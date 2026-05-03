@@ -1,0 +1,12 @@
+# Production-ish compose overlay — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d --build
+#
+# Requires COINLINE_API_KEYS (comma-separated) for ApiKey auth mode.
+
+services:
+  api:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      COINLINE_API_KEYS: ${COINLINE_API_KEYS:-}
+      HOSTPLATFORM_API_KEYS: ${HOSTPLATFORM_API_KEYS:-}
+      Platform__Seed__EnableDemoData: "false"

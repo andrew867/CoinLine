@@ -1,0 +1,29 @@
+{
+  "fixtureId": "ncc.message_min",
+  "kind": "ncc_wire",
+  "lineage": {
+    "canonicality": "CANONICAL",
+    "captureMethod": "GENERATOR_HOST_CODEC",
+    "mtrScope": "BOTH",
+    "notes": "Minimal message packet (non-control) with one data byte; CRC computed by NccFrameCodec."
+  },
+  "sourceEvidence": [
+    "docs/protocols/ncc_framing/packet_layout_and_wire_sequence.md",
+    "host-platform/backend/src/HostPlatform.Protocols.Ncc/NccFrameCodec.cs",
+    "host-platform/backend/tests/HostPlatform.Tests.Golden/GoldenNccFixtureTests.cs",
+    "host-platform/backend/tools/FixtureGen/Program.cs"
+  ],
+  "artifact": {
+    "binaryFileRelative": "ncc/message_min.bin",
+    "hexLowercaseNoSpaces": "02000b0102030405aa191b03"
+  },
+  "expectedParse": {
+    "nccStrictDecodeSuccess": true,
+    "controlByteHex": "00",
+    "controlIsControlPacket": false,
+    "countDecimal": 11,
+    "terminalIdHex": "0102030405",
+    "dataHex": "aa"
+  },
+  "expectedDiagnostics": []
+}

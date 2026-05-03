@@ -1,0 +1,14 @@
+{
+  "name": "@millennium/host-platform-docs",
+  "private": true,
+  "description": "MkDocs Material site — scripts delegate to Python mkdocs (see requirements.txt)",
+  "scripts": {
+    "docs:install": "pip install -r requirements.txt",
+    "docs:serve": "mkdocs serve -f mkdocs.yml",
+    "docs:build": "mkdocs build -f mkdocs.yml -d site --strict",
+    "docs:validate": "npm run docs:build",
+    "docs:openapi": "bash scripts/export-openapi.sh",
+    "docs:openapi:win": "powershell -ExecutionPolicy Bypass -File scripts/export-openapi.ps1",
+    "docs:check-links": "echo 'Optional: install markdown-link-check globally and run against docs/'"
+  }
+}

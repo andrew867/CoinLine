@@ -1,0 +1,16 @@
+{
+  "fixtureId": "craft.channel_placeholder",
+  "kind": "craft_transport",
+  "lineage": {
+    "canonicality": "PLACEHOLDER",
+    "mtrScope": "N_A",
+    "notes": "Craft transport binding not implemented; no wire fixture."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/src/HostPlatform.Craft/CraftChannelPlaceholder.cs"
+  ],
+  "expectedParse": {
+    "todoMarkerContains": "craft interface"
+  },
+  "expectedDiagnostics": []
+}

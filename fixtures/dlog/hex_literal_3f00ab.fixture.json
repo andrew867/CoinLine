@@ -1,0 +1,23 @@
+{
+  "fixtureId": "dlog.hex_literal_3f00ab",
+  "kind": "dlog_hex_literal",
+  "lineage": {
+    "canonicality": "CANONICAL",
+    "captureMethod": "UNIT_TEST_HEX",
+    "mtrScope": "BOTH",
+    "notes": "Human-readable hex round-trip example from DlogHex.TryParse tests (not a classifier payload)."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/tests/HostPlatform.Tests.Protocol/DlogTranche3Tests.cs",
+    "host-platform/backend/src/HostPlatform.Protocols.Dlog/DlogHex.cs"
+  ],
+  "artifact": {
+    "hexWithSpacesForHumans": "3F 00 AB",
+    "hexLowercaseNoSpaces": "3f00ab"
+  },
+  "expectedParse": {
+    "byteLength": 3,
+    "bytesDecimal": [63, 0, 171]
+  },
+  "expectedDiagnostics": []
+}

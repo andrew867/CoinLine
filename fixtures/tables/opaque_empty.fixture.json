@@ -1,0 +1,23 @@
+{
+  "fixtureId": "tables.opaque_empty",
+  "kind": "table_distribution_payload",
+  "lineage": {
+    "canonicality": "INFERRED",
+    "captureMethod": "LAB_EMPTY_BYTES",
+    "mtrScope": "BOTH",
+    "notes": "TableDistributionService rejects zero-byte payloads with EMPTY_PAYLOAD; structure not firmware-parsed at this layer."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/tests/HostPlatform.Tests.Unit/TableDistributionUnitTests.cs",
+    "host-platform/backend/src/HostPlatform.Infrastructure/Tables/TableDistributionService.cs"
+  ],
+  "artifact": {
+    "binaryFileRelative": "tables/opaque_empty.bin",
+    "hexLowercaseNoSpaces": ""
+  },
+  "expectedParse": {
+    "validatePayloadOk": false,
+    "diagnosticsJsonContains": "EMPTY_PAYLOAD"
+  },
+  "expectedDiagnostics": []
+}

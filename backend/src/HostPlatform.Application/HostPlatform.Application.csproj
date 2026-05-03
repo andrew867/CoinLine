@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\HostPlatform.Domain\HostPlatform.Domain.csproj" />
+    <ProjectReference Include="..\HostPlatform.Protocols.Ncc\HostPlatform.Protocols.Ncc.csproj" />
+    <ProjectReference Include="..\HostPlatform.Protocols.Dlog\HostPlatform.Protocols.Dlog.csproj" />
+    <ProjectReference Include="..\HostPlatform.Protocols.Tables\HostPlatform.Protocols.Tables.csproj" />
+    <ProjectReference Include="..\HostPlatform.Rating\HostPlatform.Rating.csproj" />
+    <ProjectReference Include="..\HostPlatform.Cards\HostPlatform.Cards.csproj" />
+    <ProjectReference Include="..\HostPlatform.Craft\HostPlatform.Craft.csproj" />
+    <ProjectReference Include="..\HostPlatform.Firmware\HostPlatform.Firmware.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

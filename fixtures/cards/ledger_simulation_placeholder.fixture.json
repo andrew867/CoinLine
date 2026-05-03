@@ -1,0 +1,17 @@
+{
+  "fixtureId": "cards.ledger_simulation_placeholder",
+  "kind": "cards_ledger",
+  "lineage": {
+    "canonicality": "PLACEHOLDER",
+    "mtrScope": "N_A",
+    "notes": "No binary payload; Cards module is simulation-gated until certifications exist."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/src/HostPlatform.Cards/CardLedgerPlaceholder.cs",
+    "docs/protocols/host_platform/dlog_tables/mt_134_card_table.md"
+  ],
+  "expectedParse": {
+    "defaultSimulation": true
+  },
+  "expectedDiagnostics": []
+}

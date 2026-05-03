@@ -1,0 +1,30 @@
+{
+  "fixtureId": "hw_validation.sample_session_envelope_v1",
+  "kind": "captured_session_envelope",
+  "lineage": {
+    "canonicality": "INFERRED",
+    "captureMethod": "CI_SYNTHETIC_ENVELOPE",
+    "mtrScope": "N_A",
+    "notes": "Companion JSON for replay/import tests; not captured from a terminal."
+  },
+  "sourceEvidence": [
+    "docs/host_platform/hw_validation/README.md",
+    "docs/host_platform/hw_validation/promote-session-to-golden-fixture.md",
+    "host-platform/backend/src/HostPlatform.Api/Controllers/HardwareValidationController.cs",
+    "host-platform/backend/src/HostPlatform.Api/Services/CapturedSessionReplayService.cs",
+    "host-platform/fixtures/hw_validation/sample_session_envelope_v1.json"
+  ],
+  "expectedParse": {
+    "schemaVersion": 1,
+    "segmentTypesInclude": [
+      "ncc_uart_hex",
+      "dlog_payload_hex",
+      "table_opaque_hex",
+      "rated_call_evidence",
+      "modem_trace_evidence",
+      "card_transaction_evidence",
+      "firmware_dry_run_evidence"
+    ]
+  },
+  "expectedDiagnostics": []
+}

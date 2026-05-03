@@ -1,0 +1,28 @@
+# Dependencies & build output
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+
+# .NET / tooling
+backend/.tools/
+**/TestResults/
+*.user
+*.suo
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Frontend artifacts
+web/test-results/
+web/playwright-report/
+
+# MkDocs
+docs-site/site/
+
+# Secrets — never commit
+.env
+*.pfx

@@ -1,0 +1,27 @@
+{
+  "fixtureId": "ncc.control_clr",
+  "kind": "ncc_wire",
+  "lineage": {
+    "canonicality": "CANONICAL",
+    "captureMethod": "GENERATOR_HOST_CODEC",
+    "mtrScope": "BOTH",
+    "notes": "CLR control packet emitted by FixtureGen using NccFrameCodec.Encode; framing rules trace to MTR212-style layout in NccFrameCodec."
+  },
+  "sourceEvidence": [
+    "docs/protocols/ncc_framing/packet_layout_and_wire_sequence.md",
+    "docs/protocols/ncc_framing/crc_nccgen_and_table.md",
+    "host-platform/backend/src/HostPlatform.Protocols.Ncc/NccFrameCodec.cs",
+    "host-platform/backend/tools/FixtureGen/Program.cs"
+  ],
+  "artifact": {
+    "binaryFileRelative": "ncc/control_clr.bin",
+    "hexLowercaseNoSpaces": "022005780303"
+  },
+  "expectedParse": {
+    "nccStrictDecodeSuccess": true,
+    "controlIsControlPacket": true,
+    "controlByteHex": "20",
+    "countDecimal": 5
+  },
+  "expectedDiagnostics": []
+}

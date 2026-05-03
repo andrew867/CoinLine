@@ -1,0 +1,4 @@
+# Host platform public documentation (MkDocs Material)
+mkdocs-material>=9.5.0
+mkdocs>=1.6.0
+pymdown-extensions>=10.0

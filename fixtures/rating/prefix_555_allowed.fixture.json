@@ -1,0 +1,33 @@
+{
+  "fixtureId": "rating.prefix_555_allowed",
+  "kind": "rating_quote",
+  "lineage": {
+    "canonicality": "INFERRED",
+    "mtrScope": "HOST_SOFTWARE",
+    "notes": "RatingEngine quote derived from existing Unit test scenario; host computation only (no DLOG/NCC bytes)."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/tests/HostPlatform.Tests.Unit/RatingQuoteTests.cs",
+    "host-platform/backend/src/HostPlatform.Rating/RatingEngine.cs",
+    "host-platform/backend/src/HostPlatform.Domain/RatingAndCards.cs",
+    "docs/protocols/host_platform/dlog_tables/mt_63_to_65_rate_request_response_auth_code.md"
+  ],
+  "expectedParse": {
+    "dialedDigits": "5551234",
+    "ratingMode": "RealTimeRated",
+    "assumedDurationMinutes": 1,
+    "rules": [
+      {
+        "priority": 10,
+        "matchKind": "Prefix",
+        "pattern": "555",
+        "outcome": "Rated",
+        "ratePerMinuteUsd": 0.02
+      }
+    ],
+    "numberClasses": [],
+    "expectedDecisionKind": "Allowed",
+    "expectedAmountUsd": 0.02
+  },
+  "expectedDiagnostics": []
+}

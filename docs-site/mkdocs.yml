@@ -1,0 +1,246 @@
+# CoinLine Payphone Management Platform — documentation site
+site_name: CoinLine Payphone Management Platform
+site_description: OEM-grade server-hosted fleet management for Millennium payphones — CoinLine Server, Management Console, API, and field validation.
+site_url: http://127.0.0.1:8000
+repo_url: https://github.com/andrew867/CoinLine
+repo_name: CoinLine
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - tables
+  - attr_list
+  - toc:
+      permalink: true
+  - md_in_html
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Overview: getting-started/overview.md
+      - Quickstart: getting-started/quickstart.md
+      - Quickstart (Docker): getting-started/quickstart-docker.md
+      - Quickstart (dev): getting-started/quickstart-dev.md
+      - Architecture at a glance: getting-started/architecture-at-a-glance.md
+      - Terminology: getting-started/terminology.md
+  - Deployment:
+      - Server deployment: deployment/server-deployment.md
+  - Administration:
+      - Fleet management: administration/fleet-management.md
+      - Table distribution: administration/table-distribution.md
+      - Rating: administration/rating.md
+      - Cards and accounts: administration/cards-and-accounts.md
+  - Architecture:
+      - Overview: architecture/overview.md
+      - Service boundaries: architecture/service-boundaries.md
+      - Domain model: architecture/domain-model.md
+      - Data flow: architecture/data-flow.md
+      - Protocol boundaries: architecture/protocol-boundaries.md
+      - Security boundaries: architecture/security-boundaries.md
+      - Deployment topologies: architecture/deployment-topologies.md
+      - High availability: architecture/high-availability.md
+      - Disaster recovery: architecture/disaster-recovery.md
+  - CoinLine Management Console:
+      - Overview: frontend/overview.md
+      - Routes: frontend/routes.md
+      - Route catalog: frontend/route-catalog.md
+      - Components: frontend/components.md
+      - API client: frontend/api-client.md
+      - State management: frontend/state-management.md
+      - Forms & validation: frontend/forms-validation.md
+      - Testing: frontend/testing.md
+      - Build & release: frontend/build-and-release.md
+  - CoinLine Server (engineering):
+      - Overview: backend/overview.md
+      - Solution structure: backend/solution-structure.md
+      - Projects: backend/projects.md
+      - Configuration: backend/configuration.md
+      - Dependency injection: backend/dependency-injection.md
+      - Background workers: backend/background-workers.md
+      - Database: backend/database.md
+      - Migrations: backend/migrations.md
+      - Seed data: backend/seed-data.md
+      - Audit logging: backend/audit-logging.md
+      - Observability: backend/observability.md
+      - Error handling: backend/error-handling.md
+      - Testing: backend/testing.md
+  - CoinLine API:
+      - Overview: api/overview.md
+      - Authentication: api/authentication.md
+      - Errors: api/errors.md
+      - Pagination & filtering: api/pagination-filtering.md
+      - Versioning: api/versioning.md
+      - OpenAPI: api/openapi.md
+      - Endpoints:
+          - Customers: api/endpoints/customers.md
+          - Sites: api/endpoints/sites.md
+          - Terminals: api/endpoints/terminals.md
+          - Terminal events: api/endpoints/terminal-events.md
+          - NCC sessions: api/endpoints/ncc-sessions.md
+          - NCC frame captures: api/endpoints/ncc-frame-captures.md
+          - DLOG transactions: api/endpoints/dlog-transactions.md
+          - Table definitions: api/endpoints/table-definitions.md
+          - Table sets: api/endpoints/table-sets.md
+          - Downloads: api/endpoints/downloads.md
+          - Uploads: api/endpoints/uploads.md
+          - Rating (quote/authorize): api/endpoints/rating.md
+          - Rate plans: api/endpoints/rate-plans.md
+          - Rate rules: api/endpoints/rate-rules.md
+          - Call records: api/endpoints/call-records.md
+          - Card products: api/endpoints/card-products.md
+          - Card accounts: api/endpoints/card-accounts.md
+          - Smartcard types: api/endpoints/smartcard-types.md
+          - Number classes: api/endpoints/number-classes.md
+          - Craft: api/endpoints/craft.md
+          - Firmware: api/endpoints/firmware.md
+          - Operator: api/endpoints/operator.md
+          - Audit: api/endpoints/audit.md
+          - Health: api/endpoints/health.md
+          - Hardware validation: api/endpoints/hardware-validation.md
+  - Protocol compatibility:
+      - Protocols index: protocols/overview.md
+      - Compatibility overview: protocols/compatibility-overview.md
+      - NCC framing: protocols/ncc-framing.md
+      - DLOG: protocols/dlog.md
+      - Protocol components: protocols/parser-inventory.md
+      - Table distribution: protocols/table-distribution.md
+      - Upload ingestion: protocols/upload-ingestion.md
+      - Rating & call flow: protocols/rating-call-flow.md
+      - Cards, smartcards, e-purse: protocols/cards-smartcards-epurse.md
+      - Craft: protocols/craft.md
+      - Firmware packages: protocols/firmware-update.md
+      - Raw payload preservation: protocols/raw-payload-preservation.md
+      - Fixtures & replay: protocols/fixtures-and-replay.md
+      - Field validation protocol notes: protocols/hardware-validation-required.md
+  - Operations:
+      - Overview: operations/overview.md
+      - Install: operations/install.md
+      - Configuration: operations/configuration.md
+      - Docker Compose: operations/docker-compose.md
+      - Production deployment: operations/production-deployment.md
+      - Reverse proxy & TLS: operations/reverse-proxy-tls.md
+      - PostgreSQL: operations/postgresql.md
+      - Backups & restore: operations/backups-restore.md
+      - Monitoring: operations/monitoring.md
+      - Logging: operations/logging.md
+      - Metrics: operations/metrics.md
+      - Traces: operations/traces.md
+      - Runbooks: operations/runbooks.md
+      - Incident response: operations/incident-response.md
+      - Upgrades: operations/upgrades.md
+      - Rollback: operations/rollback.md
+  - Operator guide:
+      - Overview: operator-guide/overview.md
+      - Dashboard: operator-guide/dashboard.md
+      - Customers & sites: operator-guide/customers-sites.md
+      - Terminals: operator-guide/terminals.md
+      - Table management: operator-guide/table-management.md
+      - Downloads: operator-guide/downloads.md
+      - Uploads: operator-guide/uploads.md
+      - DLOG viewer: operator-guide/dlog-viewer.md
+      - Rating: operator-guide/rating.md
+      - Cards: operator-guide/cards.md
+      - Craft sessions: operator-guide/craft-sessions.md
+      - Firmware jobs: operator-guide/firmware-jobs.md
+      - Audit log: operator-guide/audit-log.md
+      - Common workflows: operator-guide/common-workflows.md
+  - Field validation:
+      - Overview: field-validation/overview.md
+      - Payphone validation: field-validation/payphone-validation.md
+      - Lab setup: field-validation/lab-setup.md
+      - Modem transport: field-validation/modem-transport.md
+      - Terminal registration: field-validation/terminal-registration.md
+      - Table download: field-validation/table-download.md
+      - Upload capture: field-validation/upload-capture.md
+      - Rated call: field-validation/rated-call.md
+      - Card transaction: field-validation/card-transaction.md
+      - Craft session: field-validation/craft-session.md
+      - Firmware dry-run: field-validation/firmware-update-dry-run.md
+      - Evidence capture: field-validation/evidence-capture.md
+      - Troubleshooting: field-validation/troubleshooting.md
+  - Security:
+      - Security overview: security/security-overview.md
+      - Overview (architecture): security/overview.md
+      - Dangerous operations: security/dangerous-operations.md
+      - Authentication & authorization: security/authn-authz.md
+      - Roles & permissions: security/roles-permissions.md
+      - Audit model: security/audit-model.md
+      - Secrets: security/secrets.md
+      - Data classification: security/data-classification.md
+      - Payment card boundary: security/payment-card-boundary.md
+      - Raw payload redaction: security/raw-payload-redaction.md
+      - Threat model: security/threat-model.md
+      - Hardening checklist: security/hardening-checklist.md
+  - Testing:
+      - Overview: testing/overview.md
+      - Unit tests: testing/unit-tests.md
+      - Integration tests: testing/integration-tests.md
+      - Protocol golden tests: testing/protocol-golden-tests.md
+      - Fixture tests: testing/fixture-tests.md
+      - Frontend tests: testing/frontend-tests.md
+      - E2E tests: testing/e2e-tests.md
+      - Hardware validation tests: testing/hardware-validation-tests.md
+      - Performance & soak: testing/performance-soak-tests.md
+      - Release gates: testing/release-gates.md
+  - Reference:
+      - Branding: reference/branding.md
+      - Environment variables: reference/environment-variables.md
+      - Configuration files: reference/configuration-files.md
+      - Database schema: reference/database-schema.md
+      - Entity reference: reference/entity-reference.md
+      - Event reference: reference/event-reference.md
+      - Status codes: reference/status-codes.md
+      - Error codes: reference/error-codes.md
+      - Protocol fixtures: reference/protocol-fixtures.md
+      - Compatibility validation items: reference/compatibility-validation-items.md
+      - Open questions (deprecated stub): reference/open-questions.md
+      - Implementation traceability (engineering): reference/source-traceability.md
+      - Glossary: reference/glossary.md
+      - Known limitations: reference/known-limitations.md
+      - Roadmap: reference/roadmap.md
+  - Release:
+      - Public release checklist: release/public-release-checklist.md
+      - Versioning: release/versioning.md
+      - Changelog: release/changelog.md
+      - License: release/license.md
+      - Support policy: release/support-policy.md
+      - Migration guide: release/migration-guide.md
+      - Contributor guide: release/contributor-guide.md
+
+extra:
+  generator: false
+
+copyright: Copyright &copy; 2026 Andrew Green

@@ -1,0 +1,22 @@
+{
+  "fixtureId": "tables.opaque_min",
+  "kind": "table_distribution_payload",
+  "lineage": {
+    "canonicality": "INFERRED",
+    "captureMethod": "LAB_SINGLE_BYTE",
+    "mtrScope": "BOTH",
+    "notes": "Minimal non-empty opaque blob; passes ValidatePayload (opaque validation only)."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/tests/HostPlatform.Tests.Unit/TableDistributionUnitTests.cs",
+    "host-platform/backend/src/HostPlatform.Infrastructure/Tables/TableDistributionService.cs"
+  ],
+  "artifact": {
+    "binaryFileRelative": "tables/opaque_min.bin",
+    "hexLowercaseNoSpaces": "01"
+  },
+  "expectedParse": {
+    "validatePayloadOk": true
+  },
+  "expectedDiagnostics": []
+}

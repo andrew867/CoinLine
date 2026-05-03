@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "sessionKind": "golden_lab_smoke",
+  "sourceLabel": "fixtures/hw_validation/sample_session_envelope_v1.json",
+  "terminal": {
+    "label": "lab-fixture",
+    "mtrGeneration": "unknown"
+  },
+  "evidence": {
+    "attachments": [
+      {
+        "kind": "notes",
+        "description": "Synthetic envelope for replay testing — NOT hardware captured.",
+        "uriOrInline": "See lineage in complementary .fixture.json."
+      }
+    ],
+    "segments": [
+      {
+        "type": "ncc_uart_hex",
+        "hex": "022005780303",
+        "note": "Canonical CLR control frame (matches FixtureGen output)."
+      },
+      {
+        "type": "dlog_payload_hex",
+        "rawPayloadHex": "3F 00 AB",
+        "firstByteIsMessageType": true
+      },
+      {
+        "type": "table_opaque_hex",
+        "hex": "01",
+        "tableNumber": 0
+      },
+      {
+        "type": "rated_call_evidence",
+        "dialedDigits": "5551234",
+        "notes": "metadata-only — no wire replay"
+      },
+      {
+        "type": "modem_trace_evidence",
+        "notes": "Attach AT transcript path per attaching-evidence.md"
+      },
+      {
+        "type": "card_transaction_evidence",
+        "notes": "simulation-only ledger pointers — no PAN/track"
+      },
+      {
+        "type": "firmware_dry_run_evidence",
+        "notes": "optional firmwareUpdateJobId when DB exists"
+      }
+    ]
+  },
+  "provenance": {
+    "operatorId": "fixture-ci",
+    "siteLabel": "repository",
+    "notes": "INFERRED envelope for CI — use HARDWARE_CAPTURED lineage only with real terminal archives."
+  }
+}

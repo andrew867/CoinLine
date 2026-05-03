@@ -1,0 +1,21 @@
+{
+  "fixtureId": "firmware.integration_checksum_placeholder_a",
+  "kind": "firmware_checksum_hex",
+  "lineage": {
+    "canonicality": "INFERRED",
+    "mtrScope": "HOST_SOFTWARE",
+    "notes": "Integration tests use this 64-char lowercase SHA256 placeholder (TestShaA); not terminal-flashed firmware."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/tests/HostPlatform.Tests.Integration/FirmwareTranche8Tests.cs",
+    "host-platform/backend/src/HostPlatform.Api/Services/FirmwareJobOrchestrator.cs"
+  ],
+  "artifact": {
+    "hexLowercaseNoSpaces": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "expectedParse": {
+    "sha256HexCharLength": 64,
+    "isLowercaseHex": true
+  },
+  "expectedDiagnostics": []
+}

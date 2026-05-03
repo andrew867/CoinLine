@@ -1,0 +1,28 @@
+{
+  "fixtureId": "dlog.empty_payload",
+  "kind": "dlog_payload",
+  "lineage": {
+    "canonicality": "CANONICAL",
+    "captureMethod": "LAB_EMPTY_SPAN",
+    "mtrScope": "BOTH",
+    "notes": "Zero-length payload span used by classifier tests."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/tests/HostPlatform.Tests.Protocol/DlogTranche3Tests.cs",
+    "host-platform/backend/src/HostPlatform.Protocols.Dlog/DlogPayloadClassifier.cs",
+    "docs/protocols/host_platform/dlog_tables/README.md"
+  ],
+  "artifact": {
+    "binaryFileRelative": "dlog/empty_payload.bin",
+    "hexLowercaseNoSpaces": ""
+  },
+  "expectedParse": {
+    "diagnosticsContainCodes": ["EMPTY_PAYLOAD"]
+  },
+  "expectedDiagnostics": [
+    {
+      "code": "EMPTY_PAYLOAD",
+      "severity": "Error"
+    }
+  ]
+}

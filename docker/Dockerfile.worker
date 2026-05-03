@@ -1,0 +1,11 @@
+# syntax=docker/dockerfile:1
+FROM mcr.microsoft.com/dotnet/sdk:9.0 AS build
+WORKDIR /src
+COPY backend ./backend
+WORKDIR /src/backend
+RUN dotnet publish src/HostPlatform.Worker/HostPlatform.Worker.csproj -c Release -o /app/publish /p:UseAppHost=false
+
+FROM mcr.microsoft.com/dotnet/runtime:9.0 AS runtime
+WORKDIR /app
+COPY --from=build /app/publish .
+ENTRYPOINT ["dotnet", "HostPlatform.Worker.dll"]

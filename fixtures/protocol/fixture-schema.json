@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://millennium.local/schemas/host-platform-fixture.schema.json",
+  "title": "Host platform golden fixture manifest",
+  "type": "object",
+  "required": ["fixtureId", "kind", "lineage", "sourceEvidence"],
+  "properties": {
+    "fixtureId": { "type": "string", "minLength": 1 },
+    "kind": { "type": "string" },
+    "lineage": {
+      "type": "object",
+      "required": ["canonicality"],
+      "properties": {
+        "canonicality": {
+          "type": "string",
+          "enum": ["CANONICAL", "INFERRED", "PLACEHOLDER", "HARDWARE_CAPTURED"]
+        },
+        "captureMethod": { "type": "string" },
+        "mtrScope": {
+          "type": "string",
+          "description": "MTR1_9 | MTR2_12 | BOTH | HOST_SOFTWARE | N_A"
+        },
+        "notes": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "sourceEvidence": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "minItems": 1
+    },
+    "artifact": {
+      "type": "object",
+      "properties": {
+        "binaryFileRelative": { "type": "string" },
+        "hexLowercaseNoSpaces": { "type": "string" },
+        "hexWithSpacesForHumans": { "type": "string" }
+      },
+      "additionalProperties": true
+    },
+    "expectedParse": { "type": "object", "additionalProperties": true },
+    "expectedDiagnostics": {
+      "type": "array",
+      "items": { "type": "object", "additionalProperties": true }
+    }
+  },
+  "additionalProperties": true
+}

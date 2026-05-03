@@ -1,0 +1,43 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: coinline
+      POSTGRES_PASSWORD: coinline
+      POSTGRES_DB: coinline
+    # Postgres is reachable as hostname `postgres:5432` from other services.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U coinline -d coinline"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    volumes:
+      - coinline_pg:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.api
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_URLS: http://0.0.0.0:5006
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=coinline;Username=coinline;Password=coinline
+    ports:
+      - "5006:5006"
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.worker
+    depends_on:
+      - postgres
+    environment:
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=coinline;Username=coinline;Password=coinline
+    profiles:
+      - worker
+
+volumes:
+  coinline_pg:

@@ -1,0 +1,23 @@
+{
+  "fixtureId": "dlog.unknown_mt_ff01",
+  "kind": "dlog_payload",
+  "lineage": {
+    "canonicality": "INFERRED",
+    "captureMethod": "LAB_SYNTHETIC_UNKNOWN_MT",
+    "mtrScope": "BOTH",
+    "notes": "Two-byte synthetic payload chosen so first octet is not a known registry MT; behavior asserted in unit tests. Not a hardware capture."
+  },
+  "sourceEvidence": [
+    "host-platform/backend/tests/HostPlatform.Tests.Protocol/DlogTranche3Tests.cs",
+    "host-platform/backend/src/HostPlatform.Protocols.Dlog/DlogPayloadClassifier.cs"
+  ],
+  "artifact": {
+    "binaryFileRelative": "dlog/unknown_mt_ff01.bin",
+    "hexLowercaseNoSpaces": "ff01"
+  },
+  "expectedParse": {
+    "messageTypeDecimal": 255,
+    "isUnknownMessageType": true
+  },
+  "expectedDiagnostics": []
+}
