@@ -134,5 +134,9 @@ public class DownloadBatchItem : AuditableEntity
     public string LastAckStatus { get; set; } = string.Empty;
     public bool Succeeded { get; set; }
     public DownloadBatchItemStatus ItemStatus { get; set; } = DownloadBatchItemStatus.Pending;
+
+    /// <summary>Ordered download state on the host before terminal ACK is certified in the field.</summary>
+    public TableDownloadHostPhase HostDownloadPhase { get; set; } = TableDownloadHostPhase.Draft;
+
     public string? ErrorDetail { get; set; }
 }

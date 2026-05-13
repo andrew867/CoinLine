@@ -181,8 +181,16 @@ public sealed class RatingQuoteTests
     }
 
     [Fact]
-    public void Set_rated_mode_returns_placeholder()
+    public void Set_rated_mode_uses_host_plan_rules()
     {
+        var v = PublishedVersion(new RateRule
+        {
+            Priority = 10,
+            MatchKind = RateRuleMatchKind.Prefix,
+            Pattern = "555",
+            Outcome = RateRuleOutcome.Rated,
+            RatePerMinuteUsd = 0.02m
+        });
         var q = RatingEngine.Quote(new RatingEngine.QuoteRequest(
             "5551212",
             RatingMode.SetRated,
@@ -190,8 +198,32 @@ public sealed class RatingQuoteTests
             1m,
             DateTime.UtcNow,
             Array.Empty<DialedNumberClass>(),
-            PublishedVersion()));
-        Assert.Equal(RatingDecisionKind.PlaceholderTableRated, q.DecisionKind);
+            v));
+        Assert.Equal(RatingDecisionKind.Allowed, q.DecisionKind);
+        Assert.Equal(RatingAirtimeSource.RateRule, q.AirtimeSource);
+        Assert.Contains(q.Diagnostics, d => d.Code == "SET_RATED_HOST");
+    }
+
+    [Fact]
+    public void Table_rated_adds_firmware_validation_diagnostic_on_rule_match()
+    {
+        var v = PublishedVersion(new RateRule
+        {
+            Priority = 10,
+            Pattern = "555",
+            MatchKind = RateRuleMatchKind.Prefix,
+            Outcome = RateRuleOutcome.Rated,
+            RatePerMinuteUsd = 0.02m
+        });
+        var q = RatingEngine.Quote(new RatingEngine.QuoteRequest(
+            "5551212",
+            RatingMode.TableRated,
+            Guid.NewGuid(),
+            1m,
+            DateTime.UtcNow,
+            Array.Empty<DialedNumberClass>(),
+            v));
+        Assert.Equal(RatingDecisionKind.Allowed, q.DecisionKind);
         Assert.Contains(q.Diagnostics, d => d.Code == "HARDWARE_VALIDATION_REQUIRED");
     }
 }

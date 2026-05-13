@@ -1,6 +1,5 @@
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
-import { JsonPanel } from './components/JsonPanel'
 import { AuditEventsPage } from './pages/AuditEventsPage'
 import { CustomerDetail } from './pages/CustomerDetail'
 import { CustomersPage } from './pages/CustomersPage'
@@ -43,12 +42,11 @@ import { FirmwarePackageDetail } from './pages/FirmwarePackageDetail'
 import { FirmwarePackagesPage } from './pages/FirmwarePackagesPage'
 import { FirmwareTargetsPage } from './pages/FirmwareTargetsPage'
 import { FirmwareVersionsPage } from './pages/FirmwareVersionsPage'
+import { NccSessionsPage } from './pages/NccSessionsPage'
 import { NotFoundPage } from './pages/NotFoundPage'
 import { StatusPage } from './pages/StatusPage'
-
-function Page(props: { title: string; url: string }) {
-  return <JsonPanel title={props.title} url={props.url} />
-}
+import { UploadDetail } from './pages/UploadDetail'
+import { UploadsPage } from './pages/UploadsPage'
 
 export default function App() {
   return (
@@ -62,7 +60,7 @@ export default function App() {
           <Route path="/terminals/new" element={<TerminalCreatePage />} />
           <Route path="/terminals/:id" element={<TerminalDetail />} />
           <Route path="/terminals" element={<TerminalsList />} />
-          <Route path="/ncc-sessions" element={<Page title="NCC Sessions" url="/api/ncc/sessions" />} />
+          <Route path="/ncc-sessions" element={<NccSessionsPage />} />
           <Route path="/ncc-frame-captures" element={<NccFrameCaptures />} />
           <Route path="/dlog/replay-debug" element={<DlogReplayDebug />} />
           <Route path="/dlog/:id" element={<DlogTransactionDetail />} />
@@ -74,7 +72,8 @@ export default function App() {
           <Route path="/table-sets" element={<TableSets />} />
           <Route path="/downloads/:id" element={<DownloadDetail />} />
           <Route path="/downloads" element={<DownloadsPage />} />
-          <Route path="/uploads" element={<Page title="Uploads" url="/api/uploads" />} />
+          <Route path="/uploads/:id" element={<UploadDetail />} />
+          <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/rate-plans/:id" element={<RatePlanDetail />} />
           <Route path="/rate-plans" element={<RatePlansPage />} />
           <Route path="/number-classes" element={<NumberClassesPage />} />

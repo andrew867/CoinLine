@@ -1,6 +1,5 @@
 using HostPlatform.Cards;
 using HostPlatform.Craft;
-using HostPlatform.Protocols.Tables;
 
 namespace HostPlatform.Tests.Unit;
 
@@ -9,18 +8,21 @@ public sealed class SlicePlaceholderTests
     [Fact]
     public void Card_ledger_defaults_to_simulation()
     {
-        Assert.True(CardLedgerPlaceholder.DefaultSimulation);
+        Assert.True(CardLedgerCapabilities.DefaultSimulationMode);
+        Assert.Contains(
+            "HARDWARE_VALIDATION_REQUIRED",
+            CardLedgerCapabilities.LiveSettlementNotice,
+            StringComparison.Ordinal);
     }
 
     [Fact]
-    public void Craft_channel_placeholder_documents_extension_point()
+    public void Craft_transport_defaults_to_simulation()
     {
-        Assert.False(string.IsNullOrWhiteSpace(CraftChannelPlaceholder.Todo));
+        Assert.True(CraftTransportCapabilities.DefaultSimulationExecution);
+        Assert.Contains(
+            "HARDWARE_VALIDATION_REQUIRED",
+            CraftTransportCapabilities.LiveAttachNotice,
+            StringComparison.Ordinal);
     }
 
-    [Fact]
-    public void Table_distribution_placeholder_documents_extension_point()
-    {
-        Assert.False(string.IsNullOrWhiteSpace(TableDistributionPlaceholder.Todo));
-    }
 }

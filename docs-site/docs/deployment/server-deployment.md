@@ -10,7 +10,7 @@
 
 ## Container deployment
 
-From the `docker` directory:
+From the `coinline/docker` directory:
 
 ```bash
 docker compose up --build -d

@@ -25,3 +25,21 @@ public enum DownloadBatchItemStatus
     Cancelled = 5,
     Skipped = 6
 }
+
+/// <summary>Host-side download step for a single table in a batch (modem/NCC ACK semantics validated separately).</summary>
+public enum TableDownloadHostPhase
+{
+    Draft = 0,
+    Validating = 1,
+    Ready = 2,
+    Queued = 3,
+    WaitingForTerminal = 4,
+    SendingHeader = 5,
+    SendingPayload = 6,
+    WaitingForAck = 7,
+    Retrying = 8,
+    Completed = 9,
+    Failed = 10,
+    Cancelled = 11,
+    RolledBack = 12
+}

@@ -69,4 +69,4 @@
 |-----|---------|
 | `Firmware__AllowLiveFlashing` | Default **false** — **PRODUCTION GUARD REQUIRED** |
 
-Canonical prose: `docs/configuration/secrets-and-config.md` (repository).
+Canonical prose: `coinline/docs/configuration/secrets-and-config.md` (repository).

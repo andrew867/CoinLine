@@ -13,6 +13,17 @@ test('customers page renders (JSON requires API on :5006)', async ({ page }) => 
   ).toBeVisible({ timeout: 15_000 })
 })
 
+test('ncc sessions page loads (list requires API on :5006)', async ({ page }) => {
+  await page.goto('/ncc-sessions')
+  await expect(page.getByRole('heading', { name: 'NCC sessions' })).toBeVisible()
+  await expect(
+    page
+      .getByText('Loading…')
+      .or(page.getByTestId('ncc-sessions-summary'))
+      .or(page.getByTestId('ncc-sessions-error')),
+  ).toBeVisible({ timeout: 15_000 })
+})
+
 test('ncc frame captures page loads', async ({ page }) => {
   await page.goto('/ncc-frame-captures')
   await expect(page.getByRole('heading', { name: 'NCC frame captures' })).toBeVisible()

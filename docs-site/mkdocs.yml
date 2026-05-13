@@ -217,6 +217,7 @@ nav:
       - Release gates: testing/release-gates.md
   - Reference:
       - Branding: reference/branding.md
+      - Firmware DLA transport adapter: reference/firmware-dla-transport-adapter.md
       - Environment variables: reference/environment-variables.md
       - Configuration files: reference/configuration-files.md
       - Database schema: reference/database-schema.md

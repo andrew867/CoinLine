@@ -40,6 +40,8 @@ public sealed class DownloadsController(HostPlatformDbContext db, TableDistribut
             i.Id,
             i.StepIndex,
             i.ItemStatus,
+            hostDownloadPhase = (int)i.HostDownloadPhase,
+            hostDownloadPhaseName = i.HostDownloadPhase.ToString(),
             i.LastAckStatus,
             i.Succeeded,
             i.ErrorDetail,

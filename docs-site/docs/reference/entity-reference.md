@@ -77,4 +77,4 @@ Mapped in **`HostPlatformDbContext`** — authoritative names match EF model.
 | `AuditEvents` | `AuditEvent` |
 | `SubsystemHeartbeats` | `SubsystemHeartbeat` |
 
-Physical schema: EF migrations under `backend/src/HostPlatform.Infrastructure/Persistence/Migrations/`.
+Physical schema: EF migrations under `coinline/backend/src/HostPlatform.Infrastructure/Persistence/Migrations/`.

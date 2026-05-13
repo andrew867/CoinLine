@@ -4,13 +4,15 @@
   "lineage": {
     "canonicality": "PLACEHOLDER",
     "mtrScope": "N_A",
-    "notes": "Craft transport binding not implemented; no wire fixture."
+    "notes": "Simulation transport is implemented (CraftSimulationTransport); live modem attach remains uncertified."
   },
   "sourceEvidence": [
-    "host-platform/backend/src/HostPlatform.Craft/CraftChannelPlaceholder.cs"
+    "coinline/backend/src/HostPlatform.Craft/CraftTransportCapabilities.cs",
+    "coinline/backend/src/HostPlatform.Infrastructure/Craft/CraftSimulationTransport.cs"
   ],
   "expectedParse": {
-    "todoMarkerContains": "craft interface"
+    "defaultSimulation": true,
+    "liveAttachNoticeContains": "HARDWARE_VALIDATION_REQUIRED"
   },
   "expectedDiagnostics": []
 }

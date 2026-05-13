@@ -1,3 +1,3 @@
 # Cards fixtures
 
-Placeholder manifests until ledger APIs are backed by certified flows. See `CardLedgerPlaceholder.cs`.
+Ledger simulation manifests align with `CardLedgerCapabilities` and `ICardAccountLedger` / `CardAccountLedger` in the CoinLine backend. Live issuer settlement remains uncertified by default.

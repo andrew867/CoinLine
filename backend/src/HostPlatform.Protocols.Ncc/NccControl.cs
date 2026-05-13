@@ -1,6 +1,6 @@
 namespace HostPlatform.Protocols.Ncc;
 
-/// <summary>Control byte masks from <c>MTR212/NCC.H</c> (receive validation in <c>NCCASM.ASM</c>).</summary>
+/// <summary>Control byte masks from <c>NCC.H</c> (receive validation in <c>NCCASM.ASM</c>).</summary>
 public static class NccControl
 {
     public const byte PacketMask = 0x03;

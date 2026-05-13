@@ -92,7 +92,7 @@ public sealed class CapturedSessionReplayService(HostPlatformDbContext db)
         if (!TryNormalizeHex(hexEl.GetString(), out var bytes, out var err))
             return new { segmentIndex = index, type = "ncc_uart_hex", error = err, HARDWARE_VALIDATION_REQUIRED = true };
 
-        var ordered = NccStreamReader.ReadOrdered(bytes, NccParseMode.Archaeology);
+        var ordered = NccStreamReader.ReadOrdered(bytes, NccParseMode.DiagnosticCapture);
         var frames = ordered.OfType<NccStreamParsedFrame>().ToList();
         return new
         {
@@ -110,7 +110,7 @@ public sealed class CapturedSessionReplayService(HostPlatformDbContext db)
             }).Take(25),
             HARDWARE_VALIDATION_REQUIRED = true,
             note =
-                "Archaeology parse tolerates marginal UART captures; strict interchange parity requires reference terminals."
+                "Diagnostic capture mode tolerates marginal UART captures; strict interchange parity requires reference terminals."
         };
     }
 

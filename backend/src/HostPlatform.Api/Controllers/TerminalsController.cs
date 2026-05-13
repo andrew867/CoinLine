@@ -110,6 +110,55 @@ public sealed class TerminalsController(
         return t == null ? NotFound() : Ok(t);
     }
 
+    /// <summary>Lists DLOG transactions for this terminal. Query parameters match <c>GET /api/dlog/transactions</c> (terminal filter is implied).</summary>
+    [HttpGet("{id:guid}/dlog")]
+    [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IEnumerable<object>>> DlogForTerminal(
+        Guid id,
+        [FromQuery] int? messageType,
+        [FromQuery] int? direction,
+        [FromQuery] int? processingStatus,
+        [FromQuery] DateTime? fromUtc,
+        [FromQuery] DateTime? toUtc,
+        [FromQuery] string? sessionCorrelationId,
+        CancellationToken ct)
+    {
+        if (!await db.Terminals.AsNoTracking().AnyAsync(t => t.Id == id, ct))
+            return NotFound();
+        var q = db.DlogTransactions.AsNoTracking().Where(t => t.TerminalId == id);
+        if (messageType is { } mt)
+            q = q.Where(t => t.MessageType == mt);
+        if (direction is { } dir)
+            q = q.Where(t => t.Direction == dir);
+        if (processingStatus is { } ps)
+            q = q.Where(t => t.ProcessingStatus == ps);
+        if (fromUtc is { } f)
+            q = q.Where(t => t.CapturedAtUtc >= f);
+        if (toUtc is { } t0)
+            q = q.Where(t => t.CapturedAtUtc <= t0);
+        if (!string.IsNullOrEmpty(sessionCorrelationId))
+            q = q.Where(t => t.SessionCorrelationId == sessionCorrelationId);
+
+        var list = await q.OrderByDescending(x => x.CapturedAtUtc)
+            .Select(x => new
+            {
+                x.Id,
+                x.TerminalId,
+                x.NccSessionId,
+                x.Direction,
+                x.MessageType,
+                x.MessageTypeName,
+                x.IsUnknownMessageType,
+                x.ProcessingStatus,
+                x.ImmediateClear,
+                x.CapturedAtUtc,
+                x.SessionCorrelationId,
+                RawPayloadHex = Convert.ToHexString(x.RawPayload)
+            }).ToListAsync(ct);
+        return Ok(list);
+    }
+
     [HttpPut("{id:guid}")]
     public async Task<ActionResult> Update(Guid id, [FromBody] TerminalUpdateDto body, CancellationToken ct)
     {

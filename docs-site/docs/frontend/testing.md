@@ -1,7 +1,7 @@
 # Frontend testing
 
 ```bash
-cd web
+cd coinline/web
 npm run test        # Vitest
 npx playwright test # E2E
 ```

@@ -34,7 +34,7 @@ public static class SeedData
         await db.SaveChangesAsync(ct);
 
         var site = new Site { CustomerId = cust.Id, Name = "Downtown Shelter", Code = "DTS" };
-        var fw = new FirmwareVersion { Label = "MTR212-sample", BuildId = "seed" };
+        var fw = new FirmwareVersion { Label = "reference-sample", BuildId = "seed" };
         var te = new TransportEndpoint { Kind = TransportKind.Tcp, DisplayName = "lab-gateway", ConnectionString = "tcp://127.0.0.1:7000" };
         var grp = new TerminalGroup { CustomerId = cust.Id, Name = "Fleet A" };
         db.AddRange(site, fw, te, grp);
@@ -63,21 +63,27 @@ public static class SeedData
 
         var tdRate = new TableDefinition
         {
-            Name = "Rate table (opaque blob)",
+            Name = "Rate table (firmware payload)",
             TableNumber = 10,
-            Description = "MVP placeholder — host stores raw bytes only; no firmware layout interpretation."
+            Description =
+                "Firmware rate-table image for distribution. The host stores, hashes, and versions the raw table bytes; " +
+                "it does not parse manufacturer-specific EEPROM layout. Validate shape against lab captures or OEM docs before field use."
         };
         var tdLcd = new TableDefinition
         {
-            Name = "LCD NPA/NXX (opaque blob)",
+            Name = "LCD / NPA–NXX dialing tables",
             TableNumber = 20,
-            Description = "MVP placeholder — least-cost dialing tables as opaque payload."
+            Description =
+                "Least-cost and numbering-plan (NPA/NXX) dialing tables for the payphone LCD path. " +
+                "The host ships the payload as delivered; record layout and wire compression (e.g. DLOG paged table families) are defined in terminal firmware."
         };
         var tdIw = new TableDefinition
         {
-            Name = "Instant win (opaque blob)",
+            Name = "Instant-win configuration",
             TableNumber = 30,
-            Description = "MVP placeholder — instant-win configuration as opaque payload."
+            Description =
+                "Promotional instant-win parameters and thresholds as an opaque firmware table. " +
+                "The host provides secure storage, audit, and download scheduling; it does not interpret game rules or odds."
         };
         var ts = new TableSet
         {
@@ -123,6 +129,7 @@ public static class SeedData
         var nccSession = new NccSession
         {
             TerminalId = term.Id,
+            Status = NccSessionStatus.Active,
             StartedAtUtc = DateTime.UtcNow.AddMinutes(-5),
             CorrelationId = "ncc-seed",
             LastFrameSample = new byte[] { 0x02, 0x00, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x03 }
@@ -175,7 +182,7 @@ public static class SeedData
                 Pattern = "900",
                 Outcome = RateRuleOutcome.Block,
                 RatePerMinuteUsd = 0,
-                Expression = """{"note":"MVP seed — block premium 900"}"""
+                Expression = """{"note":"Seed catalog — block premium 900"}"""
             },
             new RateRule
             {
@@ -207,6 +214,39 @@ public static class SeedData
                 RatePerMinuteUsd = 0.05m,
                 Expression = """{"label":"long-distance-prefix-1"}"""
             });
+        await db.SaveChangesAsync(ct);
+        var catalogLow = new Tariff
+        {
+            RatePlanVersionId = ver.Id,
+            Name = "Seed catalog destination",
+            RatePerMinuteUsd = 0.03m,
+            Notes = "Prefix 333 — no overlapping prefix rule"
+        };
+        var catalogPeak = new Tariff
+        {
+            RatePlanVersionId = ver.Id,
+            Name = "Seed catalog peak",
+            RatePerMinuteUsd = 0.15m,
+            Notes = "UTC 10:00–13:00 window"
+        };
+        db.Tariffs.AddRange(catalogLow, catalogPeak);
+        await db.SaveChangesAsync(ct);
+        db.DestinationPrefixes.Add(new DestinationPrefix
+        {
+            RatePlanVersionId = ver.Id,
+            PrefixDigits = "333",
+            TariffId = catalogLow.Id,
+            Notes = "Tariff catalog integration seed"
+        });
+        db.TimeBands.Add(new TimeBand
+        {
+            RatePlanVersionId = ver.Id,
+            DayOfWeekMask = 127,
+            StartMinuteOfDay = 600,
+            EndMinuteOfDay = 780,
+            TariffId = catalogPeak.Id
+        });
+        await db.SaveChangesAsync(ct);
         rp.PublishedVersionId = ver.Id;
         db.DialedNumberClasses.AddRange(
             new DialedNumberClass
@@ -415,7 +455,7 @@ public static class SeedData
                     Pattern = "900",
                     Outcome = RateRuleOutcome.Block,
                     RatePerMinuteUsd = 0,
-                    Expression = """{"note":"MVP seed — block premium 900"}"""
+                    Expression = """{"note":"Seed catalog — block premium 900"}"""
                 },
                 new RateRule
                 {
@@ -454,6 +494,41 @@ public static class SeedData
             ver.Status = RatePlanVersionStatus.Published;
             ver.PublishedAtUtc = DateTime.UtcNow;
             plan.PublishedVersionId = ver.Id;
+        }
+
+        if (!await db.DestinationPrefixes.AnyAsync(d => d.PrefixDigits == "333", ct))
+        {
+            var catalogLow = new Tariff
+            {
+                RatePlanVersionId = ver.Id,
+                Name = "Seed catalog destination",
+                RatePerMinuteUsd = 0.03m,
+                Notes = "Prefix 333 — no overlapping prefix rule"
+            };
+            var catalogPeak = new Tariff
+            {
+                RatePlanVersionId = ver.Id,
+                Name = "Seed catalog peak",
+                RatePerMinuteUsd = 0.15m,
+                Notes = "UTC 10:00–13:00 window"
+            };
+            db.Tariffs.AddRange(catalogLow, catalogPeak);
+            await db.SaveChangesAsync(ct);
+            db.DestinationPrefixes.Add(new DestinationPrefix
+            {
+                RatePlanVersionId = ver.Id,
+                PrefixDigits = "333",
+                TariffId = catalogLow.Id,
+                Notes = "Tariff catalog integration seed"
+            });
+            db.TimeBands.Add(new TimeBand
+            {
+                RatePlanVersionId = ver.Id,
+                DayOfWeekMask = 127,
+                StartMinuteOfDay = 600,
+                EndMinuteOfDay = 780,
+                TariffId = catalogPeak.Id
+            });
         }
 
         if (!await db.DialedNumberClasses.AnyAsync(c => c.Pattern == "911", ct))

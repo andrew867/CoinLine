@@ -694,10 +694,69 @@ paths:
       responses:
         '200':
           description: OK
+  '/api/destination-prefixes/{id}':
+    put:
+      tags:
+        - DestinationPrefixes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationPrefixUpdateDto'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/DestinationPrefixUpdateDto'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/DestinationPrefixUpdateDto'
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+        - DestinationPrefixes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
   /api/dlog/message-types:
     get:
       tags:
         - Dlog
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: array
+                items: { }
+            application/json:
+              schema:
+                type: array
+                items: { }
+            text/json:
+              schema:
+                type: array
+                items: { }
+  /api/dlog/correlation-pairs:
+    get:
+      tags:
+        - Dlog
+      summary: Documented DLOG request→response message-type pairs for lab correlation (same data as HostPlatform.Protocols.Dlog.DlogCorrelationRules.CompatibilityPairs).
       responses:
         '200':
           description: OK
@@ -1506,6 +1565,56 @@ paths:
             text/json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  /api/ncc/captures:
+    get:
+      tags:
+        - NccFrameCaptures
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: array
+                items: { }
+            application/json:
+              schema:
+                type: array
+                items: { }
+            text/json:
+              schema:
+                type: array
+                items: { }
+    post:
+      tags:
+        - NccFrameCaptures
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                file:
+                  type: string
+                  format: binary
+            encoding:
+              file:
+                style: form
+      responses:
+        '201':
+          description: Created
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   '/api/ncc/frame-captures/{id}':
     get:
       tags:
@@ -1575,10 +1684,191 @@ paths:
             text/json:
               schema:
                 $ref: '#/components/schemas/ProblemDetails'
+  '/api/ncc/captures/{id}':
+    get:
+      tags:
+        - NccFrameCaptures
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+    delete:
+      tags:
+        - NccFrameCaptures
+      summary: 'Destructive: requires `?confirm=true`. Writes an audit event.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: confirm
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '204':
+          description: No Content
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/ncc/decode:
+    post:
+      tags:
+        - NccProtocol
+      summary: Decode hex-encoded UART bytes into ordered gaps + frames.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NccDecodeRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/NccDecodeRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/NccDecodeRequest'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/ncc/encode:
+    post:
+      tags:
+        - NccProtocol
+      summary: Build a wire frame from control/terminal/data hex (CRC computed).
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NccEncodeRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/NccEncodeRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/NccEncodeRequest'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  /api/ncc/replay:
+    post:
+      tags:
+        - NccProtocol
+      summary: 'Replay analysis: either body.CaptureId.CaptureId or body.RawHex.RawHex.'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NccReplayRequest'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/NccReplayRequest'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/NccReplayRequest'
+      responses:
+        '200':
+          description: OK
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   /api/ncc/sessions:
     get:
       tags:
         - NccSessions
+      parameters:
+        - name: includeArchived
+          in: query
+          description: 'When false (default), rows with HostPlatform.Domain.NccSessionStatus.Archived are omitted.'
+          schema:
+            type: boolean
+            default: false
       responses:
         '200':
           description: OK
@@ -1595,6 +1885,36 @@ paths:
               schema:
                 type: array
                 items: { }
+  '/api/ncc/sessions/{id}/close':
+    post:
+      tags:
+        - NccSessions
+      summary: Marks an active session as closed (idempotent for already-closed rows).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+  '/api/ncc/sessions/{id}/archive':
+    post:
+      tags:
+        - NccSessions
+      summary: Archives a session for long-term audit; sets end time if still active.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
   /api/number-classes:
     get:
       tags:
@@ -1860,6 +2180,101 @@ paths:
           application/*+json:
             schema:
               $ref: '#/components/schemas/RuleDto'
+      responses:
+        '200':
+          description: OK
+  '/api/rate-plans/{planId}/versions/{versionId}/tariffs':
+    post:
+      tags:
+        - RatePlans
+      summary: Adds a reusable tariff row on a <strong>draft</strong> plan version (referenced by prefixes / time bands).
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TariffCreateDto'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/TariffCreateDto'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/TariffCreateDto'
+      responses:
+        '200':
+          description: OK
+  '/api/rate-plans/{planId}/versions/{versionId}/destination-prefixes':
+    post:
+      tags:
+        - RatePlans
+      summary: Adds a destination prefix row (longest-prefix match in HostPlatform.Rating.RatingEngine).
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DestinationPrefixCreateDto'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/DestinationPrefixCreateDto'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/DestinationPrefixCreateDto'
+      responses:
+        '200':
+          description: OK
+  '/api/rate-plans/{planId}/versions/{versionId}/time-bands':
+    post:
+      tags:
+        - RatePlans
+      parameters:
+        - name: planId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: versionId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeBandCreateDto'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/TimeBandCreateDto'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/TimeBandCreateDto'
       responses:
         '200':
           description: OK
@@ -2171,6 +2586,45 @@ paths:
       responses:
         '200':
           description: OK
+  '/api/tariffs/{id}':
+    put:
+      tags:
+        - Tariffs
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TariffUpdateDto'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/TariffUpdateDto'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/TariffUpdateDto'
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+        - Tariffs
+      summary: Deletes a tariff only when no destination prefix or time band references it (FKs set null on delete of referenced tariff is avoided by this guard).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
   /api/terminals:
     get:
       tags:
@@ -2271,6 +2725,75 @@ paths:
       responses:
         '200':
           description: OK
+  '/api/terminals/{id}/dlog':
+    get:
+      tags:
+        - Terminals
+      summary: Lists DLOG transactions for this terminal. Query parameters match `GET /api/dlog/transactions` (terminal filter is implied).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: messageType
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: direction
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: processingStatus
+          in: query
+          schema:
+            type: integer
+            format: int32
+        - name: fromUtc
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: toUtc
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: sessionCorrelationId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema:
+                type: array
+                items: { }
+            application/json:
+              schema:
+                type: array
+                items: { }
+            text/json:
+              schema:
+                type: array
+                items: { }
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
   '/api/terminals/{id}/events':
     get:
       tags:
@@ -2525,6 +3048,44 @@ paths:
       responses:
         '200':
           description: OK
+  '/api/time-bands/{id}':
+    put:
+      tags:
+        - TimeBands
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TimeBandUpdateDto'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/TimeBandUpdateDto'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/TimeBandUpdateDto'
+      responses:
+        '200':
+          description: OK
+    delete:
+      tags:
+        - TimeBands
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
   /api/uploads:
     get:
       tags:
@@ -2548,6 +3109,7 @@ paths:
     post:
       tags:
         - Uploads
+      summary: Creates an upload batch from hex-encoded payload. Does not run ingestion — call `POST .../ingest`.
       requestBody:
         content:
           application/json:
@@ -2560,8 +3122,8 @@ paths:
             schema:
               $ref: '#/components/schemas/UploadCreateDto'
       responses:
-        '200':
-          description: OK
+        '201':
+          description: Created
   '/api/uploads/{id}':
     get:
       tags:
@@ -2576,6 +3138,148 @@ paths:
       responses:
         '200':
           description: OK
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  '/api/uploads/{id}/ingest':
+    post:
+      tags:
+        - Uploads
+      summary: 'Parses the batch payload into HostPlatform.Domain.UploadRecord rows (JSON array, `records` envelope, or monolithic).'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema: { }
+            application/json:
+              schema: { }
+            text/json:
+              schema: { }
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  '/api/uploads/{id}/reprocess':
+    post:
+      tags:
+        - Uploads
+      summary: 'Re-runs ingestion, replacing derived records. Requires `?confirm=true`.'
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: confirm
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema: { }
+            application/json:
+              schema: { }
+            text/json:
+              schema: { }
+        '400':
+          description: Bad Request
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+  '/api/uploads/{id}/operator-review':
+    post:
+      tags:
+        - Uploads
+      summary: Records operator review metadata on the batch (merged into `DecodedMetadataJson`).
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorReviewDto'
+          text/json:
+            schema:
+              $ref: '#/components/schemas/OperatorReviewDto'
+          application/*+json:
+            schema:
+              $ref: '#/components/schemas/OperatorReviewDto'
+      responses:
+        '200':
+          description: OK
+          content:
+            text/plain:
+              schema: { }
+            application/json:
+              schema: { }
+            text/json:
+              schema: { }
+        '404':
+          description: Not Found
+          content:
+            text/plain:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
+            text/json:
+              schema:
+                $ref: '#/components/schemas/ProblemDetails'
 components:
   schemas:
     AccountDto:
@@ -2785,7 +3489,7 @@ components:
           type: boolean
           nullable: true
       additionalProperties: false
-      description: DeferSimulation keeps the command Queued for cancel/step-through; otherwise HostPlatform.Api.Craft.CraftCommandSimulator runs.
+      description: DeferSimulation keeps the command Queued for cancel/step-through; otherwise HostPlatform.Infrastructure.Craft.ICraftSimulationTransport runs.
     CompatibilityRuleDto:
       type: object
       properties:
@@ -2903,6 +3607,34 @@ components:
           nullable: true
         firstByteIsMessageType:
           type: boolean
+          nullable: true
+      additionalProperties: false
+    DestinationPrefixCreateDto:
+      type: object
+      properties:
+        prefixDigits:
+          type: string
+          nullable: true
+        tariffId:
+          type: string
+          format: uuid
+          nullable: true
+        notes:
+          type: string
+          nullable: true
+      additionalProperties: false
+    DestinationPrefixUpdateDto:
+      type: object
+      properties:
+        prefixDigits:
+          type: string
+          nullable: true
+        tariffId:
+          type: string
+          format: uuid
+          nullable: true
+        notes:
+          type: string
           nullable: true
       additionalProperties: false
     DiagnosticSnapshotDto:
@@ -3024,6 +3756,50 @@ components:
         capturedAtUtc:
           type: string
           format: date-time
+          nullable: true
+      additionalProperties: false
+    NccDecodeRequest:
+      type: object
+      properties:
+        rawHex:
+          type: string
+          nullable: true
+        parseMode:
+          type: string
+          nullable: true
+      additionalProperties: false
+    NccEncodeRequest:
+      type: object
+      properties:
+        controlHex:
+          type: string
+          nullable: true
+        terminalIdHex:
+          type: string
+          nullable: true
+        dataHex:
+          type: string
+          nullable: true
+      additionalProperties: false
+    NccReplayRequest:
+      type: object
+      properties:
+        rawHex:
+          type: string
+          nullable: true
+        captureId:
+          type: string
+          format: uuid
+          nullable: true
+        parseMode:
+          type: string
+          nullable: true
+      additionalProperties: false
+    OperatorReviewDto:
+      type: object
+      properties:
+        note:
+          type: string
           nullable: true
       additionalProperties: false
     PackageDto:
@@ -3382,6 +4158,32 @@ components:
           type: string
           nullable: true
       additionalProperties: false
+    TariffCreateDto:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        ratePerMinuteUsd:
+          type: number
+          format: double
+        notes:
+          type: string
+          nullable: true
+      additionalProperties: false
+    TariffUpdateDto:
+      type: object
+      properties:
+        name:
+          type: string
+          nullable: true
+        ratePerMinuteUsd:
+          type: number
+          format: double
+        notes:
+          type: string
+          nullable: true
+      additionalProperties: false
     TerminalCreateDto:
       type: object
       properties:
@@ -3449,6 +4251,40 @@ components:
           format: uuid
           nullable: true
         transportEndpointId:
+          type: string
+          format: uuid
+          nullable: true
+      additionalProperties: false
+    TimeBandCreateDto:
+      type: object
+      properties:
+        dayOfWeekMask:
+          type: integer
+          format: int32
+        startMinuteOfDay:
+          type: integer
+          format: int32
+        endMinuteOfDay:
+          type: integer
+          format: int32
+        tariffId:
+          type: string
+          format: uuid
+          nullable: true
+      additionalProperties: false
+    TimeBandUpdateDto:
+      type: object
+      properties:
+        dayOfWeekMask:
+          type: integer
+          format: int32
+        startMinuteOfDay:
+          type: integer
+          format: int32
+        endMinuteOfDay:
+          type: integer
+          format: int32
+        tariffId:
           type: string
           format: uuid
           nullable: true

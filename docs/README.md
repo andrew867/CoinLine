@@ -1,5 +1,7 @@
 # Product documentation (supplemental)
 
+Hardware compatibility specifications for Millennium-class terminals (audio, voice prompts, supervision) live under **`../docs/hardware/`** and are mirrored into the MkDocs **Hardware compatibility** section.
+
 Primary **customer documentation** is built with MkDocs from **`../docs-site/`** and is intended to publish at:
 
 [https://github.com/andrew867/CoinLine/tree/main/docs-site/docs](https://github.com/andrew867/CoinLine/tree/main/docs-site/docs)

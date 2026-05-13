@@ -9,6 +9,9 @@ using HostPlatform.Api.Middleware;
 using HostPlatform.Api.Options;
 using HostPlatform.Api.Services;
 using HostPlatform.Api.Swagger;
+using HostPlatform.Firmware;
+using HostPlatform.Infrastructure.Cards;
+using HostPlatform.Infrastructure.Craft;
 using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
@@ -26,6 +29,8 @@ builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSectio
 builder.Services.Configure<JobOrchestrationOptions>(builder.Configuration.GetSection(JobOrchestrationOptions.SectionName));
 builder.Services.Configure<CardPaymentOptions>(builder.Configuration.GetSection(CardPaymentOptions.SectionName));
 builder.Services.Configure<FirmwareOptions>(builder.Configuration.GetSection(FirmwareOptions.SectionName));
+builder.Services.Configure<DlTransportEnvironmentOptions>(builder.Configuration.GetSection(DlTransportEnvironmentOptions.SectionName));
+builder.Services.PostConfigure<DlTransportEnvironmentOptions>(BindDlTransportFromEnvironment);
 
 builder.Services.PostConfigure<SecurityOptions>(o =>
 {
@@ -108,6 +113,7 @@ if (platOptsCfg.Retention.TelemetryEnabled)
     builder.Services.AddHostedService<RetentionTelemetryHostedService>();
 
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddSingleton<IDlXmodemTransportAdapter, DlXmodemTransportAdapter>();
 builder.Services.AddScoped<IFirmwareExecutionPolicy, FirmwareExecutionPolicy>();
 builder.Services.AddScoped<FirmwareJobOrchestrator>();
 builder.Services.AddScoped<CapturedSessionReplayService>();
@@ -123,6 +129,8 @@ builder.Services.AddSwaggerGen(o =>
 });
 builder.Services.AddScoped<DlogTransactionEngine>();
 builder.Services.AddScoped<TableDistributionService>();
+builder.Services.AddSingleton<ICraftSimulationTransport, CraftSimulationTransport>();
+builder.Services.AddScoped<ICardAccountLedger, CardAccountLedger>();
 
 var cs = builder.Configuration.GetConnectionString("Default") ??
          "Host=localhost;Port=5432;Database=coinline;Username=coinline;Password=coinline";
@@ -190,4 +198,40 @@ static void ValidateProductionSecurity(WebApplication app)
     }
 }
 
-public partial class Program;
+public partial class Program
+{
+    private static void BindDlTransportFromEnvironment(DlTransportEnvironmentOptions o)
+    {
+        o.LiveDlaEnabled = ReadEnvBool("COINLINE_FIRMWARE_LIVE_DLA_ENABLED", o.LiveDlaEnabled);
+        var transport = Environment.GetEnvironmentVariable("COINLINE_DLA_TRANSPORT");
+        if (!string.IsNullOrWhiteSpace(transport))
+            o.TransportKind = transport.Trim();
+        var serialPort = Environment.GetEnvironmentVariable("COINLINE_DLA_SERIAL_PORT");
+        if (!string.IsNullOrWhiteSpace(serialPort))
+            o.SerialPort = serialPort.Trim();
+        if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_DLA_BAUD"), out var baud) && baud > 0)
+            o.Baud = baud;
+        if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_DLA_TIMEOUT_MS"), out var to) && to > 0)
+            o.TimeoutMs = to;
+        if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_DLA_MAX_RETRIES"), out var mr) && mr >= 0)
+            o.MaxRetries = mr;
+        if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_DLA_PACING_MS"), out var p) && p >= 0)
+            o.PacingMs = p;
+        var tcpHost = Environment.GetEnvironmentVariable("COINLINE_DLA_TCP_HOST");
+        if (!string.IsNullOrWhiteSpace(tcpHost))
+            o.TcpHost = tcpHost.Trim();
+        if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_DLA_TCP_PORT"), out var tp) && tp > 0)
+            o.TcpPort = tp;
+        var pipe = Environment.GetEnvironmentVariable("COINLINE_DLA_PIPE");
+        if (!string.IsNullOrWhiteSpace(pipe))
+            o.PipeName = pipe.Trim();
+    }
+
+    private static bool ReadEnvBool(string name, bool fallback)
+    {
+        var v = Environment.GetEnvironmentVariable(name);
+        if (string.IsNullOrWhiteSpace(v))
+            return fallback;
+        return string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || v == "1";
+    }
+}

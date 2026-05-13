@@ -1,0 +1,17 @@
+{
+  "fixtureId": "dlog.correlation_pairs",
+  "kind": "dlog_correlation_catalogue",
+  "lineage": {
+    "canonicality": "PLACEHOLDER",
+    "notes": "Must stay aligned with HostPlatform.Protocols.Dlog.DlogCorrelationRules.CompatibilityPairs."
+  },
+  "pairs": [
+    { "request": 1, "response": 3 },
+    { "request": 2, "response": 3 },
+    { "request": 4, "response": 5 },
+    { "request": 53, "response": 5 },
+    { "request": 6, "response": 15 },
+    { "request": 7, "response": 16 },
+    { "request": 63, "response": 64 }
+  ]
+}

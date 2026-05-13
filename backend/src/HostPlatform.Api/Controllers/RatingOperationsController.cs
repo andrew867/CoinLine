@@ -54,7 +54,8 @@ public sealed class RatingOperationsController(HostPlatformDbContext db) : Contr
             effectiveDecisionKind = decisionKind,
             allowed,
             insufficientBalance = decisionKind == RatingDecisionKind.InsufficientBalance,
-            warning = "MVP simulated rating — card balance checks are mocked; not production parity."
+            warning =
+                "Simulated authorize — card balance is compared only against AvailableBalanceUsd when provided; full ledger parity remains deployment-dependent."
         };
 
         db.CallAuthorizationRequests.Add(new CallAuthorizationRequest
@@ -88,10 +89,12 @@ public sealed class RatingOperationsController(HostPlatformDbContext db) : Contr
         blocked = r.Blocked,
         freeCall = r.FreeCall,
         emergency = r.Emergency,
+        airtimeSource = r.AirtimeSource.ToString(),
         diagnostics = r.Diagnostics.Select(d => new { d.Code, d.Severity, d.Message }),
         determinismFingerprint = r.DeterminismFingerprint,
         determinismInputJson = r.DeterminismInputJson,
-        warning = "MVP simulated rating — not production firmware parity. See host-platform/docs/rating-mvp.md."
+        warning =
+            "Host plan quote — cross-check against terminal/firmware policy in UAT. See coinline/docs/implementation/implementation-gap-register.md for field certification items."
     };
 
     public sealed record QuoteBody(

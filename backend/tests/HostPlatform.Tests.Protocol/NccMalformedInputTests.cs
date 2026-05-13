@@ -30,10 +30,10 @@ public sealed class NccMalformedInputTests
     }
 
     [Fact]
-    public void Archaeology_may_decode_with_diagnostics_when_crc_wrong()
+    public void DiagnosticCapture_preserves_packet_with_diagnostics_when_crc_wrong()
     {
         var wire = new byte[] { 0x02, NccControl.Clr, 0x05, 0xFF, 0xFF, 0x03 };
-        var r = NccFrameCodec.TryDecode(wire, NccParseMode.Archaeology);
+        var r = NccFrameCodec.TryDecode(wire, NccParseMode.DiagnosticCapture);
         Assert.True(r.Success);
         Assert.NotEmpty(r.Diagnostics);
     }

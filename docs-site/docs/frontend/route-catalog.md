@@ -1,6 +1,6 @@
 # Route catalog (audit)
 
-Every implemented UI route (`web/src/App.tsx`) with operator-facing purpose and primary API dependencies.
+Every implemented UI route (`coinline/web/src/App.tsx`) with operator-facing purpose and primary API dependencies.
 
 !!! tip "Developer vs operator"
     Operators follow task docs in [Operator guide](../operator-guide/overview.md). Developers extend routes here and matching API clients.
@@ -26,7 +26,8 @@ Every implemented UI route (`web/src/App.tsx`) with operator-facing purpose and 
 | `/table-sets/:id` | `TableSetDetail` | `/api/tables/sets/{id}`, publish | Confirm publish |
 | `/downloads` | `DownloadsPage` | `/api/downloads` | |
 | `/downloads/:id` | `DownloadDetail` | `/api/downloads/{id}` | Cancel/retry confirm |
-| `/uploads` | JsonPanel | `/api/uploads` | |
+| `/uploads` | `UploadsPage` | `/api/uploads` | |
+| `/uploads/:id` | `UploadDetail` | `/api/uploads/{id}`, ingest / reprocess / review | |
 | `/rate-plans` | `RatePlansPage` | `/api/rate-plans` | |
 | `/rate-plans/:id` | `RatePlanDetail` | `/api/rate-plans/{id}`, versions | Publish confirm |
 | `/number-classes` | `NumberClassesPage` | `/api/number-classes` | Blocked class confirm |

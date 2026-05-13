@@ -17,7 +17,7 @@ docker run --name hostplatform-pg \
 ## Backend
 
 ```bash
-cd backend
+cd coinline/backend
 dotnet tool restore
 dotnet ef database update --project src/HostPlatform.Infrastructure --startup-project src/HostPlatform.Api
 dotnet run --project src/HostPlatform.Api --launch-profile http
@@ -28,7 +28,7 @@ API: **http://localhost:5006** · Swagger: **http://localhost:5006/swagger**
 ## Frontend
 
 ```bash
-cd web
+cd coinline/web
 npm install
 npm run dev
 ```

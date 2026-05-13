@@ -4,6 +4,29 @@ All notable changes to this repository are documented here. Format follows [Keep
 
 ---
 
+## [0.2.0] — 2026-05-13 {: #release-020 }
+
+**Public sync release (v0.2.0).** Brings the public **CoinLine** repository up to the same engineering snapshot as the **[CoinLine Terminal Emulator](https://github.com/andrew867/CoinLine-emu)** companion project, and aligns README, badges, and project-status framing across both.
+
+### Added
+
+- README hero with badges (license, .NET, Node, PostgreSQL, MkDocs, OpenAPI, release, status), architecture diagram, **Project status — honest version** section, and **How to help** contribution entry points.
+- Cross-link to the **CoinLine Terminal Emulator** companion repository.
+- Filled-out controllers, services, and console pages for **destination prefixes**, **tariffs**, **time bands**, **NCC protocol**, **NCC sessions**, **card ledger capabilities**, and **rate-plan detail** flows (parity with the latest internal engineering snapshot).
+- Expanded fixtures, web tests, and Playwright smoke coverage to track the broader API surface.
+
+### Changed
+
+- README rewritten around the host-platform architecture and OEM positioning; `v0.2.0` set as the current release.
+- Honest-scope language in the rating UI and fixtures normalized to reference-firmware framing rather than vendor-specific identifiers.
+- Documentation-site release checklist aligned to **v0.2.0**.
+
+### Notes
+
+- Same overall scope and honesty boundaries as v0.1.0 — see the **v0.1.0** package notes below for the full simulation / gated / field-validation matrix; nothing in v0.2.0 changes those guardrails.
+
+---
+
 ## [0.1.0] — 2026-05-03 {: #release-010 }
 
 **Initial public release (v0.1.0).** Same technical scope as the prior **0.1.0-alpha** engineering drop: intended for **evaluation**, **lab demos**, and **integration validation** — **not** for production billing, certified payment processing, or unattended carrier-grade operation without a dedicated validation program.
@@ -59,7 +82,7 @@ Prior alpha notes remain applicable; treat **v0.1.0** as the first tagged **MIT-
 
 #### Recommended demo workflow (lab)
 
-1. Bring up PostgreSQL and apply EF migrations; run **API** and **Web** per `README.md`.
+1. Bring up PostgreSQL and apply EF migrations; run **API** and **Web** per `coinline/README.md`.
 2. Use **Swagger** (`/swagger`) with a configured API key; confirm **health** vs **ready** behavior matches your ops expectations.
 3. Walk the operator UI: create customer → site → terminal; inspect **simulation-state** for cards; review **audit** after mutations.
 4. Ingest a **small** DLOG sample or fixture-driven path; verify **raw payload** retention and diagnostics — **do not** infer field certification from UI alone.

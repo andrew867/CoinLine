@@ -1461,6 +1461,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("ErrorDetail")
                         .HasColumnType("text");
 
+                    b.Property<int>("HostDownloadPhase")
+                        .HasColumnType("integer");
+
                     b.Property<int>("ItemStatus")
                         .HasColumnType("integer");
 
@@ -2110,6 +2113,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.Property<DateTime>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
 
                     b.Property<Guid?>("TerminalId")
                         .HasColumnType("uuid");

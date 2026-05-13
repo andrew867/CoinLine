@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Protocols.Tables;
 using Microsoft.EntityFrameworkCore;
 
 namespace HostPlatform.Infrastructure.Tables;
@@ -253,7 +254,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
                 TableVersionId = v.Id,
                 StepIndex = step++,
                 ItemStatus = DownloadBatchItemStatus.Queued,
-                LastAckStatus = "pending_hardware_ack"
+                LastAckStatus = "pending_terminal_ack",
+                HostDownloadPhase = TableDownloadStateMachine.InitialItemPhaseAfterBatchPrepared()
             });
         }
 
@@ -261,8 +263,10 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         batch.DiagnosticsJson = JsonSerializer.Serialize(new
         {
             phase = "prepared",
+            orchestrator = TableDownloadStateMachine.OrchestratorId,
+            defaultHostPhase = TableDownloadHostPhase.Queued.ToString(),
             note =
-                "HARDWARE_VALIDATION_REQUIRED: batch items are queued; no terminal download completion or NCC/DLOG ACK handling in this tranche."
+                "Per-item HostDownloadPhase tracks host orchestration; Completed/Succeeded requires terminal ACK validated under field conditions."
         }, JsonOpts);
         await db.SaveChangesAsync(ct);
 
@@ -283,6 +287,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         {
             i.ItemStatus = DownloadBatchItemStatus.Cancelled;
             i.LastAckStatus = "cancelled";
+            i.HostDownloadPhase = TableDownloadHostPhase.Cancelled;
         }
 
         await db.SaveChangesAsync(ct);

@@ -5,7 +5,7 @@
     "canonicality": "CANONICAL",
     "captureMethod": "GENERATOR_HOST_CODEC",
     "mtrScope": "BOTH",
-    "notes": "CLR control packet emitted by FixtureGen using NccFrameCodec.Encode; framing rules trace to MTR212-style layout in NccFrameCodec."
+    "notes": "CLR control packet emitted by FixtureGen using NccFrameCodec.Encode; framing rules trace to the reference packet layout in NccFrameCodec."
   },
   "sourceEvidence": [
     "docs/protocols/ncc_framing/packet_layout_and_wire_sequence.md",

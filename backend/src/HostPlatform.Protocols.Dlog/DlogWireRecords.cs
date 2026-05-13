@@ -11,7 +11,7 @@ public sealed class DlogPayload
 {
     public required byte[] RawBytes { get; init; }
 
-    /// <summary>When true, <see cref="RawBytes"/>[0] is the DLOG_MT wire type byte per MTR212 list discipline.</summary>
+    /// <summary>When true, <see cref="RawBytes"/>[0] is the DLOG_MT wire type byte per reference firmware list discipline.</summary>
     public bool FirstByteIsMessageType { get; init; }
 }
 

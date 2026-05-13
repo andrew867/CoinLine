@@ -1,9 +1,9 @@
 namespace HostPlatform.Protocols.Ncc;
 
-/// <summary>CRC-16 per MTR212 <c>_nccgen_crc</c> / <c>ncci_upd_crc</c> (initial value 0).</summary>
+/// <summary>CRC-16 per reference firmware <c>_nccgen_crc</c> / <c>ncci_upd_crc</c> (initial value 0).</summary>
 public static class NccCrc16
 {
-    /// <summary>256×uint16 from <c>MTR212/NCCASM.ASM</c> <c>_ncc_crc_table</c>.</summary>
+    /// <summary>256×uint16 from <c>NCCASM.ASM</c> <c>_ncc_crc_table</c>.</summary>
     public static ReadOnlySpan<ushort> Table => TableStorage.Data;
 
     public static ushort Compute(ReadOnlySpan<byte> data)

@@ -2,9 +2,9 @@
 
 Use before declaring a **public** or **customer-facing** release of documentation + artifacts. Items are **honest gates**: unchecked areas mean the release is **not** fully enterprise-certified.
 
-## Current package: v0.1.0
+## Current package: v0.2.0
 
-**Published:** 2026-05-03 (documentation-aligned; GitHub: [CoinLine](https://github.com/andrew867/CoinLine)).
+**Published:** 2026-05-13 (documentation-aligned; GitHub: [CoinLine](https://github.com/andrew867/CoinLine)). Brings the repository to the same engineering snapshot as the [CoinLine Terminal Emulator](https://github.com/andrew867/CoinLine-emu) companion project.
 
 **Authoritative package notes** — scope, honesty boundaries, demo workflow, next tranche:
 

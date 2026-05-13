@@ -26,4 +26,4 @@ Task-oriented steps for operators using **CoinLine Management Console** against 
 
 ## Quickstart reference
 
-See `README.md` in the product package for local **CoinLine Server** + console startup commands.
+See `coinline/README.md` in the product package for local **CoinLine Server** + console startup commands.

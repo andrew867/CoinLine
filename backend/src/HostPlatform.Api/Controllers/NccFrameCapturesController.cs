@@ -13,6 +13,7 @@ namespace HostPlatform.Api.Controllers;
 
 [ApiController]
 [Route("api/ncc/frame-captures")]
+[Route("api/ncc/captures")]
 public sealed class NccFrameCapturesController(HostPlatformDbContext db) : ControllerBase
 {
     public const int MaxCaptureBytes = 512 * 1024;
@@ -38,7 +39,7 @@ public sealed class NccFrameCapturesController(HostPlatformDbContext db) : Contr
         var row = await db.NccFrameCaptures.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
         if (row == null)
             return NotFound();
-        var ordered = NccStreamReader.ReadOrdered(row.RawBytes, NccParseMode.Archaeology);
+        var ordered = NccStreamReader.ReadOrdered(row.RawBytes, NccParseMode.DiagnosticCapture);
         return Ok(BuildInspectPayload(row, ordered));
     }
 
@@ -67,7 +68,7 @@ public sealed class NccFrameCapturesController(HostPlatformDbContext db) : Contr
         AddAudit("upload", entity.Id.ToString(), new { file.FileName, entity.ByteLength });
         await db.SaveChangesAsync(ct);
 
-        var ordered = NccStreamReader.ReadOrdered(bytes, NccParseMode.Archaeology);
+        var ordered = NccStreamReader.ReadOrdered(bytes, NccParseMode.DiagnosticCapture);
         var frames = ordered.OfType<NccStreamParsedFrame>().Select(p => p.Frame).ToList();
         return CreatedAtAction(nameof(Get), new { id = entity.Id }, new
         {

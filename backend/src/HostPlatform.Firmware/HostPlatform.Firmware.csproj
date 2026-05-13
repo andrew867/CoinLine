@@ -1,7 +1,13 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\HostPlatform.Domain\HostPlatform.Domain.csproj" />
+    <ProjectReference Include="..\HostPlatform.Transport\HostPlatform.Transport.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

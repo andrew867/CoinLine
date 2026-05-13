@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\HostPlatform.Domain\HostPlatform.Domain.csproj" />
     <ProjectReference Include="..\HostPlatform.Protocols.Dlog\HostPlatform.Protocols.Dlog.csproj" />
+    <ProjectReference Include="..\HostPlatform.Protocols.Tables\HostPlatform.Protocols.Tables.csproj" />
     <ProjectReference Include="..\HostPlatform.Rating\HostPlatform.Rating.csproj" />
   </ItemGroup>
 

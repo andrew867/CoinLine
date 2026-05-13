@@ -4,11 +4,11 @@
   "lineage": {
     "canonicality": "PLACEHOLDER",
     "mtrScope": "N_A",
-    "notes": "No binary payload; Cards module is simulation-gated until certifications exist."
+    "notes": "Simulation-gated balance mutations; live issuer settlement is uncertified by default."
   },
   "sourceEvidence": [
-    "host-platform/backend/src/HostPlatform.Cards/CardLedgerPlaceholder.cs",
-    "docs/protocols/host_platform/dlog_tables/mt_134_card_table.md"
+    "coinline/backend/src/HostPlatform.Cards/CardLedgerCapabilities.cs",
+    "coinline/backend/src/HostPlatform.Infrastructure/Cards/CardAccountLedger.cs"
   ],
   "expectedParse": {
     "defaultSimulation": true

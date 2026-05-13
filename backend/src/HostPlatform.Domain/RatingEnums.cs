@@ -18,7 +18,7 @@ public enum RateRuleMatchKind
 /// <summary>What happens when a rule matches.</summary>
 public enum RateRuleOutcome
 {
-    /// <summary>Use computed tariff (per-minute × duration placeholder in MVP).</summary>
+    /// <summary>Per-minute airtime from the matching rule (× quoted duration).</summary>
     Rated = 0,
     Block = 1,
     Free = 2,
@@ -35,6 +35,15 @@ public enum RatingDecisionKind
     Emergency = 4,
     InsufficientBalance = 5,
     DeniedUnknownPrefix = 6,
-    /// <summary>Set/table rated modes need firmware-backed tables — not production parity in MVP.</summary>
+    /// <summary>Legacy — host catalog quoting now covers set/table modes; retained for persisted rows.</summary>
     PlaceholderTableRated = 7
+}
+
+/// <summary>Which host configuration produced a rated (non-zero) airtime amount.</summary>
+public enum RatingAirtimeSource
+{
+    None = 0,
+    RateRule = 1,
+    DestinationPrefix = 2,
+    TimeBand = 3
 }

@@ -33,7 +33,7 @@ public class RateRule : AuditableEntity
     public RateRuleMatchKind MatchKind { get; set; } = RateRuleMatchKind.Prefix;
     public string Pattern { get; set; } = string.Empty;
     public RateRuleOutcome Outcome { get; set; } = RateRuleOutcome.Rated;
-    /// <summary>MVP stub rate — not production parity without UAT-backed rules.</summary>
+    /// <summary>Per-minute airtime when <see cref="RateRuleOutcome"/> is <see cref="RateRuleOutcome.Rated"/> (UAT for field certification).</summary>
     public decimal RatePerMinuteUsd { get; set; }
     /// <summary>Opaque legacy / diagnostic payload (JSON).</summary>
     public string Expression { get; set; } = "{}";
@@ -66,7 +66,7 @@ public class TimeBand : AuditableEntity
 {
     public Guid RatePlanVersionId { get; set; }
     public RatePlanVersion? RatePlanVersion { get; set; }
-    /// <summary>Bit mask Sunday=1 … HARDWARE_VALIDATION_REQUIRED for real calendar integration.</summary>
+    /// <summary>Bit mask for <see cref="DayOfWeek"/> — Sunday = 1 &lt;&lt; 0 … Saturday = 1 &lt;&lt; 6 (all days = 127).</summary>
     public int DayOfWeekMask { get; set; } = 127;
     public int StartMinuteOfDay { get; set; }
     public int EndMinuteOfDay { get; set; }

@@ -56,7 +56,7 @@ export function RatingQuoteTool() {
       <h1>Rating quote (test)</h1>
       <p style={{ color: '#a60', maxWidth: 720 }}>
         Quotes use the <strong>published</strong> rate-plan version only. This tool is for lab validation — not an
-        assertion of production rating parity with payphones or MTR212.
+        assertion of production rating parity with payphones or reference terminal firmware.
       </p>
       {planListLoading && <p role="status">Loading rate plans…</p>}
       {!planListLoading && plans.length === 0 && !err && (

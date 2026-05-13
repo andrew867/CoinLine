@@ -1,0 +1,6 @@
+{
+  "byteLength": 6,
+  "strictParseSuccess": true,
+  "orderedItemKinds": ["frame"],
+  "notes": "Golden expectations for lab replay; extend with additional stream items as fixtures grow."
+}

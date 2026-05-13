@@ -3,6 +3,7 @@ using HostPlatform.Api.Audit;
 using HostPlatform.Api.Options;
 using HostPlatform.Api.Security;
 using HostPlatform.Domain;
+using HostPlatform.Infrastructure.Cards;
 using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,7 +19,8 @@ namespace HostPlatform.Api.Controllers;
 [Route("api/cards")]
 public sealed class CardsController(
     HostPlatformDbContext db,
-    IOptions<CardPaymentOptions> cardOptions) : ControllerBase
+    IOptions<CardPaymentOptions> cardOptions,
+    ICardAccountLedger ledger) : ControllerBase
 {
     private readonly CardPaymentOptions _opts = cardOptions.Value;
 
@@ -288,17 +290,22 @@ public sealed class CardsController(
             return NotFound();
 
         var product = a.CardProduct ?? await db.CardProducts.FirstAsync(p => p.Id == a.CardProductId, ct);
-        var next = a.Balance + body.Delta;
-        if (next < 0 && !product.AllowNegativeBalance)
-            return BadRequest(new { error = "Negative balance not allowed for this card product.", attemptedBalance = next });
+        if (a.CardBalance == null)
+        {
+            var cb = new CardBalance { CardAccountId = a.Id, Amount = a.Balance, Currency = "USD" };
+            db.CardBalances.Add(cb);
+            a.CardBalance = cb;
+        }
 
         var before = a.Balance;
-        a.Balance = next;
-
-        if (a.CardBalance == null)
-            db.CardBalances.Add(new CardBalance { CardAccountId = a.Id, Amount = a.Balance, Currency = "USD" });
-        else
-            a.CardBalance.Amount = a.Balance;
+        try
+        {
+            ledger.ApplyBalanceAdjustment(a, product, body.Delta);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
 
         db.BalanceAdjustments.Add(new BalanceAdjustment
         {
@@ -337,11 +344,33 @@ public sealed class CardsController(
     [HttpPost("transactions")]
     public async Task<ActionResult<object>> PostTransaction([FromBody] PaymentTransactionDto body, CancellationToken ct)
     {
-        var account = await db.CardAccounts.FirstOrDefaultAsync(a => a.Id == body.CardAccountId, ct);
+        var account = await db.CardAccounts.Include(a => a.CardProduct).Include(a => a.CardBalance)
+            .FirstOrDefaultAsync(a => a.Id == body.CardAccountId, ct);
         if (account == null)
             return BadRequest(new { error = "Unknown CardAccountId" });
 
+        var product = account.CardProduct ?? await db.CardProducts.FirstAsync(p => p.Id == account.CardProductId, ct);
+
+        if (account.CardBalance == null)
+        {
+            var cb = new CardBalance { CardAccountId = account.Id, Amount = account.Balance, Currency = "USD" };
+            db.CardBalances.Add(cb);
+            account.CardBalance = cb;
+        }
+
         var raw = string.IsNullOrWhiteSpace(body.RawPayloadJson) ? "{}" : body.RawPayloadJson!;
+        if (_opts.SimulationMode)
+        {
+            try
+            {
+                ledger.ApplyPaymentAmount(account, product, body.Amount);
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
+        }
+
         var tx = new PaymentTransaction
         {
             CardAccountId = body.CardAccountId,
@@ -352,10 +381,11 @@ public sealed class CardsController(
             RawPayloadJson = raw
         };
         db.PaymentTransactions.Add(tx);
+
         ApiAudit.Write(db, HttpContext, "cards", "payment_transaction", $"PaymentTransaction:{tx.Id}",
-            new { body.CardAccountId, body.Amount, tx.ReportedCardType });
+            new { body.CardAccountId, body.Amount, tx.ReportedCardType, balanceApplied = _opts.SimulationMode });
         await db.SaveChangesAsync(ct);
-        return Created($"/api/cards/transactions", new { tx.Id });
+        return Created($"/api/cards/transactions", new { tx.Id, appliedToBalance = _opts.SimulationMode });
     }
 
     [HttpGet("transactions")]

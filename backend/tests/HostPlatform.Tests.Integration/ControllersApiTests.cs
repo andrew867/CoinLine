@@ -54,6 +54,7 @@ public sealed class ControllersApiTests(ApiFixture factory)
         var created = JsonSerializer.Deserialize<JsonElement>(await create.Content.ReadAsStringAsync(), JsonOpts);
         var tid = created.GetProperty("id").GetGuid();
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/api/terminals/{tid}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/api/terminals/{tid}/dlog")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/api/terminals/{tid}/events")).StatusCode);
         var st = await _client.PostAsJsonAsync($"/api/terminals/{tid}/status", new { status = TerminalOperationalStatus.Online, detail = "itest" });
         Assert.Equal(HttpStatusCode.OK, st.StatusCode);
@@ -200,6 +201,7 @@ public sealed class ControllersApiTests(ApiFixture factory)
         Assert.Equal(HttpStatusCode.Created, post.StatusCode);
         var id = JsonSerializer.Deserialize<JsonElement>(await post.Content.ReadAsStringAsync(), JsonOpts).GetProperty("id").GetGuid();
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync($"/api/uploads/{id}")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/uploads/{id}/ingest", null)).StatusCode);
     }
 
     [Fact]
@@ -285,6 +287,21 @@ public sealed class ControllersApiTests(ApiFixture factory)
     {
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/audit/events")).StatusCode);
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/ncc/sessions")).StatusCode);
+    }
+
+    [Fact]
+    public async Task Ncc_capture_alias_and_protocol_endpoints()
+    {
+        Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/ncc/captures")).StatusCode);
+        var decode = await _client.PostAsJsonAsync("/api/ncc/decode",
+            new { rawHex = "022005780303", parseMode = "strict" });
+        Assert.Equal(HttpStatusCode.OK, decode.StatusCode);
+        var replay =
+            await _client.PostAsJsonAsync("/api/ncc/replay", new { rawHex = "022005780303" });
+        Assert.Equal(HttpStatusCode.OK, replay.StatusCode);
+        var enc = await _client.PostAsJsonAsync("/api/ncc/encode",
+            new { controlHex = "20", terminalIdHex = "0000000000", dataHex = "" });
+        Assert.Equal(HttpStatusCode.OK, enc.StatusCode);
     }
 
     [Fact]

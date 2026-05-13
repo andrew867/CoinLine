@@ -28,7 +28,7 @@ export function RatePlansPage() {
     <div>
       <h1>Rate plans</h1>
       <p style={{ color: '#a60', maxWidth: 720 }}>
-        MVP host-side rating is <strong>not production parity</strong> with MTR212 firmware until rules are UAT-backed and
+        MVP host-side rating is <strong>not production parity</strong> with reference terminal firmware until rules are UAT-backed and
         tested. Set-rated / table-rated paths require <code>HARDWARE_VALIDATION_REQUIRED</code>.
       </p>
       {loading && <p role="status">Loading rate plans…</p>}

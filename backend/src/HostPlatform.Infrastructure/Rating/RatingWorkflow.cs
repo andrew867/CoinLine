@@ -6,9 +6,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HostPlatform.Infrastructure.Rating;
 
-/// <summary>
-/// Loads persisted configuration and runs <see cref="RatingEngine"/> (MVP — not firmware parity).
-/// </summary>
+/// <summary>Loads persisted configuration and runs <see cref="RatingEngine"/>.</summary>
 public static class RatingWorkflow
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
@@ -37,8 +35,12 @@ public static class RatingWorkflow
         if (planId is { } pid)
         {
             var plan = await db.RatePlans.AsNoTracking()
-                .Include(p => p.PublishedVersion!)
+                .Include(p => p.PublishedVersion!)!
                 .ThenInclude(v => v!.Rules)
+                .Include(p => p.PublishedVersion!)!
+                .ThenInclude(v => v!.DestinationPrefixes)!.ThenInclude(d => d.Tariff)
+                .Include(p => p.PublishedVersion!)!
+                .ThenInclude(v => v!.TimeBands)!.ThenInclude(t => t.Tariff)
                 .FirstOrDefaultAsync(p => p.Id == pid, ct);
             published = plan?.PublishedVersion;
         }
@@ -58,6 +60,14 @@ public static class RatingWorkflow
         RatingEngine.QuoteResult quote,
         Guid? appliedVersionId)
     {
+        var segmentLabel = quote.AirtimeSource switch
+        {
+            RatingAirtimeSource.RateRule => "Airtime (rate rule)",
+            RatingAirtimeSource.DestinationPrefix => "Airtime (destination tariff)",
+            RatingAirtimeSource.TimeBand => "Airtime (time-of-day tariff)",
+            _ => "Airtime"
+        };
+
         var rr = new RatingResult
         {
             CallRecordId = callRecordId,
@@ -75,8 +85,8 @@ public static class RatingWorkflow
                 quote.AmountUsd,
                 quote.Allowed,
                 quote.DeterminismFingerprint,
-                simulatedRating = true,
-                productionParity = "incomplete"
+                airtimeSource = quote.AirtimeSource.ToString(),
+                hostPlanQuote = true
             }, JsonOpts)
         };
 
@@ -95,7 +105,7 @@ public static class RatingWorkflow
             rr.Segments.Add(new CallChargeSegment
             {
                 SegmentIndex = 0,
-                Label = "Airtime (MVP stub per-minute)",
+                Label = segmentLabel,
                 AmountUsd = quote.AmountUsd
             });
         }

@@ -148,6 +148,37 @@ public sealed class RatingTranche5Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Quote_tariff_catalog_uses_destination_or_peak_time_band()
+    {
+        var planId = await GetLocalDefaultPlanIdAsync();
+        var inPeak = new DateTime(2026, 1, 6, 12, 0, 0, DateTimeKind.Utc);
+        var rPeak = await _client.PostAsJsonAsync("/api/rating/quote", new
+        {
+            dialedDigits = "3331000",
+            mode = RatingMode.RealTimeRated,
+            ratePlanId = planId,
+            assumedDurationMinutes = 1m,
+            asOfUtc = inPeak
+        });
+        var jPeak = JsonSerializer.Deserialize<JsonElement>(await rPeak.Content.ReadAsStringAsync(), JsonOpts);
+        Assert.Equal(0.15m, jPeak.GetProperty("amountUsd").GetDecimal());
+        Assert.Equal("TimeBand", jPeak.GetProperty("airtimeSource").GetString());
+
+        var offPeak = new DateTime(2026, 1, 6, 14, 0, 0, DateTimeKind.Utc);
+        var rOff = await _client.PostAsJsonAsync("/api/rating/quote", new
+        {
+            dialedDigits = "3331000",
+            mode = RatingMode.RealTimeRated,
+            ratePlanId = planId,
+            assumedDurationMinutes = 1m,
+            asOfUtc = offPeak
+        });
+        var jOff = JsonSerializer.Deserialize<JsonElement>(await rOff.Content.ReadAsStringAsync(), JsonOpts);
+        Assert.Equal(0.03m, jOff.GetProperty("amountUsd").GetDecimal());
+        Assert.Equal("DestinationPrefix", jOff.GetProperty("airtimeSource").GetString());
+    }
+
+    [Fact]
     public async Task Get_rate_plan_detail_and_reconcile_call_record()
     {
         var planId = await GetLocalDefaultPlanIdAsync();

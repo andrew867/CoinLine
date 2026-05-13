@@ -1,7 +1,7 @@
 # Quickstart (Docker)
 
 !!! note "Compose location"
-    Primary compose files live under `docker/` (see [Docker Compose](../operations/docker-compose.md)).
+    Primary compose files live under `coinline/docker/` (see [Docker Compose](../operations/docker-compose.md)).
 
 ## Prerequisites
 

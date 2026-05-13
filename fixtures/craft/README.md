@@ -1,3 +1,3 @@
 # Craft fixtures
 
-Placeholder until modem/craft transport is implemented. See `CraftChannelPlaceholder.cs`.
+Simulation-first craft execution is implemented via `CraftSimulationTransport` (`ICraftSimulationTransport`). Live modem/NCC attach remains uncertified by default — see `CraftTransportCapabilities.LiveAttachNotice`.

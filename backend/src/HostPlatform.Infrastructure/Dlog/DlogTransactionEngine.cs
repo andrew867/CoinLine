@@ -85,68 +85,112 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
         await db.DlogTransactions.AsNoTracking()
             .FirstOrDefaultAsync(t => t.IdempotencyKey == key, ct);
 
-    private async Task TryCorrelateAsync(Guid responseId, string? httpCorrelationId, CancellationToken ct)
+    /// <summary>
+    /// Links request/response rows using <see cref="DlogCorrelationRules"/> — forward (response ingested after request)
+    /// and backward (request ingested after response, same session).
+    /// </summary>
+    private async Task TryCorrelateAsync(Guid newTransactionId, string? httpCorrelationId, CancellationToken ct)
     {
-        var response = await db.DlogTransactions.FirstOrDefaultAsync(t => t.Id == responseId, ct);
-        if (response == null)
+        var tx = await db.DlogTransactions.FirstOrDefaultAsync(t => t.Id == newTransactionId, ct);
+        if (tx == null)
             return;
 
-        var reqMts = DlogCorrelationRules.GetRequestMessageTypesForResponse(response.MessageType);
-        if (reqMts.Count == 0)
+        if (await db.DlogCorrelationLinks.AnyAsync(
+                l => l.ResponseTransactionId == tx.Id || l.RequestTransactionId == tx.Id, ct))
             return;
 
-        foreach (var reqMt in reqMts)
+        foreach (var reqMt in DlogCorrelationRules.GetRequestMessageTypesForResponse(tx.MessageType))
         {
-            var request = await db.DlogTransactions
-                .Where(t => t.Id != response.Id
-                            && t.TerminalId == response.TerminalId
-                            && t.MessageType == reqMt
-                            && t.CapturedAtUtc <= response.CapturedAtUtc
-                            && t.SessionCorrelationId == response.SessionCorrelationId
-                            && !db.DlogCorrelationLinks.Any(l => l.RequestTransactionId == t.Id))
-                .OrderByDescending(t => t.CapturedAtUtc)
-                .FirstOrDefaultAsync(ct);
-
+            var request = await FindUnlinkedRequestBeforeResponseAsync(tx, reqMt, ct);
             if (request == null)
                 continue;
 
-            var alreadyResponse = await db.DlogCorrelationLinks
-                .AnyAsync(l => l.ResponseTransactionId == response.Id, ct);
-            if (alreadyResponse)
-                continue;
-
-            var link = new DlogCorrelationLink
-            {
-                RequestTransactionId = request.Id,
-                ResponseTransactionId = response.Id,
-                LinkRule = $"Compatibility pair ({reqMt}→{response.MessageType})"
-            };
-            db.DlogCorrelationLinks.Add(link);
-
-            request.ProcessingStatus = (int)DlogProcessingStatus.CorrelationLinked;
-            response.ProcessingStatus = (int)DlogProcessingStatus.CorrelationLinked;
-
-            db.AuditEvents.Add(new AuditEvent
-            {
-                Category = "dlog",
-                Action = "correlation_linked",
-                Actor = OperatorContext.Current?.OperatorId ?? "system",
-                Resource = response.Id.ToString(),
-                DetailJson = JsonSerializer.Serialize(new
-                {
-                    link.Id,
-                    requestTransactionId = request.Id,
-                    responseTransactionId = response.Id,
-                    link.LinkRule,
-                    note = "HARDWARE_VALIDATION_REQUIRED: pairing is heuristic (terminal + session + time); validate on hardware captures."
-                }),
-                CorrelationId = httpCorrelationId,
-                TerminalId = response.TerminalId
-            });
-
-            await db.SaveChangesAsync(ct);
+            await LinkCorrelationPairAsync(request, tx,
+                $"Compatibility pair ({reqMt}→{tx.MessageType})", httpCorrelationId, ct);
             return;
         }
+
+        var respMt = DlogCorrelationRules.GetResponseMessageTypeForRequest(tx.MessageType);
+        if (respMt is int rmt)
+        {
+            var response = await FindUnlinkedResponseForRequestAsync(tx, rmt, ct);
+            if (response != null)
+                await LinkCorrelationPairAsync(tx, response,
+                    $"Compatibility pair ({tx.MessageType}→{rmt})", httpCorrelationId, ct);
+        }
+    }
+
+    private async Task<DlogTransaction?> FindUnlinkedRequestBeforeResponseAsync(
+        DlogTransaction response, int requestMt, CancellationToken ct) =>
+        await db.DlogTransactions
+            .Where(t => t.Id != response.Id
+                        && t.TerminalId == response.TerminalId
+                        && t.MessageType == requestMt
+                        && t.CapturedAtUtc <= response.CapturedAtUtc
+                        && t.SessionCorrelationId == response.SessionCorrelationId
+                        && !db.DlogCorrelationLinks.Any(l => l.RequestTransactionId == t.Id))
+            .OrderByDescending(t => t.CapturedAtUtc)
+            .FirstOrDefaultAsync(ct);
+
+    private async Task<DlogTransaction?> FindUnlinkedResponseForRequestAsync(
+        DlogTransaction request, int responseMt, CancellationToken ct)
+    {
+        var candidates = await db.DlogTransactions
+            .Where(t => t.Id != request.Id
+                        && t.TerminalId == request.TerminalId
+                        && t.SessionCorrelationId == request.SessionCorrelationId
+                        && t.MessageType == responseMt
+                        && !db.DlogCorrelationLinks.Any(l => l.ResponseTransactionId == t.Id))
+            .OrderBy(t => t.CapturedAtUtc)
+            .ToListAsync(ct);
+
+        var after = candidates.FirstOrDefault(c => c.CapturedAtUtc >= request.CapturedAtUtc);
+        if (after != null)
+            return after;
+
+        return candidates.Where(c => c.CapturedAtUtc < request.CapturedAtUtc)
+            .OrderByDescending(c => c.CapturedAtUtc)
+            .FirstOrDefault();
+    }
+
+    private async Task LinkCorrelationPairAsync(
+        DlogTransaction request,
+        DlogTransaction response,
+        string linkRule,
+        string? httpCorrelationId,
+        CancellationToken ct)
+    {
+        var link = new DlogCorrelationLink
+        {
+            RequestTransactionId = request.Id,
+            ResponseTransactionId = response.Id,
+            LinkRule = linkRule
+        };
+        db.DlogCorrelationLinks.Add(link);
+
+        request.ProcessingStatus = (int)DlogProcessingStatus.CorrelationLinked;
+        response.ProcessingStatus = (int)DlogProcessingStatus.CorrelationLinked;
+
+        db.AuditEvents.Add(new AuditEvent
+        {
+            Category = "dlog",
+            Action = "correlation_linked",
+            Actor = OperatorContext.Current?.OperatorId ?? "system",
+            Resource = response.Id.ToString(),
+            DetailJson = JsonSerializer.Serialize(new
+            {
+                link.Id,
+                requestTransactionId = request.Id,
+                responseTransactionId = response.Id,
+                link.LinkRule,
+                note =
+                    "HARDWARE_VALIDATION_REQUIRED: pairing is heuristic (terminal + session + time); validate on hardware captures."
+            }),
+            CorrelationId = httpCorrelationId,
+            TerminalId = response.TerminalId
+        });
+
+        await db.SaveChangesAsync(ct);
     }
 
     public async Task<DlogReplayResult> ReplayAsync(

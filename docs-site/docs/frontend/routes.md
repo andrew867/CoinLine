@@ -1,6 +1,6 @@
 # Routes
 
-Defined in `web/src/App.tsx`:
+Defined in `coinline/web/src/App.tsx`:
 
 | Path | Page |
 |------|------|

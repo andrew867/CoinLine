@@ -1,6 +1,7 @@
 using HostPlatform.Api.Audit;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Rating;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -79,14 +80,18 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
             VersionNumber = next,
             Status = RatePlanVersionStatus.Draft
         };
+        RatePlanVersion? cloneSrc = null;
         if (body?.CloneFromVersionId is { } cloneId)
         {
-            var src = await db.RatePlanVersions
+            cloneSrc = await db.RatePlanVersions
                 .Include(v => v.Rules)
+                .Include(v => v.Tariffs)
+                .Include(v => v.DestinationPrefixes)
+                .Include(v => v.TimeBands)
                 .FirstOrDefaultAsync(v => v.Id == cloneId && v.RatePlanId == plan.Id, ct);
-            if (src == null)
+            if (cloneSrc == null)
                 return BadRequest("cloneFromVersionId not found for this plan.");
-            foreach (var r in src.Rules)
+            foreach (var r in cloneSrc.Rules)
             {
                 ver.Rules.Add(new RateRule
                 {
@@ -101,6 +106,50 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
         }
 
         db.RatePlanVersions.Add(ver);
+        await db.SaveChangesAsync(ct);
+
+        if (cloneSrc != null)
+        {
+            var tariffMap = new Dictionary<Guid, Guid>();
+            foreach (var ot in cloneSrc.Tariffs.OrderBy(t => t.Id))
+            {
+                var nt = new Tariff
+                {
+                    RatePlanVersionId = ver.Id,
+                    Name = ot.Name,
+                    RatePerMinuteUsd = ot.RatePerMinuteUsd,
+                    Notes = ot.Notes
+                };
+                db.Tariffs.Add(nt);
+                tariffMap[ot.Id] = nt.Id;
+            }
+
+            foreach (var dp in cloneSrc.DestinationPrefixes)
+            {
+                db.DestinationPrefixes.Add(new DestinationPrefix
+                {
+                    RatePlanVersionId = ver.Id,
+                    PrefixDigits = dp.PrefixDigits,
+                    TariffId = dp.TariffId is { } tid && tariffMap.TryGetValue(tid, out var nid) ? nid : null,
+                    Notes = dp.Notes
+                });
+            }
+
+            foreach (var tb in cloneSrc.TimeBands)
+            {
+                db.TimeBands.Add(new TimeBand
+                {
+                    RatePlanVersionId = ver.Id,
+                    DayOfWeekMask = tb.DayOfWeekMask,
+                    StartMinuteOfDay = tb.StartMinuteOfDay,
+                    EndMinuteOfDay = tb.EndMinuteOfDay,
+                    TariffId = tb.TariffId is { } ttid && tariffMap.TryGetValue(ttid, out var tnid) ? tnid : null
+                });
+            }
+
+            await db.SaveChangesAsync(ct);
+        }
+
         ApiAudit.Write(db, HttpContext, "rating", "create_rate_plan_version", $"RatePlan/{plan.Id}", new
         {
             ver.Id,
@@ -154,6 +203,9 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
     {
         var v = await db.RatePlanVersions.AsNoTracking()
             .Include(x => x.Rules)
+            .Include(x => x.Tariffs)
+            .Include(x => x.DestinationPrefixes)
+            .Include(x => x.TimeBands)
             .FirstOrDefaultAsync(x => x.Id == versionId && x.RatePlanId == planId, ct);
         if (v == null)
             return NotFound();
@@ -172,6 +224,28 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
                 r.Outcome,
                 r.RatePerMinuteUsd,
                 r.Expression
+            }),
+            tariffs = v.Tariffs.OrderBy(t => t.Name).ThenBy(t => t.Id).Select(t => new
+            {
+                t.Id,
+                t.Name,
+                t.RatePerMinuteUsd,
+                t.Notes
+            }),
+            destinationPrefixes = v.DestinationPrefixes.OrderBy(d => d.PrefixDigits).Select(d => new
+            {
+                d.Id,
+                d.PrefixDigits,
+                d.TariffId,
+                d.Notes
+            }),
+            timeBands = v.TimeBands.OrderBy(b => b.StartMinuteOfDay).Select(b => new
+            {
+                b.Id,
+                b.DayOfWeekMask,
+                b.StartMinuteOfDay,
+                b.EndMinuteOfDay,
+                b.TariffId
             })
         });
     }
@@ -214,4 +288,98 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
         RateRuleOutcome Outcome,
         decimal RatePerMinuteUsd,
         string? Expression);
+
+    /// <summary>Adds a reusable tariff row on a <strong>draft</strong> plan version (referenced by prefixes / time bands).</summary>
+    [HttpPost("{planId:guid}/versions/{versionId:guid}/tariffs")]
+    public async Task<ActionResult<object>> AddTariff(Guid planId, Guid versionId, [FromBody] TariffCreateDto body,
+        CancellationToken ct)
+    {
+        var v = await db.RatePlanVersions.FirstOrDefaultAsync(x => x.Id == versionId && x.RatePlanId == planId, ct);
+        if (v == null)
+            return NotFound();
+        if (v.Status == RatePlanVersionStatus.Published)
+            return BadRequest("Cannot add tariffs to a published version; create a draft version.");
+        var t = new Tariff
+        {
+            RatePlanVersionId = v.Id,
+            Name = string.IsNullOrWhiteSpace(body.Name) ? "Tariff" : body.Name.Trim(),
+            RatePerMinuteUsd = body.RatePerMinuteUsd,
+            Notes = body.Notes?.Trim() ?? string.Empty
+        };
+        db.Tariffs.Add(t);
+        ApiAudit.Write(db, HttpContext, "rating", "add_tariff", $"RatePlanVersion/{v.Id}", new { t.Name, t.RatePerMinuteUsd });
+        await db.SaveChangesAsync(ct);
+        return Created($"/api/tariffs/{t.Id}", new { t.Id });
+    }
+
+    public sealed record TariffCreateDto(string? Name, decimal RatePerMinuteUsd, string? Notes);
+
+    /// <summary>Adds a destination prefix row (longest-prefix match in <see cref="HostPlatform.Rating.RatingEngine"/>).</summary>
+    [HttpPost("{planId:guid}/versions/{versionId:guid}/destination-prefixes")]
+    public async Task<ActionResult<object>> AddDestinationPrefix(Guid planId, Guid versionId,
+        [FromBody] DestinationPrefixCreateDto body, CancellationToken ct)
+    {
+        var v = await db.RatePlanVersions.FirstOrDefaultAsync(x => x.Id == versionId && x.RatePlanId == planId, ct);
+        if (v == null)
+            return NotFound();
+        if (v.Status == RatePlanVersionStatus.Published)
+            return BadRequest("Cannot edit catalog on a published version.");
+        var digits = RatingEngine.NormalizeDigits(body.PrefixDigits);
+        if (digits.Length == 0)
+            return BadRequest(new { error = "prefixDigits must contain at least one dialable digit." });
+        if (body.TariffId is { } tid &&
+            !await db.Tariffs.AnyAsync(t => t.Id == tid && t.RatePlanVersionId == v.Id, ct))
+            return BadRequest(new { error = "tariffId is not on this version." });
+        var dp = new DestinationPrefix
+        {
+            RatePlanVersionId = v.Id,
+            PrefixDigits = digits,
+            TariffId = body.TariffId,
+            Notes = body.Notes?.Trim() ?? string.Empty
+        };
+        db.DestinationPrefixes.Add(dp);
+        ApiAudit.Write(db, HttpContext, "rating", "add_destination_prefix", $"RatePlanVersion/{v.Id}",
+            new { dp.PrefixDigits, dp.TariffId });
+        await db.SaveChangesAsync(ct);
+        return Created($"/api/destination-prefixes/{dp.Id}", new { dp.Id });
+    }
+
+    public sealed record DestinationPrefixCreateDto(string PrefixDigits, Guid? TariffId, string? Notes);
+
+    [HttpPost("{planId:guid}/versions/{versionId:guid}/time-bands")]
+    public async Task<ActionResult<object>> AddTimeBand(Guid planId, Guid versionId, [FromBody] TimeBandCreateDto body,
+        CancellationToken ct)
+    {
+        var v = await db.RatePlanVersions.FirstOrDefaultAsync(x => x.Id == versionId && x.RatePlanId == planId, ct);
+        if (v == null)
+            return NotFound();
+        if (v.Status == RatePlanVersionStatus.Published)
+            return BadRequest("Cannot edit catalog on a published version.");
+        if (body.DayOfWeekMask is < 1 or > 127)
+            return BadRequest(new { error = "dayOfWeekMask must be 1–127 (bitset for DayOfWeek)." });
+        if (body is { StartMinuteOfDay: < 0 or > 1439 } or { EndMinuteOfDay: < 0 or > 1440 })
+            return BadRequest(new { error = "StartMinuteOfDay/EndMinuteOfDay out of range for a day (0–1440)." });
+        if (body.TariffId is { } tid2 &&
+            !await db.Tariffs.AnyAsync(t => t.Id == tid2 && t.RatePlanVersionId == v.Id, ct))
+            return BadRequest(new { error = "tariffId is not on this version." });
+        var tb = new TimeBand
+        {
+            RatePlanVersionId = v.Id,
+            DayOfWeekMask = body.DayOfWeekMask,
+            StartMinuteOfDay = body.StartMinuteOfDay,
+            EndMinuteOfDay = body.EndMinuteOfDay,
+            TariffId = body.TariffId
+        };
+        db.TimeBands.Add(tb);
+        ApiAudit.Write(db, HttpContext, "rating", "add_time_band", $"RatePlanVersion/{v.Id}", new
+        {
+            tb.DayOfWeekMask,
+            tb.StartMinuteOfDay,
+            tb.EndMinuteOfDay
+        });
+        await db.SaveChangesAsync(ct);
+        return Created($"/api/time-bands/{tb.Id}", new { tb.Id });
+    }
+
+    public sealed record TimeBandCreateDto(int DayOfWeekMask, int StartMinuteOfDay, int EndMinuteOfDay, Guid? TariffId);
 }

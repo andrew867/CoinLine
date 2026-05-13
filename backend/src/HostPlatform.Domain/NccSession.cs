@@ -5,6 +5,10 @@ public class NccSession : AuditableEntity
 {
     public Guid? TerminalId { get; set; }
     public Terminal? Terminal { get; set; }
+
+    /// <summary>Lifecycle bucket; keep in sync with <see cref="EndedAtUtc"/> when transitioning to <see cref="NccSessionStatus.Closed"/>.</summary>
+    public NccSessionStatus Status { get; set; }
+
     public DateTime StartedAtUtc { get; set; }
     public DateTime? EndedAtUtc { get; set; }
     public string CorrelationId { get; set; } = string.Empty;

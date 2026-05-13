@@ -15,8 +15,8 @@ Use these names consistently in documentation, UI, API metadata, and support mat
 | `docs_url` | `https://github.com/andrew867/CoinLine/tree/main/docs-site/docs` | MkDocs documentation source on GitHub | README, support |
 | `public_repo_url` | `https://github.com/andrew867/CoinLine` | Public source / issue tracker URL | `mkdocs.yml` `repo_url`, footers |
 | `copyright` | Copyright © 2026 Andrew Green | Default legal line | License, footers |
-| `placeholder_support_email` | _TBD_ | Customer support contact | Replace before external launch |
-| `placeholder_support_portal` | _TBD_ | Support portal URL | Replace before external launch |
+| `placeholder_support_email` | Not published — use GitHub Issues | Primary mailbox reserved until customer support desk is staffed | Footers, contacts |
+| `placeholder_support_portal` | `https://github.com/andrew867/CoinLine/issues` | Public issue tracker / feature requests | README, Management Console about |
 
 ## Replacement instructions
 

@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace HostPlatform.Protocols.Ncc;
 
 /// <summary>
-/// Encoder/decoder for NCC on-wire framing. Length rules follow <c>MTR212/NCCASM.ASM</c>
+/// Encoder/decoder for NCC on-wire framing. Length rules follow <c>NCCASM.ASM</c>
 /// (control packet: <c>count==5</c>, no termid/msg bytes; message: <c>count&gt;=11</c>, termid+msg = <c>count-5</c>).
 /// On-air length is <c>count+1</c> octets (STX…ETX). CRC is <see cref="NccCrc16"/> over STX through last data byte (little-endian CRC on wire).
 /// </summary>
@@ -66,7 +66,7 @@ public static class NccFrameCodec
         if (!isCtl && count < NccConstants.MinMessagePacketCount)
             diag.Add($"message packet requires count>={NccConstants.MinMessagePacketCount}, got {count}");
         if (!isCtl && count == NccConstants.ControlPacketCount)
-            diag.Add("count=5 with non-control control byte — invalid for MTR212 message path");
+            diag.Add("count=5 with non-control control byte — invalid for reference firmware message path");
 
         var termAndLen = NccFrameLayout.GetTermAndDataLength(count);
         if (isCtl && termAndLen != 0)
@@ -75,7 +75,7 @@ public static class NccFrameCodec
             diag.Add($"message needs at least 6 term+msg bytes (5 termid + ≥1 data), got implied {termAndLen}");
 
         if (NccControl.HasBothAckAndNack(control))
-            diag.Add("control byte has both ACK and NACK set (invalid per MTR212 receive checks)");
+            diag.Add("control byte has both ACK and NACK set (invalid per reference firmware receive checks)");
         if ((control & NccControl.SpareMask) != 0)
             diag.Add($"non-zero spare bits in control byte (0x{control:X2})");
 
@@ -126,7 +126,7 @@ public static class NccFrameCodec
         if (mode == NccParseMode.Strict && !strictOk)
             return new NccParseResult { Success = false, Packet = pkt, Diagnostics = diag };
 
-        if (diag.Count > 0 && mode == NccParseMode.Archaeology)
+        if (diag.Count > 0 && mode == NccParseMode.DiagnosticCapture)
             return new NccParseResult { Success = true, Packet = pkt, Diagnostics = diag };
 
         if (diag.Count > 0)

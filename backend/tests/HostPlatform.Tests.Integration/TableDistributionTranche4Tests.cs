@@ -250,6 +250,11 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         var batchId = JsonSerializer.Deserialize<JsonElement>(await dl.Content.ReadAsStringAsync(), JsonOpts).GetProperty("id").GetGuid();
         var detail = await _client.GetFromJsonAsync<JsonElement>($"/api/downloads/{batchId}");
         Assert.Equal(2, detail!.GetProperty("timeline").GetArrayLength());
+        foreach (var step in detail.GetProperty("timeline").EnumerateArray())
+        {
+            Assert.Equal(3, step.GetProperty("hostDownloadPhase").GetInt32());
+            Assert.Equal("Queued", step.GetProperty("hostDownloadPhaseName").GetString());
+        }
     }
 
     private static HttpClient CreateClient(ApiFixture f)

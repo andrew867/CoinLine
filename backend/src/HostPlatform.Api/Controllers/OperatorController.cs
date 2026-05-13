@@ -78,7 +78,7 @@ public sealed class OperatorController(HostPlatformDbContext db) : ControllerBas
             .ToListAsync(ct);
 
         var openNccSessions = await db.NccSessions.AsNoTracking()
-            .CountAsync(s => s.EndedAtUtc == null, ct);
+            .CountAsync(s => s.Status == NccSessionStatus.Active, ct);
 
         return Ok(new
         {

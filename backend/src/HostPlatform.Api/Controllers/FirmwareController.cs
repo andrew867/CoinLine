@@ -291,7 +291,7 @@ public sealed class FirmwareController(
             safetyChecks = checks,
             rollBackPlan = rollback,
             hardwareValidationNotice =
-                "Live modem flashing disabled unless Firmware:AllowLiveFlashing — see IDlXmodemTransportAdapter TODO."
+                "Live modem flashing disabled unless Firmware:AllowLiveFlashing — see docs-site reference firmware-dla-transport-adapter and docs/protocols/firmware_update/."
         });
     }
 

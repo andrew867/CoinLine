@@ -1,17 +1,16 @@
 using System.Text;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
-using Microsoft.EntityFrameworkCore;
 
-namespace HostPlatform.Api.Craft;
+namespace HostPlatform.Infrastructure.Craft;
 
 /// <summary>
 /// Simulation-first craft execution — replaces live NCC/DLOG modem transport until integration is HARDWARE_VALIDATION_REQUIRED certified.
 /// </summary>
-public static class CraftCommandSimulator
+public sealed class CraftSimulationTransport : ICraftSimulationTransport
 {
-    /// <summary>Runs queued command through Running → Succeeded with synthetic response bytes (audit/logging preserved).</summary>
-    public static async Task SimulateSuccessAsync(HostPlatformDbContext db, CraftCommand cmd, CancellationToken ct)
+    /// <inheritdoc />
+    public async Task SimulateSuccessAsync(HostPlatformDbContext db, CraftCommand cmd, CancellationToken ct)
     {
         cmd.Status = CraftCommandStatus.Running;
         await db.SaveChangesAsync(ct);

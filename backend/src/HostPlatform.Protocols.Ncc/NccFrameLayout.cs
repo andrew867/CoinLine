@@ -1,7 +1,7 @@
 namespace HostPlatform.Protocols.Ncc;
 
 /// <summary>
-/// Length rules from <c>MTR212/NCCASM.ASM</c> receive path and <c>ncco_snd_pkt</c>:
+/// Length rules from <c>NCCASM.ASM</c> receive path and <c>ncco_snd_pkt</c>:
 /// on-wire length is <c>count + 1</c> (STX through ETX inclusive); CRC covers all but the last 3 octets.
 /// </summary>
 public static class NccFrameLayout

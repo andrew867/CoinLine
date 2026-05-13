@@ -43,7 +43,7 @@ npm run dev
 
 ## 4. Docker Compose (alternative)
 
-From `docker`:
+From `coinline/docker`:
 
 ```bash
 docker compose up --build

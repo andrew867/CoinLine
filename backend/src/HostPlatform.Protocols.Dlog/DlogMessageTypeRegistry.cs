@@ -1,7 +1,7 @@
 namespace HostPlatform.Protocols.Dlog;
 
 /// <summary>
-/// Known DLOG message types from MTR212 <c>OEM compatibility catalogue</c> and <c>01_dlog_mt_payload_catalogue.md</c>.
+/// Known DLOG message types from reference firmware <c>OEM compatibility catalogue</c> and <c>01_dlog_mt_payload_catalogue.md</c>.
 /// NPA/NXX wire values depend on <c>COMPRESS_LCD</c> — multiple rows share the same symbolic table index with different type bytes.
 /// </summary>
 public static class DlogMessageTypeRegistry
@@ -117,6 +117,23 @@ public static class DlogMessageTypeRegistry
 
     public static string DescribeOrUnknown(int messageType) =>
         Map.TryGetValue(messageType, out var i) ? i.MessageTypeName : $"UNKNOWN_MT_{messageType}";
+
+    /// <summary>
+    /// Validates catalogue entries have non-empty symbolic names and action labels (integrity guard for docs/code drift).
+    /// </summary>
+    public static IReadOnlyList<string> ValidateMetadataCompleteness()
+    {
+        var issues = new List<string>();
+        foreach (var e in Map.Values)
+        {
+            if (string.IsNullOrWhiteSpace(e.MessageTypeName))
+                issues.Add($"Message type {e.MessageType}: MessageTypeName is empty.");
+            if (string.IsNullOrWhiteSpace(e.MessageAction))
+                issues.Add($"Message type {e.MessageType}: MessageAction is empty.");
+        }
+
+        return issues;
+    }
 
     public static IReadOnlyCollection<DlogMessageInfo> AllEntries => Map.Values.OrderBy(x => x.MessageType).ToList();
 

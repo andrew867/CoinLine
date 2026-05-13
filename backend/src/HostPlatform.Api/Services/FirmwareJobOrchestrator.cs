@@ -13,12 +13,13 @@ using Microsoft.Extensions.Options;
 
 namespace HostPlatform.Api.Services;
 
-/// <summary>Simulation-first firmware job orchestration — no live DLA/XMODEM execution (see <see cref="HostPlatform.Firmware.IDlXmodemTransportAdapter"/> TODO).</summary>
+/// <summary>Simulation-first firmware job orchestration — live UART/XMODEM I/O requires certification and <c>Firmware:AllowLiveFlashing</c>.</summary>
 public sealed class FirmwareJobOrchestrator(
     HostPlatformDbContext db,
     IFirmwareExecutionPolicy executionPolicy,
     IHttpContextAccessor httpAccessor,
-    IOptions<JobOrchestrationOptions> jobOrchestrationOptions)
+    IOptions<JobOrchestrationOptions> jobOrchestrationOptions,
+    IDlXmodemTransportAdapter dlTransport)
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
     private readonly JobOrchestrationOptions _jobRetry = jobOrchestrationOptions.Value;
@@ -137,7 +138,8 @@ public sealed class FirmwareJobOrchestrator(
 
         foreach (var s in job.Steps.ToList())
             db.FirmwareUpdateSteps.Remove(s);
-        foreach (var c in job.SafetyChecks.Where(x => x.Code is "simulation_host" or "dla_transport_stub").ToList())
+        foreach (var c in job.SafetyChecks.Where(x =>
+                     x.Code is "simulation_host" or "dla_transport_stub" or "dla_transport_simulation").ToList())
             db.FirmwareUpdateSafetyChecks.Remove(c);
         await SaveChangesWithRetryAsync(ct);
 
@@ -161,18 +163,29 @@ public sealed class FirmwareJobOrchestrator(
             "Compatibility rules evaluated at job creation.");
         AddStep(2, "host_simulation_shell", FirmwareUpdateStepStatus.Succeeded, true,
             "Host-side simulation only — no modem I/O.");
-        AddStep(3, "dla_xmodem_transport", FirmwareUpdateStepStatus.Skipped, false,
-            "IDlXmodemTransportAdapter not implemented — HARDWARE_VALIDATION_REQUIRED — see docs/protocols/firmware_update/.");
+
+        var declaredSize = job.FirmwarePackage?.ArtifactSizeBytes ?? 0L;
+        var transportSim = await dlTransport.SimulateTransferAsync(
+            new DlaTransportSimulationRequest(job.Id, declaredSize), ct);
+        var transportStepStatus = transportSim.SimulatedOk
+            ? FirmwareUpdateStepStatus.Succeeded
+            : FirmwareUpdateStepStatus.Failed;
+        AddStep(3, "dla_xmodem_transport", transportStepStatus, transportSim.SimulatedOk, transportSim.Detail);
+
+        await RecordSafetyCheckAsync(job.Id, "dla_transport_simulation", transportSim.SimulatedOk,
+            new { note = transportSim.Detail }, ct);
 
         await RecordSafetyCheckAsync(job.Id, "simulation_host", true,
-            new { steps = 4, note = "Simulation-only path; live transport is TODO." }, ct);
+            new { steps = 4, note = "Simulation path; live UART transport remains gated by policy and certification." }, ct);
 
         job.Status = FirmwareUpdateJobStatus.Completed;
         job.SafetyStateJson = JsonSerializer.Serialize(new
         {
             simulatedAtUtc = utc,
             mode = "simulation",
-            HARDWARE_VALIDATION_REQUIRED = "DLA/XMODEM code-server path not active."
+            fieldCertificationPending = true,
+            hardwareValidationNote =
+                "Physical modem/UART integration remains subject to field certification; host simulation exercised XMODEM framing."
         }, JsonOpts);
 
         var http = httpAccessor.HttpContext;

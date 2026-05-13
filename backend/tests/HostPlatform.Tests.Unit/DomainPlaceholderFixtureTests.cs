@@ -15,18 +15,21 @@ public sealed class DomainPlaceholderFixtureTests
         var path = Path.Combine(FixtureRoot, "cards", "ledger_simulation_placeholder.fixture.json");
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         Assert.Equal("PLACEHOLDER", doc.RootElement.GetProperty("lineage").GetProperty("canonicality").GetString());
-        Assert.Equal(CardLedgerPlaceholder.DefaultSimulation,
+        Assert.Equal(CardLedgerCapabilities.DefaultSimulationMode,
             doc.RootElement.GetProperty("expectedParse").GetProperty("defaultSimulation").GetBoolean());
     }
 
     [Fact]
-    public void Craft_channel_placeholder_fixture_aligns_with_code()
+    public void Craft_transport_fixture_aligns_with_code()
     {
         var path = Path.Combine(FixtureRoot, "craft", "channel_placeholder.fixture.json");
         using var doc = JsonDocument.Parse(File.ReadAllText(path));
         Assert.Equal("PLACEHOLDER", doc.RootElement.GetProperty("lineage").GetProperty("canonicality").GetString());
-        var needle = doc.RootElement.GetProperty("expectedParse").GetProperty("todoMarkerContains").GetString()!;
-        Assert.Contains(needle, CraftChannelPlaceholder.Todo, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(
+            CraftTransportCapabilities.DefaultSimulationExecution,
+            doc.RootElement.GetProperty("expectedParse").GetProperty("defaultSimulation").GetBoolean());
+        var needle = doc.RootElement.GetProperty("expectedParse").GetProperty("liveAttachNoticeContains").GetString()!;
+        Assert.Contains(needle, CraftTransportCapabilities.LiveAttachNotice, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

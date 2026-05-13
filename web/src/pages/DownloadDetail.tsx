@@ -8,6 +8,8 @@ type Step = {
   id: string
   stepIndex: number
   itemStatus: number
+  hostDownloadPhase: number
+  hostDownloadPhaseName: string
   lastAckStatus: string
   succeeded: boolean
   errorDetail: string | null
@@ -145,7 +147,8 @@ export function DownloadDetail() {
               Step {s.stepIndex}: <strong>{s.tableDefinitionName}</strong>
             </div>
             <div style={{ fontSize: 13, color: '#444' }}>
-              Status: {s.lastAckStatus} · Item: {s.itemStatus}
+              Host phase: {s.hostDownloadPhaseName} ({s.hostDownloadPhase}) · ACK: {s.lastAckStatus} · Item status:{' '}
+              {s.itemStatus}
             </div>
             <div style={{ fontSize: 12 }}>
               Payload SHA-256: <code>{s.payloadSha256Hex}</code>

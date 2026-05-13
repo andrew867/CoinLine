@@ -127,6 +127,22 @@ public sealed class FirmwareTranche8Tests(ApiFixture factory)
         var sim = await _client.PostAsync($"/api/firmware/jobs/{jobId}/simulate", null);
         Assert.Equal(HttpStatusCode.OK, sim.StatusCode);
 
+        var jobDetail = await _client.GetFromJsonAsync<JsonElement>($"/api/firmware/jobs/{jobId}", JsonOpts);
+        var steps = jobDetail!.GetProperty("steps");
+        JsonElement? dlaStep = null;
+        foreach (var st in steps.EnumerateArray())
+        {
+            if (st.GetProperty("name").GetString() == "dla_xmodem_transport")
+            {
+                dlaStep = st;
+                break;
+            }
+        }
+
+        Assert.True(dlaStep.HasValue);
+        Assert.True(dlaStep!.Value.GetProperty("succeeded").GetBoolean());
+        Assert.Equal((int)FirmwareUpdateStepStatus.Succeeded, dlaStep.Value.GetProperty("stepStatus").GetInt32());
+
         var badApprove = await _client.PostAsJsonAsync($"/api/firmware/jobs/{jobId}/approve", new { rollbackNotes = "short" });
         Assert.Equal(HttpStatusCode.BadRequest, badApprove.StatusCode);
 

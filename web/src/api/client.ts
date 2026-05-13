@@ -10,6 +10,8 @@ const jsonHeaders = {
   'X-Operator-Role': 'Admin',
 } as const
 
+const opHeaders = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } as const
+
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(path, {
     method: 'POST',
@@ -34,7 +36,10 @@ export async function apiPut(path: string, body: unknown): Promise<void> {
   if (!r.ok) throw new Error(`${path} ${r.status}`)
 }
 
-const opHeaders = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } as const
+export async function apiDelete(path: string): Promise<void> {
+  const r = await fetch(path, { method: 'DELETE', headers: opHeaders })
+  if (!r.ok) throw new Error(`${path} ${r.status}`)
+}
 
 export type BarePostOptions = { confirm?: boolean }
 

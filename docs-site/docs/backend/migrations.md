@@ -1,7 +1,7 @@
 # Migrations
 
 ```bash
-cd backend
+cd coinline/backend
 dotnet ef migrations add <Name> --project src/HostPlatform.Infrastructure --startup-project src/HostPlatform.Api
 dotnet ef database update --project src/HostPlatform.Infrastructure --startup-project src/HostPlatform.Api
 ```

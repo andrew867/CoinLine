@@ -26,6 +26,16 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             x.SourceNote
         }));
 
+    /// <summary>Documented DLOG request→response message-type pairs for lab correlation (same data as <see cref="DlogCorrelationRules.CompatibilityPairs"/>).</summary>
+    [HttpGet("correlation-pairs")]
+    [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
+    public ActionResult<IEnumerable<object>> CorrelationPairs() =>
+        Ok(DlogCorrelationRules.CompatibilityPairs.Select(p => new
+        {
+            requestMessageType = p.Request,
+            responseMessageType = p.Response
+        }));
+
     /// <summary>Legacy alias — prefer <c>/api/dlog/message-types</c>.</summary>
     [HttpGet("messages")]
     [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]

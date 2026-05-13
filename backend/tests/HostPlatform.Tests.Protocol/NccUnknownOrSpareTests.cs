@@ -17,7 +17,7 @@ public sealed class NccUnknownOrSpareTests
         wire[4] = (byte)(crc >> 8);
         wire[5] = NccConstants.FrameEnd;
 
-        var arch = NccFrameCodec.TryDecode(wire, NccParseMode.Archaeology);
+        var arch = NccFrameCodec.TryDecode(wire, NccParseMode.DiagnosticCapture);
         Assert.True(arch.Success);
         Assert.Contains(arch.Diagnostics, d => d.Contains("spare", StringComparison.OrdinalIgnoreCase));
 

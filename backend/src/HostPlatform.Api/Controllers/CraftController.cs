@@ -1,7 +1,7 @@
 using System.Text.Json;
 using HostPlatform.Api.Audit;
-using HostPlatform.Api.Craft;
 using HostPlatform.Domain;
+using HostPlatform.Infrastructure.Craft;
 using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,11 +9,11 @@ using Microsoft.EntityFrameworkCore;
 namespace HostPlatform.Api.Controllers;
 
 /// <summary>
-/// Technician craft workflows — live terminal execution remains behind <see cref="CraftCommandSimulator"/> unless proven.
+/// Technician craft workflows — live terminal execution remains behind <see cref="ICraftSimulationTransport"/> (default: <see cref="CraftSimulationTransport"/>) unless proven.
 /// </summary>
 [ApiController]
 [Route("api/craft")]
-public sealed class CraftController(HostPlatformDbContext db) : ControllerBase
+public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTransport craftSim) : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
 
@@ -197,10 +197,10 @@ public sealed class CraftController(HostPlatformDbContext db) : ControllerBase
         var defer = body.DeferSimulation == true;
         if (!defer)
         {
-            await CraftCommandSimulator.SimulateSuccessAsync(db, cmd, ct);
+            await craftSim.SimulateSuccessAsync(db, cmd, ct);
 
             AppendCraftAudit(db, id, "command_simulated_success",
-                new { cmd.Id, cmd.Status, note = "CraftCommandSimulator — not live modem/NCC." });
+                new { cmd.Id, cmd.Status, note = "CraftSimulationTransport — not live modem/NCC." });
 
             ApiAudit.Write(db, HttpContext, "craft", "command_simulated_complete", $"CraftCommand:{cmd.Id}",
                 new { cmd.CommandName, cmd.Status }, session.TerminalId);
@@ -230,9 +230,9 @@ public sealed class CraftController(HostPlatformDbContext db) : ControllerBase
         if (cmd.Status != CraftCommandStatus.Queued)
             return Conflict(new { error = "Only Queued commands can be simulated via this endpoint.", cmd.Status });
 
-        await CraftCommandSimulator.SimulateSuccessAsync(db, cmd, ct);
+        await craftSim.SimulateSuccessAsync(db, cmd, ct);
         AppendCraftAudit(db, cmd.CraftSessionId, "command_simulated_success",
-            new { cmd.Id, cmd.Status, note = "CraftCommandSimulator" });
+            new { cmd.Id, cmd.Status, note = "CraftSimulationTransport" });
         ApiAudit.Write(db, HttpContext, "craft", "command_simulated_complete", $"CraftCommand:{cmd.Id}",
             new { cmd.CommandName, cmd.Status }, cmd.CraftSession?.TerminalId);
         await db.SaveChangesAsync(ct);
@@ -310,7 +310,7 @@ public sealed class CraftController(HostPlatformDbContext db) : ControllerBase
 
     public sealed record SessionDto(Guid TerminalId, string TechnicianId, string OperatorId, string? FieldNotes);
 
-    /// <summary>DeferSimulation keeps the command Queued for cancel/step-through; otherwise <see cref="CraftCommandSimulator"/> runs.</summary>
+    /// <summary>DeferSimulation keeps the command Queued for cancel/step-through; otherwise <see cref="ICraftSimulationTransport"/> runs.</summary>
     public sealed record CommandDto(
         string CommandName,
         string RequestHex,

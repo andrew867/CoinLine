@@ -1,7 +1,7 @@
 # Build & release
 
 ```bash
-cd web
+cd coinline/web
 npm run build
 ```
 

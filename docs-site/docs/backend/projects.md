@@ -1,6 +1,6 @@
 # Projects (detail)
 
-See repository `backend/*.csproj`. Tests:
+See repository `coinline/backend/*.csproj`. Tests:
 
 | Project | Purpose |
 |---------|---------|

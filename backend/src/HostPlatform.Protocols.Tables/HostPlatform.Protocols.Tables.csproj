@@ -1,6 +1,7 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <ProjectReference Include="..\HostPlatform.Domain\HostPlatform.Domain.csproj" />
     <ProjectReference Include="..\HostPlatform.Protocols.Ncc\HostPlatform.Protocols.Ncc.csproj" />
   </ItemGroup>
 
