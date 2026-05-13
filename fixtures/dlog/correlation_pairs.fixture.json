@@ -5,6 +5,10 @@
     "canonicality": "PLACEHOLDER",
     "notes": "Must stay aligned with HostPlatform.Protocols.Dlog.DlogCorrelationRules.CompatibilityPairs."
   },
+  "sourceEvidence": [
+    "backend/src/HostPlatform.Protocols.Dlog/DlogCorrelationRules.cs",
+    "backend/tests/HostPlatform.Tests.Protocol/DlogCorrelationCatalogFixtureTests.cs"
+  ],
   "pairs": [
     { "request": 1, "response": 3 },
     { "request": 2, "response": 3 },
