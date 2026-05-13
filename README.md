@@ -4,11 +4,13 @@
 
 **Server-hosted management plane for Millennium payphone fleets** — provisioning, table distribution, call rating, card/account administration, technician craft workflows, firmware orchestration, protocol-aware diagnostics, and audit trails.
 
+[![Backend](https://github.com/andrew867/CoinLine/actions/workflows/backend.yml/badge.svg)](https://github.com/andrew867/CoinLine/actions/workflows/backend.yml)
+[![Web](https://github.com/andrew867/CoinLine/actions/workflows/web.yml/badge.svg)](https://github.com/andrew867/CoinLine/actions/workflows/web.yml)
+[![Docs](https://github.com/andrew867/CoinLine/actions/workflows/docs.yml/badge.svg)](https://github.com/andrew867/CoinLine/actions/workflows/docs.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-9.0-512BD4?logo=dotnet&logoColor=white)](https://dotnet.microsoft.com/)
 [![Node](https://img.shields.io/badge/Node-20%2B-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16%2B-4169E1?logo=postgresql&logoColor=white)](https://www.postgresql.org/)
-[![Docs](https://img.shields.io/badge/docs-MkDocs%20Material-526CFE?logo=materialformkdocs&logoColor=white)](docs-site/docs/index.md)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.0-6BA539?logo=openapiinitiative&logoColor=white)](docs-site/docs/api/openapi/coinline.openapi.json)
 [![Release](https://img.shields.io/badge/release-v0.2.0-0aa)](docs-site/docs/release/changelog.md)
 [![Status: pre-production](https://img.shields.io/badge/status-pre--production-orange)](docs-site/docs/reference/known-limitations.md)
