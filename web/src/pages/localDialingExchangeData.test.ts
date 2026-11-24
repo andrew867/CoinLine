@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { exchangeCount, exportLocalDialingCsv, parseExchangeSource, planLocalDialingImport } from './localDialingExchangeData'
+import { exchangeCount, exportLocalDialingCsv, homeExchangeRegion, parseCnaRegionSource,
+  parseExchangeSource, planLocalDialingImport } from './localDialingExchangeData'
 
 async function* chunks(...pieces: string[]) {
   yield* pieces
@@ -72,5 +73,53 @@ describe('public exchange registry import', () => {
     ))
     expect(source.label).toBe('CNA code status')
     expect([...source.areas.get('613')!]).toEqual([[200, 'Center, East'], [202, 'Town "West"']])
+  })
+})
+
+describe('home-exchange regional LCD generation', () => {
+  it('classifies California prefixes across and within LATAs independently of their area code', async () => {
+    const source = await parseExchangeSource(chunks('NPA,NXX,LATA\r\n415,441,722\r\n650,323,722\r\n916,441,726'))
+    if (source.kind !== 'region') throw new Error('Expected a regional crosswalk')
+    const home = homeExchangeRegion(source, '415-441')
+    expect(home).toEqual({ area: '415', region: '722' })
+    const rates = { centers: new Set([home.region]), selectedRate: '1', otherRate: '2', unlistedRate: '3' }
+    const linked = planLocalDialingImport(source, { ...rates, area: '650' }, segment(null, 3))
+    const other = planLocalDialingImport(source, { ...rates, area: '916' }, segment(null, 3))
+    expect(linked.edits).toMatchObject({ areaCode: '650', 'exchange-323': '1', 'exchange-324': '3' })
+    expect(other.edits).toMatchObject({ areaCode: '916', 'exchange-441': '2', 'exchange-440': '3' })
+    expect(() => homeExchangeRegion(source, '415-440')).toThrow('No LATA is listed')
+  })
+
+  it('joins CNA code status to LIRs by province, overlay NPA and normalized exchange area', async () => {
+    const codes = await parseExchangeSource(chunks(
+      'NPA,CO Code (NXX),Status,Pooled,Exchange Area,Province,Remarks\r\n',
+      ',,,,,,2026-11-23\r\n709,753,In Service,N,St. John’s,NL,\r\n',
+      '709,895,In Service,N,Portugal Cove,NL,\r\n709,216,In Service,N,Corner Brook,NL,\r\n',
+      '709,711,For Special Use,N,,,\r\n709,789,In Service,N,Unlisted fixture exchange,NL,\r\n',
+      '879,200,In Service,N,St. John\'s,NL,\r\n',
+    ))
+    const source = await parseCnaRegionSource(codes, chunks(
+      'Province,NPA Complex,ComplexID,Exchange Area,Rate Center,Portable,TBP,LIR,Lat,Long\r\n',
+      ',,,,,,,,,2026-11-23\r\nNL,709/879,14,St. John\'s,ST JOHNS,Y,N,CAPITAL COAST - ALLANDALE,,\r\n',
+      'NL,709/879,14,Portugal Cove,PORTUGAL COVE,Y,N,CAPITAL COAST - ALLANDALE,,\r\n',
+      'NL,709/879,14,Corner Brook,CORNER BROOK,Y,N,HUMBER - CORNER BROOK,,\r\n',
+      'PE,709/879,14,Corner Brook,CORNER BROOK,Y,N,TEST OTHER PROVINCE,,\r\n',
+    ))
+    const home = homeExchangeRegion(source, '709753')
+    expect(home).toEqual({ area: '709', region: 'CAPITAL COAST - ALLANDALE' })
+    expect(homeExchangeRegion(source, '879-200').region).toBe(home.region)
+    const plan = planLocalDialingImport(source, {
+      area: '709', centers: new Set([home.region]), selectedRate: '5', otherRate: '7', unlistedRate: '',
+    }, segment('709'))
+    expect(plan.edits).toEqual({ areaCode: '709', 'exchange-216': '7', 'exchange-753': '5', 'exchange-895': '5' })
+    expect(plan.missing).toBe(797)
+    expect(plan.filler).toBeNull()
+    expect(() => homeExchangeRegion(source, '709-789')).toThrow('No LIR is listed')
+  })
+
+  it('rejects conflicting regional assignments for the same prefix and unsupported inputs', async () => {
+    await expect(parseExchangeSource(chunks('NPA-NXX,LATA\n415-441,722\n415-441,726'))).rejects.toThrow('Line 3 conflicts')
+    await expect(parseExchangeSource(chunks('NPA-NXX,LATA,LIR\n415-441,722,Other'))).rejects.toThrow('Choose one region')
+    await expect(parseExchangeSource(chunks('NPA-NXX,LATA\n415-441,NA'))).rejects.toThrow('valid LATA')
   })
 })
