@@ -126,8 +126,9 @@ internal static class DlogFieldLayouts
             return false;
         }
 
-        fields["controlRom"] = ReadVersionLabel(raw.Slice(1, 7));
-        fields["controlSoftware"] = ReadVersionLabel(raw.Slice(8, 4));
+        var (controlRom, controlSoftware) = ReadControllerVersion(raw);
+        fields["controlRom"] = controlRom;
+        fields["controlSoftware"] = controlSoftware;
         fields["telephonyRom"] = ReadVersionLabel(raw.Slice(12, 7));
         fields["telephonySoftware"] = ReadVersionLabel(raw.Slice(19, 4));
         fields["terminalType"] = (int)raw[23];
@@ -140,6 +141,9 @@ internal static class DlogFieldLayouts
         };
         return true;
     }
+
+    internal static (string? Rom, string? Software) ReadControllerVersion(ReadOnlySpan<byte> raw) =>
+        (ReadVersionLabel(raw.Slice(1, 7)), ReadVersionLabel(raw.Slice(8, 4)));
 
     private static string? ReadVersionLabel(ReadOnlySpan<byte> value)
     {

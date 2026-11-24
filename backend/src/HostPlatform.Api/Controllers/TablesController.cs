@@ -1,8 +1,10 @@
 using System.Buffers.Binary;
+using System.Text.RegularExpressions;
 using HostPlatform.Api.Audit;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
+using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -333,10 +335,11 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     [HttpGet("sets/{id:guid}/assignment-preview")]
     public async Task<ActionResult<object>> PreviewAssignments(Guid id, [FromQuery] string targetType,
         [FromQuery] Guid? targetId, [FromQuery] string? regionCode, [FromQuery] string? groupPattern,
-        [FromQuery] string? timeAreaCode, [FromQuery] int[]? recordNumbers, CancellationToken ct)
+        [FromQuery] string? timeAreaCode, [FromQuery] int[]? recordNumbers,
+        [FromQuery] FirmwareScheduleTarget firmwareTarget, CancellationToken ct)
     {
         var query = db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).AsQueryable();
-        if (recordNumbers is { Length: > 0 } || targetType == "time-area")
+        if (recordNumbers is { Length: > 0 } || targetType == "time-area" || IsFirmwareScope(targetType))
             query = query.Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
                 .Include(s => s.Versions).ThenInclude(v => v.TablePayload);
         var set = await query.FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -347,7 +350,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         {
             var records = SelectScheduleRecords(set, targetType, recordNumbers is { Length: > 0 } ? recordNumbers : null);
             var targets = await AssignmentTargetsAsync(set, new TableTargetScope(targetType, targetId, regionCode, groupPattern, timeAreaCode),
-                ct, records);
+                ct, records, firmwareTarget);
             return Ok(new { targets, recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber) });
         }
         catch (InvalidOperationException ex)
@@ -361,6 +364,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     {
         if (body.TargetType == "time-area")
             return BadRequest(new { error = "Use scheduled delivery to target a time area." });
+        if (IsFirmwareScope(body.TargetType))
+            return BadRequest(new { error = "Use the firmware scheduler for terminal ID ranges and current software versions." });
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
         if (set == null)
             return NotFound();
@@ -474,7 +479,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         try
         {
             records = SelectScheduleRecords(set, body.TargetType, body.RecordNumbers);
-            targets = await AssignmentTargetsAsync(set, body, ct, records);
+            targets = await AssignmentTargetsAsync(set, body, ct, records, body.FirmwareTarget);
         }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         var recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber).ToArray();
@@ -533,6 +538,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     {
         const int callInParameters = 35;
         const string timeAreaIssue = "Time-area schedules accept only MT35 call-in parameters or a dedicated MT94 firmware set.";
+        if (IsFirmwareScope(targetType) && (numbers != null || TableDistributionService.CodeOnlyVersion(set.Versions) == null))
+            throw new InvalidOperationException("Terminal ID ranges and current software versions require a dedicated MT94 firmware set.");
         if (targetType == "time-area" && numbers == null)
         {
             if (TableDistributionService.CodeOnlyVersion(set.Versions) != null)
@@ -548,26 +555,70 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         return records;
     }
 
+    private static bool IsFirmwareScope(string targetType) => targetType is "terminal-id-range" or "software-version";
+
     private async Task<List<AssignmentTarget>> AssignmentTargetsAsync(TableSet set, TableTargetScope scope,
-        CancellationToken ct, IReadOnlyList<TableVersion>? records = null)
+        CancellationToken ct, IReadOnlyList<TableVersion>? records = null, FirmwareScheduleTarget? firmwareTarget = null)
     {
-        var selected = tables.PhonesInScope(scope);
+        var firmwareScope = IsFirmwareScope(scope.TargetType);
+        if (firmwareScope && (scope.TargetId != null || scope.RegionCode != null || scope.GroupPattern != null || scope.TimeAreaCode != null))
+            throw new InvalidOperationException("Use one firmware scheduling scope at a time.");
+        if (!firmwareScope && firmwareTarget is { HasRange: true } or { HasVersion: true })
+            throw new InvalidOperationException("Select the corresponding firmware scheduling scope for those fields.");
+
+        var selected = firmwareScope ? db.Terminals.AsNoTracking() : tables.PhonesInScope(scope);
+        if (scope.TargetType == "terminal-id-range")
+        {
+            var from = firmwareTarget?.TerminalIdFrom?.Trim() ?? "";
+            var to = firmwareTarget?.TerminalIdTo?.Trim() ?? "";
+            const string decimalId = "^[0-9]{10}$";
+            if (firmwareTarget is { HasVersion: true } || from.Length != 10 || to.Length != 10 ||
+                !Regex.IsMatch(from, decimalId) || !Regex.IsMatch(to, decimalId) || string.CompareOrdinal(from, to) > 0)
+                throw new InvalidOperationException("Enter two ten-digit wire terminal IDs in ascending order.");
+            selected = selected.Where(phone => Regex.IsMatch(phone.TerminalIdHex, decimalId) &&
+                phone.TerminalIdHex.CompareTo(from) >= 0 && phone.TerminalIdHex.CompareTo(to) <= 0);
+        }
+
+        (string Rom, string Software)? currentVersion = null;
+        if (scope.TargetType == "software-version")
+        {
+            var rom = firmwareTarget?.CurrentControlRom?.Trim() ?? "";
+            var software = firmwareTarget?.CurrentControlSoftware?.Trim() ?? "";
+            if (firmwareTarget is { HasRange: true } || !IsVersionLabel(rom, 7) || !IsVersionLabel(software, 4))
+                throw new InvalidOperationException("Enter the current controller ROM (up to 7 ASCII characters) and software (up to 4 ASCII characters).");
+            currentVersion = (rom, software);
+        }
+
         var access = records == null
             ? await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
                 .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21).Take(2).ToListAsync(ct)
             : records.Where(v => v.TableDefinition!.TableNumber == 21).Take(2).ToList();
-        var phones = await selected.OrderBy(t => t.DisplayName)
-            .Select(t => new { t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId })
+        var reports = db.DlogTransactions.AsNoTracking().Where(row => row.NccSessionId != null
+            && row.Direction == (int)DlogDirection.TerminalToHost && row.MessageType == FieldEventCatalog.SoftwareVersionMessageType
+            && row.RawPayload.Length == FieldEventCatalog.SoftwareVersionRecordLength);
+        var matchVersion = currentVersion.HasValue;
+        var phones = await selected.OrderBy(t => t.DisplayName).ThenBy(t => t.Id)
+            .Select(t => new
+            {
+                t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId,
+                Report = matchVersion ? reports.Where(row => row.TerminalId == t.Id)
+                    .OrderByDescending(row => row.CapturedAtUtc).ThenByDescending(row => row.Id)
+                    .Select(row => row.RawPayload).FirstOrDefault() : null
+            })
             .ToListAsync(ct);
-        return phones.Select(t =>
+        return phones.Where(t => !matchVersion || (t.Report != null && FieldEventCatalog.ReadControllerVersion(t.Report) == currentVersion))
+            .Select(t =>
         {
             var reason = set.CustomerId != null && t.CustomerId != set.CustomerId ? "Outside the set’s customer scope."
                 : TableDistributionService.AccessRecordIssue(access, t.TerminalIdHex)
                     ?? TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId);
             return new AssignmentTarget(t.Id, t.DisplayName, t.SiteId, t.CustomerId, TerminalFamilies.Find(t.TerminalFamilyId)?.Label,
-                reason == null, reason);
+                reason == null, reason, scope.TargetType == "terminal-id-range" ? t.TerminalIdHex : null);
         }).ToList();
     }
+
+    private static bool IsVersionLabel(string value, int limit) =>
+        value.Length > 0 && value.Length <= limit && value.All(character => character is >= ' ' and <= '~');
 
     [HttpGet("sets/{id:guid}")]
     public async Task<ActionResult<object>> SetById(Guid id, CancellationToken ct)
@@ -707,10 +758,17 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         string? GroupPattern = null, string? TimeAreaCode = null)
         : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
     public sealed record TableScopeScheduleDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc,
-        string? RegionCode = null, int[]? RecordNumbers = null, string? GroupPattern = null, string? TimeAreaCode = null)
+        string? RegionCode = null, int[]? RecordNumbers = null, string? GroupPattern = null, string? TimeAreaCode = null,
+        FirmwareScheduleTarget? FirmwareTarget = null)
         : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
+    public sealed record FirmwareScheduleTarget(string? TerminalIdFrom, string? TerminalIdTo, string? CurrentControlRom,
+        string? CurrentControlSoftware)
+    {
+        public bool HasRange => TerminalIdFrom != null || TerminalIdTo != null;
+        public bool HasVersion => CurrentControlRom != null || CurrentControlSoftware != null;
+    }
     private sealed record AssignmentTarget(Guid Id, string DisplayName, Guid SiteId, Guid CustomerId, string? TerminalFamilyLabel,
-        bool Eligible, string? Reason);
+        bool Eligible, string? Reason, string? TerminalIdHex);
 
     public sealed record TableSetDto(string Name, Guid? CustomerId, bool IsDefault, Guid? TargetFirmwareVersionId = null);
     public sealed record TableSetFirmwareDto(Guid? FirmwareVersionId);

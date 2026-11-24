@@ -3,6 +3,9 @@ namespace HostPlatform.Protocols.Dlog;
 /// <summary>Terminal reports and their boundaries within a supported NCC upload.</summary>
 public static class FieldEventCatalog
 {
+    public const int SoftwareVersionMessageType = 60;
+    public const int SoftwareVersionRecordLength = DlogFieldLayouts.SoftwareVersionLength;
+
     public static bool TryDescribe(int messageType, out string title)
     {
         title = messageType switch
@@ -40,6 +43,13 @@ public static class FieldEventCatalog
         var packed = record.Slice(1, 5);
         var digits = DlogRateWire.DecodeBcd(packed);
         return digits.Length == packed.Length * 2 ? digits : null;
+    }
+
+    public static (string? Rom, string? Software) ReadControllerVersion(ReadOnlySpan<byte> record)
+    {
+        if (record.Length != SoftwareVersionRecordLength || record[0] != SoftwareVersionMessageType)
+            return (null, null);
+        return DlogFieldLayouts.ReadControllerVersion(record);
     }
 
     public static string Category(int messageType) => messageType switch

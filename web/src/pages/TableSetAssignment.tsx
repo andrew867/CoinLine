@@ -9,13 +9,15 @@ const scopes = {
   'group-pattern': { label: 'Group ID pattern', path: null },
   region: { label: 'Region', path: '/api/terminals/regions' },
   'time-area': { label: 'Time area', path: '/api/terminals/time-areas' },
+  'terminal-id-range': { label: 'Terminal ID range', path: null },
+  'software-version': { label: 'Current software version', path: null },
   site: { label: 'Location', path: '/api/sites' },
   customer: { label: 'Customer', path: '/api/customers' },
 } as const
 
 type Scope = keyof typeof scopes
 type Option = { id: string; name?: string; displayName?: string; code?: string | null }
-type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null }
+type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null; terminalIdHex?: string | null }
 type SavedRecord = { tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean }
 type OptionalRecord = { tableNumber: number; name: string }
 type RecordAction = '' | 'copy' | 'remove'
@@ -39,6 +41,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
   const [targetId, setTargetId] = useState('')
+  const [secondTarget, setSecondTarget] = useState('')
   const [regions, setRegions] = useState<Option[]>([])
   const [groupRegion, setGroupRegion] = useState('')
   const [targets, setTargets] = useState<Target[] | null>(null)
@@ -70,13 +73,23 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const schedulesOnly = codeOnly || partialSchedule
   const hasRegionFilter = scope === 'group' || scope === 'group-pattern'
   const canTargetTimeArea = codeOnly || (partialSchedule && choices.get(callInParameters)?.copyable)
+  const firmwareScope = scope === 'terminal-id-range' || scope === 'software-version'
+  const prefix = scope === 'terminal-id-range' ? /^(\d{1,9})\*$/.exec(targetId)?.[1] : undefined
+  const firmwareTarget = scope === 'terminal-id-range' ? {
+    terminalIdFrom: prefix?.padEnd(10, '0') ?? targetId,
+    terminalIdTo: prefix?.padEnd(10, '9') ?? (secondTarget || targetId),
+  } : scope === 'software-version' ? {
+    currentControlRom: targetId.trim(),
+    currentControlSoftware: secondTarget.trim(),
+  } : undefined
   const deliveryMode = schedulesOnly && mode === 'assignment' ? 'now' : mode
   const scopeSelection = {
     targetType: scope,
-    targetId: scope === 'region' || scope === 'group-pattern' || scope === 'time-area' ? null : targetId,
+    targetId: firmwareScope || scope === 'region' || scope === 'group-pattern' || scope === 'time-area' ? null : targetId,
     regionCode: (scope === 'region' ? targetId : hasRegionFilter ? groupRegion : '') || undefined,
     groupPattern: scope === 'group-pattern' ? targetId.trim() : undefined,
     timeAreaCode: scope === 'time-area' ? targetId : undefined,
+    firmwareTarget,
   }
 
   useEffect(() => {
@@ -107,6 +120,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     setScope(next)
     setOptions([])
     setTargetId('')
+    setSecondTarget('')
     setGroupRegion('')
     if (next === 'time-area' && partialSchedule) setDeliveryRecords([callInParameters])
     clearReview()
@@ -128,6 +142,9 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       if (scopeSelection.regionCode) params.set('regionCode', scopeSelection.regionCode)
       if (scopeSelection.groupPattern) params.set('groupPattern', scopeSelection.groupPattern)
       if (scopeSelection.timeAreaCode) params.set('timeAreaCode', scopeSelection.timeAreaCode)
+      for (const [key, value] of Object.entries(firmwareTarget ?? {})) {
+        if (value) params.set(`firmwareTarget.${key}`, value)
+      }
       if (partialSchedule) deliveryRecords.forEach(number => params.append('recordNumbers', String(number)))
       const response = await apiGetRaw(`/api/tables/sets/${setId}/assignment-preview?${params}`)
       const result = await response.json().catch(() => null)
@@ -219,11 +236,46 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         </label>}
         <label>{schedulesOnly ? 'Schedule by' : 'Assign by'}
           <select disabled={busy} value={scope} onChange={(event) => changeScope(event.target.value as Scope)}>
-            {Object.entries(scopes).filter(([value]) => value !== 'time-area' || canTargetTimeArea)
+            {Object.entries(scopes).filter(([value]) => {
+              if (value === 'terminal-id-range' || value === 'software-version') return codeOnly
+              return value !== 'time-area' || canTargetTimeArea
+            })
               .map(([value, { label }]) => <option value={value} key={value}>{label}</option>)}
           </select>
         </label>
-        {scope === 'group-pattern' ? <label>Group ID pattern
+        {scope === 'terminal-id-range' && <>
+          <label>First terminal ID
+            <input value={targetId} disabled={busy} inputMode="tel" maxLength={10} pattern={'[0-9]{10}|[0-9]{1,9}\\*'}
+              aria-describedby="firmware-range-help" onChange={event => {
+                setTargetId(event.target.value)
+                clearReview()
+              }} />
+          </label>
+          <label>Last terminal ID
+            <input value={prefix ? prefix.padEnd(10, '9') : secondTarget} disabled={busy || !!prefix} inputMode="numeric"
+              maxLength={10} pattern="[0-9]{10}" onChange={event => {
+                setSecondTarget(event.target.value)
+                clearReview()
+              }} />
+          </label>
+          <p id="firmware-range-help">Use ten digits. Leave the last ID blank for one phone, or end a prefix with * to include every phone in that range.</p>
+        </>}
+        {scope === 'software-version' && <>
+          <label>Current controller ROM
+            <input value={targetId} disabled={busy} maxLength={7} onChange={event => {
+              setTargetId(event.target.value)
+              clearReview()
+            }} />
+          </label>
+          <label>Current controller software
+            <input value={secondTarget} disabled={busy} maxLength={4} onChange={event => {
+              setSecondTarget(event.target.value)
+              clearReview()
+            }} />
+          </label>
+          <p>Enter the controller versions shown in the phone’s latest NCC software report.</p>
+        </>}
+        {!firmwareScope && (scope === 'group-pattern' ? <label>Group ID pattern
           <input value={targetId} disabled={busy} maxLength={6} placeholder="ABC*" onChange={event => {
             setTargetId(event.target.value)
             clearReview()
@@ -238,7 +290,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               {item.name ?? item.displayName}{item.code && ` (${item.code})`}
             </option>)}
           </select>
-        </label>}
+        </label>)}
         {hasRegionFilter && <label>Within region
           <select disabled={busy} value={groupRegion} onChange={event => {
             setGroupRegion(event.target.value)
@@ -278,7 +330,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               MT{number} · {choice.name}
             </label>)}
         </fieldset>}
-        <button type="submit" disabled={!targetId || busy || (selectedRecords && !copyRecords.length && !removeRecords.length)
+        <button type="submit" disabled={!targetId || busy || (scope === 'software-version' && !secondTarget.trim())
+          || (selectedRecords && !copyRecords.length && !removeRecords.length)
           || (partialSchedule && !deliveryRecords.length)}>
           {selectedRecords ? 'Preview record update' : schedulesOnly ? 'Preview phones' : 'Preview assignment'}
         </button>
@@ -301,7 +354,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           <strong>{eligible} eligible {eligible === 1 ? 'phone' : 'phones'}</strong>
           {wireSelection && <p>Records to send {wireSelection.map(number => `MT${number}`).join(', ')}</p>}
           {targets.length > 0 && <ul>{targets.map((item) => <li key={item.id}>
-            {item.displayName}{item.terminalFamilyLabel && ` · ${item.terminalFamilyLabel}`}{item.reason && ` · ${item.reason}`}
+            {item.displayName}{item.terminalIdHex && ` · ${item.terminalIdHex}`}
+            {item.terminalFamilyLabel && ` · ${item.terminalFamilyLabel}`}{item.reason && ` · ${item.reason}`}
           </li>)}</ul>}
           <div className="table-config-selectors">
             <label>Delivery

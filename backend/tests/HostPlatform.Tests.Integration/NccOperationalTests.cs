@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.Json;
 using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
@@ -858,6 +859,94 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         finally
         {
             await AssignLabSetAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Firmware_schedules_match_wire_id_ranges_and_recheck_the_latest_ncc_software_version()
+    {
+        var site = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/sites", Json))[0].GetProperty("id").GetGuid();
+        const string firstWireId = "0000000801";
+        const string secondWireId = "0000000802";
+        var first = await AddPhoneAsync(firstWireId, "First version fixture");
+        var second = await AddPhoneAsync(secondWireId, "Second version fixture");
+        var unreported = await AddPhoneAsync("0000000803", "No software report");
+        await AddPhoneAsync("000000080A", "Nondecimal wire ID");
+        await AddPhoneAsync("0000000900", "Outside the ID range");
+
+        using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Firmware selection test" }, Json);
+        created.EnsureSuccessStatusCode();
+        var setId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var setPath = $"/api/tables/sets/{setId}";
+        var fieldsPath = $"{setPath}/records/94/fields";
+        var record = await fx.Client.GetFromJsonAsync<JsonElement>(fieldsPath, Json);
+        using var initialized = await fx.Client.PostAsJsonAsync(fieldsPath, record.GetProperty("templates")[0], Json);
+        initialized.EnsureSuccessStatusCode();
+        using var published = await fx.Client.PostAsync($"{setPath}/publish?confirm=true", null);
+        published.EnsureSuccessStatusCode();
+
+        var range = $"{setPath}/assignment-preview?targetType=terminal-id-range";
+        var matches = await fx.Client.GetFromJsonAsync<JsonElement>(
+            $"{range}&firmwareTarget.terminalIdFrom=0000000801&firmwareTarget.terminalIdTo=0000000899", Json);
+        Assert.True(new[] { first, second, unreported }.ToHashSet().SetEquals(MatchedIds(matches)));
+        var exact = await fx.Client.GetFromJsonAsync<JsonElement>(
+            $"{range}&firmwareTarget.terminalIdFrom=0000000802&firmwareTarget.terminalIdTo=0000000802", Json);
+        Assert.Equal(second, Assert.Single(MatchedIds(exact)));
+        using var reversed = await fx.Client.GetAsync(
+            $"{range}&firmwareTarget.terminalIdFrom=0000000802&firmwareTarget.terminalIdTo=0000000801");
+        Assert.Equal(HttpStatusCode.BadRequest, reversed.StatusCode);
+
+        var firmwareTarget = new { currentControlRom = "LABROM", currentControlSoftware = "A002" };
+        var byVersion = "targetType=software-version&firmwareTarget.currentControlRom=LABROM&firmwareTarget.currentControlSoftware=A002";
+        var schedulePath = $"{setPath}/schedules";
+        await ReportVersionAsync(firstWireId, "A002");
+        await ReportVersionAsync(secondWireId, "A003");
+        Assert.Equal(first, Assert.Single(MatchedIds(await fx.Client.GetFromJsonAsync<JsonElement>($"{setPath}/assignment-preview?{byVersion}", Json))));
+
+        await ReportVersionAsync(firstWireId, "A003");
+        await ReportVersionAsync(secondWireId, "A002");
+        using var stale = await fx.Client.PostAsJsonAsync(schedulePath,
+            new { targetType = "software-version", firmwareTarget, terminalIds = new[] { first } }, Json);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal(second, Assert.Single(MatchedIds(await fx.Client.GetFromJsonAsync<JsonElement>($"{setPath}/assignment-preview?{byVersion}", Json))));
+
+        using var scheduled = await fx.Client.PostAsJsonAsync(schedulePath,
+            new { targetType = "software-version", firmwareTarget, terminalIds = new[] { second } }, Json);
+        scheduled.EnsureSuccessStatusCode();
+        var queued = await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json);
+        Assert.Equal(second, Assert.Single(queued.EnumerateArray()).GetProperty("terminalId").GetGuid());
+
+        var dataSet = await CreateRateTableSetAsync("Firmware scope rejects data sets", new byte[1192]);
+        using var dataPreview = await fx.Client.GetAsync($"/api/tables/sets/{dataSet}/assignment-preview?{byVersion}");
+        Assert.Equal(HttpStatusCode.BadRequest, dataPreview.StatusCode);
+
+        static IEnumerable<Guid> MatchedIds(JsonElement preview) =>
+            preview.GetProperty("targets").EnumerateArray().Select(target => target.GetProperty("id").GetGuid());
+
+        async Task<Guid> AddPhoneAsync(string wireId, string name)
+        {
+            using var response = await fx.Client.PostAsJsonAsync("/api/terminals",
+                new { siteId = site, displayName = name, terminalIdHex = wireId, status = 0 }, Json);
+            response.EnsureSuccessStatusCode();
+            return (await response.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        }
+
+        async Task ReportVersionAsync(string wireId, string software)
+        {
+            var terminalId = Convert.FromHexString(wireId);
+            var bundle = new byte[6 + 11 + 28 + 1];
+            bundle[0] = 6;
+            bundle[6] = 10;
+            bundle[17] = 60;
+            Encoding.ASCII.GetBytes("LABROM ").CopyTo(bundle, 18);
+            Encoding.ASCII.GetBytes(software).CopyTo(bundle, 25);
+            bundle[^1] = 13;
+            await using var link = await OpenAsync();
+            await link.Stream.WriteAsync(Message(terminalId, bundle));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var receipt = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 15, 0, 0, 13 }, receipt.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | receipt.Control)));
         }
     }
 
