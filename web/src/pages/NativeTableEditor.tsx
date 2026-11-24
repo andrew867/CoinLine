@@ -47,7 +47,9 @@ type Props = {
   onDirty: (dirty: boolean) => void
 }
 
+const quickAccessRecord = 55
 const isCredential = (field: Field) => field.editor === 'password' || field.editor === 'password-hex' || field.editor === 'password-pin'
+const quickAccessNumber = (section: Section) => Number(section.key.slice('key-'.length)) + 1
 
 export function NativeTableEditor({ setId, number, revision, exchangeFile, onExchangeFile, onSaved, onDirty }: Props) {
   const [layout, setLayout] = useState<Layout | null>(null)
@@ -56,6 +58,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [ruleEdits, setRuleEdits] = useState<NumberingPlanChanges>({})
   const [byteEdits, setByteEdits] = useState<SpareByteEdits>({})
+  const [quickAccessLayout, setQuickAccessLayout] = useState('10')
+  const [clearedKeys, setClearedKeys] = useState<Set<number>>(new Set())
   const [view, setView] = useState<'settings' | 'rules' | 'bytes'>('settings')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
@@ -102,8 +106,21 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     if (value === field.value || (isCredential(field) && value === '')) delete updated[field.key]
     else updated[field.key] = value
     setEdits(updated)
-    onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0)
+    onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0 || clearedKeys.size > 0)
     setMessage('')
+  }
+
+  function toggleKeyClear(key: number) {
+    const updated = new Set(clearedKeys)
+    if (!updated.delete(key)) updated.add(key)
+    setClearedKeys(updated)
+    onDirty(updated.size > 0 || Object.keys(edits).length > 0)
+    setMessage('')
+  }
+
+  function isClearingField(key: string) {
+    const slot = /^key-(\d+)\./.exec(key)
+    return slot != null && clearedKeys.has(Number(slot[1]) + 1)
   }
 
   async function save(event: React.FormEvent) {
@@ -117,10 +134,12 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     setBusy(true)
     setMessage('')
     try {
+      const changes = Object.fromEntries(Object.entries(edits).filter(([key]) => !isClearingField(key)))
       const response = await fetch(endpoint, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: layout.revision, sha256: layout.sha256, changes: edits, profile: layout.profile,
+        body: JSON.stringify({ revision: layout.revision, sha256: layout.sha256, changes, profile: layout.profile,
           numberingPlan: Object.keys(ruleEdits).length ? ruleEdits : undefined,
+          clearQuickAccessKeys: clearedKeys.size ? [...clearedKeys] : undefined,
           spareBytes: byteEntries.length ? byteEntries.map(([offset, value]) => ({ offset: Number(offset), value: parseInt(value, 16) })) : undefined }),
       })
       if (!response.ok) {
@@ -130,6 +149,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       setEdits({})
       setRuleEdits({})
       setByteEdits({})
+      setClearedKeys(new Set())
       onDirty(false)
       setMessage('Changes saved to this draft.')
       setReload((count) => count + 1)
@@ -160,11 +180,12 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   }
 
   function changeProfile(value: string) {
-    if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0)
+    if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0 || clearedKeys.size > 0)
       && !window.confirm('Discard the unsaved changes and switch firmware profiles?')) return
     setEdits({})
     setRuleEdits({})
     setByteEdits({})
+    setClearedKeys(new Set())
     setView('settings')
     onDirty(false)
     setSectionKey('')
@@ -194,13 +215,15 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   )
 
   const needle = search.trim().toLowerCase()
-  const settings = layout.sections.filter((section) => !layout.numberingPlan?.dial || !section.key.startsWith('dial-'))
+  const isQuickAccess = number === quickAccessRecord
+  const settings = layout.sections.filter((section) => (!layout.numberingPlan?.dial || !section.key.startsWith('dial-'))
+    && (!isQuickAccess || quickAccessLayout === '10' || quickAccessNumber(section) >= 6))
   const sections = settings.filter((section) => !needle || section.label.toLowerCase().includes(needle)
     || section.fields.some((field) => field.label.toLowerCase().includes(needle) || field.help?.toLowerCase().includes(needle)
       || (field.editor !== 'bitmap' && !isCredential(field)
         && (field.value?.toLowerCase().includes(needle) || edits[field.key]?.toLowerCase().includes(needle)))))
   const current = sections.find((section) => section.key === sectionKey) ?? sections[0]
-  const changed = Object.keys(edits).length
+  const changed = Object.keys(edits).filter(key => !isClearingField(key)).length
   const ruleChanges = Object.keys(ruleEdits).length > 0
   const byteChanges = Object.keys(byteEdits).length
   const showingRules = layout.numberingPlan && view === 'rules'
@@ -217,6 +240,15 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     return [`${prefix}Initial`, `${prefix}Later`]
   }))
   const effectiveValue = (field: Field) => edits[field.key] ?? field.value
+  const keyValue = (section: Section, name: string) => {
+    const field = section.fields.find(item => item.key === `${section.key}.${name}`)
+    return field && effectiveValue(field)
+  }
+  const selectedKey = isQuickAccess && current ? quickAccessNumber(current) : null
+  const keyCleared = selectedKey != null && clearedKeys.has(selectedKey)
+  const carrierReference = selectedKey != null && current && keyValue(current, 'free') === 'true' && keyValue(current, 'featureGroupB') === 'true'
+  const displayFields = current?.showDisplayPreview ? current.fields
+    : selectedKey != null && current ? current.fields.filter(field => field.key.endsWith('.upper') || field.key.endsWith('.lower')) : []
   const areaField = layout.sections[0]?.fields.find(field => field.key === 'areaCode')
   const exchangeFields = areaField ? layout.sections.slice(1).flatMap(section => section.fields) : []
   const exchangeSegment = areaField && exchangeFields.length === exchangeCount
@@ -273,13 +305,38 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           onDirty(changed > 0 || Object.keys(updated).length > 0)
           setMessage('')
         }} />}
-      {showingSettings && settings.length > 1 && (
+      {showingSettings && isQuickAccess && (
+        <div className="native-key-panel">
+          <div className="table-config-selectors"><label>Panel layout
+            <select value={quickAccessLayout} onChange={event => setQuickAccessLayout(event.target.value)}>
+              <option value="10">Ten keys</option>
+              <option value="5">Five keys (slots 6 through 10)</option>
+            </select>
+          </label></div>
+          {[sections.filter(section => quickAccessNumber(section) <= 5),
+            sections.filter(section => quickAccessNumber(section) >= 6)].map((row, index) => row.length > 0 && (
+            <div key={index} className="native-key-row" role="group" aria-label={index === 0 ? 'Upper key row' : 'Lower key row'}>
+              {row.map(section => {
+                const key = quickAccessNumber(section)
+                const configured = !!keyValue(section, 'number') || Number(keyValue(section, 'customerReference')) > 0
+                  || keyValue(section, 'information') === 'true'
+                return <button key={section.key} type="button" className="quiet" aria-pressed={selectedKey === key}
+                  onClick={() => setSectionKey(section.key)}>
+                  <strong>Key {key}</strong>
+                  <small>{clearedKeys.has(key) ? 'Clear pending' : configured ? 'Configured' : 'Blank'}</small>
+                </button>
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+      {showingSettings && !isQuickAccess && settings.length > 1 && (
         <div className="table-config-selectors">
           {settings.length > 12 && <label>Find entry<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
           <label>Section or entry
             <select value={current?.key ?? ''} disabled={!current} onChange={(event) => setSectionKey(event.target.value)}>
               {!current && <option value="">No matching entries</option>}
-              {sections.map((section) => <option key={section.key} value={section.key}>{section.label}</option>)}
+              {sections.map(section => <option key={section.key} value={section.key}>{section.label}</option>)}
             </select>
           </label>
         </div>
@@ -287,20 +344,26 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
           <legend>{current.label}</legend>
+          {selectedKey != null && layout.editable && <div className="row-actions">
+            <button type="button" className="quiet" onClick={() => toggleKeyClear(selectedKey)}>
+              {keyCleared ? 'Undo clear' : 'Clear key'}
+            </button>
+            {keyCleared && <span role="status">Key {selectedKey} will be cleared when you save.</span>}
+          </div>}
           {changingKind && <p className="native-graphical-status">Save the screen type to load its editor.</p>}
           {changingCardFamily && <p className="native-graphical-status">Save the card standard to load its settings.</p>}
           {changingDiscountMethods.length > 0 && <p className="native-graphical-status">Save the discount methods to edit their new values.</p>}
           {!changingKind && current.showPanelPreview && (
             <GraphicalPanelPreview text={current.fields.slice(0, 4).map(effectiveValue)} keys={current.fields.slice(4, 10).map(effectiveValue)} />
           )}
-          {current.showDisplayPreview && (
+          {!keyCleared && displayFields.length > 0 && (
             <figure className="native-table-prompt-preview">
               <figcaption>Terminal display preview</figcaption>
-              <div className="table-config-vfd" role="img" aria-label={current.fields.map((field) => {
+              <div className="table-config-vfd" role="img" aria-label={displayFields.map((field) => {
                 const text = edits[field.key] ?? field.value
                 return `${field.label}, ${text === null ? 'unmapped glyphs' : text.trim() || 'blank'}`
               }).join('. ')}>
-                {current.fields.map((field) => (
+                {displayFields.map((field) => (
                   <div key={field.key} aria-hidden="true">
                     {(edits[field.key] ?? field.value ?? 'Unmapped glyphs').padEnd(20)}
                   </div>
@@ -308,22 +371,24 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
               </div>
             </figure>
           )}
-          {!changingCardFamily && current.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
+          {!keyCleared && !changingCardFamily && current.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
             && !replacedDiscountFields.has(field.key)
             && ((number !== 35 && number !== 94) || !field.key.startsWith('start.'))
             && (number !== 35 || !field.key.startsWith('adjust.'))
             && (number !== 152 || !/^period-\d+\.(local|intra|inter|international)$/.test(field.key))).map((field) => (
-            <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
+            <FieldInput key={field.key} field={carrierReference && field.key.endsWith('.rate') ? { ...field, label: 'Carrier reference' } : field}
+              value={edits[field.key] ?? field.value ?? ''}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}
         </fieldset>
       )}
       {layout.editable && (
         <div className="row-actions">
-          <button type="submit" disabled={(changed === 0 && !ruleChanges && byteChanges === 0) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
+          <button type="submit" disabled={(changed === 0 && !ruleChanges && byteChanges === 0 && clearedKeys.size === 0) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
           {changed > 0 && <span>{changed} {changed === 1 ? 'field changed' : 'fields changed'}</span>}
           {ruleChanges && <span>Numbering rules changed</span>}
           {byteChanges > 0 && <span>{byteChanges} {byteChanges === 1 ? 'byte changed' : 'bytes changed'}</span>}
+          {clearedKeys.size > 0 && <span>{clearedKeys.size} {clearedKeys.size === 1 ? 'key' : 'keys'} to clear</span>}
         </div>
       )}
       {message && <p className="native-table-feedback" role="status">{message}</p>}

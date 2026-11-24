@@ -36,7 +36,7 @@ public static partial class NativeTableLayouts
     {
         var candidates = Candidates(number, record);
         // Existing sets without a registered target already use the older editing profile for these records.
-        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 73 ? MultiPay : null);
+        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or QuickAccessKeyWire.MessageType or 73 ? MultiPay : null);
         var layout = selection == null ? candidates.Count == 1 ? candidates[0] : null
             : candidates.SingleOrDefault(layout => layout.Profile == selection);
         if (layout == null)
@@ -55,7 +55,7 @@ public static partial class NativeTableLayouts
     {
         if (number == AnswerSupervisionRecord)
             return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
-        return IsLocalDialingRecord(number) || number is 22 or 23 or CallInRecord or 55 or 58 or MessagingRecord
+        return IsLocalDialingRecord(number) || number is 22 or 23 or CallInRecord or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
             or SpareTableWire.MessageType or 73 or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or >= 150 and <= 152
             ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
             : [];
@@ -174,20 +174,8 @@ public static partial class NativeTableLayouts
                  Toggle($"{key}.window", "Enable validator window", 65 + i, 1),
                  Toggle($"{key}.accepted", "Accept coin", 65 + i, 2)])]);
 
-        yield return Layout(55, 571, Rows("key", 10, i => $"Quick-access key {i + 1}", (i, key) =>
-        {
-            var offset = 1 + i * 57;
-            return [DialField($"{key}.number", "Dialed digits", offset + 3, 8),
-                TextField($"{key}.upper", "Upper display line", offset + 11, 20),
-                TextField($"{key}.lower", "Lower display line", offset + 31, 20),
-                Toggle($"{key}.free", "Free call", offset, 1),
-                Toggle($"{key}.answer", "Require answer supervision", offset, 2),
-                Toggle($"{key}.information", "Display information", offset, 64),
-                Toggle($"{key}.advertising", "Show advertising for this key", offset + 56, 1),
-                Bits($"{key}.type", "Call classification", offset + 1, 15, CallKinds),
-                Bits($"{key}.payment", "Payment classification", offset + 1, 240, PaymentKinds),
-                Field($"{key}.rate", "Rate index", offset + 2)];
-        }));
+        yield return QuickAccessLayout(later: false);
+        yield return QuickAccessLayout(later: true);
 
         yield return Layout(58, 26, Section("restriction", "Service restriction window",
             Select("restriction", "Restriction level", 1, (0, "None"), (1, "Free and emergency calls only"),
@@ -481,6 +469,35 @@ public static partial class NativeTableLayouts
 
         return layout with { Sections = sections };
     }
+
+    private static NativeTableLayout QuickAccessLayout(bool later) => new(
+        QuickAccessKeyWire.MessageType, QuickAccessKeyWire.RecordLength, later ? Later : MultiPay,
+        Rows("key", QuickAccessKeyWire.SlotCount, i => $"Quick-access key {i + 1}", (i, key) =>
+        {
+            var offset = 1 + i * QuickAccessKeyWire.SlotLength;
+            NativeTableField[] variant = later
+                ? [Toggle($"{key}.restrictedAccess", "Allow in configurable restricted service", offset + 55, 1),
+                   Toggle($"{key}.targetCdr", "Collect target call detail", offset + 55, 2),
+                   Toggle($"{key}.pds", "Enable PDS dialing", offset + 55, 4),
+                   Toggle($"{key}.dataJack", "Data-jack or change-card key", offset + 55, 8)]
+                : [Toggle($"{key}.changeCard", "Change-card key", offset + 55, 8)];
+            return [new NativeTableField($"{key}.number", "Number to dial", offset + 3, KeypadDial, 8),
+                Field($"{key}.customerReference", "Customer reference", offset + 51, UnsignedLong),
+                TextField($"{key}.upper", "Upper display line", offset + 11, 20),
+                TextField($"{key}.lower", "Lower display line", offset + 31, 20),
+                Toggle($"{key}.free", "Free call", offset, QuickAccessKeyWire.FreeCall),
+                Toggle($"{key}.answer", "Require answer supervision", offset, QuickAccessKeyWire.AnswerSupervision),
+                Toggle($"{key}.carrierPrefix", "Use the stored number as a carrier access prefix", offset, QuickAccessKeyWire.CarrierPrefix),
+                Toggle($"{key}.keypad", "Enable keypad after answer", offset, QuickAccessKeyWire.EnableKeypad),
+                Toggle($"{key}.information", "Display information", offset, QuickAccessKeyWire.Information),
+                Toggle($"{key}.featureGroupB", "Feature Group B access", offset, QuickAccessKeyWire.FeatureGroupB),
+                Toggle($"{key}.advertising", "Show advertising for this key", offset + 56, QuickAccessKeyWire.Advertising),
+                Bits($"{key}.type", "Call classification", offset + 1, 15, CallKinds),
+                Bits($"{key}.payment", "Payment classification", offset + 1, 240, PaymentKinds),
+                Field($"{key}.rate", "Rate index", offset + 2,
+                    help: "Paid calls use a tariff index. Free Feature Group B calls use a carrier reference."),
+                .. variant];
+        }));
 
     private static NativeTableSection AreaCode() => Section("region", "Local dialing region",
         new NativeTableField("areaCode", "Area code", 1, LocalDialingArea,

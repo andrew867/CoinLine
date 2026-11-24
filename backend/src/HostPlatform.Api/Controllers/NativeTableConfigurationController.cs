@@ -150,6 +150,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         try
         {
             var updated = layout.Apply(raw, body.Changes);
+            if (body.ClearQuickAccessKeys is { Length: > 0 })
+                QuickAccessKeyWire.Clear(updated, layout, body.ClearQuickAccessKeys, body.Changes);
             if (body.NumberingPlan != null)
             {
                 if (number != NumberingPlanWire.MessageType)
@@ -193,7 +195,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         .Take(2).ToListAsync(ct);
 
     public sealed record NativeFieldEdits(int Revision, string Sha256, Dictionary<string, string> Changes, string? Profile,
-        NumberingPlanChanges? NumberingPlan = null, SpareBytePatch[]? SpareBytes = null);
+        NumberingPlanChanges? NumberingPlan = null, SpareBytePatch[]? SpareBytes = null, int[]? ClearQuickAccessKeys = null);
     public sealed record NativeTemplate(string Profile, int Length);
 
     private static string TemplateName(int number) => number switch

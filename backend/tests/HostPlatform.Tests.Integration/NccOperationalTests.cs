@@ -881,6 +881,90 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Quick_access_clear_and_edit_preserve_spare_bytes_through_ncc_pickup()
+    {
+        using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Quick-access fixture" }, Json);
+        created.EnsureSuccessStatusCode();
+        var setId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        using var definition = await fx.Client.PostAsJsonAsync("/api/tables/definitions",
+            new { name = "Quick-access fixture record", tableNumber = 55 }, Json);
+        definition.EnsureSuccessStatusCode();
+        var definitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var bytes = new byte[571];
+        bytes[0] = 55;
+        const int sixth = 286;
+        const int tenth = 514;
+        bytes[sixth] = 0x59;
+        bytes[sixth + 3] = 0x12;
+        bytes[sixth + 51] = 0x21;
+        bytes[sixth + 55] = 0xFB;
+        bytes[sixth + 56] = 0xA7;
+        bytes[tenth - 1] = 0x40;
+        using var added = await fx.Client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = setId, tableDefinitionId = definitionId, tableRevision = 1,
+            payloadBase64 = Convert.ToBase64String(bytes), sortOrder = 0
+        }, Json);
+        added.EnsureSuccessStatusCode();
+        var path = $"/api/tables/sets/{setId}/records/55/fields";
+        var original = await fx.Client.GetFromJsonAsync<JsonElement>(path, Json);
+        var sha256 = original.GetProperty("sha256").GetString();
+        using var unchanged = await fx.Client.PutAsJsonAsync(path,
+            new { revision = 1, sha256, changes = new Dictionary<string, string>() }, Json);
+        Assert.Equal(HttpStatusCode.NoContent, unchanged.StatusCode);
+        Assert.Equal(sha256, (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json)).GetProperty("sha256").GetString());
+        using var saved = await fx.Client.PutAsJsonAsync(path, new
+        {
+            revision = 1, sha256, clearQuickAccessKeys = new[] { 6 },
+            changes = new Dictionary<string, string> { ["key-9.customerReference"] = "258", ["key-9.number"] = "10" }
+        }, Json);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        using var published = await fx.Client.PostAsync($"/api/tables/sets/{setId}/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+
+        await AssignSetAsync(setId);
+        try
+        {
+            var before = await BatchIdsAsync();
+            await using var link = await OpenAsync();
+            await link.Stream.WriteAsync(Message(KnownId, [44, 2]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var header = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.PacketId(header.Control))));
+            var record = new List<byte>();
+            while (record.Count < bytes.Length)
+            {
+                var fragment = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                record.AddRange(fragment.Data);
+                await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.PacketId(fragment.Control))));
+            }
+            bytes[sixth] = 0x18;
+            bytes[sixth + 3] = 0;
+            bytes[sixth + 51] = 0;
+            bytes[sixth + 55] = 0xF3;
+            bytes[sixth + 56] = 0xA6;
+            bytes[tenth + 3] = 0x1A;
+            bytes[tenth + 51] = 2;
+            bytes[tenth + 52] = 1;
+            Assert.Equal(bytes, record);
+            await link.Stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket
+            {
+                Control = 1, TerminalId = KnownId, Data = [14, 55]
+            }));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var end = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+            await WaitNewBatchAsync(before, 2);
+        }
+        finally
+        {
+            await AssignLabSetAsync();
+        }
+    }
+
+    [Fact]
     public async Task Firmware_target_selects_wire_layout_and_blocks_incompatible_assignments_and_pickup()
     {
         var terminals = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json);
