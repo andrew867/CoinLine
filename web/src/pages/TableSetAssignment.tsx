@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 
@@ -12,8 +13,24 @@ const scopes = {
 type Scope = keyof typeof scopes
 type Option = { id: string; name?: string; displayName?: string }
 type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null }
+type SavedRecord = { tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean }
+type OptionalRecord = { tableNumber: number; name: string }
+type RecordAction = '' | 'copy' | 'remove'
+type UpdateTarget = Omit<Target, 'eligible'> & {
+  baseSetName: string | null
+  changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean }[]
+}
+type UpdatePreview = { changeCount: number; setCount: number; previewToken: string; targets: UpdateTarget[] }
+type UpdatedSet = { id: string; name: string }
+const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
 
-export function TableSetAssignment({ setId, codeOnly = false }: { setId: string; codeOnly?: boolean }) {
+export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false }: {
+  setId: string
+  revision: number
+  versions: SavedRecord[]
+  optionalRecords: OptionalRecord[]
+  codeOnly?: boolean
+}) {
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
   const [targetId, setTargetId] = useState('')
@@ -23,6 +40,22 @@ export function TableSetAssignment({ setId, codeOnly = false }: { setId: string;
   const [mode, setMode] = useState(codeOnly ? 'now' : 'assignment')
   const [availableAt, setAvailableAt] = useState('')
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
+  const [selectedRecords, setSelectedRecords] = useState(false)
+  const [actions, setActions] = useState<Record<number, RecordAction>>({})
+  const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null)
+  const [resultSets, setResultSets] = useState<UpdatedSet[]>([])
+  const choices = new Map((optionalRecords ?? []).map((record) => [record.tableNumber, { name: record.name, removable: true, copyable: false }]))
+  for (const record of versions) {
+    if (record.tableNumber === 94) continue
+    choices.set(record.tableNumber, {
+      name: record.definitionName, removable: choices.get(record.tableNumber)?.removable ?? false,
+      copyable: record.validationPassed && record.payloadLengthBytes > 2
+        && versions.filter((candidate) => candidate.tableNumber === record.tableNumber).length === 1,
+    })
+  }
+  const actionEntries = Object.entries(actions)
+  const copyRecords = actionEntries.filter(([, action]) => action === 'copy').map(([number]) => Number(number))
+  const removeRecords = actionEntries.filter(([, action]) => action === 'remove').map(([number]) => Number(number))
 
   useEffect(() => {
     let current = true
@@ -34,6 +67,10 @@ export function TableSetAssignment({ setId, codeOnly = false }: { setId: string;
 
   async function preview(event: React.FormEvent) {
     event.preventDefault()
+    if (selectedRecords) {
+      await updateRecords(false)
+      return
+    }
     setTargets(null)
     setFeedback('')
     setBusy(true)
@@ -43,6 +80,33 @@ export function TableSetAssignment({ setId, codeOnly = false }: { setId: string;
       setTargets(result.targets)
     } catch {
       setFeedback('Could not preview this assignment.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function updateRecords(apply: boolean) {
+    setBusy(true)
+    setFeedback('')
+    setResultSets([])
+    if (!apply) setUpdatePreview(null)
+    try {
+      const response = await apiPostRaw(`/api/tables/sets/${setId}/record-updates${apply ? '' : '/preview'}`, {
+        targetType: scope, targetId, sourceRevision: revision, copyRecords, removeRecords,
+        ...(apply ? { previewToken: updatePreview?.previewToken } : {}),
+      })
+      const result = await response.json().catch(() => null)
+      if (!response.ok) {
+        if (response.status === 409) setUpdatePreview(null)
+        throw new Error(result?.error ?? 'Could not update the selected records.')
+      }
+      if (apply) {
+        setFeedback(`Updated ${result.changed} ${result.changed === 1 ? 'phone assignment' : 'phone assignments'}.`)
+        setResultSets(result.sets)
+        setUpdatePreview(null)
+      } else setUpdatePreview(result)
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Could not update the selected records.')
     } finally {
       setBusy(false)
     }
@@ -84,12 +148,26 @@ export function TableSetAssignment({ setId, codeOnly = false }: { setId: string;
       <p className="page-intro">{codeOnly ? 'The selected phones pick up these parameters on a routine call-in or callback.'
         : 'A group, location or customer assignment updates its current phones. The phones receive the set when they request a download.'}</p>
       <form className="table-config-selectors" onSubmit={(event) => void preview(event)}>
+        {!codeOnly && <label>Assignment action
+          <select value={selectedRecords ? 'records' : 'set'} disabled={busy} onChange={(event) => {
+            setSelectedRecords(event.target.value === 'records')
+            setTargets(null)
+            setUpdatePreview(null)
+            setFeedback('')
+            setResultSets([])
+          }}>
+            <option value="set">Assign full set</option>
+            <option value="records">Update selected records</option>
+          </select>
+        </label>}
         <label>{codeOnly ? 'Schedule by' : 'Assign by'}
           <select disabled={busy} value={scope} onChange={(event) => {
             setScope(event.target.value as Scope)
             setOptions([])
             setTargetId('')
             setTargets(null)
+            setUpdatePreview(null)
+            setResultSets([])
             setFeedback('')
           }}>
             {Object.entries(scopes).map(([value, { label }]) => <option value={value} key={value}>{label}</option>)}
@@ -99,14 +177,49 @@ export function TableSetAssignment({ setId, codeOnly = false }: { setId: string;
           <select disabled={busy} value={targetId} onChange={(event) => {
             setTargetId(event.target.value)
             setTargets(null)
+            setUpdatePreview(null)
+            setResultSets([])
             setFeedback('')
           }}>
             <option value="">Choose {scopes[scope].label.toLowerCase()}</option>
             {options.map((item) => <option value={item.id} key={item.id}>{item.name ?? item.displayName}</option>)}
           </select>
         </label>
-        <button type="submit" disabled={!targetId || busy}>{codeOnly ? 'Preview phones' : 'Preview assignment'}</button>
+        {selectedRecords && <fieldset className="scope-record-choices" disabled={busy}>
+          <legend>Record actions</legend>
+          {[...choices.entries()].sort(([first], [second]) => first - second).map(([number, choice]) =>
+            (choice.copyable || choice.removable) && <label key={number} className="scope-record-choice">
+              MT{number} · {choice.name}
+              <select value={actions[number] ?? ''} onChange={(event) => {
+                setActions({ ...actions, [number]: event.target.value as RecordAction })
+                setUpdatePreview(null)
+                setFeedback('')
+                setResultSets([])
+              }}>
+                <option value="">Keep current</option>
+                {choice.copyable && <option value="copy">Use source record</option>}
+                {choice.removable && <option value="remove">Remove from assignment</option>}
+              </select>
+            </label>)}
+          {removeRecords.length > 0 && <p>Removal affects future data sets. A phone can retain the already installed record.</p>}
+        </fieldset>}
+        <button type="submit" disabled={!targetId || busy || (selectedRecords && !copyRecords.length && !removeRecords.length)}>
+          {selectedRecords ? 'Preview record update' : codeOnly ? 'Preview phones' : 'Preview assignment'}
+        </button>
       </form>
+      {updatePreview && <section className="table-config-preview" aria-labelledby="scope-record-review">
+        <h3 id="scope-record-review">Record update review</h3>
+        <p>{updatePreview.changeCount} phone assignments will change across {updatePreview.setCount} resulting sets.</p>
+        <ul>{updatePreview.targets.map((phone) => <li key={phone.id}>
+          <strong>{phone.displayName}</strong>{phone.terminalFamilyLabel && ` · ${phone.terminalFamilyLabel}`}
+          {phone.baseSetName && ` · ${phone.baseSetName}`}
+          {phone.reason ? <p>{phone.reason}</p> : <p>{phone.changes.map(({ tableNumber, action, required }) =>
+            `${changeLabels[action]} MT${tableNumber}${required ? ' (required)' : ''}`).join(', ')}</p>}
+        </li>)}</ul>
+        {updatePreview.changeCount > 0 && <button type="button" disabled={busy} onClick={() => void updateRecords(true)}>
+          Update {updatePreview.changeCount} {updatePreview.changeCount === 1 ? 'phone' : 'phones'}
+        </button>}
+      </section>}
       {targets && (
         <div className="table-config-preview">
           <strong>{eligible} eligible phones</strong>
@@ -131,6 +244,9 @@ export function TableSetAssignment({ setId, codeOnly = false }: { setId: string;
         </div>
       )}
       {feedback && <p role="status">{feedback}</p>}
+      {resultSets.length > 0 && <ul aria-label="Resulting table sets">{resultSets.map((set) => <li key={set.id}>
+        <Link to={`/table-sets/${set.id}`}>{set.name}</Link>
+      </li>)}</ul>}
       <TableDownloadScheduleList setId={setId} refresh={scheduleRefresh} />
     </section>
   )

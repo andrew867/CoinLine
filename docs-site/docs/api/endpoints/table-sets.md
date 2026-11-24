@@ -12,6 +12,8 @@
 | POST | `/api/tables/sets/{id}/clone` | Create a draft copy with the same records |
 | POST | `/api/tables/sets/{id}/record-copy/preview` | Review copying selected records into a draft |
 | POST | `/api/tables/sets/{id}/record-copy` | Copy the reviewed records and their dependencies into a draft |
+| POST | `/api/tables/sets/{id}/record-updates/preview` | Review selected-record changes to existing phone assignments |
+| POST | `/api/tables/sets/{id}/record-updates` | Confirm the reviewed assignment changes |
 | GET | `/api/tables/sets/{id}/advertising` | Read the 20 MT29 slots, record revision, SHA-256 and supported MT26 and MT30 playback settings |
 | PUT | `/api/tables/sets/{id}/advertising` | Encode and save slots on a draft. Send the retrieved revision and SHA-256 to detect concurrent edits. |
 | GET | `/api/tables/sets/{id}/records/{number}/fields` | Read editable fields for a known wire profile |
@@ -30,6 +32,10 @@ The assignment API supports `terminal`, `group`, `site` and `customer`. Apply th
 A new set accepts an optional `targetFirmwareVersionId`. A draft copy inherits the target. Published targeted sets can be assigned and downloaded by phones with the same registered firmware version. Detail responses expose `firmwareFindings`. Blocking findings prevent publishing. Other findings identify records whose format still needs verification.
 
 The record-copy request takes `sourceSetId`, `sourceRevision`, `destinationRevision` and a `recordNumbers` array of decimal message types. Read each revision from the table set detail response. Submit the same request to the preview and apply endpoints. The response lists each planned record as `add`, `replace` or `keep` and marks automatically included dependencies with `required`. Copies write to drafts and require a global source set or one belonging to the same customer. A changed source or destination revision returns HTTP 409 and requires a new review.
+
+For selected-record assignment updates, the route identifies the published source set. Send `targetType`, `targetId`, `sourceRevision`, `copyRecords` and `removeRecords`. The two arrays contain decimal message types and can each be empty. The preview reports each phone's current set, planned actions, skipped reasons, and the count of assignments and resulting sets. Add its `previewToken` to the same request on confirmation. Changed scope membership, assignments or configuration require another preview. The update saves the resulting published sets and assignments together and retains the previous sets for rollback.
+
+The recognized Multi-pay profile permits removing records documented as optional. The preview reports any dependency that prevents removal. Removal changes the assignment for future downloads. Delivery of a set without the record can leave previously installed terminal data in place.
 
 For the verified 200-entry Multi-pay profile, the set review checks MT92 screening rules that use a direct tariff or mark a call as free. If screening or configured MT101 exchange rules refer to tariffs without an MT73 record in the set, the review returns a warning so a partial update can rely on the phone's installed tariff record.
 

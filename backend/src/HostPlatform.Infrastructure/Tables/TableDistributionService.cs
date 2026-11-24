@@ -17,6 +17,44 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     public static string ComputePayloadSha256Hex(TableVersion v) =>
         TablePayloadHasher.Sha256Hex(GetEffectivePayload(v));
 
+    public static TableVersion CopyVersion(TableVersion source) => new()
+    {
+        TableDefinitionId = source.TableDefinitionId,
+        TableRevision = source.TableRevision,
+        TablePayloadId = source.TablePayloadId,
+        EmbeddedPayload = source.EmbeddedPayload,
+        Checksum = source.Checksum,
+        PayloadSha256Hex = source.PayloadSha256Hex,
+        SortOrder = source.SortOrder,
+        DependsOnTableDefinitionId = source.DependsOnTableDefinitionId,
+        ValidationPassed = source.ValidationPassed,
+        ValidationDiagnosticsJson = source.ValidationDiagnosticsJson
+    };
+
+    public IQueryable<Terminal> PhonesInScope(string targetType, Guid targetId)
+    {
+        var phones = db.Terminals.AsNoTracking();
+        return targetType switch
+        {
+            "terminal" => phones.Where(phone => phone.Id == targetId),
+            "group" => phones.Where(phone => phone.TerminalGroupId == targetId || phone.AdditionalGroups.Any(m => m.TerminalGroupId == targetId)),
+            "site" => phones.Where(phone => phone.SiteId == targetId),
+            "customer" => phones.Where(phone => phone.Site!.CustomerId == targetId),
+            _ => throw new InvalidOperationException("Choose a phone, group, site or customer.")
+        };
+    }
+
+    public static string? AccessRecordIssue(IReadOnlyList<TableVersion> accessRecords, string terminalIdHex)
+    {
+        if (accessRecords.Count > 1)
+            return "This set has multiple terminal access records.";
+
+        var access = accessRecords.Count == 1 ? GetEffectivePayload(accessRecords[0]) : [];
+        return access.Length >= 18 && access[0] == 21
+            && !string.Equals(Convert.ToHexString(access.AsSpan(1, 5)), terminalIdHex, StringComparison.OrdinalIgnoreCase)
+            ? "The terminal access record carries another phone’s wire ID." : null;
+    }
+
     public static TableVersion? CodeOnlyVersion(ICollection<TableVersion> versions)
     {
         var version = versions.Count == 1 ? versions.First() : null;
@@ -205,6 +243,16 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             .FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
             ?? throw new InvalidOperationException("Table set not found.");
 
+        var issues = PublicationIssues(set);
+        if (issues.Count > 0)
+            throw new InvalidOperationException(string.Join(" ", issues));
+
+        MarkPublished(set, DateTime.UtcNow);
+        await db.SaveChangesAsync(ct);
+    }
+
+    public static IReadOnlyList<string> PublicationIssues(TableSet set)
+    {
         var issues = new List<string>();
         foreach (var v in set.Versions)
         {
@@ -217,14 +265,15 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         issues.AddRange(TableSetFirmwareCompatibility.Review(set).Where(finding => finding.Blocking)
             .Select(finding => $"MT{finding.TableNumber}. {finding.Message}"));
 
-        if (issues.Count > 0)
-            throw new InvalidOperationException(string.Join(" ", issues));
+        return issues;
+    }
 
+    public static void MarkPublished(TableSet set, DateTime now)
+    {
         set.Status = TableSetStatus.Published;
-        set.PublishedAtUtc = DateTime.UtcNow;
+        set.PublishedAtUtc = now;
         set.PublishGeneration++;
         set.Version++;
-        await db.SaveChangesAsync(ct);
     }
 
     public async Task<(DownloadBatch Batch, bool WasExisting)> CreateDownloadBatchAsync(

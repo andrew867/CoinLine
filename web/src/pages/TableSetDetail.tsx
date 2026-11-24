@@ -33,6 +33,7 @@ type Detail = {
   publishedAtUtc: string | null
   publishGeneration: number
   revision: number
+  optionalRecordRemovals: { tableNumber: number; name: string }[]
   targetFirmwareVersionId: string | null
   targetFirmware: string | null
   tableProfile: string | null
@@ -222,7 +223,8 @@ export function TableSetDetail() {
         disabled={recordDirty || targetChanged} onSaved={load} />}
       <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
         versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />
-      {!draft && <TableSetAssignment key={id} setId={id} codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} />}
+      {!draft && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
+        codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} />}
       <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>
       </p>

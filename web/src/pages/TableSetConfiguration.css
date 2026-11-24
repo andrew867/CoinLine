@@ -71,6 +71,13 @@
 .table-record-copy .table-config-preview { margin-top: 10px; }
 .table-record-copy h3 { margin: 0; font-size: 1rem; }
 .table-set-versions { overflow-x: auto; }
+.scope-record-choices {
+  flex: 0 0 100%; min-inline-size: 0; display: grid; gap: 8px; max-height: 20rem; overflow: auto;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  border: 1px solid var(--line); padding: 10px; border-radius: 9px;
+}
+.scope-record-choice { padding: 4px; overflow-wrap: anywhere; }
+.scope-record-choices p { grid-column: 1 / -1; }
 .native-table-editor { margin: 14px 0 18px; }
 .native-table-header {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;

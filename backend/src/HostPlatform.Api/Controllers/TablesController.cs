@@ -170,22 +170,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         {
             Name = body.Name.Trim(), CustomerId = source.CustomerId, TargetFirmwareVersionId = source.TargetFirmwareVersionId
         };
-        foreach (var copy in source.Versions)
-        {
-            clone.Versions.Add(new TableVersion
-            {
-                TableDefinitionId = copy.TableDefinitionId,
-                TableRevision = copy.TableRevision,
-                TablePayloadId = copy.TablePayloadId,
-                EmbeddedPayload = copy.EmbeddedPayload,
-                Checksum = copy.Checksum,
-                PayloadSha256Hex = copy.PayloadSha256Hex,
-                SortOrder = copy.SortOrder,
-                DependsOnTableDefinitionId = copy.DependsOnTableDefinitionId,
-                ValidationPassed = copy.ValidationPassed,
-                ValidationDiagnosticsJson = copy.ValidationDiagnosticsJson
-            });
-        }
+        foreach (var version in source.Versions)
+            clone.Versions.Add(TableDistributionService.CopyVersion(version));
         db.TableSets.Add(clone);
         await db.SaveChangesAsync(ct);
         return Created($"/api/tables/sets/{clone.Id}", new { clone.Id });
@@ -524,31 +510,17 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     private async Task<List<AssignmentTarget>> AssignmentTargetsAsync(TableSet set, string targetType, Guid targetId,
         CancellationToken ct)
     {
-        var terminals = db.Terminals.AsNoTracking();
-        var selected = targetType switch
-        {
-            "terminal" => terminals.Where(t => t.Id == targetId),
-            "group" => terminals.Where(t => t.TerminalGroupId == targetId || t.AdditionalGroups.Any(m => m.TerminalGroupId == targetId)),
-            "site" => terminals.Where(t => t.SiteId == targetId),
-            "customer" => terminals.Where(t => t.Site!.CustomerId == targetId),
-            _ => throw new InvalidOperationException("Choose a phone, group, site or customer.")
-        };
-
+        var selected = tables.PhonesInScope(targetType, targetId);
         var access = await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
             .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21).Take(2).ToListAsync(ct);
-        var accessBytes = access.Count == 1 ? TableDistributionService.GetEffectivePayload(access[0]) : [];
-        var wireId = accessBytes.Length >= 18 && accessBytes[0] == 21 ? Convert.ToHexString(accessBytes.AsSpan(1, 5)) : null;
-
         var phones = await selected.OrderBy(t => t.DisplayName)
             .Select(t => new { t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId })
             .ToListAsync(ct);
         return phones.Select(t =>
         {
             var reason = set.CustomerId != null && t.CustomerId != set.CustomerId ? "Outside the set’s customer scope."
-                : access.Count > 1 ? "This set has multiple terminal access records."
-                : wireId != null && !string.Equals(wireId, t.TerminalIdHex, StringComparison.OrdinalIgnoreCase)
-                    ? "The terminal access record carries another phone’s wire ID."
-                    : TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId);
+                : TableDistributionService.AccessRecordIssue(access, t.TerminalIdHex)
+                    ?? TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId);
             return new AssignmentTarget(t.Id, t.DisplayName, t.SiteId, t.CustomerId, TerminalFamilies.Find(t.TerminalFamilyId)?.Label,
                 reason == null, reason);
         }).ToList();
@@ -581,6 +553,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             s.PublishedAtUtc,
             s.PublishGeneration,
             revision = s.Version,
+            optionalRecordRemovals = TableRecordUpdate.MultiPayOptionalRecords.Select(pair => new { tableNumber = pair.Key, name = pair.Value }),
             provisioning = NativeTableSetReview.Build(records),
             Versions = s.Versions.OrderBy(v => v.SortOrder).Select(v => new
             {
