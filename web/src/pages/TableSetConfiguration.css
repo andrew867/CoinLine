@@ -45,6 +45,32 @@
 .table-config-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .table-config-preview { background: #f2f8f5; border-radius: 8px; padding: 11px 13px; }
 .table-config-preview ul { margin-block: 5px 10px; max-height: 200px; overflow-y: auto; }
+.table-record-copy > details { margin: 0; }
+.table-record-copy summary { margin: 0; }
+.table-record-copy form > fieldset {
+  min-inline-size: 0;
+  padding: 10px 12px;
+  margin: 0 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+.table-record-copy select { max-width: min(100%, 42rem); }
+.table-record-search { display: grid; width: fit-content; gap: 4px; margin-bottom: 8px; }
+.table-record-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 235px), 1fr));
+  max-height: 20rem;
+  overflow-y: auto;
+  gap: 5px;
+}
+.table-record-option { display: flex; align-items: start; gap: 8px; padding: 7px 8px; border-radius: 6px; }
+.table-record-option input { flex: 0 0 auto; }
+.table-record-option span { overflow-wrap: anywhere; }
+.table-record-option:has(:checked) { background: #e8f4ec; }
+.table-record-option small { display: block; color: #526c61; }
+.table-record-copy .table-config-preview { margin-top: 10px; }
+.table-record-copy h3 { margin: 0; font-size: 1rem; }
+.table-set-versions { overflow-x: auto; }
 .native-table-editor { margin: 14px 0 18px; }
 .native-table-header {
   display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;

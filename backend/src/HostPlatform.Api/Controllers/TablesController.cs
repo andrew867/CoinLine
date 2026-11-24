@@ -191,6 +191,63 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         return Created($"/api/tables/sets/{clone.Id}", new { clone.Id });
     }
 
+    [HttpPost("sets/{id:guid}/record-copy/preview")]
+    public Task<ActionResult> PreviewRecordCopy(Guid id, TableRecordCopyRequest request, CancellationToken ct) =>
+        CopyRecords(id, request, preview: true, ct);
+
+    [HttpPost("sets/{id:guid}/record-copy")]
+    public Task<ActionResult> ApplyRecordCopy(Guid id, TableRecordCopyRequest request, CancellationToken ct) =>
+        CopyRecords(id, request, preview: false, ct);
+
+    private async Task<ActionResult> CopyRecords(Guid id, TableRecordCopyRequest request, bool preview, CancellationToken ct)
+    {
+        if (request.SourceSetId == id || request.RecordNumbers.Length is < 1 or > 255
+            || request.RecordNumbers.Any(number => number is < 1 or > 255)
+            || request.RecordNumbers.Distinct().Count() != request.RecordNumbers.Length)
+            return BadRequest(new { error = "Choose one or more distinct records from a different table set." });
+
+        var sets = db.TableSets.Include(set => set.TargetFirmwareVersion)
+            .Include(set => set.Versions).ThenInclude(record => record.TableDefinition)
+            .Include(set => set.Versions).ThenInclude(record => record.TablePayload);
+        var destination = await sets.FirstOrDefaultAsync(set => set.Id == id, ct);
+        var source = await sets.AsNoTracking().FirstOrDefaultAsync(set => set.Id == request.SourceSetId, ct);
+        if (destination == null || source == null)
+            return NotFound(new { error = "The source or destination table set no longer exists." });
+        if (destination.Status != TableSetStatus.Draft)
+            return Conflict(new { error = "Copy records into a draft table set." });
+        if (destination.Version != request.DestinationRevision || source.Version != request.SourceRevision)
+            return Conflict(new { error = "The source or destination changed. Reload both sets and review the copy again." });
+
+        IReadOnlyList<TableRecordCopyEntry> changes;
+        try { changes = TableRecordCopy.Prepare(source, destination, request.RecordNumbers); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+
+        var records = changes.Select(change => new
+        {
+            change.Source.TableDefinition!.TableNumber,
+            DefinitionName = (change.Destination ?? change.Source).TableDefinition!.Name,
+            change.Action,
+            change.Required
+        }).ToArray();
+
+        if (!preview && changes.Any(change => change.Action != "keep"))
+        {
+            tables.StageRecordCopy(destination, changes);
+            ApiAudit.Write(db, HttpContext, "tables.set", "copy_records", id.ToString(), new
+            {
+                sourceSetId = source.Id, sourceRevision = source.Version,
+                records = records.Where(record => record.Action != "keep").Select(record => new { record.TableNumber, record.Action })
+            });
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { error = "The destination changed. Reload both sets and review the copy again." });
+            }
+        }
+
+        return Ok(new { sourceRevision = source.Version, destinationRevision = destination.Version, records });
+    }
+
     [HttpGet("sets/{id:guid}/advertising")]
     public async Task<ActionResult<object>> Advertising(Guid id, CancellationToken ct)
     {
@@ -523,6 +580,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             s.Status,
             s.PublishedAtUtc,
             s.PublishGeneration,
+            revision = s.Version,
             provisioning = NativeTableSetReview.Build(records),
             Versions = s.Versions.OrderBy(v => v.SortOrder).Select(v => new
             {
@@ -627,6 +685,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
     public sealed record TableDefDto(string Name, int TableNumber, string? Description);
     public sealed record TableCloneDto(string Name);
+    public sealed record TableRecordCopyRequest(Guid SourceSetId, int SourceRevision, int DestinationRevision, int[] RecordNumbers);
     public sealed record AdvertisingDto(AdvertisingSlot[] Slots, int? Revision = null, string? Sha256 = null);
     public sealed record TableScopeDto(string TargetType, Guid TargetId, Guid[] TerminalIds);
     public sealed record TableScopeScheduleDto(string TargetType, Guid TargetId, Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc);

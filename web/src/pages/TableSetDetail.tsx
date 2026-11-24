@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { TableSetAssignment } from './TableSetAssignment'
 import { TableSetConfiguration } from './TableSetConfiguration'
+import { TableRecordCopy } from './TableRecordCopy'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import './TableSetConfiguration.css'
 
@@ -31,6 +32,7 @@ type Detail = {
   status: number
   publishedAtUtc: string | null
   publishGeneration: number
+  revision: number
   targetFirmwareVersionId: string | null
   targetFirmware: string | null
   tableProfile: string | null
@@ -216,6 +218,8 @@ export function TableSetDetail() {
           ))}</ul>}
         </section>
       )}
+      {draft && <TableRecordCopy key={d.id} setId={d.id} revision={d.revision} customerId={d.customerId}
+        disabled={recordDirty || targetChanged} onSaved={load} />}
       <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
         versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />
       {!draft && <TableSetAssignment key={id} setId={id} codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} />}
@@ -228,44 +232,46 @@ export function TableSetDetail() {
           No versions in this set yet. Add table versions from the versions list, then publish this set.
         </p>
       )}
-      <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 14 }}>
-        <thead>
-          <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
-            <th>Table</th>
-            <th>Rev</th>
-            <th>SHA-256 (payload)</th>
-            <th>Bytes</th>
-            <th>Valid</th>
-            <th>Warnings</th>
-          </tr>
-        </thead>
-        <tbody>
-          {d.versions.map((v) => (
-            <tr key={v.id} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
-              <td>{v.definitionName}</td>
-              <td>{v.tableRevision}</td>
-              <td>
-                <code style={{ fontSize: 11 }} title="SHA-256 of opaque table payload bytes">
-                  {v.payloadSha256Hex}
-                </code>
-              </td>
-              <td>{v.payloadLengthBytes}</td>
-              <td>{v.validationPassed ? 'yes' : 'no'}</td>
-              <td>
-                {v.warnings?.length ? (
-                  <ul style={{ margin: 0, paddingLeft: 18, color: '#a50' }}>
-                    {v.warnings.map((w) => (
-                      <li key={w}>{w}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  ''
-                )}
-              </td>
+      <div className="table-set-versions" tabIndex={0} role="region" aria-label="Versions in this set">
+        <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 14 }}>
+          <thead>
+            <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
+              <th>Table</th>
+              <th>Rev</th>
+              <th>SHA-256 (payload)</th>
+              <th>Bytes</th>
+              <th>Valid</th>
+              <th>Warnings</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {d.versions.map((v) => (
+              <tr key={v.id} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
+                <td>{v.definitionName}</td>
+                <td>{v.tableRevision}</td>
+                <td>
+                  <code style={{ fontSize: 11 }} title="SHA-256 of opaque table payload bytes">
+                    {v.payloadSha256Hex}
+                  </code>
+                </td>
+                <td>{v.payloadLengthBytes}</td>
+                <td>{v.validationPassed ? 'yes' : 'no'}</td>
+                <td>
+                  {v.warnings?.length ? (
+                    <ul style={{ margin: 0, paddingLeft: 18, color: '#a50' }}>
+                      {v.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    ''
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

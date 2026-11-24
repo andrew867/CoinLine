@@ -106,8 +106,27 @@ label { display: block; font-size: 13px; color: var(--muted); }
   margin-bottom: 2px;
 }
 .nav-group a.active, .nav-group a:hover { background: var(--sidebar-active); color: #fff; }
+.sidebar-toggle { display: none; }
 .content { flex: 1; padding: 22px 28px 48px; min-width: 0; }
 .page-intro { color: var(--muted); max-width: 68ch; }
+
+@media (max-width: 720px) {
+  .shell { display: block; }
+  .sidebar { width: 100%; padding: 10px 16px; }
+  .sidebar-header { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+  .sidebar-header :is(.brand, .brand-note) { margin-bottom: 0; }
+  .sidebar-toggle { display: block; background: #1d4a3e; border: 1px solid #34584e; }
+  .sidebar-navigation[data-open='false'] { display: none; }
+  .sidebar-navigation {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 125px), 1fr));
+    gap: 16px 12px;
+    margin-top: 14px;
+  }
+  .sidebar-navigation .nav-group { margin: 0; }
+  .sidebar-navigation .sign-out { grid-column: 1 / -1; margin: 0; }
+  .content { padding: 16px 16px 40px; }
+}
 
 .stat-grid {
   display: grid;

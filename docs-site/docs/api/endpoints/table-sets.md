@@ -10,6 +10,8 @@
 | PUT | `/api/tables/sets/{id}` | Update |
 | PUT | `/api/tables/sets/{id}/firmware-target` | Set or clear a draft's target version using `firmwareVersionId` |
 | POST | `/api/tables/sets/{id}/clone` | Create a draft copy with the same records |
+| POST | `/api/tables/sets/{id}/record-copy/preview` | Review copying selected records into a draft |
+| POST | `/api/tables/sets/{id}/record-copy` | Copy the reviewed records and their dependencies into a draft |
 | GET | `/api/tables/sets/{id}/advertising` | Read the 20 MT29 slots, record revision, SHA-256 and supported MT26 and MT30 playback settings |
 | PUT | `/api/tables/sets/{id}/advertising` | Encode and save slots on a draft. Send the retrieved revision and SHA-256 to detect concurrent edits. |
 | GET | `/api/tables/sets/{id}/records/{number}/fields` | Read editable fields for a known wire profile |
@@ -26,6 +28,8 @@
 The assignment API supports `terminal`, `group`, `site` and `customer`. Apply the same `targetType` and `targetId` with the preview's eligible phone IDs in `terminalIds`. A changed eligible list requires another preview.
 
 A new set accepts an optional `targetFirmwareVersionId`. A draft copy inherits the target. Published targeted sets can be assigned and downloaded by phones with the same registered firmware version. Detail responses expose `firmwareFindings`. Blocking findings prevent publishing. Other findings identify records whose format still needs verification.
+
+The record-copy request takes `sourceSetId`, `sourceRevision`, `destinationRevision` and a `recordNumbers` array of decimal message types. Read each revision from the table set detail response. Submit the same request to the preview and apply endpoints. The response lists each planned record as `add`, `replace` or `keep` and marks automatically included dependencies with `required`. Copies write to drafts and require a global source set or one belonging to the same customer. A changed source or destination revision returns HTTP 409 and requires a new review.
 
 For the verified 200-entry Multi-pay profile, the set review checks MT92 screening rules that use a direct tariff or mark a call as free. If screening or configured MT101 exchange rules refer to tariffs without an MT73 record in the set, the review returns a warning so a partial update can rely on the phone's installed tariff record.
 

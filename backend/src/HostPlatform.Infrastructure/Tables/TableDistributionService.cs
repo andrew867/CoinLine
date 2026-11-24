@@ -163,6 +163,41 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         return version;
     }
 
+    public void StageRecordCopy(TableSet destination, IReadOnlyList<TableRecordCopyEntry> changes)
+    {
+        var lastSortOrder = destination.Versions.Select(version => version.SortOrder).DefaultIfEmpty(-1).Max();
+        foreach (var change in changes.Where(change => change.Action != "keep"))
+        {
+            var source = change.Source;
+            var version = change.Destination;
+            if (version == null)
+            {
+                version = new TableVersion
+                {
+                    TableSet = destination,
+                    TableDefinitionId = source.TableDefinitionId,
+                    TableRevision = source.TableRevision,
+                    SortOrder = ++lastSortOrder
+                };
+                db.TableVersions.Add(version);
+            }
+            else
+            {
+                version.TableRevision++;
+            }
+
+            version.TablePayloadId = source.TablePayloadId;
+            version.EmbeddedPayload = source.EmbeddedPayload;
+            version.PayloadSha256Hex = ComputePayloadSha256Hex(source);
+            version.Checksum = source.Checksum;
+            version.DependsOnTableDefinitionId = change.DependencyId;
+            version.ValidationPassed = source.ValidationPassed;
+            version.ValidationDiagnosticsJson = source.ValidationDiagnosticsJson;
+        }
+
+        destination.Version++;
+    }
+
     public async Task PublishTableSetAsync(Guid tableSetId, CancellationToken ct)
     {
         var set = await db.TableSets.Include(s => s.Versions).ThenInclude(v => v.TablePayload)

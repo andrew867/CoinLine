@@ -46,6 +46,7 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
   const panel = panels[panelIndex]
   const record = panel.records.find(([number]) => number === tableNumber)!
   const version = versions.find((item) => item.tableNumber === tableNumber)
+  const advertisingRevision = [26, 29, 30].map((number) => versions.find((item) => item.tableNumber === number)?.tableRevision ?? 0).join(':')
 
   return (
     <section className="table-config-panel" aria-labelledby="config-heading">
@@ -76,7 +77,7 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
       </div>
       <p className="page-intro">{panel.fields}</p>
       {tableNumber === 29 ? (
-        <AdvertisingEditor key={setId} setId={setId} draft={draft} onSaved={onSaved} onDirty={onRecordDirty} />
+        <AdvertisingEditor key={setId} setId={setId} draft={draft} revision={advertisingRevision} onSaved={onSaved} onDirty={onRecordDirty} />
       ) : (
         <div key={`${setId}:${tableNumber}`}>
           <Suspense fallback={<p role="status">Loading record editor…</p>}>
@@ -96,7 +97,8 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
   )
 }
 
-function AdvertisingEditor({ setId, draft, onSaved, onDirty }: Pick<Props, 'setId' | 'draft' | 'onSaved'> & {
+function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Props, 'setId' | 'draft' | 'onSaved'> & {
+  revision: string
   onDirty: (dirty: boolean) => void
 }) {
   const [snapshot, setSnapshot] = useState<AdvertisingSnapshot | null>(null)
@@ -127,7 +129,7 @@ function AdvertisingEditor({ setId, draft, onSaved, onDirty }: Pick<Props, 'setI
         if (!controller.signal.aborted) setFeedback(error instanceof Error ? error.message : 'Could not load advertising.')
       })
     return () => controller.abort()
-  }, [expanded, endpoint])
+  }, [expanded, endpoint, revision])
 
   function update(index: number, patch: Partial<AdvertisingSlot>) {
     setSnapshot((current) => current && {
