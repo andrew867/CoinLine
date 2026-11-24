@@ -38,10 +38,10 @@ public static class TableSetFirmwareCompatibility
             var data = TableDistributionService.GetEffectivePayload(record.Single());
             if (data.Length <= 2 || data[0] != number)
                 yield return new(number, true, "Import a complete record with the matching message type.");
-            else if (profile == null || !profile.VerifiedLengths.TryGetValue(number, out var length))
+            else if (RecordIssue(profile, number, data.Length) is { } issue)
+                yield return new(number, true, issue);
+            else if (profile == null || !profile.VerifiedLengths.ContainsKey(number))
                 yield return new(number, false, "The record format has no verified length for the selected firmware.");
-            else if (data.Length != length)
-                yield return new(number, true, $"The selected firmware uses {length:N0} bytes. The record has {data.Length:N0}.");
             else
                 verifiedRecords.Add(number, data);
         }
@@ -49,6 +49,16 @@ public static class TableSetFirmwareCompatibility
         if (profile?.Id == FirmwareTableProfiles.MultiPay200)
             foreach (var finding in ReviewMultiPayRates(verifiedRecords))
                 yield return finding;
+    }
+
+    public static string? RecordIssue(FirmwareTableProfile? profile, int number, int length)
+    {
+        if (profile == null)
+            return null;
+        if (profile.VerifiedLengths.TryGetValue(number, out var expected))
+            return length != expected
+                ? $"The selected firmware uses {expected:N0} bytes. The record has {length:N0}." : null;
+        return profile.CompleteCatalogue ? "This record type is absent from the selected firmware catalogue." : null;
     }
 
     private static IEnumerable<TableFirmwareFinding> ReviewMultiPayRates(IReadOnlyDictionary<int, byte[]> records)

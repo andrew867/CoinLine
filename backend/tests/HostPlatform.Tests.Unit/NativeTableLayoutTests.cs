@@ -5,9 +5,9 @@ namespace HostPlatform.Tests.Unit;
 public sealed class NativeTableLayoutTests
 {
     [Theory]
-    [InlineData(21, 18)] [InlineData(21, 40)] [InlineData(22, 661)] [InlineData(23, 678)] [InlineData(24, 721)] [InlineData(26, 72)]
+    [InlineData(21, 18)] [InlineData(21, 40)] [InlineData(21, 48)] [InlineData(22, 661)] [InlineData(23, 678)] [InlineData(24, 721)] [InlineData(26, 72)]
     [InlineData(27, 2801)] [InlineData(28, 2801)] [InlineData(30, 68)] [InlineData(31, 37)]
-    [InlineData(32, 33)] [InlineData(33, 35)] [InlineData(34, 19)] [InlineData(35, 21)]
+    [InlineData(32, 33)] [InlineData(33, 36)] [InlineData(34, 19)] [InlineData(35, 21)]
     [InlineData(49, 199)] [InlineData(49, 263)] [InlineData(50, 105)] [InlineData(55, 571)] [InlineData(58, 26)]
     [InlineData(62, 353)] [InlineData(68, 72)] [InlineData(72, 1001)]
     [InlineData(73, 1192)] [InlineData(74, 819)]
@@ -457,16 +457,39 @@ public sealed class NativeTableLayoutTests
         Assert.Equal(new byte[] { 25, 0 }, updatedTimers[50..52]);
         Assert.Equal(new byte[] { 0x98, 0x3A }, updatedTimers[62..64]);
 
-        var modem = new byte[35];
+        var modem = new byte[36];
         modem[0] = 33;
-        modem[32] = 0x80;
-        modem[33] = 0x40;
+        modem[32] = 0x51;
+        modem[33] = 0x80;
+        modem[34] = 0x40;
         var updatedModem = NativeTableLayouts.Find(33, modem)!.Apply(modem, new Dictionary<string, string>
         {
             ["laptopSeizeTime"] = "300", ["carrierLossTimeout"] = "true", ["answerToneOptional"] = "true"
         });
         Assert.Equal(new byte[] { 44, 1 }, updatedModem[10..12]);
-        Assert.Equal(new byte[] { 0x82, 0x44 }, updatedModem[32..34]);
+        Assert.Equal(new byte[] { 0x51, 0x82, 0x44 }, updatedModem[32..35]);
+        var later = NativeTableLayouts.Find(33, modem, NativeTableLayouts.Later)!;
+        var removal = later.Apply(modem, new Dictionary<string, string> { ["answerRemovalDelay"] = "4321" });
+        Assert.Equal(new byte[] { 0xE1, 0x10 }, removal[12..14]);
+        Assert.Equal(modem[..12], removal[..12]);
+        Assert.Equal(modem[14..], removal[14..]);
+        Assert.Null(NativeTableLayouts.Find(33, modem[..35]));
+    }
+
+    [Fact]
+    public void Twenty_digit_management_access_preserves_the_other_fields_and_reserved_tail()
+    {
+        var data = Enumerable.Repeat((byte)0x5A, 48).ToArray();
+        data[0] = 21;
+        var layout = NativeTableLayouts.Find(21, data, NativeTableLayouts.Later)!;
+        var updated = layout.Apply(data, new Dictionary<string, string> { ["primary"] = "12345678901234567890" });
+        Assert.Equal(Convert.FromHexString("123456789A123456789A"), updated[6..16]);
+        Assert.Equal(data[..6], updated[..6]);
+        Assert.Equal(data[16..], updated[16..]);
+        var cad = layout.Apply(updated, new Dictionary<string, string> { ["cadId"] = "1234ABCD" });
+        Assert.Equal(Convert.FromHexString("1234ABCD"), cad[26..30]);
+        Assert.Equal(updated[..26], cad[..26]);
+        Assert.Equal(updated[30..], cad[30..]);
     }
 
     [Fact]

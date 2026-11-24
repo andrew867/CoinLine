@@ -2,6 +2,8 @@
 
 Register installed builds under **Firmware versions**, then select the installed build on each phone. Select the same **Target firmware** on a table-set draft if it is intended for that build. A set with a target can be assigned only to phones registered with that version. The draft's firmware review reports record lengths that conflict with a verified layout.
 
+The firmware registry distinguishes compiled catalogue lengths from records acknowledged by an OEM emulated terminal. The later MTR 2.x Multi-pay profile describes the 180-entry screening and sixteen-segment double-compressed image. A record absent from its compiled catalogue cannot be published for that target. A phone registered with a known profile also checks its selected records at pickup.
+
 1. Open **Table sets** and select the set for the target firmware. Make a named draft copy of a published set to retain its existing records.
 2. Open **Terminal configuration**. Under **Text and display**, choose **Text advertising** to edit the 20 message slots. **Edit as text block** changes the text while keeping each slot's duration and display mode. Mark the first unused slot in a rotation **End sequence**. For a timed blank, leave the text empty, set a duration, and clear **End sequence**. The editor saves a 481-byte MT29 record.
 3. Select another record to open its native fields. **Terminal features and call setup** includes Multi-pay, Card only and Coin only. **Cards, coin and carriers** includes coin slots, magnetic-card ranges and carrier acceptance. Call screening and tariff records have their own editors. Use the entry selector and search on lists with many records.

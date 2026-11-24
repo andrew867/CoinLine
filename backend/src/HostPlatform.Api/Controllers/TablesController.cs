@@ -725,6 +725,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         var records = s.Versions.Where(v => v.TableDefinition != null)
             .GroupBy(v => v.TableDefinition!.TableNumber).Where(group => group.Count() == 1)
             .ToDictionary(group => group.Key, group => TableDistributionService.GetEffectivePayload(group.Single()));
+        var profile = FirmwareTableProfiles.Find(s.TargetFirmwareVersion?.TableProfileId);
         return Ok(new
         {
             s.Id,
@@ -732,7 +733,13 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             s.CustomerId,
             s.TargetFirmwareVersionId,
             targetFirmware = s.TargetFirmwareVersion?.Label,
-            tableProfile = FirmwareTableProfiles.Find(s.TargetFirmwareVersion?.TableProfileId)?.Label,
+            tableProfile = profile?.Label,
+            tableProfileEvidence = profile == null ? null : new
+            {
+                recordCount = profile.VerifiedLengths.Count,
+                terminalAcknowledgedCount = profile.TerminalAcknowledgedRecords.Count,
+                profile.CompleteCatalogue
+            },
             firmwareFindings = TableSetFirmwareCompatibility.Review(s),
             s.IsDefault,
             s.Status,
@@ -786,7 +793,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         if (set == null)
             return NotFound();
         var records = set.Versions.Where(v => v.TableDefinition != null)
-            .Select(v => (v.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(v)));
+            .Select(v => (v.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(v), v.ScreeningLayoutProfile));
         return Ok(LegacyTerminalTableRequirements.Review(family, records,
             FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId)));
     }

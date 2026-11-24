@@ -299,6 +299,68 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Later_compiled_target_selects_its_native_editor_and_rejects_unlisted_or_wrong_length_records()
+    {
+        using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
+        {
+            label = "Later compiled profile fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180
+        });
+        firmware.EnsureSuccessStatusCode();
+        var targetFirmwareVersionId = (await firmware.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Later target fixture", targetFirmwareVersionId });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+
+        var screening = await _client.GetFromJsonAsync<JsonElement>(path + "/records/92/fields");
+        var layout = Assert.Single(screening.GetProperty("templates").EnumerateArray());
+        Assert.Equal(3061, layout.GetProperty("length").GetInt32());
+        Assert.Equal(180, layout.GetProperty("screeningSlots").GetInt32());
+        var shared = await _client.GetFromJsonAsync<JsonElement>(path + "/records/35/fields");
+        Assert.Equal(NativeTableLayouts.MultiPay, Assert.Single(shared.GetProperty("templates").EnumerateArray()).GetProperty("profile").GetString());
+        var absent = await _client.GetFromJsonAsync<JsonElement>(path + "/records/131/fields");
+        Assert.False(absent.GetProperty("supported").GetBoolean());
+        Assert.Contains("absent", absent.GetProperty("reason").GetString());
+
+        await Import(33, 35);
+        await Import(131, 9224);
+        var review = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.Equal(42, review.GetProperty("tableProfileEvidence").GetProperty("recordCount").GetInt32());
+        Assert.Equal(0, review.GetProperty("tableProfileEvidence").GetProperty("terminalAcknowledgedCount").GetInt32());
+        var findings = review.GetProperty("firmwareFindings").EnumerateArray().ToArray();
+        Assert.Equal(2, findings.Length);
+        Assert.All(findings, finding => Assert.True(finding.GetProperty("blocking").GetBoolean()));
+        Assert.Contains("36 bytes", findings[0].GetProperty("message").GetString());
+        Assert.Contains("absent", findings[1].GetProperty("message").GetString());
+        using var rejected = await _client.PostAsync(path + "/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+
+        async Task Import(int number, int length)
+        {
+            var existing = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/definitions"))
+                .EnumerateArray().FirstOrDefault(row => row.GetProperty("tableNumber").GetInt32() == number);
+            Guid definitionId;
+            if (existing.ValueKind == JsonValueKind.Object)
+                definitionId = existing.GetProperty("id").GetGuid();
+            else
+            {
+                using var definition = await _client.PostAsJsonAsync("/api/tables/definitions",
+                    new { name = $"Later profile MT{number}", tableNumber = number });
+                definition.EnsureSuccessStatusCode();
+                definitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            }
+            var payload = new byte[length];
+            payload[0] = (byte)number;
+            using var version = await _client.PostAsJsonAsync("/api/tables/versions", new
+            {
+                tableSetId = id, tableDefinitionId = definitionId,
+                tableRevision = 1, payloadBase64 = Convert.ToBase64String(payload), sortOrder = number
+            });
+            version.EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
     public async Task Family_checklist_reports_present_and_missing_records_without_blocking_partial_publication()
     {
         using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Family checklist fixture" });

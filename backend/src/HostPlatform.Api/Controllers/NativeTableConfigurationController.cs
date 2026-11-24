@@ -19,14 +19,16 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         if (set == null)
             return NotFound();
 
+        var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
+        if (firmware?.CompleteCatalogue == true && !firmware.VerifiedLengths.ContainsKey(number))
+            return Ok(new { supported = false, reason = "This record type is absent from the selected firmware catalogue." });
         var versions = await ReadVersions(id, number, ct);
         if (versions.Count == 0)
         {
-            var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
             var templates = set.Status == TableSetStatus.Draft
                 ? NativeTableLayouts.DraftTemplates(number)
                     .Where(layout => firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expectedLength)
-                        || (layout.Length == expectedLength && layout.Profile == firmware.NativeLayout))
+                        || (layout.Length == expectedLength && layout.Profile == firmware.LayoutFor(number)))
                     .Select(layout => new
                     {
                         layout.Profile, layout.Length,
@@ -57,7 +59,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             editable = set.Status == TableSetStatus.Draft,
             layout.Profile,
             profiles = version.ScreeningLayoutProfile != null
-                || FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId)?.VerifiedLengths.ContainsKey(number) == true
+                || firmware?.VerifiedLengths.ContainsKey(number) == true
                 ? [layout.Profile] : NativeTableLayouts.Candidates(number, raw).Select(candidate => candidate.Profile).ToArray(),
             layout.Length,
             revision = version.TableRevision,
@@ -217,13 +219,16 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             return (null, "This record has a confirmed screening layout. Import a matching record to use a different layout.");
         var profile = savedProfile ?? requestedProfile;
         var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
+        if (firmware?.CompleteCatalogue == true && !firmware.VerifiedLengths.ContainsKey(number))
+            return (null, "This record type is absent from the selected firmware catalogue.");
         if (firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expected))
             return (NativeTableLayouts.Find(number, data, profile), null);
         if (data.Length != expected)
             return (null, $"The selected firmware uses {expected:N0} bytes for this record. Import the matching record to edit it.");
-        if (profile != null && profile != firmware.NativeLayout)
+        var nativeLayout = firmware.LayoutFor(number);
+        if (profile != null && profile != nativeLayout)
             return (null, "This layout does not match the set's target firmware.");
-        return (NativeTableLayouts.Find(number, data, firmware.NativeLayout), null);
+        return (NativeTableLayouts.Find(number, data, nativeLayout), null);
     }
 
     private Task<List<TableVersion>> ReadVersions(Guid set, int number, CancellationToken ct) => db.TableVersions

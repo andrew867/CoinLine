@@ -45,7 +45,8 @@ public sealed class FirmwareController(
     [AllowAnonymous]
     [HttpGet("table-profiles")]
     public ActionResult<object> TableProfiles() => Ok(FirmwareTableProfiles.Catalog.Select(profile =>
-        new { profile.Id, profile.Label, profile.VerifiedLengths }));
+        new { profile.Id, profile.Label, profile.VerifiedLengths, profile.CompleteCatalogue,
+            terminalAcknowledgedRecords = profile.TerminalAcknowledgedRecords.Order().ToArray() }));
 
     [AllowAnonymous]
     [HttpGet("versions")]

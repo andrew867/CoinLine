@@ -1044,6 +1044,20 @@ internal sealed class NccLinkProcessor(
             }
         }
 
+        var profileId = await db.FirmwareVersions.AsNoTracking().Where(version => version.Id == terminal.FirmwareVersionId)
+            .Select(version => version.TableProfileId).FirstOrDefaultAsync(stoppingToken);
+        var profile = FirmwareTableProfiles.Find(profileId);
+        foreach (var version in items.Select(item => item.TableVersion).OfType<TableVersion>())
+        {
+            if (version.TableDefinition is { } definition &&
+                TableSetFirmwareCompatibility.RecordIssue(profile, definition.TableNumber,
+                    TableDistributionService.GetEffectivePayload(version).Length) is { } issue)
+            {
+                await RejectBatchBeforeSendAsync(stream, terminalId, items, $"MT{definition.TableNumber}. {issue}", cashboxStatus);
+                return;
+            }
+        }
+
         await StartFirmwareTableTransferAsync(stream, terminalId, items, cashboxStatus);
     }
 

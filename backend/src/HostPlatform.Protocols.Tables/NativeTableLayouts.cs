@@ -11,7 +11,7 @@ public static partial class NativeTableLayouts
     public const byte MessagingRecord = 68;
     internal const byte TimeDiscountRecord = 152;
     private const int LaterAnswerSupervisionLength = 263;
-    private const string Later = "Later packed profile";
+    public const string Later = "Later packed profile";
     private static readonly (int, string)[] PaymentKinds =
         [(2, "No payment"), (3, "Coin"), (4, "Credit card"), (5, "Calling card"), (6, "Stored-value card"), (7, "Debit card")];
     private static readonly (int, string)[] CallKinds =
@@ -36,7 +36,7 @@ public static partial class NativeTableLayouts
     {
         var candidates = Candidates(number, record);
         // Existing sets without a registered target already use the older editing profile for these records.
-        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or QuickAccessKeyWire.MessageType or 73 ? MultiPay : null);
+        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 33 or QuickAccessKeyWire.MessageType or 73 ? MultiPay : null);
         var layout = selection == null ? candidates.Count == 1 ? candidates[0] : null
             : candidates.SingleOrDefault(layout => layout.Profile == selection);
         if (layout == null)
@@ -122,24 +122,8 @@ public static partial class NativeTableLayouts
                     Field($"interval-{item.Item1}.start", "Start (10 ms ticks)", 1 + item.Item1 * 4, SignedWord, min: 0),
                     Field($"interval-{item.Item1}.duration", "Interval (10 ms ticks)", 3 + item.Item1 * 4, SignedWord, min: 0)))]);
 
-        yield return Layout(33, 35, [Section("modem", "Modem line timing",
-            Select("baud", "Modem speed", 1, (0, "300 baud"), (1, "1200 baud")),
-            Field("seizeDelay", "Delay after line seizure (10 ms ticks)", 2, Word),
-            Field("dialToneDelay", "Delay after dial tone (10 ms ticks)", 4, Word),
-            Field("busyCycle", "Busy and ringback interval (10 ms ticks)", 6, Word),
-            Field("answerDelay", "Delay after answer tone (10 ms ticks)", 8, Word),
-            Field("laptopSeizeTime", "Data device line seizure time (10 ms ticks)", 10, Word),
-            Field("carrierDelay", "Delay after carrier detection (10 ms ticks)", 14, Word),
-            Field("turnaroundDelay", "Receive-to-transmit delay (10 ms ticks)", 16, Word),
-            Toggle("groundStart", "Use ground-start line seizure", 32, 1),
-            Toggle("carrierLossTimeout", "Enable carrier-loss timeout", 32, 2),
-            Toggle("answerToneDetection", "Enable answer tone detection", 33, 2),
-            Toggle("answerToneOptional", "Allow connection without answer tone", 33, 4),
-            Toggle("skipAnswerToneRemoval", "Skip waiting for answer tone removal", 33, 8),
-            Field("busyThreshold", "Busy signal threshold", 34)),
-            .. Rows("debounce", 5, i => new[] { "Dial tone", "Busy and ringback", "Answer tone", "Carrier", "Lost carrier" }[i], (i, key) =>
-                [Field($"{key}.interval", "Interval", 18 + i * 3), Field($"{key}.off", "Off count", 19 + i * 3),
-                 Field($"{key}.on", "On count", 20 + i * 3)])]);
+        yield return Layout(33, 36, ModemSections(later: false));
+        yield return new NativeTableLayout(33, 36, Later, ModemSections(later: true));
 
         yield return Layout(34, 19, [Section("summary", "Summary collection",
             Hour("startHour", "Start hour", 1), Minute("startMinute", "Start minute", 2),

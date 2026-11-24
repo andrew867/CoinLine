@@ -14,6 +14,14 @@ public static partial class NativeTableLayouts
         yield return new NativeTableLayout(21, 40, Later, [access, Section("adsi", "ADSI identifiers",
             new NativeTableField("cadId", "CAD identifier", 18, HexBytes, 4, Help: "Eight hexadecimal digits from the service configuration."),
             new NativeTableField("cpeId", "CPE identifier", 22, HexBytes, 4, Help: "Eight hexadecimal digits from the service configuration."))]);
+        yield return new NativeTableLayout(21, 48, Later,
+            [Section("access", "Management access",
+                Digits("terminalNumber", "Terminal wire ID", 1, 5, 10),
+                DialField("primary", "Primary manager number", 6, 10),
+                DialField("alternate", "Alternate manager number", 16, 10)),
+             Section("adsi", "ADSI identifiers",
+                 new NativeTableField("cadId", "CAD identifier", 26, HexBytes, 4, Help: "Eight hexadecimal digits from the service configuration."),
+                 new NativeTableField("cpeId", "CPE identifier", 30, HexBytes, 4, Help: "Eight hexadecimal digits from the service configuration."))]);
 
         yield return Layout(26, 72, FeatureSections(later: false));
         yield return new NativeTableLayout(26, 72, Later, FeatureSections(later: true));
@@ -45,6 +53,29 @@ public static partial class NativeTableLayouts
                 Field("dataJackPauseThreshold", "Data port DTMF pause threshold (10 ms ticks)", 64, SignedWord, min: 0),
                 Field("dataJackGrace", "Data port answer supervision grace period", 66, Word)));
     }
+
+    private static NativeTableSection[] ModemSections(bool later) =>
+    [
+        Section("modem", "Modem line timing",
+            [Select("baud", "Modem speed", 1, (0, "300 baud"), (1, "1200 baud")),
+             Field("seizeDelay", "Delay after line seizure (10 ms ticks)", 2, Word),
+             Field("dialToneDelay", "Delay after dial tone (10 ms ticks)", 4, Word),
+             Field("busyCycle", "Busy and ringback interval (10 ms ticks)", 6, Word),
+             Field("answerDelay", "Delay after answer tone (10 ms ticks)", 8, Word),
+             Field("laptopSeizeTime", "Data device line seizure time (10 ms ticks)", 10, Word),
+             ..(later ? new[] { Field("answerRemovalDelay", "Delay after answer tone removal (10 ms ticks)", 12, Word) } : []),
+             Field("carrierDelay", "Delay after carrier detection (10 ms ticks)", 14, Word),
+             Field("turnaroundDelay", "Receive-to-transmit delay (10 ms ticks)", 16, Word),
+             Toggle("groundStart", "Use ground-start line seizure", 33, 1),
+             Toggle("carrierLossTimeout", "Enable carrier-loss timeout", 33, 2),
+             Toggle("answerToneDetection", "Enable answer tone detection", 34, 2),
+             Toggle("answerToneOptional", "Allow connection without answer tone", 34, 4),
+             Toggle("skipAnswerToneRemoval", "Skip waiting for answer tone removal", 34, 8),
+             Field("busyThreshold", "Busy signal threshold", 35)]),
+        .. Rows("debounce", 5, i => new[] { "Dial tone", "Busy and ringback", "Answer tone", "Carrier", "Lost carrier" }[i], (i, key) =>
+            [Field($"{key}.interval", "Interval", 18 + i * 3), Field($"{key}.off", "Off count", 19 + i * 3),
+             Field($"{key}.on", "On count", 20 + i * 3)])
+    ];
 
     private static NativeTableSection[] FeatureSections(bool later) =>
     [

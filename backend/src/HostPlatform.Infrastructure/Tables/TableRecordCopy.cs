@@ -33,12 +33,11 @@ public static class TableRecordCopy
                 throw new InvalidOperationException($"Resolve the duplicate MT{number} records in the destination draft first.");
 
             var bytes = TableDistributionService.GetEffectivePayload(version);
-            if (firmware != null && firmware.VerifiedLengths.TryGetValue(number, out var length))
-            {
-                if (bytes.Length != length || (sourceFirmware != null && sourceFirmware.NativeLayout != firmware.NativeLayout
-                    && NativeTableLayouts.Candidates(number, bytes).Count > 1))
-                    throw new InvalidOperationException($"MT{number} does not match the destination firmware layout.");
-            }
+            if (TableSetFirmwareCompatibility.RecordIssue(firmware, number, bytes.Length) is { } issue)
+                throw new InvalidOperationException($"MT{number}. {issue}");
+            if (firmware?.VerifiedLengths.ContainsKey(number) == true && sourceFirmware != null &&
+                sourceFirmware.LayoutFor(number) != firmware.LayoutFor(number) && NativeTableLayouts.Candidates(number, bytes).Count > 1)
+                throw new InvalidOperationException($"MT{number} does not match the destination firmware layout.");
 
             var existing = candidates.SingleOrDefault();
             Guid? dependencyId = version.DependsOnTableDefinitionId is { } dependency ? mappedDefinitions[dependency] : null;

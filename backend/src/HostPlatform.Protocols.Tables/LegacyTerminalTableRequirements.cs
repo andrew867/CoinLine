@@ -4,7 +4,7 @@ namespace HostPlatform.Protocols.Tables;
 
 public sealed record FamilyRecordEvidence(int Number, int Length, string Format, int[] ScreeningSlots);
 public sealed record FamilyTableRequirement(string Name, bool Required, int[] Candidates, FamilyRecordEvidence[] Records,
-    string Status);
+    string Status, string? Note = null);
 public sealed record TerminalFamilyTableReview(string FamilyId, string FamilyLabel, bool Documented, int? ScreeningEntries,
     string? Note, FamilyTableRequirement[] Tables);
 
@@ -87,7 +87,7 @@ public static class LegacyTerminalTableRequirements
         _ => null
     };
 
-    public static TerminalFamilyTableReview Review(TerminalFamily family, IEnumerable<(int Number, byte[] Payload)> records,
+    public static TerminalFamilyTableReview Review(TerminalFamily family, IEnumerable<(int Number, byte[] Payload, string? LayoutProfile)> records,
         FirmwareTableProfile? firmware)
     {
         var reference = Find(family.Id);
@@ -95,7 +95,7 @@ public static class LegacyTerminalTableRequirements
             return new(family.Id, family.Label, false, null,
                 "No separate mandatory and optional table list was identified for this family.", []);
 
-        var byNumber = records.ToLookup(record => record.Number, record => record.Payload);
+        var byNumber = records.ToLookup(record => record.Number);
         var tables = reference.Required.Select(group => Evaluate(group, true))
             .Concat(reference.Optional.Except(reference.Required).Select(group => Evaluate(group, false))).ToArray();
         return new(family.Id, family.Label, true, reference.ScreeningEntries, reference.Note, tables);
@@ -103,25 +103,36 @@ public static class LegacyTerminalTableRequirements
         FamilyTableRequirement Evaluate(Group group, bool required)
         {
             var (name, candidates) = Describe(group, reference.ExpandedPrompts);
+            string? note = null;
+            if (group == Group.Prompts && reference.ExpandedPrompts && firmware?.VerifiedLengths.ContainsKey(27) == true
+                && !firmware.VerifiedLengths.ContainsKey(85))
+            {
+                candidates = [27, 28, .. candidates];
+                note = "The legacy list specifies expanded prompts. The inspected target catalogue contains MT27 and MT28.";
+            }
             var present = candidates.Where(number => byNumber.Contains(number)).Select(number =>
             {
                 var values = byNumber[number].ToArray();
-                var data = values[0];
+                var data = values[0].Payload;
                 var validHeader = values.Length == 1 && data.Length > 2 && data[0] == number;
                 var layouts = validHeader ? NativeTableLayouts.Candidates(number, data) : [];
+                if (values[0].LayoutProfile is { } storedProfile)
+                    layouts = layouts.Where(layout => layout.Profile == storedProfile).ToArray();
                 var format = !validHeader ? "invalid" :
                     firmware?.VerifiedLengths.TryGetValue(number, out var length) == true
-                        ? data.Length == length ? "verifiedLength" : "wrongLength"
+                        ? data.Length != length ? "wrongLength"
+                            : firmware.TerminalAcknowledgedRecords.Contains(number) ? "verifiedLength" : "catalogueLength"
+                        : firmware?.CompleteCatalogue == true ? "unsupported"
                         : layouts.Count > 0 || (number == 29 && data.Length == AdvertisingTableWire.RecordLength)
                             ? "recognized" : "unverified";
                 return new FamilyRecordEvidence(number, data.Length, format, CallScreeningWire.IsRecord(number)
                     ? layouts.Select(layout => layout.Sections.Count).Distinct().Order().ToArray() : []);
             }).ToArray();
             var status = candidates.Length == 0 ? "unmapped" : present.Length == 0 ? "missing"
-                : present.All(record => record.Format is "invalid" or "wrongLength") ? "invalid"
-                : group == Group.Graphics && present.Count(record => record.Format is not ("invalid" or "wrongLength")) != candidates.Length
+                : present.All(record => record.Format is "invalid" or "wrongLength" or "unsupported") ? "invalid"
+                : group == Group.Graphics && present.Count(record => record.Format is not ("invalid" or "wrongLength" or "unsupported")) != candidates.Length
                     ? "partial" : "present";
-            return new(name, required, candidates, present, status);
+            return new(name, required, candidates, present, status, note);
         }
     }
 

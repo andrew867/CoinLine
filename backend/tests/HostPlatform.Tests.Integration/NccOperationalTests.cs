@@ -1592,6 +1592,148 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Later_compiled_profile_validates_untargeted_pickup_and_delivers_edited_records()
+    {
+        using var firmware = await fx.Client.PostAsJsonAsync("/api/firmware/versions",
+            new { label = "Later transfer fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180 }, Json);
+        firmware.EnsureSuccessStatusCode();
+        var firmwareId = (await firmware.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var seed = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
+            .Single(row => row.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        byte[] wire = Convert.FromHexString("0000000621");
+        using var created = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId = seed.GetProperty("siteId").GetGuid(), firmwareVersionId = firmwareId,
+            terminalIdHex = Convert.ToHexString(wire), displayName = "Later transfer fixture", status = 0
+        }, Json);
+        created.EnsureSuccessStatusCode();
+        var phone = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var wrong = new byte[35];
+        wrong[0] = 33;
+        var wrongSet = await CreateSet("Untargeted old modem record", null, wrong);
+        await Publish(wrongSet);
+        var wrongBatch = await Queue(wrongSet);
+        await using (var link = await OpenAsync())
+        {
+            await link.Stream.WriteAsync(Message(wire, [8]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var end = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+        }
+        var refused = await WaitBatchAsync(wrongBatch, 3);
+        Assert.Contains("36 bytes", refused.GetProperty("lastError").GetString());
+        Assert.All(refused.GetProperty("timeline").EnumerateArray(), step =>
+            Assert.Equal("not_sent", step.GetProperty("lastAckStatus").GetString()));
+
+        var access = new byte[48];
+        access[0] = 21;
+        wire.CopyTo(access, 1);
+        Array.Fill(access, (byte)0x5A, 34, 14);
+        var modem = new byte[36];
+        modem[0] = 33;
+        modem[32] = 0x51;
+        modem[33] = 0x80;
+        modem[34] = 0x40;
+        var screen = new byte[3061];
+        screen[0] = 92;
+        var validSet = await CreateSet("Later compatible records", firmwareId, access, modem, screen);
+        await Edit(validSet, 21, new() { ["primary"] = "12345678901234567890" });
+        Convert.FromHexString("123456789A123456789A").CopyTo(access, 6);
+        await Edit(validSet, 33, new() { ["answerRemovalDelay"] = "4321", ["carrierLossTimeout"] = "true" });
+        modem[12] = 0xE1;
+        modem[13] = 0x10;
+        modem[33] = 0x82;
+        await Publish(validSet);
+        var batch = await Queue(validSet);
+        await using (var link = await OpenAsync())
+        {
+            await link.Stream.WriteAsync(Message(wire, [8]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var header = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+            foreach (var expected in new[] { access, modem, screen })
+            {
+                var received = new List<byte>();
+                while (received.Count < expected.Length)
+                {
+                    var fragment = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                    received.AddRange(fragment.Data);
+                    await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | fragment.Control)));
+                }
+                Assert.Equal(expected, received);
+                await link.Stream.WriteAsync(Message(wire, [14, expected[0]]));
+                AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            }
+            var end = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+        }
+        var completed = await WaitBatchAsync(batch, 2);
+        Assert.Equal(3, completed.GetProperty("timeline").GetArrayLength());
+        Assert.All(completed.GetProperty("timeline").EnumerateArray(), step =>
+            Assert.Equal("ack", step.GetProperty("lastAckStatus").GetString()));
+
+        async Task<Guid> CreateSet(string name, Guid? target, params byte[][] records)
+        {
+            using var createdSet = await fx.Client.PostAsJsonAsync("/api/tables/sets",
+                new { name, targetFirmwareVersionId = target }, Json);
+            createdSet.EnsureSuccessStatusCode();
+            var id = (await createdSet.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+            foreach (var record in records)
+            {
+                var existing = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/definitions", Json))
+                    .EnumerateArray().FirstOrDefault(row => row.GetProperty("tableNumber").GetInt32() == record[0]);
+                Guid definitionId;
+                if (existing.ValueKind == JsonValueKind.Object)
+                    definitionId = existing.GetProperty("id").GetGuid();
+                else
+                {
+                    using var definition = await fx.Client.PostAsJsonAsync("/api/tables/definitions",
+                        new { name = $"{name} MT{record[0]}", tableNumber = (int)record[0] }, Json);
+                    definition.EnsureSuccessStatusCode();
+                    definitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+                }
+                using var imported = await fx.Client.PostAsJsonAsync("/api/tables/versions", new
+                {
+                    tableSetId = id, tableDefinitionId = definitionId,
+                    tableRevision = 1, payloadBase64 = Convert.ToBase64String(record), sortOrder = (int)record[0]
+                }, Json);
+                imported.EnsureSuccessStatusCode();
+            }
+            return id;
+        }
+
+        async Task Edit(Guid id, int number, Dictionary<string, string> changes)
+        {
+            var path = $"/api/tables/sets/{id}/records/{number}/fields";
+            var original = await fx.Client.GetFromJsonAsync<JsonElement>(path, Json);
+            Assert.Equal(NativeTableLayouts.Later, original.GetProperty("profile").GetString());
+            var sha256 = original.GetProperty("sha256").GetString();
+            using var untouched = await fx.Client.PutAsJsonAsync(path,
+                new { revision = 1, sha256, changes = new Dictionary<string, string>() }, Json);
+            untouched.EnsureSuccessStatusCode();
+            Assert.Equal(sha256, (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json)).GetProperty("sha256").GetString());
+            using var edited = await fx.Client.PutAsJsonAsync(path, new { revision = 1, sha256, changes }, Json);
+            edited.EnsureSuccessStatusCode();
+        }
+
+        async Task Publish(Guid id)
+        {
+            using var response = await fx.Client.PostAsync($"/api/tables/sets/{id}/publish?confirm=true", null);
+            response.EnsureSuccessStatusCode();
+        }
+
+        async Task<Guid> Queue(Guid tableSetId)
+        {
+            using var queued = await fx.Client.PostAsJsonAsync($"/api/terminals/{phone}/downloads", new { tableSetId, scope = "Full" }, Json);
+            queued.EnsureSuccessStatusCode();
+            return (await queued.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        }
+    }
+
+    [Fact]
     public async Task Firmware_install_request_does_not_send_fixture_payloads()
     {
         await AssignLabSetAsync();

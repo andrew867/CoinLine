@@ -4,7 +4,7 @@ import { apiGet } from '../api/client'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 
 type Evidence = { number: number; length: number; format: string; screeningSlots: number[] }
-type Requirement = { name: string; required: boolean; candidates: number[]; records: Evidence[]; status: string }
+type Requirement = { name: string; required: boolean; candidates: number[]; records: Evidence[]; status: string; note?: string | null }
 type Review = {
   familyId: string; familyLabel: string; documented: boolean; screeningEntries: number | null
   note: string | null; tables: Requirement[]
@@ -15,7 +15,8 @@ const statusText: Record<string, string> = {
   invalid: 'Check record format', unmapped: 'Wire record unidentified',
 }
 const formatText: Record<string, string> = {
-  verifiedLength: 'Verified target length', recognized: 'Recognized editor layout', unverified: 'Unverified layout',
+  verifiedLength: 'OEM-emulator acknowledged length', catalogueLength: 'Compiled catalogue length',
+  recognized: 'Recognized editor layout', unverified: 'Unverified layout', unsupported: 'Absent from target catalogue',
   wrongLength: 'Wrong target length', invalid: 'Incomplete or duplicate record',
 }
 
@@ -69,7 +70,7 @@ export function TerminalFamilyReview({ setId, initialFamily, dataKey, recordDirt
           <table className="family-review-table">
             <thead><tr><th>Table family</th><th>Requirement</th><th>Candidate records</th><th>In this set</th></tr></thead>
             <tbody>{review.tables.map(row => <tr key={row.name}>
-              <th scope="row">{row.name}</th>
+              <th scope="row">{row.name}{row.note && <small>{row.note}</small>}</th>
               <td>{row.required ? 'Mandatory' : 'Feature-specific'}</td>
               <td>{row.candidates.length ? recordRanges(row.candidates) : 'Unknown'}</td>
               <td><strong>{statusText[row.status] ?? row.status}</strong>

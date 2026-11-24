@@ -13,7 +13,7 @@ public sealed class LegacyTerminalTableRequirementsTests
         Assert.All(reviews.Where(review => review.Documented), review =>
         {
             Assert.Contains(review.ScreeningEntries, new int?[] { 50, 200 });
-            Assert.NotEmpty(review.Tables.Where(table => table.Required));
+            Assert.Contains(review.Tables, table => table.Required);
             Assert.Equal(review.Tables.Length, review.Tables.Select(table => table.Name).Distinct().Count());
         });
         var graphics = Assert.Single(reviews.Single(review => review.FamilyId == "mtr20-card-graphical").Tables,
@@ -29,8 +29,8 @@ public sealed class LegacyTerminalTableRequirementsTests
     [Fact]
     public void Checklist_separates_logical_screening_size_and_recognized_or_verified_wire_formats()
     {
-        var payloads = new[] { (59, Payload(59, 1021)), (92, Payload(92, 3061)),
-            (26, Payload(26, 72)), (131, Payload(131, 9224)), (27, Payload(27, 2801)), (29, Payload(29, 2)) };
+        var payloads = new (int, byte[], string?)[] { (59, Payload(59, 1021), null), (92, Payload(92, 3061), null),
+            (26, Payload(26, 72), null), (131, Payload(131, 9224), null), (27, Payload(27, 2801), null), (29, Payload(29, 2), null) };
         var multi = LegacyTerminalTableRequirements.Review(TerminalFamilies.Find("mtr19-multipay")!, payloads,
             FirmwareTableProfiles.Find(FirmwareTableProfiles.MultiPay200));
         Assert.Equal(200, multi.ScreeningEntries);
@@ -40,13 +40,19 @@ public sealed class LegacyTerminalTableRequirementsTests
         Assert.Equal("wrongLength", screening.Records[1].Format);
         Assert.Equal(new[] { 180 }, screening.Records[1].ScreeningSlots);
         Assert.Equal("verifiedLength", Assert.Single(multi.Tables, table => table.Name == "Terminal feature and call options").Records[0].Format);
-        Assert.Empty(Assert.Single(multi.Tables, table => table.Name == "Expanded visual prompts").Records);
+        var prompts = Assert.Single(multi.Tables, table => table.Name == "Expanded visual prompts");
+        Assert.Equal("catalogueLength", Assert.Single(prompts.Records).Format);
+        Assert.Contains("MT27 and MT28", prompts.Note);
         Assert.Equal("invalid", Assert.Single(multi.Tables, table => table.Name == "Text advertising").Status);
 
         var graphic = LegacyTerminalTableRequirements.Review(TerminalFamilies.Find("mtr20-card-graphical")!, payloads, null);
         Assert.Equal(50, graphic.ScreeningEntries);
         Assert.Equal("partial", Assert.Single(graphic.Tables, table => table.Name == "Graphical screens").Status);
         Assert.Equal("recognized", Assert.Single(graphic.Tables, table => table.Name == "Graphical screens").Records[0].Format);
+
+        var selected = LegacyTerminalTableRequirements.Review(TerminalFamilies.Find("mtr19-multipay")!,
+            [(59, Payload(59, 1021), CallScreeningWire.CompactProfile)], null);
+        Assert.Equal(new[] { 85 }, Assert.Single(Assert.Single(selected.Tables, table => table.Name == "Call screening").Records).ScreeningSlots);
     }
 
     private static byte[] Payload(int number, int length)

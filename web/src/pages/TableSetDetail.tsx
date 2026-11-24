@@ -38,6 +38,7 @@ type Detail = {
   targetFirmwareVersionId: string | null
   targetFirmware: string | null
   tableProfile: string | null
+  tableProfileEvidence?: { recordCount: number; terminalAcknowledgedCount: number; completeCatalogue: boolean } | null
   firmwareFindings: { tableNumber: number; blocking: boolean; message: string }[]
   versions: Ver[]
   provisioning?: {
@@ -202,12 +203,15 @@ export function TableSetDetail() {
         ) : <p>Target firmware <strong>{d.targetFirmware ?? 'Any'}</strong></p>}
         {draft && recordDirty && targetChanged && <p>Save the record edits before changing the target.</p>}
         {d.targetFirmware && <p>Table layout <strong>{d.tableProfile ?? 'Unverified'}</strong></p>}
+        {d.tableProfileEvidence && <p className="page-intro">{d.tableProfileEvidence.recordCount} known record lengths.
+          {' '}{d.tableProfileEvidence.terminalAcknowledgedCount} with OEM-emulator acknowledgements.
+          {d.tableProfileEvidence.completeCatalogue && ' Records outside the compiled catalogue cannot be published for this target.'}</p>}
         {!!d.firmwareFindings?.length && <ul>{d.firmwareFindings.map((finding) => (
           <li key={finding.tableNumber}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}</li>
         ))}</ul>}
       </section>
       <TerminalFamilyReview key={`${id}:${initialFamily}`} setId={id} initialFamily={initialFamily}
-        dataKey={`${d.targetFirmwareVersionId}:${d.versions.map(version => `${version.tableNumber}:${version.payloadSha256Hex}`).join(',')}`}
+        dataKey={`${d.revision}:${d.targetFirmwareVersionId}:${d.versions.map(version => `${version.tableNumber}:${version.payloadSha256Hex}`).join(',')}`}
         recordDirty={recordDirty} />
       {d.provisioning && (d.provisioning.operatingType || d.provisioning.acceptedCoinSlots !== null ||
         d.provisioning.configuredCardRanges !== null || d.provisioning.findings.length > 0) && (

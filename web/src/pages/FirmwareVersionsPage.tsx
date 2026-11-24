@@ -2,7 +2,14 @@ import { useCallback, useEffect, useState } from 'react'
 import { apiGet, apiPost } from '../api/client'
 
 type Row = { id: string; label: string; buildId: string | null; tableProfileId: string | null }
-type TableProfile = { id: string; label: string }
+type TableProfile = { id: string; label: string; verifiedLengths: Record<string, number>;
+  completeCatalogue: boolean; terminalAcknowledgedRecords: number[] }
+
+function profileEvidence(profile: TableProfile) {
+  const count = Object.keys(profile.verifiedLengths).length
+  const acked = profile.terminalAcknowledgedRecords.length
+  return `${count} known record lengths, ${acked} with OEM-emulator acknowledgements${profile.completeCatalogue ? '. Complete image catalogue.' : '.'}`
+}
 
 export function FirmwareVersionsPage() {
   const [rows, setRows] = useState<Row[]>([])
@@ -12,6 +19,7 @@ export function FirmwareVersionsPage() {
   const [buildId, setBuildId] = useState('')
   const [profiles, setProfiles] = useState<TableProfile[]>([])
   const [tableProfileId, setTableProfileId] = useState('')
+  const selectedProfile = profiles.find(profile => profile.id === tableProfileId)
 
   const refresh = useCallback(async () => {
     setErr(null)
@@ -70,6 +78,7 @@ export function FirmwareVersionsPage() {
           </select>
         </label>
         <button type="submit" disabled={!label.trim()}>Register firmware</button>
+        {selectedProfile && <p className="page-intro" style={{ flexBasis: '100%', margin: 0 }}>{profileEvidence(selectedProfile)}</p>}
       </form>
       {!loading && !err && rows.length === 0 && (
         <p role="status" style={{ color: '#666' }}>
@@ -86,13 +95,18 @@ export function FirmwareVersionsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.map((r) => {
+              const profile = profiles.find(item => item.id === r.tableProfileId)
+              return (
               <tr key={r.id}>
                 <td>{r.label}</td>
                 <td>{r.buildId ?? '—'}</td>
-                <td>{profiles.find((profile) => profile.id === r.tableProfileId)?.label ?? 'Unverified layout'}</td>
+                <td>{profile?.label ?? 'Unverified layout'}
+                  {profile && <div><small>{profileEvidence(profile)}</small></div>}
+                </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       )}
