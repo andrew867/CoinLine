@@ -1,3 +1,4 @@
+using System.Data;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Security;
 using HostPlatform.Domain;
@@ -6,6 +7,7 @@ using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HostPlatform.Api.Controllers;
 
@@ -22,7 +24,7 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
             return Unauthorized(new { error = "Unknown username or password." });
 
         var expires = DateTimeOffset.UtcNow.AddHours(12);
-        var token = OperatorToken.Issue(user.Username, user.Role, signingKey.Value, expires);
+        var token = OperatorToken.Issue(user.Username, user.Role, signingKey.Value, expires, user.SessionGeneration);
         return Ok(new
         {
             token,
@@ -62,13 +64,13 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
         var username = (body.Username ?? "").Trim();
         var displayName = (body.DisplayName ?? "").Trim();
         var password = body.Password ?? "";
-        if (username.Length < 2 || username.Length > 64)
-            return BadRequest(new { error = "Username must be 2 to 64 characters." });
-        if (displayName.Length < 2)
-            return BadRequest(new { error = "A person needs a display name." });
+        if (username.Length < 2 || username.Length > 64 || username.Any(char.IsControl))
+            return BadRequest(new { error = "Username must be 2 to 64 printable characters." });
+        if (displayName.Length is < 2 or > 120)
+            return BadRequest(new { error = "A person needs a display name of 2 to 120 characters." });
         if (password.Length < 8)
             return BadRequest(new { error = "Password must be at least 8 characters." });
-        if (!Enum.TryParse<OperatorRole>(body.Role, true, out var role))
+        if (!Enum.TryParse<OperatorRole>(body.Role, true, out var role) || !Enum.IsDefined(role))
             return BadRequest(new { error = "Unknown role." });
         if (await db.OperatorAccounts.AnyAsync(u => u.Username == username, ct))
             return Conflict(new { error = "That username is already in use." });
@@ -82,7 +84,11 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
             Enabled = true
         };
         db.OperatorAccounts.Add(user);
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+        {
+            return Conflict(new { error = "That username is already in use." });
+        }
         return Created($"/api/auth/accounts/{user.Id}", AccountView(user));
     }
 
@@ -90,19 +96,40 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
     [Authorize(Policy = Policies.RequireAdmin)]
     public async Task<ActionResult<object>> Update(Guid id, [FromBody] UpdateAccountDto body, CancellationToken ct)
     {
+        try
+        {
+            if (!db.Database.IsRelational() || (body.Role == null && body.Enabled == null))
+                return await UpdateAccountAsync(id, body, ct);
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var result = await UpdateAccountAsync(id, body, ct);
+            if (result.Result is OkObjectResult)
+                await transaction.CommitAsync(ct);
+            return result;
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || ex.GetBaseException() is PostgresException
+            { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected })
+        {
+            return Conflict(new { error = "The account changed. Refresh People and try again." });
+        }
+    }
+
+    private async Task<ActionResult<object>> UpdateAccountAsync(Guid id, UpdateAccountDto body, CancellationToken ct)
+    {
         var user = await db.OperatorAccounts.FirstOrDefaultAsync(u => u.Id == id, ct);
         if (user == null)
             return NotFound();
+        var previousRole = user.Role;
+        var previousEnabled = user.Enabled;
         if (body.DisplayName != null)
         {
             var displayName = body.DisplayName.Trim();
-            if (displayName.Length < 2)
-                return BadRequest(new { error = "A person needs a display name." });
+            if (displayName.Length is < 2 or > 120)
+                return BadRequest(new { error = "A person needs a display name of 2 to 120 characters." });
             user.DisplayName = displayName;
         }
         if (body.Role != null)
         {
-            if (!Enum.TryParse<OperatorRole>(body.Role, true, out var role))
+            if (!Enum.TryParse<OperatorRole>(body.Role, true, out var role) || !Enum.IsDefined(role))
                 return BadRequest(new { error = "Unknown role." });
             if (user.Role == OperatorRole.Admin && role != OperatorRole.Admin && await EnabledAdminCount(user.Id, ct) == 0)
                 return Conflict(new { error = "Keep at least one enabled administrator." });
@@ -114,6 +141,8 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
                 return Conflict(new { error = "Keep at least one enabled administrator." });
             user.Enabled = enabled;
         }
+        if (user.Role != previousRole || user.Enabled != previousEnabled)
+            user.SessionGeneration++;
         await db.SaveChangesAsync(ct);
         return Ok(AccountView(user));
     }
@@ -130,7 +159,12 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
         if ((body.NewPassword ?? "").Length < 8)
             return BadRequest(new { error = "Password must be at least 8 characters." });
         user.PasswordHash = OperatorPassword.Hash(body.NewPassword!);
-        await db.SaveChangesAsync(ct);
+        user.SessionGeneration++;
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "The account changed. Sign in again before changing the password." });
+        }
         return NoContent();
     }
 

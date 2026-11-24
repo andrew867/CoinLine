@@ -387,6 +387,7 @@ public class HostPlatformDbContext : DbContext
             b.HasIndex(a => a.Username).IsUnique();
             b.Property(a => a.Username).HasMaxLength(64);
             b.Property(a => a.DisplayName).HasMaxLength(120);
+            b.Property(a => a.SessionGeneration).IsConcurrencyToken();
         });
 
         modelBuilder.Entity<SubsystemHeartbeat>(b =>

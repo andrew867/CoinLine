@@ -7,18 +7,19 @@ namespace HostPlatform.Api.Security;
 /// <summary>Signed console token: payload and HMAC, both base64url. Lifetime is hours, not a session cookie.</summary>
 public static class OperatorToken
 {
-    public static string Issue(string username, OperatorRole role, string key, DateTimeOffset expiresUtc)
+    public static string Issue(string username, OperatorRole role, string key, DateTimeOffset expiresUtc, int sessionGeneration)
     {
-        var payload = $"{username}\n{(int)role}\n{expiresUtc.ToUnixTimeSeconds()}";
+        var payload = $"{username}\n{(int)role}\n{expiresUtc.ToUnixTimeSeconds()}\n{sessionGeneration}";
         var body = Base64Url(Encoding.UTF8.GetBytes(payload));
         var sig = Base64Url(Sign(body, key));
         return body + "." + sig;
     }
 
-    public static bool TryRead(string token, string key, out string username, out OperatorRole role)
+    public static bool TryRead(string token, string key, out string username, out OperatorRole role, out int sessionGeneration)
     {
         username = "";
         role = OperatorRole.Viewer;
+        sessionGeneration = 0;
         var parts = token.Split('.');
         if (parts.Length != 2)
             return false;
@@ -47,7 +48,9 @@ public static class OperatorToken
         }
 
         var fields = payload.Split('\n');
-        if (fields.Length != 3 || !int.TryParse(fields[1], out var roleNum) || !long.TryParse(fields[2], out var exp))
+        if (fields.Length is not (3 or 4) || !int.TryParse(fields[1], out var roleNum) || !long.TryParse(fields[2], out var exp))
+            return false;
+        if (fields.Length == 4 && (!int.TryParse(fields[3], out sessionGeneration) || sessionGeneration < 0))
             return false;
         if (DateTimeOffset.UtcNow.ToUnixTimeSeconds() > exp)
             return false;

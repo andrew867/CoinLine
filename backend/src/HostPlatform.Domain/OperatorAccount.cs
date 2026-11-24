@@ -8,4 +8,5 @@ public class OperatorAccount : AuditableEntity
     public string PasswordHash { get; set; } = string.Empty;
     public OperatorRole Role { get; set; } = OperatorRole.Operator;
     public bool Enabled { get; set; } = true;
+    public int SessionGeneration { get; set; }
 }

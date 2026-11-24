@@ -81,7 +81,8 @@ export function SettingsPage() {
     }
     setCurrentPassword('')
     setNewPassword('')
-    setNote('Password saved. Use it the next time you sign in.')
+    consoleSession.clear()
+    window.location.assign('/login')
   }
 
   function onKey(e: FormEvent) {
@@ -128,6 +129,7 @@ export function SettingsPage() {
       </dl>
 
       <h2>Password</h2>
+      <p className="page-intro">Changing your password ends your current sign-in sessions.</p>
       <form onSubmit={(e) => void onPassword(e)} className="row-actions">
         <label>
           Current password

@@ -2297,6 +2297,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Role")
                         .HasColumnType("integer");
 
+                    b.Property<int>("SessionGeneration")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
