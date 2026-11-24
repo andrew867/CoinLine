@@ -15,6 +15,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<InmateFeatureConfiguration> InmateFeatureConfigurations => Set<InmateFeatureConfiguration>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
+    public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
     public DbSet<TerminalCallbackRequest> TerminalCallbackRequests => Set<TerminalCallbackRequest>();
     public DbSet<TerminalEvent> TerminalEvents => Set<TerminalEvent>();
     public DbSet<TerminalStatusRecord> TerminalStatusRecords => Set<TerminalStatusRecord>();
@@ -96,6 +97,17 @@ public class HostPlatformDbContext : DbContext
             b.Property(t => t.TerminalFamilyId).HasMaxLength(48);
             b.HasOne(t => t.TransportEndpoint).WithMany().HasForeignKey(t => t.TransportEndpointId);
             b.HasOne(t => t.FirmwareVersion).WithMany().HasForeignKey(t => t.FirmwareVersionId);
+        });
+        modelBuilder.Entity<TerminalInventory>(b =>
+        {
+            b.HasOne<Terminal>().WithOne().HasForeignKey<TerminalInventory>(inventory => inventory.TerminalId);
+            b.Property(inventory => inventory.Version).IsConcurrencyToken();
+            b.OwnsOne(inventory => inventory.Details, details =>
+            {
+                details.Property(profile => profile.EquipmentCost).HasPrecision(12, 2);
+                details.Property(profile => profile.LoopMileageCost).HasPrecision(12, 2);
+            });
+            b.Navigation(inventory => inventory.Details).IsRequired();
         });
         modelBuilder.Entity<TerminalGroupMembership>(b =>
         {

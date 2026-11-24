@@ -33,6 +33,15 @@ public static class FieldEventCatalog
     public static int[] MessageTypes { get; } =
         [6, 7, 10, 15, 16, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 51, 60, 83];
 
+    public static string? ReadTerminalSerial(ReadOnlySpan<byte> record)
+    {
+        if (record.Length != DlogFieldLayouts.TerminalStatusLength || record[0] != 10)
+            return null;
+        var packed = record.Slice(1, 5);
+        var digits = DlogRateWire.DecodeBcd(packed);
+        return digits.Length == packed.Length * 2 ? digits : null;
+    }
+
     public static string Category(int messageType) => messageType switch
     {
         7 or 16 or 83 => "alarm",

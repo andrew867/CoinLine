@@ -97,6 +97,7 @@ internal static class DlogFieldLayouts
         if (raw.Length < TerminalStatusLength)
             return false;
 
+        fields["serialNumber"] = FieldEventCatalog.ReadTerminalSerial(raw[..TerminalStatusLength]);
         var flags = new JsonArray();
         AddFlags(flags, raw[6], ["Handset fault", "Telephony not responding", null, null, null, null, null, "Telephony communications fault"]);
         AddFlags(flags, raw[7], ["Power interruption", "Display not responding", "Voice prompts unavailable", null, "Card reader blocked"]);

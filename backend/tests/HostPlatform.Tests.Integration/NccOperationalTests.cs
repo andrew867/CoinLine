@@ -1362,6 +1362,71 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             link.Stream.WriteAsync(Control((byte)(NccControl.Ack | frame.Control)));
     }
 
+    [Fact]
+    public async Task Terminal_inventory_keeps_operator_details_separate_from_reported_serial()
+    {
+        const string wireId = "0000000202";
+        var terminals = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json);
+        var seed = terminals.EnumerateArray().Single(t => t.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        using var create = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId = seed.GetProperty("siteId").GetGuid(), displayName = "Inventory test",
+            terminalIdHex = wireId, status = 0
+        }, Json);
+        create.EnsureSuccessStatusCode();
+        var terminalId = (await create.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var endpoint = $"/api/terminals/{terminalId}/inventory";
+        var inventory = await fx.Client.GetFromJsonAsync<JsonElement>(endpoint, Json);
+        Assert.Equal(JsonValueKind.Null, inventory.GetProperty("revision").ValueKind);
+        Assert.Equal(JsonValueKind.Null, inventory.GetProperty("serialNumber").ValueKind);
+        Assert.False(string.IsNullOrWhiteSpace(inventory.GetProperty("location").GetString()));
+
+        using var invalid = await fx.Client.PutAsJsonAsync(endpoint, new { profile = new { billingCustomerCode = "AB" } }, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var fractional = await fx.Client.PutAsJsonAsync(endpoint, new { profile = new { equipmentCost = 12.345m } }, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, fractional.StatusCode);
+        using var save = await fx.Client.PutAsJsonAsync(endpoint, new
+        {
+            profile = new { regionCode = " LAB-INV ", route = "North", addressLine2 = "Service area", indoor = true,
+                salespersonCode = "0000042", billingCustomerCode = "007", equipmentCost = 12.35m, signCount = 3 }
+        }, Json);
+        save.EnsureSuccessStatusCode();
+        var saved = await save.Content.ReadFromJsonAsync<JsonElement>(Json);
+        Assert.Equal(1, saved.GetProperty("revision").GetInt32());
+        Assert.Equal("LAB-INV", saved.GetProperty("profile").GetProperty("regionCode").GetString());
+
+        var bundle = new byte[2 + 11 + 28];
+        bundle[0] = 44;
+        bundle[1] = 2;
+        bundle[2] = 10;
+        Convert.FromHexString("0012345678").CopyTo(bundle, 3);
+        bundle[13] = 60;
+        await using (var link = await OpenAsync())
+        {
+            await link.Stream.WriteAsync(Message(Convert.FromHexString(wireId), bundle));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5))).Data);
+        }
+        inventory = await fx.Client.GetFromJsonAsync<JsonElement>(endpoint, Json);
+        Assert.Equal("0012345678", inventory.GetProperty("serialNumber").GetString());
+        Assert.NotEqual(JsonValueKind.Null, inventory.GetProperty("serialReportedAtUtc").ValueKind);
+        Assert.Equal("0000042", inventory.GetProperty("profile").GetProperty("salespersonCode").GetString());
+        Assert.Equal(12.35m, inventory.GetProperty("profile").GetProperty("equipmentCost").GetDecimal());
+        Assert.True(inventory.GetProperty("profile").GetProperty("indoor").GetBoolean());
+
+        using var update = await fx.Client.PutAsJsonAsync(endpoint, new
+        {
+            revision = 1, profile = new { regionCode = "Lab-New", billingCustomerCode = "007", signCount = 0 }
+        }, Json);
+        update.EnsureSuccessStatusCode();
+        using var stale = await fx.Client.PutAsJsonAsync(endpoint, new { revision = 1, profile = new { } }, Json);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var matches = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals?regionCode=lab-new&page=1", Json);
+        Assert.Equal(1, matches.GetProperty("total").GetInt32());
+        Assert.Equal(wireId, matches.GetProperty("items")[0].GetProperty("terminalIdHex").GetString());
+        Assert.Equal("Lab-New", matches.GetProperty("items")[0].GetProperty("regionCode").GetString());
+    }
+
     private async Task AssignLabSetAsync()
     {
         var sets = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/sets", Json))!;

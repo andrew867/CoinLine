@@ -29,6 +29,7 @@ public sealed class TerminalsController(
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
         [FromQuery] string? terminalFamilyId,
+        [FromQuery] string? regionCode,
         CancellationToken ct)
     {
         var query = db.Terminals.AsNoTracking().AsQueryable();
@@ -40,6 +41,12 @@ public sealed class TerminalsController(
             query = query.Where(t => (int)t.Status == status.Value);
         if (!string.IsNullOrEmpty(terminalFamilyId))
             query = query.Where(t => t.TerminalFamilyId == terminalFamilyId);
+        if (!string.IsNullOrWhiteSpace(regionCode))
+        {
+            var region = regionCode.Trim().ToLowerInvariant();
+            query = query.Where(t => db.TerminalInventories.Any(inventory => inventory.TerminalId == t.Id
+                && inventory.Details.RegionCode != null && inventory.Details.RegionCode.ToLower() == region));
+        }
         if (!string.IsNullOrWhiteSpace(q))
         {
             var s = q.Trim().ToLowerInvariant();
@@ -68,7 +75,9 @@ public sealed class TerminalsController(
             t.TerminalFamilyId,
             t.TransportEndpointId,
             t.TerminalGroupId,
-            t.TerminalGroup != null ? t.TerminalGroup.Name : null));
+            t.TerminalGroup != null ? t.TerminalGroup.Name : null,
+            db.TerminalInventories.Where(inventory => inventory.TerminalId == t.Id)
+                .Select(inventory => inventory.Details.RegionCode).FirstOrDefault()));
 
         var wantsPaging = page.HasValue || pageSize.HasValue;
         if (!wantsPaging)
@@ -126,6 +135,7 @@ public sealed class TerminalsController(
                 t.TransportEndpointId,
                 t.TerminalGroupId,
                 groupName = t.GroupName,
+                t.RegionCode,
                 onCall = mark.OnCall,
                 lastSessionAtUtc = mark.Last
             };
@@ -142,7 +152,8 @@ public sealed class TerminalsController(
         string? TerminalFamilyId,
         Guid? TransportEndpointId,
         Guid? TerminalGroupId,
-        string? GroupName);
+        string? GroupName,
+        string? RegionCode);
 
     [HttpPost]
     public async Task<ActionResult<object>> Create([FromBody] TerminalCreateDto body, CancellationToken ct)

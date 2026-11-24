@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { terminalStatusLabel } from '../components/StatusBadge'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
@@ -13,6 +13,7 @@ type Row = {
   status: number
   groupName: string | null
   terminalFamilyLabel: string | null
+  regionCode: string | null
   onCall: boolean
   lastSessionAtUtc: string | null
 }
@@ -21,11 +22,17 @@ export function TerminalsList() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [family, setFamily] = useState('')
+  const [search, setSearch] = useState('')
+  const [region, setRegion] = useState('')
+  const [filters, setFilters] = useState({ search: '', region: '' })
 
   useEffect(() => {
     let c = false
-    const query = family ? '?' + new URLSearchParams({ terminalFamilyId: family }) : ''
-    fetch('/api/terminals' + query, { headers })
+    const query = new URLSearchParams()
+    if (family) query.set('terminalFamilyId', family)
+    if (filters.search) query.set('q', filters.search)
+    if (filters.region) query.set('regionCode', filters.region)
+    fetch('/api/terminals?' + query, { headers })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>
@@ -39,10 +46,20 @@ export function TerminalsList() {
     return () => {
       c = true
     }
-  }, [family])
+  }, [family, filters])
 
   function filterFamily(value: string) {
+    if (value === family) return
     setFamily(value)
+    setRows(null)
+    setErr(null)
+  }
+
+  function applySearch(event: FormEvent) {
+    event.preventDefault()
+    const next = { search: search.trim(), region: region.trim() }
+    if (next.search === filters.search && next.region === filters.region) return
+    setFilters(next)
     setRows(null)
     setErr(null)
   }
@@ -55,16 +72,22 @@ export function TerminalsList() {
           Add a phone
         </Link>
       </p>
-      <TerminalFamilySelect value={family} onChange={filterFamily} emptyLabel="All families" />
+      <form className="table-config-selectors" aria-label="Find phones" onSubmit={applySearch}>
+        <label>Name or terminal ID<input value={search} onChange={event => setSearch(event.target.value)} /></label>
+        <label>Region code<input value={region} maxLength={32} onChange={event => setRegion(event.target.value)} /></label>
+        <TerminalFamilySelect value={family} onChange={filterFamily} emptyLabel="All families" />
+        <button type="submit">Apply filters</button>
+      </form>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!rows && <p>Loading…</p>}
-      {rows && rows.length === 0 && <p style={{ color: '#666' }}>{family ? 'No terminals in this family.' : 'No terminals yet.'}</p>}
+      {rows && rows.length === 0 && <p>{family || filters.search || filters.region ? 'No matching phones.' : 'No terminals yet.'}</p>}
       {rows && rows.length > 0 && (
         <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
               <th>Name</th>
               <th>Hex id</th>
+              <th>Region</th>
               <th>Group</th>
               <th>Family</th>
               <th>Status</th>
@@ -80,6 +103,7 @@ export function TerminalsList() {
                 <td>
                   <code>{r.terminalIdHex}</code>
                 </td>
+                <td>{r.regionCode ?? '—'}</td>
                 <td>{r.groupName ?? '—'}</td>
                 <td>{r.terminalFamilyLabel ?? 'Unknown'}</td>
                 <td>{terminalStatusLabel(r.status)}</td>

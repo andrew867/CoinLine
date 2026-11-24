@@ -1,4 +1,5 @@
 import { SpecialCallback } from './SpecialCallback'
+import { TerminalInventoryPanel } from './TerminalInventoryPanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
@@ -483,6 +484,7 @@ export function TerminalDetail() {
         <button type="submit" disabled={savingFamily || familySelection === (term.terminalFamilyId ?? '')}>Save family</button>
       </form>
       {familyNotice && <p role="status">{familyNotice}</p>}
+      <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />
       <PhoneGroups key={term.id} terminalId={term.id} />
 
       <h2>Phone session</h2>

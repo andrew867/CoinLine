@@ -3408,6 +3408,41 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("TerminalGroupMemberships");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInventory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("TerminalInventories");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TerminalStatusRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4547,6 +4582,134 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .WithMany("AdditionalGroups")
                         .HasForeignKey("TerminalId")
                         .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInventory", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithOne()
+                        .HasForeignKey("HostPlatform.Domain.TerminalInventory", "TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.OwnsOne("HostPlatform.Domain.TerminalInventoryDetails", "Details", b1 =>
+                        {
+                            b1.Property<Guid>("TerminalInventoryId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("AddressLine1")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<string>("AddressLine2")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<string>("AddressLine3")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<bool>("Basement")
+                                .HasColumnType("boolean");
+
+                            b1.Property<string>("BillingCustomerCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Contact")
+                                .HasMaxLength(80)
+                                .HasColumnType("character varying(80)");
+
+                            b1.Property<string>("DirectoryCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("DirectoryCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<decimal?>("EquipmentCost")
+                                .HasPrecision(12, 2)
+                                .HasColumnType("numeric(12,2)");
+
+                            b1.Property<string>("ExtensionCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("ExtensionCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<string>("HousingCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<bool>("Indoor")
+                                .HasColumnType("boolean");
+
+                            b1.Property<string>("IndustryCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("LocationGroupCode")
+                                .HasColumnType("text");
+
+                            b1.Property<decimal?>("LoopMileageCost")
+                                .HasPrecision(12, 2)
+                                .HasColumnType("numeric(12,2)");
+
+                            b1.Property<string>("MiscellaneousCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("MiscellaneousCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<bool>("PublicService")
+                                .HasColumnType("boolean");
+
+                            b1.Property<string>("RegionCode")
+                                .HasMaxLength(32)
+                                .HasColumnType("character varying(32)");
+
+                            b1.Property<string>("RevenueAccountingCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Route")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<string>("SalespersonCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("ServiceClass")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<string>("SignCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("SignCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<string>("SiteDescription")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<string>("Stop")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<string>("VoucherAccountCode")
+                                .HasColumnType("text");
+
+                            b1.HasKey("TerminalInventoryId");
+
+                            b1.ToTable("TerminalInventories");
+
+                            b1.WithOwner()
+                                .HasForeignKey("TerminalInventoryId");
+                        });
+
+                    b.Navigation("Details")
                         .IsRequired();
                 });
 
