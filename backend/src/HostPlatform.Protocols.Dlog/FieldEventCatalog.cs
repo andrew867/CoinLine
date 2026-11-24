@@ -23,6 +23,7 @@ public static class FieldEventCatalog
             46 => "Attention required",
             47 => "Attention required",
             51 => "Cash box collection",
+            60 => "Software version",
             83 => "Phone error",
             _ => ""
         };
@@ -30,7 +31,7 @@ public static class FieldEventCatalog
     }
 
     public static int[] MessageTypes { get; } =
-        [6, 7, 10, 15, 16, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 51, 83];
+        [6, 7, 10, 15, 16, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 51, 60, 83];
 
     public static string Category(int messageType) => messageType switch
     {
@@ -68,10 +69,12 @@ public static class FieldEventCatalog
         }
         while (type is 6 or 7 && data.Length >= recordLength && data[0] == type);
 
-        if (DlogFieldLayouts.HasUploadTrailer(data))
+        if (DlogFieldLayouts.HasUploadTrailer(data, allowWithoutEndData: type is 42 or 44))
         {
             records.Add(data[..DlogFieldLayouts.TerminalStatusLength].ToArray());
-            var cashTail = data[(DlogFieldLayouts.TerminalStatusLength + DlogFieldLayouts.SoftwareVersionLength)..];
+            var versionAndTail = data[DlogFieldLayouts.TerminalStatusLength..];
+            records.Add(versionAndTail[..DlogFieldLayouts.SoftwareVersionLength].ToArray());
+            var cashTail = versionAndTail[DlogFieldLayouts.SoftwareVersionLength..];
             if (cashTail.Length > 1)
                 records.Add(cashTail[..^1].ToArray());
         }

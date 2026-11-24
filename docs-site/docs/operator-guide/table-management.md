@@ -55,4 +55,4 @@ For compatible firmware, edit the ten **Discount rate** entries in the later **S
 
 In **Phones**, open a phone and expand **Phone groups** to choose its memberships. A phone can belong to up to 40 groups. Its primary group appears in the phone list. Every saved membership is included in that group's assignment preview.
 
-The console also exposes **Terminal status**, where decoded alarms, maintenance reports and status flags can be filtered by phone or report type.
+Open **Terminal status** to filter decoded alarms, maintenance reports, status flags and software versions by phone or report type. An upload or table request can include status and version records in the same message. The console lists each report separately and shows the type number the phone reported.

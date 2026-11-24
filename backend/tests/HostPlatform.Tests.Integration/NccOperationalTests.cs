@@ -472,18 +472,28 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         BinaryPrimitives.WriteUInt16LittleEndian(messaging.AsSpan(91), 5);
         var status = new byte[11];
         status[0] = 10;
+        status[8] = 0x02;
         var version = new byte[28];
         version[0] = 60;
+        "V100001"u8.CopyTo(version.AsSpan(1));
+        "90A "u8.CopyTo(version.AsSpan(8));
+        "20B "u8.CopyTo(version.AsSpan(19));
+        version[23] = 28;
         var cash = new byte[57];
         cash[0] = 38;
 
         await using (var link = await OpenAsync())
         {
-            await link.Stream.WriteAsync(Message(KnownId, [42, 0]));
+            await link.Stream.WriteAsync(Message(KnownId, [42, 8, .. status, .. version]));
             AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
             var invitation = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
             Assert.Equal(new byte[] { 17 }, invitation.Data);
             await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | invitation.Control)));
+            var ledger = await fx.Client.GetFromJsonAsync<JsonElement>("/api/field-events", Json);
+            var events = ledger.GetProperty("items").EnumerateArray().ToList();
+            Assert.Contains(events, row => row.GetProperty("summary").GetString() == "Statistics checksum fault");
+            Assert.Contains(events, row => row.GetProperty("summary").GetString() ==
+                "Controller ROM V100001, Controller software 90A, Telephony software 20B, Terminal type 28");
 
             await link.Stream.WriteAsync(Message(KnownId, [.. TerminalCallDetail(61, 0x7675, 0x33), .. status, .. version, .. cash, .. calls]));
             AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));

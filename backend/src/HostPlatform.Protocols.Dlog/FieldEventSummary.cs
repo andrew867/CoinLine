@@ -18,6 +18,7 @@ public static class FieldEventSummary
             38 or 51 => FormatCash(fields),
             39 => fields["callTime"]?.GetValue<string>(),
             >= 40 and <= 47 => FormatAttention(messageType, fields),
+            60 => FormatVersion(fields),
             _ => null
         };
     }
@@ -96,6 +97,20 @@ public static class FieldEventSummary
             parts.Add($"value {cur}");
         if (TryInt(fields["totalCurrencyValue"], out var total))
             parts.Add($"total {total}");
+        return parts.Count == 0 ? null : string.Join(", ", parts);
+    }
+
+    private static string? FormatVersion(JsonObject fields)
+    {
+        var parts = new List<string>();
+        if (fields["controlRom"]?.GetValue<string>() is { } rom)
+            parts.Add($"Controller ROM {rom}");
+        if (fields["controlSoftware"]?.GetValue<string>() is { } software)
+            parts.Add($"Controller software {software}");
+        if (fields["telephonySoftware"]?.GetValue<string>() is { } telephony)
+            parts.Add($"Telephony software {telephony}");
+        if (TryInt(fields["terminalType"], out var terminalType) && terminalType != 0)
+            parts.Add($"Terminal type {terminalType}");
         return parts.Count == 0 ? null : string.Join(", ", parts);
     }
 

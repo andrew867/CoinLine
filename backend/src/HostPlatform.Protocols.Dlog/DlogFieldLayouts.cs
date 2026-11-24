@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Text;
 using System.Text.Json.Nodes;
 
 namespace HostPlatform.Protocols.Dlog;
@@ -47,14 +48,15 @@ internal static class DlogFieldLayouts
     public const int CashBoxCollectionMinBytes =
         CashBoxCollectionPrefixBytes + 4 + (CashBoxStatusMinBytes - 1);
 
-    public static bool HasUploadTrailer(ReadOnlySpan<byte> data)
+    public static bool HasUploadTrailer(ReadOnlySpan<byte> data, bool allowWithoutEndData = false)
     {
         const int statusAndVersionLength = TerminalStatusLength + SoftwareVersionLength;
-        if (data.Length <= statusAndVersionLength || data[0] != 10 || data[TerminalStatusLength] != 60)
+        if (data.Length < statusAndVersionLength || data[0] != 10 || data[TerminalStatusLength] != 60)
             return false;
 
         var tail = data[statusAndVersionLength..];
-        return tail is [13] || (tail.Length == CashBoxStatusMinBytes + 1 && tail is [38, .., 13]);
+        return (allowWithoutEndData && tail.IsEmpty) || tail is [13]
+            || (tail.Length == CashBoxStatusMinBytes + 1 && tail is [38, .., 13]);
     }
 
     public static bool TryDecodeFields(int messageType, ReadOnlySpan<byte> raw, out JsonObject fields, out string note)
@@ -71,6 +73,7 @@ internal static class DlogFieldLayouts
             39 => TryDecodeAttentionCallback(raw, fields, out note),
             >= 40 and <= 47 => TryDecodeAttentionRequired(raw, fields, out note),
             51 => TryDecodeCashBoxCollection(raw, fields, out note),
+            60 => TryDecodeSoftwareVersion(raw, fields, out note),
             _ => false
         };
     }
@@ -111,6 +114,37 @@ internal static class DlogFieldLayouts
         for (var i = 0; i < labels.Length; i++)
             if ((source & (1 << i)) != 0 && labels[i] is { } label)
                 target.Add(label);
+    }
+
+    private static bool TryDecodeSoftwareVersion(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
+    {
+        note = "Reported controller and telephony versions and terminal type.";
+        if (raw.Length < SoftwareVersionLength)
+        {
+            note = "Software version requires a 28-byte report.";
+            return false;
+        }
+
+        fields["controlRom"] = ReadVersionLabel(raw.Slice(1, 7));
+        fields["controlSoftware"] = ReadVersionLabel(raw.Slice(8, 4));
+        fields["telephonyRom"] = ReadVersionLabel(raw.Slice(12, 7));
+        fields["telephonySoftware"] = ReadVersionLabel(raw.Slice(19, 4));
+        fields["terminalType"] = (int)raw[23];
+        return true;
+    }
+
+    private static string? ReadVersionLabel(ReadOnlySpan<byte> value)
+    {
+        var padding = value.IndexOfAny((byte)0, (byte)0xFF);
+        if (padding >= 0)
+            value = value[..padding];
+        foreach (var character in value)
+        {
+            if (character is < 0x20 or > 0x7E)
+                return null;
+        }
+        var label = Encoding.ASCII.GetString(value).Trim();
+        return label.Length > 0 ? label : null;
     }
 
     private static bool TryDecodeAlarm(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
