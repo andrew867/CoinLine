@@ -3126,6 +3126,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<byte[]>("Checksum")
                         .HasColumnType("bytea");
 
+                    b.Property<string>("ConfigurationId")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -3189,6 +3193,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("TablePayloadId");
 
                     b.HasIndex("TableSetId");
+
+                    b.HasIndex("ConfigurationId", "TableDefinitionId");
 
                     b.ToTable("TableVersions");
                 });

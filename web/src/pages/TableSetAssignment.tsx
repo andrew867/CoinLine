@@ -11,6 +11,7 @@ const scopes = {
   'group-pattern': { label: 'Group ID pattern', path: null },
   region: { label: 'Region', path: '/api/terminals/regions' },
   'time-area': { label: 'Time area', path: '/api/terminals/time-areas' },
+  'configuration-id': { label: 'Configuration ID', path: null },
   'terminal-id-range': { label: 'Terminal ID range', path: null },
   'software-version': { label: 'Current software version', path: null },
   site: { label: 'Location', path: '/api/sites' },
@@ -20,7 +21,9 @@ const scopes = {
 type Scope = keyof typeof scopes
 type Option = { id: string; name?: string; displayName?: string; code?: string | null }
 type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null; terminalIdHex?: string | null }
-type SavedRecord = { tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean }
+type SavedRecord = {
+  tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean; configurationId: string | null
+}
 type OptionalRecord = { tableNumber: number; name: string }
 type RecordAction = '' | 'copy' | 'remove'
 type AssignmentAction = 'set' | 'records' | 'schedule-records'
@@ -82,6 +85,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const hasRegionFilter = scope === 'group' || scope === 'group-pattern'
   const canTargetTimeArea = codeOnly || (partialSchedule && choices.get(callInParameters)?.copyable)
   const firmwareScope = scope === 'terminal-id-range' || scope === 'software-version'
+  const configurationScope = scope === 'configuration-id'
+  const namedRecords = configurationScope ? versions.filter(record => record.configurationId && choices.get(record.tableNumber)?.copyable) : []
+  const configurationRecord = namedRecords.find(record => String(record.tableNumber) === targetId)
+  const selectedDeliveryRecords = configurationRecord ? [configurationRecord.tableNumber] : deliveryRecords
   const prefix = scope === 'terminal-id-range' ? /^(\d{1,9})\*$/.exec(targetId)?.[1] : undefined
   const firmwareTarget = scope === 'terminal-id-range' ? {
     terminalIdFrom: prefix?.padEnd(10, '0') ?? targetId,
@@ -93,10 +100,11 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const deliveryMode = schedulesOnly && mode === 'assignment' ? 'now' : mode
   const scopeSelection = {
     targetType: scope,
-    targetId: firmwareScope || scope === 'region' || scope === 'group-pattern' || scope === 'time-area' ? null : targetId,
+    targetId: firmwareScope || configurationScope || scope === 'region' || scope === 'group-pattern' || scope === 'time-area' ? null : targetId,
     regionCode: (scope === 'region' ? targetId : hasRegionFilter ? groupRegion : '') || undefined,
     groupPattern: scope === 'group-pattern' ? targetId.trim() : undefined,
     timeAreaCode: scope === 'time-area' ? targetId : undefined,
+    configurationId: configurationRecord?.configurationId,
     firmwareTarget,
   }
 
@@ -153,7 +161,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       for (const [key, value] of Object.entries(firmwareTarget ?? {})) {
         if (value) params.set(`firmwareTarget.${key}`, value)
       }
-      if (partialSchedule) deliveryRecords.forEach(number => params.append('recordNumbers', String(number)))
+      if (scopeSelection.configurationId) params.set('configurationId', scopeSelection.configurationId)
+      if (partialSchedule) selectedDeliveryRecords.forEach(number => params.append('recordNumbers', String(number)))
       const response = await apiGetRaw(`/api/tables/sets/${setId}/assignment-preview?${params}`)
       const result = await response.json().catch(() => null)
       if (!response.ok) throw new Error(result?.error ?? 'Could not preview this assignment.')
@@ -210,7 +219,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       const response = await apiPostRaw(`/api/tables/sets/${setId}/${scheduled ? 'schedules' : 'assignments'}`, {
         ...scopeSelection, terminalIds: targets?.filter((target) => target.eligible).map((target) => target.id) ?? [],
         ...(scheduled ? { availableAtUtc: selected?.toISOString() ?? null } : {}),
-        ...(partialSchedule ? { recordNumbers: deliveryRecords } : {}),
+        ...(partialSchedule ? { recordNumbers: selectedDeliveryRecords } : {}),
       })
       const result = await response.json().catch(() => null)
       if (!response.ok) throw new Error(result?.error ?? 'Could not save the assignment.')
@@ -238,7 +247,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           <select value={action} disabled={busy} onChange={(event) => {
             const next = event.target.value as AssignmentAction
             setAction(next)
-            if (scope === 'time-area' && next !== 'schedule-records') changeScope('terminal')
+            if ((scope === 'time-area' || scope === 'configuration-id') && next !== 'schedule-records') changeScope('terminal')
             else clearReview()
           }}>
             <option value="set">Assign full set</option>
@@ -250,6 +259,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           <select disabled={busy} value={scope} onChange={(event) => changeScope(event.target.value as Scope)}>
             {Object.entries(scopes).filter(([value]) => {
               if (value === 'terminal-id-range' || value === 'software-version') return codeOnly
+              if (value === 'configuration-id') return partialSchedule
               return value !== 'time-area' || canTargetTimeArea
             })
               .map(([value, { label }]) => <option value={value} key={value}>{label}</option>)}
@@ -287,7 +297,15 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           </label>
           <p>Enter the controller versions shown in the phone’s latest NCC software report.</p>
         </>}
-        {!firmwareScope && (scope === 'group-pattern' ? <label>Group ID pattern
+        {configurationScope && <label>Configuration ID
+          <select disabled={busy} value={targetId} onChange={event => { setTargetId(event.target.value); clearReview() }}>
+            <option value="">Choose a named record</option>
+            {namedRecords.map(record => <option value={record.tableNumber} key={record.tableNumber}>
+              {record.configurationId} · MT{record.tableNumber} · {record.definitionName}
+            </option>)}
+          </select>
+        </label>}
+        {!firmwareScope && !configurationScope && (scope === 'group-pattern' ? <label>Group ID pattern
           <input value={targetId} disabled={busy} maxLength={6} placeholder="ABC*" onChange={event => {
             setTargetId(event.target.value)
             clearReview()
@@ -338,7 +356,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               onChange={event => { setBeginWithTerminalId(event.target.value); clearReview() }} />
           </label>}
         </fieldset>}
-        {partialSchedule && <fieldset className="scope-record-choices" disabled={busy}>
+        {partialSchedule && !configurationScope && <fieldset className="scope-record-choices" disabled={busy}>
           <legend>Records to download</legend>
           {[...choices].filter(([number, choice]) => choice.copyable && (scope !== 'time-area' || number === callInParameters))
             .sort(([first], [second]) => first - second).map(([number, choice]) =>
@@ -352,7 +370,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         </fieldset>}
         <button type="submit" disabled={!targetId || busy || (scope === 'software-version' && !secondTarget.trim())
           || (selectedRecords && !copyRecords.length && !removeRecords.length)
-          || (partialSchedule && !deliveryRecords.length)}>
+          || (configurationScope && !configurationRecord) || (partialSchedule && !selectedDeliveryRecords.length)}>
           {selectedRecords ? 'Preview record update' : schedulesOnly ? 'Preview phones' : 'Preview assignment'}
         </button>
       </form>

@@ -15,6 +15,7 @@ type Ver = {
   tableNumber: number
   dependsOnTableDefinitionId: string | null
   tableRevision: number
+  configurationId: string | null
   payloadSha256Hex: string
   payloadLengthBytes: number
   sortOrder: number
@@ -238,6 +239,7 @@ export function TableSetDetail() {
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
               <th>Table</th>
+              <th>Configuration ID</th>
               <th>Rev</th>
               <th>SHA-256 (payload)</th>
               <th>Bytes</th>
@@ -249,6 +251,9 @@ export function TableSetDetail() {
             {d.versions.map((v) => (
               <tr key={v.id} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
                 <td>{v.definitionName}</td>
+                <td>{draft && v.tableNumber !== 94
+                  ? <ConfigurationIdField key={v.tableRevision} setId={d.id} record={v} disabled={recordDirty || targetChanged} onSaved={load} />
+                  : v.configurationId ?? 'None'}</td>
                 <td>{v.tableRevision}</td>
                 <td>
                   <code style={{ fontSize: 11 }} title="SHA-256 of opaque table payload bytes">
@@ -275,4 +280,40 @@ export function TableSetDetail() {
       </div>
     </div>
   )
+}
+
+function ConfigurationIdField({ setId, record, disabled, onSaved }: {
+  setId: string; record: Ver; disabled: boolean; onSaved: () => void
+}) {
+  const original = record.configurationId ?? ''
+  const [value, setValue] = useState(original)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const label = `Configuration ID for ${record.definitionName}`
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const response = await apiFetch(`/api/tables/sets/${setId}/records/${record.tableNumber}/configuration-id`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordRevision: record.tableRevision, configurationId: value || null }),
+      })
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not save the Configuration ID.')
+      setValue(value.trimEnd().toUpperCase())
+      onSaved()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not save the Configuration ID.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <form onSubmit={event => void save(event)} className="row-actions">
+    <input aria-label={label} autoComplete="off" value={value} maxLength={6} size={6} disabled={disabled || saving}
+      onChange={event => setValue(event.target.value)} />
+    <button type="submit" disabled={disabled || saving || value === original}>Save ID</button>
+    {error && <p role="alert">{error}</p>}
+  </form>
 }

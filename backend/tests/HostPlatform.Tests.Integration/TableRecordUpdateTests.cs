@@ -11,6 +11,82 @@ public sealed class TableRecordUpdateTests(ApiFixture factory)
     private readonly HttpClient client = CreateClient(factory);
 
     [Fact]
+    public async Task Configuration_id_schedule_matches_the_selected_record_on_current_assignments()
+    {
+        var site = (await Get("sites"))[0].GetProperty("id").GetGuid();
+        var firmware = await Create("firmware/versions", new { label = "Configuration ID fixture", tableProfileId = FirmwareTableProfiles.MultiPay200 });
+        var first = await Phone("First named assignment", "0000000681", null, firmware, site);
+        var second = await Phone("Second named assignment", "0000000682", null, firmware, site);
+        var differentType = await Phone("Same ID on another message type", "0000000683", null, firmware, site);
+        var advertising = await Definition("Named advertising", 29);
+        var coin = await Definition("Named coin settings", 50);
+        var source = await Set("New named source", firmware);
+        var firstBasis = await Set("Old set one", firmware);
+        var secondBasis = await Set("Old set two", firmware);
+        var otherBasis = await Set("Different advertising ID", firmware);
+        foreach (var (set, payload) in new[] { (source, (byte)1), (firstBasis, (byte)2), (secondBasis, (byte)3), (otherBasis, (byte)4) })
+        {
+            await Version(set, advertising, Bytes(29, 481, payload), 0);
+            var sourceHash = Hash(await Get($"tables/sets/{set}"), 29);
+            await NameRecord(set, 29, 1, set == otherBasis ? "OTHER" : "ad$1  ");
+            var labelled = (await Get($"tables/sets/{set}"));
+            Assert.Equal(set == otherBasis ? "OTHER" : "AD$1", Record(labelled, 29).GetProperty("configurationId").GetString());
+            Assert.Equal(sourceHash, Hash(labelled, 29));
+            if (set == otherBasis || set == source)
+            {
+                await Version(set, coin, Bytes(50, 105, payload), 1);
+                await NameRecord(set, 50, 1, "AD$1");
+            }
+            await Publish(set);
+        }
+        await Assign(first, firstBasis);
+        await Assign(second, secondBasis);
+        await Assign(differentType, otherBasis);
+        var endpoint = $"tables/sets/{source}";
+        var preview = await Get($"{endpoint}/assignment-preview?targetType=configuration-id&recordNumbers=29&configurationId=ad%241");
+        var eligible = preview.GetProperty("targets").EnumerateArray().Where(row => row.GetProperty("eligible").GetBoolean())
+            .Select(row => row.GetProperty("id").GetGuid()).ToHashSet();
+        Assert.True(eligible.SetEquals(new[] { first, second }));
+        Assert.Equal(29, Assert.Single(preview.GetProperty("recordNumbers").EnumerateArray()).GetInt32());
+
+        var request = new { targetType = "configuration-id", configurationId = "AD$1", terminalIds = new[] { first, second }, recordNumbers = new[] { 29 } };
+        using var invalid = await client.PostAsJsonAsync($"/api/{endpoint}/schedules", request with { configurationId = "OTHER" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var multiple = await client.PostAsJsonAsync($"/api/{endpoint}/schedules", request with { recordNumbers = new[] { 29, 50 } });
+        Assert.Equal(HttpStatusCode.BadRequest, multiple.StatusCode);
+
+        await Assign(second, otherBasis);
+        using var stale = await client.PostAsJsonAsync($"/api/{endpoint}/schedules", request);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        await Assign(second, secondBasis);
+        Assert.Equal(2, (await Post($"{endpoint}/schedules", request)).GetProperty("scheduled").GetInt32());
+        var schedules = (await Get($"{endpoint}/schedules")).EnumerateArray().ToArray();
+        Assert.True(schedules.Select(row => row.GetProperty("terminalId").GetGuid()).ToHashSet().SetEquals(eligible));
+        Assert.All(schedules, row => Assert.Equal(29, Assert.Single(row.GetProperty("recordNumbers").EnumerateArray()).GetInt32()));
+        Assert.Equal(firstBasis, (await Assignment(first)).GetProperty("tableSetId").GetGuid());
+
+        var clone = await Create($"{endpoint}/clone", new { name = "Named draft copy" });
+        var cloneRecord = Record(await Get($"tables/sets/{clone}"), 29);
+        Assert.Equal("AD$1", cloneRecord.GetProperty("configurationId").GetString());
+        await NameRecord(clone, 29, cloneRecord.GetProperty("tableRevision").GetInt32(), null);
+        var draft = await Get($"tables/sets/{clone}");
+        Assert.Equal(JsonValueKind.Null, Record(draft, 29).GetProperty("configurationId").ValueKind);
+        var currentSource = await Get(endpoint);
+        await Post($"tables/sets/{clone}/record-copy", new { sourceSetId = source, sourceRevision = currentSource.GetProperty("revision"),
+            destinationRevision = draft.GetProperty("revision"), recordNumbers = new[] { 29 } });
+        var copied = await Get($"tables/sets/{clone}");
+        Assert.Equal("AD$1", Record(copied, 29).GetProperty("configurationId").GetString());
+        Assert.Equal(Hash(currentSource, 29), Hash(copied, 29));
+
+        async Task NameRecord(Guid set, int number, int recordRevision, string? configurationId)
+        {
+            using var response = await client.PutAsJsonAsync($"/api/tables/sets/{set}/records/{number}/configuration-id",
+                new { recordRevision, configurationId });
+            Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Rollout_resumes_from_the_blocked_phone_and_can_skip_it_without_replaying_the_prefix()
     {
         var site = (await Get("sites"))[0].GetProperty("id").GetGuid();

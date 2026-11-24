@@ -61,6 +61,8 @@ public class TableVersion : AuditableEntity
     public string? ScreeningDescriptionsJson { get; set; }
     /// <summary>Confirmed editor layout when the message type and length match more than one screening format.</summary>
     public string? ScreeningLayoutProfile { get; set; }
+    /// <summary>Host-side Configuration ID used to select assignments for this message type.</summary>
+    public string? ConfigurationId { get; set; }
 }
 
 public class TerminalTableAssignment : AuditableEntity

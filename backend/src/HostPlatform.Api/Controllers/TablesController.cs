@@ -1,4 +1,6 @@
 using System.Buffers.Binary;
+using System.Data;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HostPlatform.Api.Audit;
 using HostPlatform.Domain;
@@ -70,6 +72,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             v.TableDefinitionId,
             DefinitionName = v.TableDefinition!.Name,
             v.TableRevision,
+            v.ConfigurationId,
             v.TablePayloadId,
             v.PayloadSha256Hex,
             PayloadLengthBytes = TableDistributionService.GetEffectivePayload(v).Length,
@@ -120,6 +123,43 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    [HttpPut("sets/{id:guid}/records/{number:int}/configuration-id")]
+    public async Task<ActionResult> SetConfigurationId(Guid id, int number, ConfigurationIdEdit body, CancellationToken ct)
+    {
+        var set = await db.TableSets.Include(row => row.Versions).ThenInclude(record => record.TableDefinition)
+            .SingleOrDefaultAsync(row => row.Id == id, ct);
+        if (set == null)
+            return NotFound();
+        if (set.Status != TableSetStatus.Draft)
+            return Conflict(new { error = "Make a draft copy to change a Configuration ID." });
+
+        var matches = set.Versions.Where(record => record.TableDefinition!.TableNumber == number).Take(2).ToArray();
+        if (number is < 1 or > 255 or CodeDownloadWire.MessageType || matches.Length != 1)
+            return BadRequest(new { error = "Choose a single data record in the draft." });
+        var record = matches[0];
+        if (record.TableRevision != body.RecordRevision)
+            return Conflict(new { error = "The record changed. Reload it before changing its Configuration ID." });
+
+        string? configurationId;
+        try { configurationId = TableDistributionService.NormalizeConfigurationId(body.ConfigurationId); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        if (record.ConfigurationId == configurationId)
+            return NoContent();
+        if (record.TableRevision == int.MaxValue)
+            return Conflict(new { error = "The record has reached its maximum revision." });
+
+        record.ConfigurationId = configurationId;
+        record.TableRevision++;
+        set.Version++;
+        ApiAudit.Write(db, HttpContext, "tables.set", "set_configuration_id", id.ToString(), new { number, configurationId });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "The record changed. Reload it before changing its Configuration ID." });
+        }
+        return NoContent();
     }
 
     [HttpGet("sets")]
@@ -335,7 +375,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     [HttpGet("sets/{id:guid}/assignment-preview")]
     public async Task<ActionResult<object>> PreviewAssignments(Guid id, [FromQuery] string targetType,
         [FromQuery] Guid? targetId, [FromQuery] string? regionCode, [FromQuery] string? groupPattern,
-        [FromQuery] string? timeAreaCode, [FromQuery] int[]? recordNumbers,
+        [FromQuery] string? timeAreaCode, [FromQuery] int[]? recordNumbers, [FromQuery] string? configurationId,
         [FromQuery] FirmwareScheduleTarget firmwareTarget, CancellationToken ct)
     {
         var query = db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).AsQueryable();
@@ -350,7 +390,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         {
             var records = SelectScheduleRecords(set, targetType, recordNumbers is { Length: > 0 } ? recordNumbers : null);
             var targets = await AssignmentTargetsAsync(set, new TableTargetScope(targetType, targetId, regionCode, groupPattern, timeAreaCode),
-                ct, records, firmwareTarget);
+                ct, records, firmwareTarget, configurationId, recordNumbers is { Length: 1 } ? recordNumbers[0] : null);
             return Ok(new { targets, recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber) });
         }
         catch (InvalidOperationException ex)
@@ -364,6 +404,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     {
         if (body.TargetType == "time-area")
             return BadRequest(new { error = "Use scheduled delivery to target a time area." });
+        if (body.TargetType == "configuration-id")
+            return BadRequest(new { error = "Use scheduled delivery to target a Configuration ID." });
         if (IsFirmwareScope(body.TargetType))
             return BadRequest(new { error = "Use the firmware scheduler for terminal ID ranges and current software versions." });
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -455,6 +497,25 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     [HttpPost("sets/{id:guid}/schedules")]
     public async Task<ActionResult<object>> ScheduleForScope(Guid id, [FromBody] TableScopeScheduleDto body, CancellationToken ct)
     {
+        if (body.TargetType != "configuration-id" || !db.Database.IsRelational())
+            return await SaveScheduleAsync(id, body, ct);
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var response = await SaveScheduleAsync(id, body, ct);
+            if (response.Result is OkObjectResult)
+                await transaction.CommitAsync(ct);
+            return response;
+        }
+        catch (Exception ex) when (ex.GetBaseException() is PostgresException
+            { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected })
+        {
+            return Conflict(new { error = "Phone assignments changed while scheduling. Refresh the preview and try again." });
+        }
+    }
+
+    private async Task<ActionResult<object>> SaveScheduleAsync(Guid id, TableScopeScheduleDto body, CancellationToken ct)
+    {
         var set = await db.TableSets.AsNoTracking().Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
             .Include(s => s.Versions).ThenInclude(v => v.TablePayload).Include(s => s.TargetFirmwareVersion)
             .FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -479,7 +540,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         try
         {
             records = SelectScheduleRecords(set, body.TargetType, body.RecordNumbers);
-            targets = await AssignmentTargetsAsync(set, body, ct, records, body.FirmwareTarget);
+            targets = await AssignmentTargetsAsync(set, body, ct, records, body.FirmwareTarget, body.ConfigurationId,
+                body.RecordNumbers is { Length: 1 } ? body.RecordNumbers[0] : null);
         }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         var recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber).ToArray();
@@ -504,7 +566,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 TerminalId = terminalId, TableSetId = id, AvailableAtUtc = ready, RecordNumbers = recordNumbers
             }));
             ApiAudit.Write(db, HttpContext, "tables.set", "schedule_scope", id.ToString(),
-                new { body.TargetType, body.TargetId, body.RegionCode, body.GroupPattern, body.TimeAreaCode, recordNumbers, ready, count = ids.Count });
+                new { body.TargetType, body.TargetId, body.RegionCode, body.GroupPattern, body.TimeAreaCode, body.ConfigurationId,
+                    configurationRecordNumber = body.TargetType == "configuration-id" ? body.RecordNumbers?[0] : null, recordNumbers, ready, count = ids.Count });
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
             {
@@ -536,6 +599,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
     private static IReadOnlyList<TableVersion>? SelectScheduleRecords(TableSet set, string targetType, int[]? numbers)
     {
+        if (targetType == "configuration-id" && numbers is not { Length: 1 })
+            throw new InvalidOperationException("Choose one data record to schedule by Configuration ID.");
         const int callInParameters = 35;
         const string timeAreaIssue = "Time-area schedules accept only MT35 call-in parameters or a dedicated MT94 firmware set.";
         if (IsFirmwareScope(targetType) && (numbers != null || TableDistributionService.CodeOnlyVersion(set.Versions) == null))
@@ -558,7 +623,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     private static bool IsFirmwareScope(string targetType) => targetType is "terminal-id-range" or "software-version";
 
     private async Task<List<AssignmentTarget>> AssignmentTargetsAsync(TableSet set, TableTargetScope scope,
-        CancellationToken ct, IReadOnlyList<TableVersion>? records = null, FirmwareScheduleTarget? firmwareTarget = null)
+        CancellationToken ct, IReadOnlyList<TableVersion>? records = null, FirmwareScheduleTarget? firmwareTarget = null,
+        string? configurationId = null, int? configurationRecordNumber = null)
     {
         var firmwareScope = IsFirmwareScope(scope.TargetType);
         if (firmwareScope && (scope.TargetId != null || scope.RegionCode != null || scope.GroupPattern != null || scope.TimeAreaCode != null))
@@ -566,7 +632,23 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         if (!firmwareScope && firmwareTarget is { HasRange: true } or { HasVersion: true })
             throw new InvalidOperationException("Select the corresponding firmware scheduling scope for those fields.");
 
-        var selected = firmwareScope ? db.Terminals.AsNoTracking() : tables.PhonesInScope(scope);
+        var configurationScope = scope.TargetType == "configuration-id";
+        if (!configurationScope && configurationId != null)
+            throw new InvalidOperationException("Choose the Configuration ID scope to use that field.");
+
+        IQueryable<Terminal> selected;
+        if (configurationScope)
+        {
+            var selectedId = TableDistributionService.NormalizeConfigurationId(configurationId);
+            if (scope.TargetId != null || scope.RegionCode != null || scope.GroupPattern != null || scope.TimeAreaCode != null ||
+                selectedId == null || configurationRecordNumber is not { } number)
+                throw new InvalidOperationException("Choose one Configuration ID and its data record.");
+            if (records?.SingleOrDefault(record => record.TableDefinition!.TableNumber == number)?.ConfigurationId != selectedId)
+                throw new InvalidOperationException("The selected source record does not have that Configuration ID.");
+            selected = tables.PhonesWithConfiguration(number, selectedId);
+        }
+        else
+            selected = firmwareScope ? db.Terminals.AsNoTracking() : tables.PhonesInScope(scope);
         if (scope.TargetType == "terminal-id-range")
         {
             var from = firmwareTarget?.TerminalIdFrom?.Trim() ?? "";
@@ -613,7 +695,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 : TableDistributionService.AccessRecordIssue(access, t.TerminalIdHex)
                     ?? TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId);
             return new AssignmentTarget(t.Id, t.DisplayName, t.SiteId, t.CustomerId, TerminalFamilies.Find(t.TerminalFamilyId)?.Label,
-                reason == null, reason, scope.TargetType == "terminal-id-range" ? t.TerminalIdHex : null);
+                reason == null, reason, scope.TargetType is "terminal-id-range" or "configuration-id" ? t.TerminalIdHex : null);
         }).ToList();
     }
 
@@ -656,6 +738,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 DefinitionName = v.TableDefinition!.Name,
                 TableNumber = v.TableDefinition.TableNumber,
                 v.TableRevision,
+                v.ConfigurationId,
                 v.TablePayloadId,
                 v.PayloadSha256Hex,
                 PayloadLengthBytes = v.TablePayload != null ? v.TablePayload.LengthBytes : (v.EmbeddedPayload?.Length ?? 0),
@@ -759,7 +842,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
     public sealed record TableScopeScheduleDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc,
         string? RegionCode = null, int[]? RecordNumbers = null, string? GroupPattern = null, string? TimeAreaCode = null,
-        FirmwareScheduleTarget? FirmwareTarget = null)
+        FirmwareScheduleTarget? FirmwareTarget = null, string? ConfigurationId = null)
         : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
     public sealed record FirmwareScheduleTarget(string? TerminalIdFrom, string? TerminalIdTo, string? CurrentControlRom,
         string? CurrentControlSoftware)
@@ -772,6 +855,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
     public sealed record TableSetDto(string Name, Guid? CustomerId, bool IsDefault, Guid? TargetFirmwareVersionId = null);
     public sealed record TableSetFirmwareDto(Guid? FirmwareVersionId);
+    public sealed record ConfigurationIdEdit(int RecordRevision, [property: JsonRequired] string? ConfigurationId);
 
     public sealed record TableSetUpdateDto(string Name, Guid? CustomerId, bool IsDefault);
 

@@ -146,6 +146,8 @@ public class HostPlatformDbContext : DbContext
         {
             b.Property(tv => tv.EmbeddedPayload).HasColumnName("Payload");
             b.Property(tv => tv.TableRevision).IsConcurrencyToken();
+            b.Property(tv => tv.ConfigurationId).HasMaxLength(6);
+            b.HasIndex(tv => new { tv.ConfigurationId, tv.TableDefinitionId });
             b.HasOne(tv => tv.TableSet).WithMany(ts => ts.Versions).HasForeignKey(tv => tv.TableSetId);
             b.HasOne(tv => tv.TableDefinition).WithMany().HasForeignKey(tv => tv.TableDefinitionId);
             b.HasOne(tv => tv.TablePayload).WithMany().HasForeignKey(tv => tv.TablePayloadId).OnDelete(DeleteBehavior.SetNull);

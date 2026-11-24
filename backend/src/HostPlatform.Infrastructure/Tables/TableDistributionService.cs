@@ -34,7 +34,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         ValidationPassed = source.ValidationPassed,
         ValidationDiagnosticsJson = source.ValidationDiagnosticsJson,
         ScreeningDescriptionsJson = source.ScreeningDescriptionsJson,
-        ScreeningLayoutProfile = source.ScreeningLayoutProfile
+        ScreeningLayoutProfile = source.ScreeningLayoutProfile,
+        ConfigurationId = source.ConfigurationId
     };
 
     public IQueryable<Terminal> PhonesInScope(TableTargetScope scope)
@@ -322,10 +323,28 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             version.ValidationDiagnosticsJson = source.ValidationDiagnosticsJson;
             version.ScreeningDescriptionsJson = source.ScreeningDescriptionsJson;
             version.ScreeningLayoutProfile = source.ScreeningLayoutProfile;
+            version.ConfigurationId = source.ConfigurationId;
         }
 
         destination.Version++;
     }
+
+    public static string? NormalizeConfigurationId(string? value)
+    {
+        var id = value?.TrimEnd(' ');
+        if (string.IsNullOrEmpty(id))
+            return null;
+        if (id.Length > 6 || id[0] == ' ' || id.Any(character => character is < ' ' or > '~'))
+            throw new InvalidOperationException("Enter up to six printable characters with no leading space.");
+        return id.ToUpperInvariant();
+    }
+
+    public IQueryable<Terminal> PhonesWithConfiguration(int number, string configurationId) =>
+        db.Terminals.AsNoTracking().Where(phone => db.TerminalTableAssignments.Any(assignment =>
+            assignment.TerminalId == phone.Id && assignment.TableSet!.Status == TableSetStatus.Published
+            && assignment.TableSet.Versions.Count(record => record.TableDefinition!.TableNumber == number) == 1
+            && assignment.TableSet.Versions.Any(record => record.ConfigurationId == configurationId
+                && record.TableDefinition!.TableNumber == number)));
 
     public async Task PublishTableSetAsync(Guid tableSetId, CancellationToken ct)
     {

@@ -9,6 +9,7 @@
 | GET | `/api/tables/sets/{id}` | Detail |
 | PUT | `/api/tables/sets/{id}` | Update |
 | PUT | `/api/tables/sets/{id}/firmware-target` | Set or clear a draft's target version using `firmwareVersionId` |
+| PUT | `/api/tables/sets/{id}/records/{number}/configuration-id` | Set or clear a data record's Configuration ID in a draft |
 | POST | `/api/tables/sets/{id}/clone` | Create a draft copy with the same records |
 | POST | `/api/tables/sets/{id}/record-copy/preview` | Review copying selected records into a draft |
 | POST | `/api/tables/sets/{id}/record-copy` | Copy the reviewed records and their dependencies into a draft |
@@ -90,6 +91,10 @@ Use `targetType=group-pattern` with `groupPattern` and an optional `regionCode`.
 Use `targetType=time-area` with `timeAreaCode` and omit `targetId` for a schedule preview or confirmation. Eligible deliveries are MT35 call-in parameters alone or a dedicated MT94 firmware set. For a source containing multiple records, select MT35 explicitly. A successful MT35 schedule delivers that record as a partial download. `GET /api/terminals/time-areas` lists the codes currently in use.
 
 For a partial data schedule, pass repeated `recordNumbers` query parameters in the preview and a `recordNumbers` array in the schedule request. The preview returns the full selection including dependencies and tests the eligibility of the records that will be sent. Confirm the eligible terminal IDs from the preview. The schedule history returns the same resolved record numbers in transmission order. A completed partial schedule leaves the normal full-set assignment in place. Omitting the selection schedules the full set.
+
+To name a draft record, send its current `recordRevision` and `configurationId` to the record Configuration ID endpoint. Send `null` to clear the ID. IDs allow up to six printable ASCII characters with no leading space. CoinLine discards trailing padding and stores uppercase. The ID is host metadata. It survives payload edits, draft copies and record copies, and leaves the wire hash intact.
+
+Use `targetType=configuration-id` with `configurationId` and a single explicit message type in `recordNumbers` to schedule a named configuration. The published source record must carry that ID. Eligible candidates have the same ID on the same message type in their current published assignments, including assignments from other sets. The preview resolves any required records and applies the usual customer, firmware and terminal checks. Confirm the eligible terminal IDs from the preview. CoinLine rechecks the candidates before scheduling.
 
 Use `POST /api/tables/sets/{id}/schedules` for a published set containing only MT94. `availableAtUtc` determines when a call-in can pick up the record. When enabled, `startAt` must be later than `availableAtUtc`, or later than the current time for immediate availability. If a phone first calls after the enabled terminal start time has passed, the host cancels the pending delivery. A disabled record can be scheduled to clear the terminal’s code download schedule. A successful MT94-only delivery belongs to the firmware schedule history and is independent of the phone’s regular table assignment.
 
