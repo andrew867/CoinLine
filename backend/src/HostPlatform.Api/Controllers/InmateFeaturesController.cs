@@ -76,9 +76,16 @@ public sealed class InmateFeaturesController(HostPlatformDbContext db) : Control
         if (revision != configuration.Version)
             return Changed();
 
+        if (await db.TerminalInmateConfigurations.AnyAsync(row => row.FeatureConfigurationId == id, ct))
+            return Assigned();
         db.InmateFeatureConfigurations.Remove(configuration);
         WriteAudit("delete", configuration);
-        return await SaveAsync(ct) ?? NoContent();
+        try { return await SaveAsync(ct) ?? NoContent(); }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.ForeignKeyViolation })
+        {
+            return Assigned();
+        }
     }
 
     public sealed record ConfigurationInput(string? Name, string? Description, Dictionary<string, JsonElement>? Settings,
@@ -138,4 +145,5 @@ public sealed class InmateFeaturesController(HostPlatformDbContext db) : Control
 
     private ConflictObjectResult Changed() => Conflict(new { error = "This configuration changed. Reopen it before saving." });
     private ConflictObjectResult NameTaken() => Conflict(new { error = "A configuration already uses this name." });
+    private ConflictObjectResult Assigned() => Conflict(new { error = "Clear the phone assignments before deleting this configuration." });
 }

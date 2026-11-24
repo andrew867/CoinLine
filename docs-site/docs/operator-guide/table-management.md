@@ -131,4 +131,4 @@ Open an alarm to see its name and number, the phone that reported it, and when C
 
 From **Table sets**, open **Inmate Feature Configurations**. The editor covers PIN entry, call processing, voice announcements, disconnect warnings, recording equipment, call timers and other settings. Enter a name of up to six characters and an optional description. Use **Copy as new** to reuse the current settings under a new name.
 
-The editor checks the legacy timer ranges and the minimum 10-second gap between disconnect warnings. Recorder codes accept up to two DTMF characters, and the automated operator code accepts up to three. Saved configurations are available to CoinLine operators. Terminal download awaits evidence of the Inmate firmware record layout.
+The editor checks the legacy timer ranges and the minimum 10-second gap between disconnect warnings. Recorder codes accept up to two DTMF characters, and the automated operator code accepts up to three. A saved configuration can be selected in the [phone's Inmate terminal configuration panel](terminals.md#inmate-terminal-configuration). Terminal download awaits evidence of the Inmate firmware record layout.

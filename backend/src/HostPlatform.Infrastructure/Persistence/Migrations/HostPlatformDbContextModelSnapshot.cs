@@ -3541,6 +3541,50 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("TerminalGroupMemberships");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInmateConfiguration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("FeatureConfigurationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SetupConfigurationId")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FeatureConfigurationId");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("TerminalInmateConfigurations");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TerminalInventory", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4739,6 +4783,22 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("TerminalId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInmateConfiguration", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.InmateFeatureConfiguration", "FeatureConfiguration")
+                        .WithMany()
+                        .HasForeignKey("FeatureConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithOne()
+                        .HasForeignKey("HostPlatform.Domain.TerminalInmateConfiguration", "TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FeatureConfiguration");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TerminalInventory", b =>

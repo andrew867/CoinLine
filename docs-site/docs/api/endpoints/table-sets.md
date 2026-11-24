@@ -134,6 +134,13 @@ The MT68 `serviceKey` field is write-only in the native field API. Omit it from 
 | PUT | `/api/inmate-features/{id}` | Update a configuration using the current revision |
 | DELETE | `/api/inmate-features/{id}?confirm=true&revision={revision}` | Delete the selected revision |
 
-Create and update take `name`, `description` and `settings`. The field schema supplies the defaults used on creation. Omitted settings retain their values on update. Field errors include the settings key. A stale revision or duplicate name returns HTTP 409. These configurations are saved separately from table sets until an Inmate terminal wire layout is verified.
+Create and update take `name`, `description` and `settings`. The field schema supplies the defaults used on creation. Omitted settings retain their values on update. Field errors include the settings key. A stale revision, duplicate name or deletion of an assigned configuration returns HTTP 409. These configurations are saved separately from table sets until an Inmate terminal wire layout is verified.
+
+| Method | Path | Behavior |
+|---|---|---|
+| GET | `/api/terminals/{id}/inmate-configuration` | Read the named references, available feature choices, family eligibility and current revision |
+| PUT | `/api/terminals/{id}/inmate-configuration` | Save the feature configuration ID and external setup Configuration ID using the observed revision |
+
+The PUT body requires `featureConfigurationId`, `setupConfigurationId` and `revision`, which may be null. An initial assignment uses a null revision; subsequent writes use the returned revision. Setup Configuration IDs use the existing six-character configuration identifier format. Non-Inmate phones cannot receive new references but can clear retained assignments. The response identifies that the wire format is unverified. No download batch, scheduled record or table-set assignment is created by these endpoints.
 
 **UI:** `/table-sets`, `/table-sets/:id`

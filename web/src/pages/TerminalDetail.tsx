@@ -2,6 +2,7 @@ import { SpecialCallback } from './SpecialCallback'
 import { TerminalInventoryPanel } from './TerminalInventoryPanel'
 import { TerminalIdentityPanel } from './TerminalIdentityPanel'
 import { TerminalCashboxPanel } from './TerminalCashboxPanel'
+import { InmateAssignmentPanel } from './InmateAssignmentPanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
@@ -556,6 +557,8 @@ export function TerminalDetail() {
       {familyNotice && <p role="status">{familyNotice}</p>}
       <TerminalIdentityPanel key={term.id} terminalId={term.id} wireId={term.terminalIdHex} family={term.terminalFamilyId} />
       <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />
+      {canPerform('inmate-assignments', op.read) && <InmateAssignmentPanel key={`inmate-${term.id}-${term.terminalFamilyId}`}
+        terminalId={term.id} family={term.terminalFamilyId} />}
       {canPerform('memberships', op.read) && <PhoneGroups key={`groups-${term.id}`} terminalId={term.id} />}
 
       <h2>Phone session</h2>

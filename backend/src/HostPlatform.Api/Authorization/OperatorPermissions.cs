@@ -103,6 +103,8 @@ public static class OperatorPermissions
         Screen("transport", "Modem transport", ("SerialModem", R, "Get"), ("SipModem", R, "Get"), ("SipModem", U, "SelfTest Hangup"));
         Screen("inmate-features", "Inmate features", ("InmateFeatures", R, "Schema List Get"),
             ("InmateFeatures", A, "Create"), ("InmateFeatures", U, "Update"), ("InmateFeatures", D, "Delete"));
+        Screen("inmate-assignments", "Inmate terminal configuration", ("TerminalInmateConfiguration", R, "Get"),
+            ("TerminalInmateConfiguration", U, "Save"));
         Screen("smartcards", "Smartcard types", ("Smartcards", R, "Types"));
         Screen("protocol-tools", "Protocol tools", ("NccProtocol", R, "Decode Encode"), ("NccProtocol", U, "Replay"));
 
