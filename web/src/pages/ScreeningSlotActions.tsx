@@ -34,7 +34,7 @@ export function ScreeningSlotActions({ slot, action, description, editable, supp
   return <>
     {action?.action !== 'blank' && action?.action !== 'delete' && <label className="native-table-field">
       <span>Description</span>
-      <input value={description} maxLength={120} onChange={event => onDescription(event.target.value)} />
+      <input data-field-kind="mandatory" value={description} maxLength={120} onChange={event => onDescription(event.target.value)} />
     </label>}
     {editable && <div className="row-actions">
       {action ? <button type="button" className="quiet" onClick={() => onAction(undefined)}>Undo screening action</button>
@@ -53,8 +53,8 @@ export function ScreeningSlotActions({ slot, action, description, editable, supp
       <summary>Set speed dial</summary>
       <p>For manual dialing, keep a regular screening entry for the destination with matching call settings.</p>
       <div className="table-config-selectors">
-        <label>Shortcut<input value={shortcut} maxLength={3} placeholder="*45" onChange={event => setShortcut(event.target.value)} /></label>
-        <label>Destination number<input value={destination} maxLength={13} inputMode="numeric"
+        <label>Shortcut<input data-field-kind="mandatory" value={shortcut} maxLength={3} placeholder="*45" onChange={event => setShortcut(event.target.value)} /></label>
+        <label>Destination number<input data-field-kind="mandatory" value={destination} maxLength={13} inputMode="numeric"
           onChange={event => setDestination(event.target.value)} /></label>
         <button type="button" onClick={stageSpeedDial}>Stage speed dial</button>
       </div>

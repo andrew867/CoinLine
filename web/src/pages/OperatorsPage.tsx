@@ -93,7 +93,7 @@ export function OperatorsPage() {
       <form onSubmit={(e) => void onCreate(e)} className="row-actions">
         <label>
           Username
-          <input value={username} onChange={(e) => setUsername(e.target.value)} required minLength={2} />
+          <input data-field-kind="key" value={username} onChange={(e) => setUsername(e.target.value)} required minLength={2} />
         </label>
         <label>
           Name

@@ -101,7 +101,7 @@ export function TerminalGroupsPage() {
           <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
         </label>
         <label>Group ID
-          <input value={code} onChange={e => setCode(e.target.value)} maxLength={6} pattern="[A-Za-z0-9]{3,6}" />
+          <input data-field-kind="key" value={code} onChange={e => setCode(e.target.value)} maxLength={6} pattern="[A-Za-z0-9]{3,6}" />
         </label>
         <label>Description
           <input value={description} onChange={e => setDescription(e.target.value)} />
@@ -173,10 +173,10 @@ function GroupEditor({
   return (
     <tr>
       <td>
-        <input value={name} onChange={(e) => setName(e.target.value)} aria-label={`Name for ${group.name}`} />
+        <input data-field-kind="mandatory" value={name} onChange={(e) => setName(e.target.value)} aria-label={`Name for ${group.name}`} />
       </td>
       <td>
-        <input value={code} onChange={e => setCode(e.target.value)} maxLength={6} aria-label={`Group ID for ${group.name}`} />
+        <input data-field-kind="key" value={code} onChange={e => setCode(e.target.value)} maxLength={6} aria-label={`Group ID for ${group.name}`} />
       </td>
       <td>
         <input value={description} onChange={e => setDescription(e.target.value)} aria-label={`Description for ${group.name}`} />

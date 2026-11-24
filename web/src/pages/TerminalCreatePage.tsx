@@ -76,6 +76,7 @@ export function TerminalCreatePage() {
           Site
           <select
             data-testid="terminal-create-site"
+            data-field-kind="mandatory"
             value={siteId}
             onChange={(e) => setSiteId(e.target.value)}
             style={{ display: 'block', width: '100%' }}
@@ -114,6 +115,7 @@ export function TerminalCreatePage() {
           Terminal id (hex)
           <input
             data-testid="terminal-create-hex"
+            data-field-kind="key"
             value={terminalIdHex}
             required pattern="[0-9A-Fa-f]{10}" maxLength={10}
             onChange={(e) => setTerminalIdHex(e.target.value.toUpperCase())}

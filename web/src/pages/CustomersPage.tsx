@@ -75,6 +75,7 @@ export function CustomersPage() {
           Code
           <input
             data-testid="customer-code"
+            data-field-kind="key"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             required

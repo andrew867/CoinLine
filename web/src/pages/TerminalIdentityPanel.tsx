@@ -81,7 +81,7 @@ export function TerminalIdentityPanel({ terminalId, wireId, family }: {
     {edit ? <form onSubmit={event => void save(event)}>
       <p className="page-intro">This changes the ID CoinLine matches on NCC. Set the same ID on the phone to reconnect.</p>
       <div className="phone-inventory-actions">
-        <label>New terminal ID <input value={edit.value} required pattern="[0-9A-Fa-f]{10}" maxLength={10}
+        <label>New terminal ID <input data-field-kind="key" value={edit.value} required pattern="[0-9A-Fa-f]{10}" maxLength={10}
           disabled={saving} onChange={event => setEdit({ ...edit, value: event.target.value.toUpperCase() })} /></label>
         <button disabled={saving || edit.value === edit.expected.toUpperCase()}>Save terminal ID</button>
         <button type="button" className="quiet" disabled={saving} onClick={() => { setEdit(null); setError('') }}>Cancel</button>

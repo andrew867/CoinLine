@@ -322,7 +322,7 @@ function ConfigurationIdField({ setId, record, disabled, onSaved }: {
   }
 
   return <form onSubmit={event => void save(event)} className="row-actions">
-    <input aria-label={label} autoComplete="off" value={value} maxLength={6} size={6} disabled={disabled || saving}
+    <input data-field-kind="key" aria-label={label} autoComplete="off" value={value} maxLength={6} size={6} disabled={disabled || saving}
       onChange={event => setValue(event.target.value)} />
     <button type="submit" disabled={disabled || saving || value === original}>Save ID</button>
     {error && <p role="alert">{error}</p>}

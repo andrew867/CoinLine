@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../components/AppStates'
+import { FieldPreferencesPanel } from '../components/FieldPreferencesPanel'
 import { apiFetch } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 
@@ -102,6 +103,8 @@ export function SettingsPage() {
       )}
       {err && <ErrorBanner message={err} />}
       {note && <p>{note}</p>}
+
+      <FieldPreferencesPanel />
 
       <h2>Live gates</h2>
       <p className="page-intro">

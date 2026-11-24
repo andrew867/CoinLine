@@ -54,7 +54,7 @@ export function TableDefinitions() {
         </label>
         <label>
           Table #
-          <input type="number" value={num} onChange={(e) => setNum(Number(e.target.value))} style={{ display: 'block', width: 80 }} />
+          <input data-field-kind="key" type="number" value={num} onChange={(e) => setNum(Number(e.target.value))} style={{ display: 'block', width: 80 }} />
         </label>
         <label>
           Description

@@ -79,6 +79,43 @@ input, select, textarea {
 
 label { display: block; font-size: 13px; color: var(--muted); }
 
+:root[data-highlight-mandatory="true"] .content :is(input, select, textarea):is(:required, [data-field-kind="mandatory"], [aria-required="true"]):not([type="checkbox"], [type="radio"], [type="color"]) {
+  color: var(--field-mandatory-text);
+  background-color: var(--field-mandatory-background);
+}
+
+:root[data-highlight-key="true"] .content :is(input, select, textarea)[data-field-kind="key"]:not([type="color"]) {
+  color: var(--field-key-text);
+  background-color: var(--field-key-background);
+}
+
+.field-preferences-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+  gap: 12px;
+  max-width: 720px;
+}
+.field-preference {
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+.field-preference input[type="color"] {
+  display: block;
+  width: 56px;
+  height: 36px;
+  padding: 3px;
+}
+.field-preference-preview {
+  margin-top: 12px;
+  margin-bottom: 0;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background-color: var(--surface);
+}
+
 .shell { display: flex; min-height: 100vh; }
 .sidebar {
   width: 232px;

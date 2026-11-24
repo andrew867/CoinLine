@@ -439,6 +439,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
             && (number !== 152 || !/^period-\d+\.(local|intra|inter|international)$/.test(field.key))).map((field) => (
             <FieldInput key={field.key} field={carrierReference && field.key.endsWith('.rate') ? { ...field, label: 'Carrier reference' } : field}
               value={edits[field.key] ?? field.value ?? ''}
+              mandatory={selectedKey != null && (field.key.endsWith('.number') || field.key.endsWith('.customerReference'))
+                || screeningSlot != null && field.key.endsWith('.pattern')}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}
         </fieldset>
@@ -463,8 +465,8 @@ function cardDataKind(standard: string | null) {
   return code >= 1 && code <= 9 ? 'magnetic' : code >= 10 && code <= 16 ? 'stored-value' : 'unknown'
 }
 
-function FieldInput({ field, value, dirty, onChange }: {
-  field: Field; value: string; dirty: boolean; onChange: (value: string) => void
+function FieldInput({ field, value, dirty, mandatory, onChange }: {
+  field: Field; value: string; dirty: boolean; mandatory?: boolean; onChange: (value: string) => void
 }) {
   if (field.editor === 'bitmap') {
     return <NativeBitmapField name={field.label} value={field.value === null && !dirty ? null : value}
@@ -516,6 +518,7 @@ function FieldInput({ field, value, dirty, onChange }: {
         </select>
       ) : (
         <input type={password ? 'password' : numeric ? 'number' : calendar ? 'datetime-local' : time ? 'time' : 'text'}
+          data-field-kind={mandatory ? 'mandatory' : undefined}
           value={clearingPin ? '' : value} min={numeric && dirty ? field.min : undefined}
           max={numeric && dirty ? field.max : undefined} step={numeric || calendar || time ? 1 : undefined}
           autoComplete={password ? 'new-password' : undefined} inputMode={password && !hex ? 'numeric' : undefined}

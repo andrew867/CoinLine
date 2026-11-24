@@ -69,6 +69,7 @@ export function SitesPage() {
           Customer
           <select
             data-testid="site-customer"
+            data-field-kind="mandatory"
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
             style={{ display: 'block', minWidth: 220 }}
@@ -94,6 +95,7 @@ export function SitesPage() {
           Code
           <input
             data-testid="site-code"
+            data-field-kind="key"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             required
