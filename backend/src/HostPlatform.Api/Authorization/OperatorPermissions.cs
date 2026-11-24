@@ -34,7 +34,7 @@ public static class OperatorPermissions
         Screen("overview", "Home and search", ("Operator", R, "Dashboard Search"));
         Screen("phones", "Phones",
             ("Terminals", R, "GetAll GetById Families Regions TimeAreas Identity FirmwareOptions"),
-            ("Terminals", A, "Create"), ("Terminals", U, "SetFamily SetFirmware Update SetWireId"));
+            ("Terminals", A, "Create CreateOptions"), ("Terminals", U, "SetFamily SetFirmware Update SetWireId"));
         Screen("inventory", "Phone inventory", ("TerminalInventory", R, "Get"), ("TerminalInventory", U, "Save"));
         Screen("memberships", "Phone group membership",
             ("Terminals", R, "Groups"), ("TerminalGroups", R, "Phones MembershipOptions"),

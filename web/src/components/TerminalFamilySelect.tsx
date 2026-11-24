@@ -1,24 +1,27 @@
 import { useEffect, useState } from 'react'
 import { apiGet } from '../api/client'
 
-type TerminalFamily = { id: string; release: string; variant: string; maximizerTypeNumbers: number[] }
+export type TerminalFamily = { id: string; release: string; variant: string; maximizerTypeNumbers: number[] }
 
-export function TerminalFamilySelect({ value, onChange, disabled = false, emptyLabel = 'Unknown family' }: {
+export function TerminalFamilySelect({ value, onChange, disabled = false, emptyLabel = 'Unknown family', options }: {
   value: string
   onChange: (value: string) => void
   disabled?: boolean
   emptyLabel?: string
+  options?: TerminalFamily[]
 }) {
-  const [families, setFamilies] = useState<TerminalFamily[] | null>(null)
+  const [loaded, setFamilies] = useState<TerminalFamily[] | null>(null)
   const [error, setError] = useState(false)
+  const families = options ?? loaded
 
   useEffect(() => {
+    if (options !== undefined) return
     let current = true
     void apiGet<TerminalFamily[]>('/api/terminals/families')
       .then((result) => { if (current) setFamilies(result) })
       .catch(() => { if (current) setError(true) })
     return () => { current = false }
-  }, [])
+  }, [options])
 
   const groups = new Map<string, TerminalFamily[]>()
   for (const family of families ?? []) {

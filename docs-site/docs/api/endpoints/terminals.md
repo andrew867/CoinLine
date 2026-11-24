@@ -6,6 +6,7 @@
 |--------|------|-------|
 | GET | `/api/terminals` | List |
 | POST | `/api/terminals` | Create |
+| GET | `/api/terminals/create-options` | Minimal site, firmware, family and permitted group choices for phone registration |
 | GET | `/api/terminals/{id}` | Detail |
 | GET | `/api/terminals/firmware-options` | Minimal installed-version choices for phone inventory |
 | GET | `/api/terminals/{id}/table-assignment-options` | Minimal table-set choices for phone assignments, excluding firmware-scheduler-only sets |
@@ -60,6 +61,8 @@ For a special callback, supply the current `revision` or null when creating the 
 **Manager lifecycle:** use `active=true` or `active=false` on the terminal list to filter activity independently of reported operational status. To deactivate, PUT `active: false` and the observed `revision`; optionally supply a `deletionReviewDate` (YYYY-MM-DD), otherwise the initial date is 45 days from current UTC date. To reactivate, PUT `active: true` and the observed revision; this clears both dates. An open local NCC link or stale revision returns HTTP 409. An inactive terminal is excluded from new table deliveries and field request creation. The review date does not trigger record deletion.
 
 The firmware and table assignment choices are separately permissioned under Phones Read and Table assignments Read. They do not grant access to firmware registry or table authoring endpoints. The current assignment response includes the set name and target firmware label and ID, so a read-only assignment operator need not retrieve the whole table catalogue.
+
+Phone registration choices require Phones Add and do not require full site, group, firmware or phone-list access. A group choice is returned only if the operator also has Membership Add. A new phone must use an existing site; its optional group must belong to the site's customer or be a global group.
 
 **UI:** `/terminals`, `/terminals/:id`
 

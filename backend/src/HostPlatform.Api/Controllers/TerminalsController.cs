@@ -193,6 +193,13 @@ public sealed class TerminalsController(
         {
             await using var transaction = db.Database.IsRelational()
                 ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            var site = await db.Sites.AsNoTracking().Where(row => row.Id == body.SiteId)
+                .Select(row => new { row.CustomerId }).SingleOrDefaultAsync(ct);
+            if (site == null)
+                return BadRequest(new { error = "Choose a registered site." });
+            if (body.TerminalGroupId is { } groupId && !await db.TerminalGroups.AsNoTracking().AnyAsync(group =>
+                    group.Id == groupId && (group.CustomerId == null || group.CustomerId == site.CustomerId), ct))
+                return BadRequest(new { error = "Choose a phone group available to this site's customer." });
             if (await WireIdTaken(wireId, e.Id, ct))
                 return DuplicateWireId();
             db.Terminals.Add(e);
@@ -212,6 +219,23 @@ public sealed class TerminalsController(
         }
         catch (Exception ex) when (TerminalWriteConflict(ex)) { return ChangedTerminal(); }
         return Created($"/api/terminals/{e.Id}", new { e.Id });
+    }
+
+    [HttpGet("create-options")]
+    public async Task<ActionResult<object>> CreateOptions(CancellationToken ct)
+    {
+        var canAssignGroup = OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Add);
+        return Ok(new
+        {
+            sites = await db.Sites.AsNoTracking().OrderBy(site => site.Name)
+                .Select(site => new { site.Id, site.Name, site.Code, site.CustomerId }).ToListAsync(ct),
+            groups = canAssignGroup ? await db.TerminalGroups.AsNoTracking().OrderBy(group => group.Name)
+                .Select(group => new { group.Id, group.Name, group.CustomerId }).ToListAsync(ct) : [],
+            firmwareVersions = await db.FirmwareVersions.AsNoTracking().OrderBy(version => version.Label)
+                .Select(version => new { version.Id, version.Label, version.BuildId }).ToListAsync(ct),
+            families = TerminalFamilies.Catalog,
+            canAssignGroup
+        });
     }
 
     [HttpGet("families")]
