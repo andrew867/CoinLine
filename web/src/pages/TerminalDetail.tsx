@@ -1,3 +1,4 @@
+import { SpecialCallback } from './SpecialCallback'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
@@ -523,6 +524,7 @@ export function TerminalDetail() {
       </div>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
 
+      <SpecialCallback key={id} terminalId={id} />
       <h2>Table assignment</h2>
       {assign === undefined && <p>Loading assignment…</p>}
       {assign === null && <p>No assignment yet.</p>}

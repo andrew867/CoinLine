@@ -34,7 +34,6 @@ internal sealed class NccLinkProcessor(
     private const byte TableUpdateMessageType = 18;
     private const byte TableDownloadRequestType = 44;
     private const byte RoutineCallInMessageType = 8;
-    private const byte CallbackMessageType = 9;
     private const int MaxInstallRetransmissions = 2;
     private static readonly TimeSpan AckWait = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan FirmwareLinkAckDelay = TimeSpan.FromMilliseconds(350);
@@ -53,6 +52,8 @@ internal sealed class NccLinkProcessor(
     private bool _firmwareDialogue;
     private readonly Dictionary<int, DownloadBatchItem> _waiting = new();
     private FirmwareTableTransfer? _firmwareTables;
+    private CallbackOffer? _callbackOffer;
+    private bool _callbackOffered;
 
     private bool HasPendingInstall => _waiting.Count > 0 || _firmwareTables != null;
 
@@ -88,7 +89,7 @@ internal sealed class NccLinkProcessor(
             while (!stoppingToken.IsCancellationRequested)
             {
                 using var readCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
-                if (HasPendingInstall)
+                if (HasPendingInstall || _callbackOffer != null)
                     readCts.CancelAfter(AckWait);
 
                 int n;
@@ -255,7 +256,9 @@ internal sealed class NccLinkProcessor(
 
         if (control)
         {
-            if (_firmwareTables != null)
+            if (_callbackOffer != null)
+                await HandleCallbackControlAsync(stream, packet.Control);
+            else if (_firmwareTables != null)
                 await HandleFirmwareTableControlAsync(stream, packet.Control);
             else
                 await HandleTimeSyncControlAsync(stream, packet.Control);
@@ -263,7 +266,7 @@ internal sealed class NccLinkProcessor(
         }
 
         var maintenanceRequest = DlogMaintenanceWire.HasRequestRecord(packet.Data);
-        var callIn = packet.Data is [RoutineCallInMessageType] or [CallbackMessageType];
+        var callIn = packet.Data is [RoutineCallInMessageType] or [DlogCallbackWire.Return];
         if (statistics)
         {
             if (terminal == null || truncatedReport)
@@ -324,7 +327,7 @@ internal sealed class NccLinkProcessor(
         {
             await RecordFieldEventAsync(packet.Data, terminal);
             if (terminal != null && DlogMaintenanceWire.TryBuildAcknowledgement(packet.Data, out var reply))
-                await SendDialogueReplyAsync(stream, packet, reply, "maintenance");
+                await SendManagementReplyAsync(stream, packet, terminal.Id, reply, "maintenance");
             return;
         }
 
@@ -354,13 +357,19 @@ internal sealed class NccLinkProcessor(
             var stored = await RecordFieldEventAsync(fieldData, terminal);
             if (stored && terminal != null && applicationType == DlogAlarmWire.AlarmMessageType
                 && DlogAlarmWire.TryBuildAcknowledgement(packet.Data, out var acknowledgement))
-                await SendDialogueReplyAsync(stream, packet, acknowledgement, "alarm");
+                await SendManagementReplyAsync(stream, packet, terminal.Id, acknowledgement, "alarm");
             else if (stored && terminal != null && uploadAttention)
                 await SendDialogueReplyAsync(stream, packet, [DlogCallDetailWire.RequestUpload], "call upload request");
         }
 
         if (terminal != null && (callIn || applicationType == TableDownloadRequestType && packet.Data.Length >= 2))
-            await StartInstallAsync(stream, packet.TerminalId, terminal, callIn);
+        {
+            var returned = applicationType == DlogCallbackWire.Return ? await RecordCallbackReturnAsync(terminal.Id) : null;
+            var continuation = callIn ? CallbackContinuation.CallIn : CallbackContinuation.Install;
+            if (returned == null && await TryOfferCallbackAsync(stream, terminal.Id, packet.TerminalId, continuation))
+                return;
+            await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true);
+        }
     }
 
     private async Task<byte[]> StoreCallDetailsAsync(byte[] data, Terminal terminal)
@@ -442,6 +451,16 @@ internal sealed class NccLinkProcessor(
         }
     }
 
+    private async Task SendManagementReplyAsync(NetworkStream stream, NccWirePacket request, Guid terminalId,
+        byte[] acknowledgement, string dialogue)
+    {
+        if (acknowledgement.Length + DlogCallbackWire.ScheduleLength <= NccConstants.MaxDataSize &&
+            await TryOfferCallbackAsync(stream, terminalId, request.TerminalId, CallbackContinuation.ManagementReply, acknowledgement))
+            return;
+
+        await SendDialogueReplyAsync(stream, request, acknowledgement, dialogue);
+    }
+
     private async Task<Terminal?> MatchTerminalAsync(string hex)
     {
         var rows = await db.Terminals.AsNoTracking()
@@ -508,8 +527,10 @@ internal sealed class NccLinkProcessor(
                     return;
                 }
 
-                _lastTimeSync = await WriteMessageAsync(stream, timeSync.TerminalId, [EndDataMessageType]);
-                logger.LogInformation("NCC time sync end sent for session {SessionId}.", _session.Id);
+                if (_session.TerminalId is { } terminalId &&
+                    await TryOfferCallbackAsync(stream, terminalId, timeSync.TerminalId, CallbackContinuation.TimeSync))
+                    return;
+                await SendTimeSyncEndAsync(stream, timeSync.TerminalId);
             }
             else if ((control & NccControl.Nack) != 0)
             {
@@ -522,6 +543,115 @@ internal sealed class NccLinkProcessor(
         {
             logger.LogInformation(ex, "NCC time sync follow-up was not sent.");
         }
+    }
+
+    private async Task SendTimeSyncEndAsync(NetworkStream stream, byte[] terminalId)
+    {
+        _lastTimeSync = await WriteMessageAsync(stream, terminalId, [EndDataMessageType]);
+        logger.LogInformation("NCC time sync end sent for session {SessionId}.", _session.Id);
+    }
+
+    private async Task<bool> TryOfferCallbackAsync(NetworkStream stream, Guid terminalId, byte[] wireId,
+        CallbackContinuation continuation, byte[]? acknowledgement = null)
+    {
+        if (_callbackOffer != null)
+            return true;
+        if (_callbackOffered || _installStarted || _firmwareTables != null)
+            return false;
+
+        var request = await db.TerminalCallbackRequests.AsNoTracking().SingleOrDefaultAsync(row => row.TerminalId == terminalId
+            && row.CancelledAtUtc == null && row.ReturnedAtUtc == null, stoppingToken);
+        if (request == null)
+            return false;
+        var now = clock.GetUtcNow().UtcDateTime;
+        var due = request.ProgrammedForUtc ?? (request.DueAtUtc > now ? request.DueAtUtc.Value : now);
+        due = due.AddTicks(-(due.Ticks % TimeSpan.TicksPerSecond));
+        var terminalClock = due.AddMinutes(request.TerminalClockOffsetMinutes);
+        if (!DlogCallbackWire.CanEncode(terminalClock))
+            return false;
+
+        var schedule = DlogCallbackWire.EncodeSchedule(terminalClock);
+        var payload = acknowledgement == null
+            ? schedule
+            : [.. acknowledgement.AsSpan(..^1), .. schedule, EndDataMessageType];
+        var message = await WriteMessageAsync(stream, wireId, payload);
+        _callbackOffer = new CallbackOffer(request, due, message, continuation);
+        _callbackOffered = true;
+        return true;
+    }
+
+    private async Task HandleCallbackControlAsync(NetworkStream stream, byte control)
+    {
+        var offer = _callbackOffer!;
+        if ((control & NccControl.Clr) != 0 || NccControl.PacketId(control) != offer.Frame.Control)
+            return;
+
+        if ((control & NccControl.Nack) != 0)
+        {
+            if (offer.Retransmissions >= MaxInstallRetransmissions)
+                throw new IOException("The terminal rejected the callback request.");
+            await RetransmitMessageAsync(stream, offer.Frame);
+            offer.Retransmissions++;
+            return;
+        }
+        if ((control & NccControl.Ack) == 0)
+            return;
+
+        _callbackOffer = null;
+        var row = await db.TerminalCallbackRequests.SingleOrDefaultAsync(candidate => candidate.Id == offer.Request.Id
+            && candidate.Version == offer.Request.Version, stoppingToken);
+        if (row != null)
+        {
+            row.ProgrammedForUtc = offer.DueAtUtc;
+            row.AcknowledgedAtUtc ??= clock.GetUtcNow().UtcDateTime;
+            row.AcknowledgedSessionId = _session.Id;
+            await SaveCallbackReceiptAsync(row, "acknowledged");
+        }
+
+        if (offer.Continuation == CallbackContinuation.TimeSync)
+        {
+            await SendTimeSyncEndAsync(stream, offer.Frame.TerminalId);
+            return;
+        }
+        if (offer.Continuation == CallbackContinuation.ManagementReply)
+            return;
+        var terminal = await db.Terminals.AsNoTracking().SingleOrDefaultAsync(phone => phone.Id == offer.Request.TerminalId, stoppingToken);
+        if (terminal != null)
+            await StartInstallAsync(stream, offer.Frame.TerminalId, terminal, offer.Continuation == CallbackContinuation.CallIn);
+    }
+
+    private async Task<TerminalCallbackRequest?> RecordCallbackReturnAsync(Guid terminalId)
+    {
+        var now = clock.GetUtcNow().UtcDateTime;
+        var row = await db.TerminalCallbackRequests.SingleOrDefaultAsync(candidate => candidate.TerminalId == terminalId
+            && candidate.AcknowledgedSessionId != null
+            && candidate.ProgrammedForUtc <= now && candidate.CancelledAtUtc == null && candidate.ReturnedAtUtc == null, stoppingToken);
+        if (row == null)
+            return null;
+
+        row.ReturnedAtUtc = now;
+        return await SaveCallbackReceiptAsync(row, "returned") ? row : null;
+    }
+
+    private async Task<bool> SaveCallbackReceiptAsync(TerminalCallbackRequest row, string action)
+    {
+        row.Version++;
+        var audit = Audit($"callback_{action}", new { callbackId = row.Id, sessionId = _session.Id, row.ProgrammedForUtc }, row.TerminalId);
+        try { await db.SaveChangesAsync(stoppingToken); }
+        catch (DbUpdateConcurrencyException)
+        {
+            db.Entry(row).State = EntityState.Detached;
+            if (audit != null) db.Entry(audit).State = EntityState.Detached;
+            return false;
+        }
+        return true;
+    }
+
+    private enum CallbackContinuation { TimeSync, CallIn, Install, ManagementReply }
+
+    private sealed record CallbackOffer(TerminalCallbackRequest Request, DateTime DueAtUtc, NccWirePacket Frame, CallbackContinuation Continuation)
+    {
+        public int Retransmissions { get; set; }
     }
 
     private Task RetransmitMessageAsync(NetworkStream stream, NccWirePacket message)
@@ -627,10 +757,15 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn)
+    private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn,
+        bool deliverAssignedTables = false)
     {
         if (_installStarted)
+        {
+            if (callIn && !HasPendingInstall)
+                await SendInstallEndAsync(stream, terminalId);
             return;
+        }
 
         var now = clock.GetUtcNow().UtcDateTime;
         var scheduled = await db.ScheduledTableDownloads.Include(s => s.NccSession).Include(s => s.TableSet)
@@ -650,7 +785,7 @@ internal sealed class NccLinkProcessor(
 
         Guid? tableSetId = null;
         var codeIssue = codeVersion == null ? null : CodeDownloadWire.DeliveryIssue(TableDistributionService.GetEffectivePayload(codeVersion), now);
-        if (scheduled != null && codeIssue == null && await IsScheduledSetEligibleAsync(scheduled, terminal))
+        if (scheduled != null && codeIssue == null && await IsSetEligibleAsync(scheduled.TableSet, terminal))
             tableSetId = scheduled.TableSetId;
         else
         {
@@ -675,6 +810,13 @@ internal sealed class NccLinkProcessor(
                 tableSetId = await db.TerminalTableAssignments.AsNoTracking()
                     .Where(a => a.TerminalId == terminal.Id && a.TableSet!.Status == TableSetStatus.Published)
                     .Select(a => (Guid?)a.TableSetId).FirstOrDefaultAsync(stoppingToken);
+            else if (deliverAssignedTables)
+            {
+                var assigned = await db.TerminalTableAssignments.AsNoTracking().Where(a => a.TerminalId == terminal.Id)
+                    .Select(a => a.TableSet).FirstOrDefaultAsync(stoppingToken);
+                if (await IsSetEligibleAsync(assigned, terminal) && await tables.FindCodeOnlyVersionAsync(assigned!.Id, stoppingToken) == null)
+                    tableSetId = assigned.Id;
+            }
         }
 
         if (tableSetId == null)
@@ -722,17 +864,17 @@ internal sealed class NccLinkProcessor(
         await StartFirmwareTableTransferAsync(stream, terminalId, items);
     }
 
-    private async Task<bool> IsScheduledSetEligibleAsync(ScheduledTableDownload scheduled, Terminal terminal)
+    private async Task<bool> IsSetEligibleAsync(TableSet? set, Terminal terminal)
     {
-        if (scheduled.TableSet?.Status != TableSetStatus.Published ||
-            TableSetFirmwareCompatibility.Mismatch(scheduled.TableSet, terminal.FirmwareVersionId) != null)
+        if (set?.Status != TableSetStatus.Published ||
+            TableSetFirmwareCompatibility.Mismatch(set, terminal.FirmwareVersionId) != null)
             return false;
-        if (scheduled.TableSet.CustomerId is { } customerId &&
+        if (set.CustomerId is { } customerId &&
             !await db.Sites.AsNoTracking().AnyAsync(s => s.Id == terminal.SiteId && s.CustomerId == customerId, stoppingToken))
             return false;
 
         var access = await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
-            .Where(v => v.TableSetId == scheduled.TableSetId && v.TableDefinition!.TableNumber == 21)
+            .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21)
             .Take(2).ToListAsync(stoppingToken);
         if (access.Count > 1)
             return false;

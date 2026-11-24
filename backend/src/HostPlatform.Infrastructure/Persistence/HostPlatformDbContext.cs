@@ -15,6 +15,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<InmateFeatureConfiguration> InmateFeatureConfigurations => Set<InmateFeatureConfiguration>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
+    public DbSet<TerminalCallbackRequest> TerminalCallbackRequests => Set<TerminalCallbackRequest>();
     public DbSet<TerminalEvent> TerminalEvents => Set<TerminalEvent>();
     public DbSet<TerminalStatusRecord> TerminalStatusRecords => Set<TerminalStatusRecord>();
     public DbSet<NccSession> NccSessions => Set<NccSession>();
@@ -166,6 +167,13 @@ public class HostPlatformDbContext : DbContext
             b.HasOne(a => a.Site).WithMany().HasForeignKey(a => a.SiteId);
             b.HasOne(a => a.Customer).WithMany().HasForeignKey(a => a.CustomerId);
             b.HasIndex(a => a.TerminalId).IsUnique();
+        });
+
+        modelBuilder.Entity<TerminalCallbackRequest>(b =>
+        {
+            b.Property(request => request.Version).IsConcurrencyToken();
+            b.HasOne(request => request.Terminal).WithMany().HasForeignKey(request => request.TerminalId);
+            b.HasIndex(request => request.TerminalId).IsUnique();
         });
 
         modelBuilder.Entity<ScheduledTableDownload>(b =>

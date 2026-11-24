@@ -3209,6 +3209,68 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("Terminals");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TerminalCallbackRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AcknowledgedSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("DeliverAssignedTables")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("DueAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ProgrammedForUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("RequestedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ReturnedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TerminalClockOffsetMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("TerminalCallbackRequests");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TerminalDiagnosticSnapshot", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4429,6 +4491,17 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("TerminalGroup");
 
                     b.Navigation("TransportEndpoint");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalCallbackRequest", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.Terminal", "Terminal")
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Terminal");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TerminalDiagnosticSnapshot", b =>

@@ -18,6 +18,9 @@
 | GET | `/api/terminals/{id}/table-assignment` | Assignment |
 | POST | `/api/terminals/{id}/table-assignment` | Assign (confirm) |
 | POST | `/api/terminals/{id}/table-assignment/rollback` | Rollback (confirm) |
+| GET | `/api/terminals/{id}/special-callback` | Read the latest callback and its acknowledgment and return timestamps |
+| PUT | `/api/terminals/{id}/special-callback` | Queue or replace a callback |
+| POST | `/api/terminals/{id}/special-callback/cancel` | Cancel future offers for the current revision |
 | POST | `/api/terminals/{id}/downloads` | Start download (idempotency) |
 | POST | `/api/terminals/{id}/firmware-jobs` | Create firmware job |
 | GET | `/api/terminals/{id}/diagnostics` | Diagnostics |
@@ -26,6 +29,8 @@
 | POST | `/api/terminals/{id}/request-table-reload` | Request table reload |
 
 Create accepts an optional `terminalFamilyId`. The terminal list accepts the same field as a query filter and includes the family label. A phone can have a terminal family and a separately registered firmware build. Wire settings such as card-only or Multi-pay mode are configured in MT26.
+
+For a special callback, supply the current `revision` or null when creating the first request. Supply `dueAtUtc` as an ISO 8601 timestamp with an offset, or null to request the earliest callback. Use `terminalClockOffsetMinutes` for a phone clock offset from UTC. Set `deliverAssignedTables` to opt into sending the current compatible assignment on return. The GET response wraps the record in `callback`, which is null before the first request. Cancellation takes the current `revision`. A stale revision returns HTTP 409.
 
 **Confirm flags:** several POST routes require `?confirm=true` — see Swagger.
 

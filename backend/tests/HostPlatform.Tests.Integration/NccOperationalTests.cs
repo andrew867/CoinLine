@@ -1215,6 +1215,153 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(HttpStatusCode.Created, retry.StatusCode);
     }
 
+    [Fact]
+    public async Task Special_callback_retries_and_picks_up_assigned_tables_only_on_return()
+    {
+        byte[] wireId = Convert.FromHexString("0000000201");
+        var terminals = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json);
+        var seed = terminals.EnumerateArray().Single(t => t.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        using var created = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId = seed.GetProperty("siteId").GetGuid(), displayName = "Special callback test",
+            terminalIdHex = Convert.ToHexString(wireId), status = 0
+        }, Json);
+        created.EnsureSuccessStatusCode();
+        var terminalId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var endpoint = $"/api/terminals/{terminalId}/special-callback";
+        var payload = new byte[1192];
+        payload[^1] = 0x55;
+        var tableSetId = await CreateRateTableSetAsync("Special callback test set", payload);
+        using var assigned = await fx.Client.PostAsJsonAsync($"/api/terminals/{terminalId}/table-assignment?confirm=true",
+            new { tableSetId }, Json);
+        assigned.EnsureSuccessStatusCode();
+
+        var due = fx.Factory.Clock.GetUtcNow().AddMinutes(2);
+        const int terminalClockOffsetMinutes = -210;
+        var expected = DlogCallbackWire.EncodeSchedule(due.UtcDateTime.AddMinutes(terminalClockOffsetMinutes));
+        using var queued = await fx.Client.PutAsJsonAsync(endpoint, new
+        {
+            dueAtUtc = due, terminalClockOffsetMinutes, deliverAssignedTables = true
+        }, Json);
+        queued.EnsureSuccessStatusCode();
+        var queuedRevision = (await ReadStatusAsync()).GetProperty("revision").GetInt32();
+        var before = await BatchIdsAsync();
+
+        foreach (var (request, response) in new[]
+            { (DlogRateWire.EncodeRequest("5551212", false), (byte)64), (new byte[29], (byte)3) })
+        {
+            if (response == 3)
+                request[0] = 1;
+            await using var runtime = await OpenAsync();
+            await runtime.Stream.WriteAsync(Message(wireId, request));
+            AssertAck(await ReadFrameAsync(runtime.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(response, (await ReadAsync(runtime)).Data[0]);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => ReadFrameAsync(runtime.Stream, TimeSpan.FromMilliseconds(350)));
+        }
+
+        await using (var interrupted = await OpenAsync())
+        {
+            var maintenance = new byte[6 + 11 + 28 + 1];
+            maintenance[0] = 6;
+            maintenance[1] = 0x08;
+            maintenance[6] = 10;
+            maintenance[17] = 60;
+            maintenance[^1] = 13;
+            await interrupted.Stream.WriteAsync(Message(wireId, maintenance));
+            AssertAck(await ReadFrameAsync(interrupted.Stream, TimeSpan.FromSeconds(5)));
+            var first = await ReadAsync(interrupted);
+            byte[] reply = [15, 0x08, 0x00, .. expected, 13];
+            Assert.Equal(reply, first.Data);
+            await interrupted.Stream.WriteAsync(Control((byte)(NccControl.Nack | first.Control)));
+            var retry = await ReadAsync(interrupted);
+            Assert.Equal(first.Control | NccControl.ReTrans, retry.Control);
+            Assert.Equal(first.Data, retry.Data);
+        }
+        Assert.Equal(JsonValueKind.Null, (await ReadStatusAsync()).GetProperty("acknowledgedAtUtc").ValueKind);
+
+        await using (var sync = await OpenAsync())
+        {
+            await sync.Stream.WriteAsync(Message(wireId, [DlogTimeSyncWire.Request]));
+            AssertAck(await ReadFrameAsync(sync.Stream, TimeSpan.FromSeconds(5)));
+            var clock = await ReadAsync(sync);
+            Assert.Equal(DlogTimeSyncWire.Response, clock.Data[0]);
+            await AckAsync(sync, clock);
+            var offer = await ReadAsync(sync);
+            Assert.Equal(expected, offer.Data);
+            await AckAsync(sync, offer);
+            var end = await ReadAsync(sync);
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await AckAsync(sync, end);
+        }
+        var programmed = await ReadStatusAsync();
+        Assert.NotEqual(JsonValueKind.Null, programmed.GetProperty("acknowledgedAtUtc").ValueKind);
+        Assert.Equal(JsonValueKind.Null, programmed.GetProperty("returnedAtUtc").ValueKind);
+        using var staleCancel = await fx.Client.PostAsJsonAsync($"{endpoint}/cancel", new { revision = queuedRevision }, Json);
+        Assert.Equal(HttpStatusCode.Conflict, staleCancel.StatusCode);
+
+        await using var callback = await OpenAsync();
+        var earlyOffer = await OfferAsync(callback, DlogCallbackWire.Return);
+        await AckAsync(callback, earlyOffer);
+        Assert.Equal(new byte[] { 13 }, (await ReadAsync(callback)).Data);
+        Assert.Equal(JsonValueKind.Null, (await ReadStatusAsync()).GetProperty("returnedAtUtc").ValueKind);
+        Assert.True(before.SetEquals(await BatchIdsAsync()));
+
+        fx.Factory.Clock.Advance(TimeSpan.FromMinutes(3));
+        try
+        {
+            await callback.Stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket
+            {
+                Control = 1, TerminalId = wireId, Data = [DlogCallbackWire.Return]
+            }));
+            AssertAck(await ReadFrameAsync(callback.Stream, TimeSpan.FromSeconds(5)));
+            var header = await ReadAsync(callback);
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await AckAsync(callback, header);
+            for (var offset = 0; offset < payload.Length; offset += NccConstants.MaxDataSize)
+            {
+                var part = await ReadAsync(callback);
+                Assert.Equal(payload[offset..Math.Min(offset + NccConstants.MaxDataSize, payload.Length)], part.Data);
+                await AckAsync(callback, part);
+            }
+            await callback.Stream.WriteAsync(Message(wireId, [14, 73]));
+            AssertAck(await ReadFrameAsync(callback.Stream, TimeSpan.FromSeconds(5)));
+            var completed = await ReadAsync(callback);
+            Assert.Equal(new byte[] { 13 }, completed.Data);
+            await AckAsync(callback, completed);
+            await WaitNewBatchAsync(before, 2);
+            Assert.NotEqual(JsonValueKind.Null, (await ReadStatusAsync()).GetProperty("returnedAtUtc").ValueKind);
+            await callback.Stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket
+            {
+                Control = 2, TerminalId = wireId, Data = [DlogCallbackWire.Return]
+            }));
+            AssertAck(await ReadFrameAsync(callback.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, (await ReadAsync(callback)).Data);
+        }
+        finally
+        {
+            fx.Factory.Clock.Advance(TimeSpan.FromMinutes(-3));
+        }
+
+        async Task<JsonElement> ReadStatusAsync() =>
+            (await fx.Client.GetFromJsonAsync<JsonElement>(endpoint, Json)).GetProperty("callback");
+
+        async Task<NccWirePacket> OfferAsync(Link link, byte type)
+        {
+            await link.Stream.WriteAsync(Message(wireId, [type]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var offer = await ReadAsync(link);
+            Assert.Equal(expected, offer.Data);
+            return offer;
+        }
+
+        static async Task<NccWirePacket> ReadAsync(Link link) =>
+            Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+
+        static ValueTask AckAsync(Link link, NccWirePacket frame) =>
+            link.Stream.WriteAsync(Control((byte)(NccControl.Ack | frame.Control)));
+    }
+
     private async Task AssignLabSetAsync()
     {
         var sets = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/sets", Json))!;
