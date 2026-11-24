@@ -467,7 +467,8 @@ function FieldInput({ field, value, dirty, onChange }: {
   field: Field; value: string; dirty: boolean; onChange: (value: string) => void
 }) {
   if (field.editor === 'bitmap') {
-    return <NativeBitmapField name={field.label} value={field.value === null && !dirty ? null : value} onChange={onChange} />
+    return <NativeBitmapField name={field.label} value={field.value === null && !dirty ? null : value}
+      savedValue={field.value} onChange={onChange} />
   }
   if (field.editor === 'screen-text') {
     return <GraphicalTextField label={field.label} value={value} unmapped={field.value === null && !dirty} onChange={onChange} />

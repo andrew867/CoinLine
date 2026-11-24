@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
-
-const width = 112
-const height = 72
+import { useEffect, useMemo, useRef, useState } from 'react'
+import {
+  bitmapBit, bitmapByteIndex, bitmapHeight as height, bitmapPixelIsLit, bitmapWidth as width,
+  emptyBitmap, encodeBitmap, exportBitmap, invertBitmap,
+} from './graphicalBitmap'
 
 export function NativeBitmapPreview({ name, value }: { name: string; value: string }) {
   const canvas = useRef<HTMLCanvasElement>(null)
@@ -13,7 +14,7 @@ export function NativeBitmapPreview({ name, value }: { name: string; value: stri
     const pixels = context.createImageData(width, height)
     for (let y = 0; y < height; y++) {
       for (let x = 0; x < width; x++) {
-        const visible = (bitmap.charCodeAt(Math.floor(y / 8) * width + x) & (1 << (y % 8))) !== 0
+        const visible = bitmapPixelIsLit(bitmap, x, y)
         const index = (y * width + x) * 4
         pixels.data.set(visible ? [152, 247, 216, 255] : [22, 49, 42, 255], index)
       }
@@ -24,13 +25,16 @@ export function NativeBitmapPreview({ name, value }: { name: string; value: stri
   return <canvas ref={canvas} width={width} height={height} aria-label={`${name} preview`} role="img" />
 }
 
-export function NativeBitmapField({ name, value, onChange }: {
-  name: string; value: string | null; onChange: (value: string) => void
+export function NativeBitmapField({ name, value, savedValue, onChange }: {
+  name: string; value: string | null; savedValue: string | null; onChange: (value: string) => void
 }) {
   const [message, setMessage] = useState('')
+  const [reading, setReading] = useState(false)
+  const download = useMemo(() => value && exportBitmap(value), [value])
 
   async function replace(file: File) {
     setMessage('')
+    setReading(true)
     try {
       if (file.size > 2_000_000) throw new Error('Choose an image smaller than 2 MB.')
       const image = await createImageBitmap(file)
@@ -50,15 +54,17 @@ export function NativeBitmapField({ name, value, onChange }: {
           for (let x = 0; x < width; x++) {
             const index = (y * width + x) * 4
             const darkness = pixels[index] * .299 + pixels[index + 1] * .587 + pixels[index + 2] * .114
-            if (darkness < 128) bitmap[Math.floor(y / 8) * width + x] |= 1 << (y % 8)
+            if (darkness < 128) bitmap[bitmapByteIndex(x, y)] |= bitmapBit(y)
           }
         }
-        onChange(btoa(String.fromCharCode(...bitmap)))
+        onChange(encodeBitmap(bitmap))
       } finally {
         image.close()
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'The browser could not open this image.')
+    } finally {
+      setReading(false)
     }
   }
 
@@ -67,12 +73,21 @@ export function NativeBitmapField({ name, value, onChange }: {
     <div className="native-table-bitmap">
       <NativeBitmapPreview name={name} value={value} />
       <label>{name}
-        <input type="file" accept="image/png,image/bmp,image/jpeg" onChange={(event) => {
+        <input type="file" accept="image/png,image/bmp,image/jpeg" disabled={reading} onChange={(event) => {
           const file = event.target.files?.[0]
+          event.target.value = ''
           if (file) void replace(file)
         }} />
       </label>
       <small>112 × 72 pixels. Dark pixels light up on the terminal.</small>
+      <div className="row-actions">
+        {download && <a href={download} download="screen-artwork.bmp">Download BMP</a>}
+        <button type="button" disabled={reading} onClick={() => { setMessage(''); onChange(invertBitmap(value)) }}>Invert artwork</button>
+        <button type="button" disabled={reading || value === emptyBitmap}
+          onClick={() => { setMessage(''); onChange(emptyBitmap) }}>Clear artwork</button>
+        {savedValue !== null && value !== savedValue && <button type="button" disabled={reading}
+          onClick={() => { setMessage(''); onChange(savedValue) }}>Restore saved artwork</button>}
+      </div>
       {message && <p role="status">{message}</p>}
     </div>
   )

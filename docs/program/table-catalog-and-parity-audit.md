@@ -117,11 +117,13 @@ The inspected later graphical profile stores eight 1,152-byte screens after an e
 
 | Kind | Display fields | Authoring status |
 | --- | --- | --- |
-| Bitmap (`B`) | The first 1,008 body bytes hold 112 by 72 monochrome pixels. Screen attributes and six key actions follow the body. | Native artwork upload and monochrome preview. |
+| Bitmap (`B`) | The first 1,008 body bytes hold 112 by 72 monochrome pixels. Screen attributes and six key actions follow the body. | Native artwork import, monochrome preview, BMP download, invert, clear and restore. |
 | Text (`T`) | The desktop help describes a nine-line screen with 19 cells per line. The firmware can scroll across 54 stored rows. A zero at the start of a row ends the displayed text. | Native multiline editing and nine-line preview with paging. |
 | Mixed (`M`) | The body contains four 261-byte panels. Each starts with four 19-cell text rows and three 19-cell key-label rows, then its own attributes and six key actions. | Native panel text, key labels, attributes and separate key-action editing. |
 
-The browser simulator reads context settings from MT131 and resolves the saved links across all 24 screen slots, including mixed panel addresses. It previews screen phases, flash timing, navigation and choice-key actions. Bitmap export, foreground and background reversal, and physical display timing remain open.
+The browser simulator reads context settings from MT131 and resolves the saved links across all 24 screen slots, including mixed panel addresses. It previews screen phases, flash timing, navigation and choice-key actions. Physical display timing remains open.
+
+Chromium exported a one-bit BMP from a draft and reimported it without changing the record hash. Clearing and restoring the artwork left the saved bytes intact. A saved inversion changed only the 1,008 artwork bytes and left the screen settings, links and reserved bytes intact. An isolated NCC fixture received only the selected MT133 record and returned MT14 to the original batch. Download from the published set produced the expected inverted BMP. Rendering the changed artwork on compatible stock firmware remains pending.
 
 ## Manager data and workflows
 
