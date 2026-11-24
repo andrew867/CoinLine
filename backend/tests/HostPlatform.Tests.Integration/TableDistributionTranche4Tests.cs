@@ -100,6 +100,41 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Graphical_draft_can_author_a_mixed_screen_and_its_key_link_in_one_revision()
+    {
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Graphical editor test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}/records/133/fields";
+        var initial = await _client.GetFromJsonAsync<JsonElement>(path);
+        using var initialized = await _client.PostAsJsonAsync(path, initial.GetProperty("templates")[0]);
+        Assert.Equal(HttpStatusCode.NoContent, initialized.StatusCode);
+
+        var original = await _client.GetFromJsonAsync<JsonElement>(path);
+        using var saved = await _client.PutAsJsonAsync(path, new
+        {
+            profile = original.GetProperty("profile"), revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
+            changes = new Dictionary<string, string>
+            {
+                ["screen-0.panel-0.line-0"] = "Main menu", ["screen-0.panel-0.label-0"] = "Details",
+                ["screen-0.panel-0.button-0.next"] = "80", ["screen-0.kind"] = "77"
+            }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var result = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.Equal(2, result.GetProperty("revision").GetInt32());
+        var allSections = result.GetProperty("sections").EnumerateArray().ToDictionary(section => section.GetProperty("key").GetString()!);
+        var panel = allSections["screen-0.panel-0"];
+        Assert.Equal("Screen 17 · Panel 1", panel.GetProperty("label").GetString());
+        Assert.True(panel.GetProperty("showPanelPreview").GetBoolean());
+        Assert.Equal("Main menu", panel.GetProperty("fields")[0].GetProperty("value").GetString());
+        var key = allSections["screen-0.panel-0.button-0"].GetProperty("fields").EnumerateArray()
+            .Single(field => field.GetProperty("key").GetString()!.EndsWith(".next"));
+        Assert.Equal("screen-link", key.GetProperty("editor").GetString());
+        Assert.Equal("80", key.GetProperty("value").GetString());
+    }
+
+    [Fact]
     public async Task Draft_clone_retains_original_records_and_can_publish_advertising()
     {
         var sets = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets"))!;

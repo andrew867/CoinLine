@@ -4,7 +4,11 @@ using System.Numerics;
 
 namespace HostPlatform.Protocols.Tables;
 
-public enum TableFieldEncoding { UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText }
+public enum TableFieldEncoding
+{
+    UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
+    KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon
+}
 
 public sealed record TableFieldChoice(int Value, string Label);
 
@@ -18,7 +22,12 @@ public sealed record NativeTableField(
         TableFieldEncoding.Flag => "checkbox",
         TableFieldEncoding.Bitmap => "bitmap",
         TableFieldEncoding.MessagingKey => "password",
-        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial => "text",
+        TableFieldEncoding.GraphicalKind => "screen-kind",
+        TableFieldEncoding.GraphicalText => "screen-text",
+        TableFieldEncoding.GraphicalLink => "screen-link",
+        TableFieldEncoding.GraphicalFlashRate => "flash-rate",
+        TableFieldEncoding.GraphicalIcon => "screen-icon",
+        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial => "text",
         _ when Choices != null => "select",
         _ => "number"
     };
@@ -34,7 +43,7 @@ public sealed record NativeTableField(
     {
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.MessagingKey => Size,
         TableFieldEncoding.Bcd => Maximum ?? Size * 2,
-        TableFieldEncoding.Dial => Size * 2,
+        TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial => Size * 2,
         _ => null
     };
 
@@ -68,8 +77,10 @@ public sealed record NativeTableField(
             TableFieldEncoding.SignedLong => Format(BinaryPrimitives.ReadInt32LittleEndian(data)),
             TableFieldEncoding.Text => ReadText(data),
             TableFieldEncoding.DisplayText => VisualPromptText.Read(data),
+            TableFieldEncoding.GraphicalText => GraphicalScreenText.Read(data),
             TableFieldEncoding.Bcd => ReadDigits(data, isDial: false, TextLimit ?? 0),
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
+            TableFieldEncoding.KeypadDial => ReadDigits(data, isDial: true, TextLimit ?? 0, allowKeypad: true),
             TableFieldEncoding.Bitmap => IsBitmapScreen(record) ? Convert.ToBase64String(data) : null,
             TableFieldEncoding.MessagingKey => null,
             _ => Format(data[0])
@@ -99,9 +110,14 @@ public sealed record NativeTableField(
                 if (!VisualPromptText.TryWrite(value, data))
                     throw Invalid($"enter up to {Size} display characters using ASCII or supported accents");
                 return;
+            case TableFieldEncoding.GraphicalText:
+                if (!GraphicalScreenText.TryWrite(value, data))
+                    throw Invalid("enter up to 54 lines of 19 supported display characters");
+                return;
             case TableFieldEncoding.Bcd:
             case TableFieldEncoding.Dial:
-                WriteDigits(data, value, Encoding == TableFieldEncoding.Dial);
+            case TableFieldEncoding.KeypadDial:
+                WriteDigits(data, value, Encoding != TableFieldEncoding.Bcd, Encoding == TableFieldEncoding.KeypadDial);
                 return;
             case TableFieldEncoding.MessagingKey:
                 if (value.Length != Size || value.Any(ch => !char.IsAsciiDigit(ch)) || value.StartsWith("0000", StringComparison.Ordinal))
@@ -142,26 +158,26 @@ public sealed record NativeTableField(
         }
     }
 
-    private void WriteDigits(Span<byte> data, string value, bool isDial)
+    private void WriteDigits(Span<byte> data, string value, bool isDial, bool allowKeypad)
     {
         var limit = TextLimit ?? 0;
-        if ((!isDial && value.Length != limit) || value.Length > limit || value.Any(ch => !char.IsAsciiDigit(ch)))
-            throw Invalid(isDial ? $"enter up to {limit} decimal digits" : $"enter exactly {limit} decimal digits");
+        if ((!isDial && value.Length != limit) || value.Length > limit
+            || value.Any(ch => !char.IsAsciiDigit(ch) && !(allowKeypad && ch is '*' or '#')))
+            throw Invalid(allowKeypad ? $"enter up to {limit} keypad digits (0 to 9, * or #)"
+                : isDial ? $"enter up to {limit} decimal digits" : $"enter exactly {limit} decimal digits");
 
         var finalNibble = data[^1] & 15;
         data.Clear();
         for (var i = 0; i < value.Length; i++)
         {
-            var digit = value[i] - '0';
-            if (isDial && digit == 0)
-                digit = 10;
+            var digit = value[i] switch { '0' when isDial => 10, '*' => 11, '#' => 12, var ch => ch - '0' };
             data[i / 2] |= (byte)(digit << (i % 2 == 0 ? 4 : 0));
         }
         if (!isDial && limit % 2 != 0)
             data[^1] |= (byte)(finalNibble is 14 or 15 ? finalNibble : 14);
     }
 
-    private static string? ReadDigits(ReadOnlySpan<byte> data, bool isDial, int limit)
+    private static string? ReadDigits(ReadOnlySpan<byte> data, bool isDial, int limit, bool allowKeypad = false)
     {
         Span<char> output = stackalloc char[limit];
         for (var i = 0; i < limit; i++)
@@ -171,6 +187,11 @@ public sealed record NativeTableField(
                 return new string(output[..i]);
             if (isDial && digit == 10)
                 digit = 0;
+            if (allowKeypad && digit is 11 or 12)
+            {
+                output[i] = digit == 11 ? '*' : '#';
+                continue;
+            }
             if (digit > 9)
                 return null;
             output[i] = (char)('0' + digit);
@@ -195,7 +216,8 @@ public sealed record NativeTableField(
         && !value[..4].SequenceEqual("0000"u8) && value.IndexOfAnyExceptInRange((byte)'0', (byte)'9') < 0;
 }
 
-public sealed record NativeTableSection(string Key, string Label, IReadOnlyList<NativeTableField> Fields, bool ShowDisplayPreview = false);
+public sealed record NativeTableSection(string Key, string Label, IReadOnlyList<NativeTableField> Fields,
+    bool ShowDisplayPreview = false, int? GraphicalScreenIndex = null, bool ShowPanelPreview = false);
 
 public sealed record NativeTableLayout(byte Number, int Length, string Profile, IReadOnlyList<NativeTableSection> Sections)
 {
@@ -203,8 +225,9 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
     {
         if (original.Length != Length || original[0] != Number)
             throw new InvalidOperationException("The record does not match this editor's wire profile.");
-        var fields = Sections.SelectMany(s => s.Fields).ToDictionary(f => f.Key, StringComparer.Ordinal);
         var edited = original.ToArray();
+        var sections = NativeTableLayouts.IsGraphicalRecord(Number) ? NativeTableLayouts.PrepareGraphicalChanges(edited, changes) : Sections;
+        var fields = sections.SelectMany(s => s.Fields).ToDictionary(f => f.Key, StringComparer.Ordinal);
         foreach (var (key, value) in changes)
         {
             if (!fields.TryGetValue(key, out var field) || value == null)

@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { NativeBitmapField } from './NativeBitmapField'
+import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 
 type Field = {
   key: string
   label: string
   editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password'
+    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon'
   value: string | null
   min: number
   max: number
@@ -13,7 +15,10 @@ type Field = {
   help: string | null
 }
 
-type Section = { key: string; label: string; fields: Field[]; showDisplayPreview?: boolean }
+type Section = {
+  key: string; label: string; fields: Field[]; showDisplayPreview?: boolean
+  graphicalScreenIndex?: number | null; showPanelPreview?: boolean
+}
 type Layout = {
   supported: true
   editable: boolean
@@ -58,6 +63,14 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
 
   function edit(field: Field, value: string) {
     const updated = { ...edits }
+    if (field.editor === 'screen-kind' && value !== field.value && layout?.supported) {
+      const screen = layout.sections.find((section) => section.fields.includes(field))?.graphicalScreenIndex
+      const others = layout.sections.filter((section) => section.graphicalScreenIndex === screen)
+        .flatMap((section) => section.fields).filter((item) => item.key !== field.key)
+      if ((field.value !== '0' || others.some((item) => item.key in updated)) &&
+          !window.confirm('Changing the screen type replaces its content and clears pending edits for this screen. Continue?')) return
+      for (const item of others) delete updated[item.key]
+    }
     if (value === field.value || (field.editor === 'password' && value === '')) delete updated[field.key]
     else updated[field.key] = value
     setEdits(updated)
@@ -134,6 +147,8 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
         && (field.value?.toLowerCase().includes(needle) || edits[field.key]?.toLowerCase().includes(needle)))))
   const current = sections.find((section) => section.key === sectionKey) ?? sections[0]
   const changed = Object.keys(edits).length
+  const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
+  const effectiveValue = (field: Field) => edits[field.key] ?? field.value
 
   return (
     <form className="native-table-editor" onSubmit={(event) => void save(event)}>
@@ -155,6 +170,10 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
       {current && (
         <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
           <legend>{current.label}</legend>
+          {changingKind && <p className="native-graphical-status">Save the screen type to load its editor.</p>}
+          {!changingKind && current.showPanelPreview && (
+            <GraphicalPanelPreview text={current.fields.slice(0, 4).map(effectiveValue)} keys={current.fields.slice(4, 10).map(effectiveValue)} />
+          )}
           {current.showDisplayPreview && (
             <figure className="native-table-prompt-preview">
               <figcaption>Terminal display preview</figcaption>
@@ -170,7 +189,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
               </div>
             </figure>
           )}
-          {current.fields.map((field) => (
+          {current.fields.filter((field) => !changingKind || field.editor === 'screen-kind').map((field) => (
             <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}
@@ -192,6 +211,20 @@ function FieldInput({ field, value, dirty, onChange }: {
 }) {
   if (field.editor === 'bitmap') {
     return <NativeBitmapField name={field.label} value={field.value === null && !dirty ? null : value} onChange={onChange} />
+  }
+  if (field.editor === 'screen-text') {
+    return <GraphicalTextField label={field.label} value={value} unmapped={field.value === null && !dirty} onChange={onChange} />
+  }
+  if (field.editor === 'screen-link') return <GraphicalLinkField label={field.label} value={value} onChange={onChange} />
+  if (field.editor === 'flash-rate') return <GraphicalFlashField label={field.label} value={value} onChange={onChange} />
+  if (field.editor === 'screen-icon') {
+    const packed = Number(value)
+    return <label className="native-table-field" data-dirty={dirty}>
+      <span>{field.label}</span>
+      <select value={packed & 63} onChange={(event) => onChange(String((packed & 192) | Number(event.target.value)))}>
+        {Array.from({ length: 64 }, (_, index) => <option key={index} value={index}>{index}</option>)}
+      </select>
+    </label>
   }
   if (field.editor === 'checkbox') {
     return <label className="native-table-toggle" data-dirty={dirty}>

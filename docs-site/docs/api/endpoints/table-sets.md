@@ -35,6 +35,8 @@ Field updates include the `revision`, `sha256`, `profile` and a `changes` object
 
 Visual prompt sections with `showDisplayPreview` set contain the upper and lower fields of a known two-line message in display order. Each `prompt-{row}.text` key still addresses one zero-based, 20-byte wire row. Supported Western accents are converted to the firmware's glyph codes. An unmapped imported row returns a null value and is preserved when omitted from `changes`.
 
+Graphical records MT131 through MT133 expose fields based on the screen type. A field ending in `.kind` accepts `0` for undefined, `66` for bitmap, `77` for mixed, or `84` for text. The API can apply a type change and the new content in the same request. A type change reinitializes that screen's content area. Text uses newline-separated rows. A screen link packs the zero-based screen index into the low six bits and the panel into the high two bits. Value `255` means no link.
+
 The MT68 `serviceKey` field is write-only in the native field API. Omit it from `changes` to keep the stored key. The field response provides `editor: "password"` and `value: null`. Enabling messaging requires a valid service number and key.
 
 **UI:** `/table-sets`, `/table-sets/:id`

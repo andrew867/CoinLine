@@ -3,7 +3,7 @@ using static HostPlatform.Protocols.Tables.TableFieldEncoding;
 namespace HostPlatform.Protocols.Tables;
 
 /// <summary>Editable portions of identified packed terminal profiles. Unlisted bytes survive every edit.</summary>
-public static class NativeTableLayouts
+public static partial class NativeTableLayouts
 {
     public const string MultiPay = "MTR 1.9 packed";
     public const byte MessagingRecord = 68;
@@ -31,12 +31,28 @@ public static class NativeTableLayouts
         var candidates = Candidates(number, record);
         var layout = profile == null ? candidates.Count == 1 ? candidates[0] : null
             : candidates.SingleOrDefault(layout => layout.Profile == profile);
-        return number == 62 && layout != null ? ExpandNumberingPlan(layout, record) : layout;
+        if (layout == null)
+            return null;
+        return number switch
+        {
+            62 => ExpandNumberingPlan(layout, record),
+            >= 131 and <= 133 => layout with { Sections = GraphicalSections(record) },
+            _ => layout
+        };
     }
 
-    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 55 or 58 or MessagingRecord or 95 or 152
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 55 or 58 or MessagingRecord or 95 or >= 131 and <= 133 or 152
         ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
         : [];
+
+    public static byte[] CreateDraftTemplate(NativeTableLayout template)
+    {
+        var bytes = new byte[template.Length];
+        bytes[0] = template.Number;
+        if (IsGraphicalRecord(template.Number))
+            InitializeGraphicalRecord(bytes);
+        return bytes;
+    }
 
     internal static void ValidateMessagingChanges(ReadOnlySpan<byte> original, ReadOnlySpan<byte> updated)
     {
@@ -305,7 +321,7 @@ public static class NativeTableLayouts
             yield return new NativeTableLayout(type, 8001, Later, VisualPromptCatalog.Build(expanded: true));
 
         foreach (var type in new byte[] { 131, 132, 133 })
-            yield return new NativeTableLayout(type, 9224, Later, GraphicScreens());
+            yield return new NativeTableLayout(type, GraphicalRecordLength, Later, []);
 
         for (byte type = 101; type <= 115; type++)
             yield return Layout(type, 403, [AreaCode(), .. PairedRates(3, "Exchange")]);
@@ -480,27 +496,6 @@ public static class NativeTableLayouts
         i => $"{label} {200 + i * 2} and {201 + i * 2}", (i, key) =>
             [Bits($"{key}.even", $"Rate index for {200 + i * 2}", offset + i, 240),
              Bits($"{key}.odd", $"Rate index for {201 + i * 2}", offset + i, 15)]);
-
-    private static NativeTableSection[] GraphicScreens() => [Section("rotation", "Graphical screens and rotation",
-        Field("statDuration", "Statistics collection duration", 1, Word), Field("offHookScreen", "Off-hook entry screen", 4),
-        Field("connectedScreen", "Connected-call screen", 5), Field("offHookDuration", "Off-hook display duration", 6)),
-        .. Rows("screen", 8, i => $"Screen {i + 1}", (i, key) =>
-        {
-            var offset = 8 + i * 1152;
-            return [new NativeTableField($"{key}.bitmap", "Screen artwork", offset + 1, Bitmap, Size: 1008, BitmapTypeOffset: offset),
-                Field($"{key}.dwell", "Screen display duration", offset + 1045, Word),
-                Field($"{key}.flash", "Flash rate", offset + 1047), Field($"{key}.owner", "Screen owner code", offset + 1056, Word),
-                Field($"{key}.next", "Next screen", offset + 1058), Field($"{key}.connected", "Connected-call screen", offset + 1059)];
-        }),
-        .. Rows("button", 48, i => $"Screen {i / 6 + 1}, button {i % 6 + 1}", (i, key) =>
-        {
-            var offset = 8 + i / 6 * 1152 + 1062 + i % 6 * 15;
-            return [Field($"{key}.owner", "Button owner code", offset, Word),
-                Bits($"{key}.type", "Call classification", offset + 3, 15, CallKinds),
-                Bits($"{key}.payment", "Payment classification", offset + 3, 240, PaymentKinds),
-                Field($"{key}.icon", "Icon ID", offset + 4), Field($"{key}.rate", "Rate index", offset + 5),
-                DialField($"{key}.digits", "Dialed digits", offset + 6, 8), Field($"{key}.next", "Next screen", offset + 14)];
-        })];
 
     private static NativeTableSection[] ReportTimes(int offset) => Rows("timestamp", 4, i => $"Report timestamp {i + 1}", (i, key) =>
         [Hour($"{key}.hour", "Hour", offset + i * 2), Minute($"{key}.minute", "Minute", offset + i * 2 + 1)]);

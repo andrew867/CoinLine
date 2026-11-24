@@ -55,6 +55,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                 section.Key,
                 section.Label,
                 section.ShowDisplayPreview,
+                section.GraphicalScreenIndex,
+                section.ShowPanelPreview,
                 fields = section.Fields.Select(field => new
                 {
                     field.Key,
@@ -85,8 +87,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         if (template == null)
             return BadRequest(new { error = "There is no default template for that wire profile." });
 
-        var bytes = new byte[template.Length];
-        bytes[0] = checked((byte)number);
+        var bytes = NativeTableLayouts.CreateDraftTemplate(template);
         var (_, error) = ResolveLayout(set, number, bytes, body.Profile);
         if (error != null)
             return BadRequest(new { error });
@@ -177,7 +178,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     private static string TemplateName(int number) => number switch
     {
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
-        95 => "Instant Win", 152 => "Holiday and time-of-day discounts",
+        95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}", 152 => "Holiday and time-of-day discounts",
         _ => $"MT{number}"
     };
 }

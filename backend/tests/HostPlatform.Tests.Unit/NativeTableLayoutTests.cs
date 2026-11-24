@@ -216,4 +216,86 @@ public sealed class NativeTableLayoutTests
         record[8] = (byte)'M';
         Assert.Throws<InvalidOperationException>(() => layout.Apply(record, edits));
     }
+
+    [Theory]
+    [InlineData(131, "Screen 1")] [InlineData(132, "Screen 9")] [InlineData(133, "Screen 17")]
+    public void Graphical_templates_start_disabled_with_unused_links(int type, string firstScreen)
+    {
+        var record = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(type)));
+        Assert.Equal(9224, record.Length);
+        Assert.Equal(type, record[0]);
+        Assert.Equal(0, record[3]);
+        Assert.Equal(new byte[] { 255, 255 }, record[4..6]);
+        var layout = NativeTableLayouts.Find(type, record)!;
+        Assert.Equal(firstScreen, layout.Sections[1].Label);
+        Assert.DoesNotContain(layout.Sections, section => section.ShowPanelPreview);
+        Assert.Equal("255", layout.Sections.Single(section => section.Key == "button-47").Fields.Single(field => field.Key.EndsWith(".next")).Read(record));
+    }
+
+    [Fact]
+    public void Text_screen_edit_is_order_independent_and_preserves_hidden_rows_until_replaced()
+    {
+        var original = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(131)));
+        original[1054] = 0xAA;
+        original[1160] = (byte)'B';
+        var layout = NativeTableLayouts.Find(131, original)!;
+        var converted = layout.Apply(original, new Dictionary<string, string>
+        {
+            ["screen-0.text"] = "Line one\n\nCafé", ["screen-0.kind"] = "84"
+        });
+        Assert.Equal((byte)'T', converted[8]);
+        Assert.Equal((byte)' ', converted[9 + 19]);
+        Assert.Equal(0xA6, converted[9 + 38 + 3]);
+        Assert.Equal(0, converted[9 + 57]);
+        Assert.Equal(original[1053..], converted[1053..]);
+
+        layout = NativeTableLayouts.Find(131, converted)!;
+        var textField = layout.Sections.Single(section => section.Key == "screen-0").Fields.Single(field => field.Key.EndsWith(".text"));
+        Assert.Equal("Line one\n\nCafé", textField.Read(converted));
+        var shortened = layout.Apply(converted, new Dictionary<string, string> { ["screen-0.text"] = "Line one" });
+        Assert.Equal(0, shortened[9 + 19]);
+        Assert.Equal(converted[(9 + 20)..], shortened[(9 + 20)..]);
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(converted,
+            new Dictionary<string, string> { ["screen-0.text"] = string.Join('\n', Enumerable.Repeat("row", 55)) }));
+    }
+
+    [Fact]
+    public void Mixed_panel_writes_text_attributes_navigation_and_only_its_own_key_bytes()
+    {
+        var baseRecord = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(132)));
+        var layout = NativeTableLayouts.Find(132, baseRecord)!;
+        var record = layout.Apply(baseRecord, new Dictionary<string, string> { ["screen-0.kind"] = "77" });
+        layout = NativeTableLayouts.Find(132, record)!;
+        const int start = 9 + 261 * 2;
+        const int rightLabel = start + 76 + 10;
+        const int attributes = start + 133;
+        const int button = start + 171 + 15;
+        record[rightLabel - 1] = 0xAB;
+        record[button + 2] = 0x0C;
+        record[button + 4] = 0xC3;
+        var section = layout.Sections.Single(section => section.Key == "screen-0.panel-2");
+        Assert.True(section.ShowPanelPreview);
+        Assert.Equal(4, layout.Sections.Count(item => item.ShowPanelPreview));
+        Assert.Equal("255", section.Fields.Single(field => field.Key.EndsWith(".next")).Read(record));
+        var edited = layout.Apply(record, new Dictionary<string, string>
+        {
+            ["screen-0.panel-2.line-0"] = "Menu", ["screen-0.panel-2.label-1"] = "Options",
+            ["screen-0.panel-2.flash"] = "33", ["screen-0.panel-2.enter-1"] = "6",
+            ["screen-0.panel-2.button-1.digits"] = "*10#", ["screen-0.panel-2.button-1.next"] = "132",
+            ["screen-0.panel-2.button-1.answer"] = "true", ["screen-0.panel-2.button-1.icon"] = "197"
+        });
+        Assert.Equal(record[..start], edited[..start]);
+        Assert.Equal(record[(start + 261)..], edited[(start + 261)..]);
+        Assert.Equal((byte)'M', edited[start]);
+        Assert.Equal((byte)'O', edited[rightLabel]);
+        Assert.Equal(0xAB, edited[rightLabel - 1]);
+        Assert.Equal(0x21, edited[attributes + 2]);
+        Assert.Equal(6, edited[attributes + 4]);
+        Assert.Equal(0x0E, edited[button + 2]);
+        Assert.Equal(0xC5, edited[button + 4]);
+        Assert.Equal(new byte[] { 0xB1, 0xAC }, edited[(button + 6)..(button + 8)]);
+        Assert.Equal(132, edited[button + 14]);
+        var digits = layout.Sections.Single(item => item.Key == "screen-0.panel-2.button-1").Fields.Single(field => field.Key.EndsWith(".digits"));
+        Assert.Equal("*10#", digits.Read(edited));
+    }
 }

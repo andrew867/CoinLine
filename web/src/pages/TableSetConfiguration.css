@@ -62,6 +62,19 @@
 .native-table-field :is(input, select) { width: 100%; min-width: 0; }
 .native-table-prompt-preview { grid-column: 1 / -1; margin: 0 0 3px; padding: 6px 8px; }
 .native-table-prompt-preview figcaption { margin-bottom: 6px; color: #2e493e; font-weight: 600; }
+.native-graphical-content {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr));
+  gap: 12px;
+}
+.native-graphical-content textarea { max-width: 100%; font-family: Consolas, monospace; }
+.native-graphical-preview { margin: 0; padding: 6px 8px; }
+.native-graphical-preview figcaption { margin-bottom: 6px; color: #2e493e; font-weight: 600; }
+.native-graphical-panel, .native-graphical-status { grid-column: 1 / -1; }
+.native-graphical-keys { display: flex; justify-content: space-between; column-gap: 1ch; color: #ffe5a3; }
+.native-graphical-page, .native-graphical-field-pair { display: flex; flex-wrap: wrap; gap: 8px; }
+.native-graphical-page { margin-top: 8px; }
 .native-table-toggle { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 6px; color: #2e493e; }
 .native-table-fields [data-dirty='true'] { background: #e8f4ec; }
 .native-table-feedback { margin-top: 9px; }
