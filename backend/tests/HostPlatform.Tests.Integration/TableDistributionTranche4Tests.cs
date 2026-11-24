@@ -299,6 +299,40 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Family_checklist_reports_present_and_missing_records_without_blocking_partial_publication()
+    {
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Family checklist fixture" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+        var endpoint = path + "/family-review";
+
+        var empty = await _client.GetFromJsonAsync<TerminalFamilyTableReview>(endpoint + "?familyId=mtr19-multipay");
+        Assert.True(empty!.Documented);
+        Assert.Equal(200, empty.ScreeningEntries);
+        Assert.Equal("missing", Assert.Single(empty.Tables, table => table.Name == "Call screening").Status);
+
+        var fieldsPath = path + "/records/92/fields";
+        var templates = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        var template = Assert.Single(templates.GetProperty("templates").EnumerateArray(),
+            item => item.GetProperty("length").GetInt32() == 3401);
+        using var imported = await _client.PostAsJsonAsync(fieldsPath, template);
+        imported.EnsureSuccessStatusCode();
+        var review = await _client.GetFromJsonAsync<TerminalFamilyTableReview>(endpoint + "?familyId=mtr19-multipay");
+        var screening = Assert.Single(review!.Tables, table => table.Name == "Call screening");
+        Assert.True(screening.Required);
+        Assert.Equal("present", screening.Status);
+        Assert.Equal(new[] { 200 }, Assert.Single(screening.Records).ScreeningSlots);
+
+        using var unknown = await _client.GetAsync(endpoint + "?familyId=unknown");
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        var desk = await _client.GetFromJsonAsync<TerminalFamilyTableReview>(endpoint + "?familyId=mtr20-desk");
+        Assert.False(desk!.Documented);
+        using var published = await _client.PostAsync(path + "/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+    }
+
+    [Fact]
     public async Task Service_restriction_template_creates_one_native_draft_record()
     {
         using var set = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Native service restriction template" });

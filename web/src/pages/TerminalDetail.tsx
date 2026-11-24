@@ -605,6 +605,8 @@ export function TerminalDetail() {
             Active set <Link to={`/table-sets/${assign.tableSetId}`}>{assignedSet?.name ?? assign.tableSetId}</Link>
           </div>
           <div><Link to={`/table-sets/${assign.tableSetId}?record=35#config-heading`}>Review routine call-in settings</Link></div>
+          {term.terminalFamilyId && <div><Link to={`/table-sets/${assign.tableSetId}?family=${encodeURIComponent(term.terminalFamilyId)}#family-review-heading`}>
+            Review table requirements for this family</Link></div>}
           {assignedSet?.targetFirmwareVersionId && assignedSet.targetFirmwareVersionId !== term.firmwareVersionId &&
             <p role="status">This set requires {assignedSet.targetFirmware}. Register matching firmware or assign a compatible set.</p>}
           {assign.previousTableSetId && (

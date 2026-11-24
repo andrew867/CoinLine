@@ -113,6 +113,8 @@ From **Phone groups**, choose **Manage** on a group to see its members. Clear **
 
 Select **Terminal family** when adding or editing a phone. The picker lists the legacy Maximizer family names and type numbers. The **Phones** list can filter by family, and assignment previews show the family of each phone. Use **Installed firmware** to record the precise build and **Terminal operating mode** in the set's MT26 editor to choose card-only, Multi-pay or coin-only operation.
 
+Open **Terminal family checklist** in a table set to compare its saved records with the legacy mandatory and feature-specific tables for a family. From an assigned phone, use **Review table requirements for this family** to open the same view preselected. Inspect missing groups, known target lengths, recognized editor layouts and packed screening capacities. Open a present record directly from the checklist. It describes a full installation, and a partial download can rely on existing terminal data. Confirm the exact installed firmware and device behavior before treating the listed candidates as compatible.
+
 Open **Terminal status** to filter decoded alarms, maintenance reports, status flags and software versions by phone or report type. An upload or table request can include status and version records in the same message. The console shows each report separately. The version report includes the operating mode stored in the phone.
 
 Open an alarm to see its name and number, the phone that reported it, and when CoinLine recorded it. The phone's own timestamp appears separately when the record contains a valid clock. Unlisted alarms retain their numeric code. Expand **Technical record** to inspect the decoded JSON or download the captured bytes.

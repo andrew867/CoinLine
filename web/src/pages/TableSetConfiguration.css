@@ -75,6 +75,10 @@
 .table-record-copy .table-config-preview { margin-top: 10px; }
 .table-record-copy h3 { margin: 0; font-size: 1rem; }
 .table-set-versions { overflow-x: auto; }
+.family-review-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: .88rem; text-align: left; }
+.family-review-table :is(th, td) { padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.family-review-table td small { display: block; color: var(--muted); }
+.family-review-table td strong { display: block; margin-bottom: 3px; }
 .scope-record-choices {
   flex: 0 0 100%; min-inline-size: 0; display: grid; gap: 8px; max-height: 20rem; overflow: auto;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));

@@ -771,6 +771,26 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             yield return "No raw payload bytes — cannot download.";
     }
 
+    [HttpGet("sets/{id:guid}/family-review")]
+    public async Task<ActionResult<TerminalFamilyTableReview>> FamilyReview(Guid id, [FromQuery] string familyId,
+        CancellationToken ct)
+    {
+        var family = TerminalFamilies.Find(familyId);
+        if (family == null)
+            return BadRequest(new { error = "Choose a registered terminal family." });
+        var set = await db.TableSets.AsNoTracking()
+            .Include(s => s.TargetFirmwareVersion)
+            .Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
+            .Include(s => s.Versions).ThenInclude(v => v.TablePayload)
+            .FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (set == null)
+            return NotFound();
+        var records = set.Versions.Where(v => v.TableDefinition != null)
+            .Select(v => (v.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(v)));
+        return Ok(LegacyTerminalTableRequirements.Review(family, records,
+            FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId)));
+    }
+
     [HttpPut("sets/{id:guid}/firmware-target")]
     public async Task<ActionResult> SetFirmwareTarget(Guid id, [FromBody] TableSetFirmwareDto body, CancellationToken ct)
     {

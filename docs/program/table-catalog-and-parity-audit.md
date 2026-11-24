@@ -173,7 +173,11 @@ The phone inventory can store and filter on the terminal family described in the
 
 The MTR 1.11 help topics list type 45 for both Desk and Coin Basic. Retain the terminal family and firmware release when comparing those records. The Multi-pay help also lists expanded visual prompts, while the lab validation tested the records recorded in the lab catalogue above. Establish required records per build before enforcing their presence.
 
+The terminal family checklist maps 33 of the 34 inventory family IDs to the archived mandatory and feature-specific table lists. The archive did not establish an independent list for MTR 2.0 Desk. The checklist translates logical tables to candidate message types and reports unknown wire mappings for Inmate Setup and Inmate Feature configuration. It retains conflicting help details, such as the Coin Basic release title, and separates the advertised screening count from the packed editor's available capacities. An ambiguous MT59 record can have 60 or 85 wire slots, while the verified Multi-pay MT92 has 200. The checklist is an advisory full-installation review. Registered exact firmware targets and the existing download validation remain independent.
+
 An upgrade test against PostgreSQL preserved the existing phone, firmware and group data. The browser verified creating, editing, filtering and clearing a family, and showed the selected family in a table set assignment preview.
+
+The family checklist was verified with Playwright and isolated PostgreSQL. An operator switched between Multi-pay, both graphical variants, Inmate and Desk, saw recognized and verified length evidence, identified a partial graphical record group, and opened the native screening editor. Creating MT58 updated the checklist. The previous four record hashes stayed intact, the partial set still published and assigned, and the assigned phone opened the matching family checklist. This verifies the host review workflow. Exact required-record lists and actual acceptance on stock builds remain open.
 
 | Workflow | Available native fields | Work still required for full parity |
 | --- | --- | --- |

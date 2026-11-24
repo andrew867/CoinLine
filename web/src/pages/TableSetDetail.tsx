@@ -5,6 +5,7 @@ import { TableSetAssignment } from './TableSetAssignment'
 import { TableSetConfiguration } from './TableSetConfiguration'
 import { TableRecordCopy } from './TableRecordCopy'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
+import { TerminalFamilyReview } from './TerminalFamilyReview'
 import './TableSetConfiguration.css'
 
 
@@ -53,6 +54,7 @@ export function TableSetDetail() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const initialRecord = Number(searchParams.get('record') ?? 29)
+  const initialFamily = searchParams.get('family') ?? ''
   const [d, setD] = useState<Detail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -204,6 +206,9 @@ export function TableSetDetail() {
           <li key={finding.tableNumber}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}</li>
         ))}</ul>}
       </section>
+      <TerminalFamilyReview key={`${id}:${initialFamily}`} setId={id} initialFamily={initialFamily}
+        dataKey={`${d.targetFirmwareVersionId}:${d.versions.map(version => `${version.tableNumber}:${version.payloadSha256Hex}`).join(',')}`}
+        recordDirty={recordDirty} />
       {d.provisioning && (d.provisioning.operatingType || d.provisioning.acceptedCoinSlots !== null ||
         d.provisioning.configuredCardRanges !== null || d.provisioning.findings.length > 0) && (
         <section className="table-config-panel" aria-labelledby="provisioning-heading">
