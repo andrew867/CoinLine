@@ -8,6 +8,8 @@
 | POST | `/api/terminals` | Create |
 | GET | `/api/terminals/{id}` | Detail |
 | PUT | `/api/terminals/{id}` | Update |
+| GET | `/api/terminals/{id}/identity` | Read the current and previous NCC IDs, previous terminal type and the first matched contact since the ID change |
+| PUT | `/api/terminals/{id}/identity` | Change only the Manager's NCC ID with the current ID as a precondition |
 | GET | `/api/terminals/{id}/inventory` | Read site details, administrative fields, equipment and reported hardware serial |
 | GET | `/api/terminals/{id}/cashbox` | Read the latest reported status by cashbox and the phone’s collection history |
 | PUT | `/api/terminals/{id}/inventory` | Replace the terminal inventory profile using its current revision |
@@ -34,6 +36,8 @@
 | POST | `/api/terminals/{id}/request-table-reload` | Request table reload |
 
 Create accepts an optional `terminalFamilyId`. The terminal list accepts the same field as a query filter and includes the family label. It also returns `regionCode` and accepts it as a case-insensitive exact filter. A phone can have a terminal family and a separately registered firmware build. Wire settings such as card-only or Multi-pay mode are configured in MT26.
+
+To create a phone or change its Manager NCC ID, send `terminalIdHex` with ten hexadecimal digits. To change only the ID, also send `expectedTerminalIdHex` with the currently registered value. IDs compare case-insensitively. Another phone's ID or a stale expected ID returns HTTP 409. The GET response timestamps the previous ID and type from their saved catalog changes. `firstContactAtUtc` is null until the host records a matched NCC frame under the new ID. A repeated change back to an older ID starts a new observation period. Phones registered before this history feature begin recording changes at their next edit.
 
 Send the complete inventory `profile` from GET with the current `revision` to replace it. The initial revision is null and competing updates return HTTP 409. Send administrative codes as strings to retain leading zeroes. Use decimal costs with at most two fractional digits and integer equipment counts. The hardware serial comes from the terminal's NCC status, and the registered location and customer come from the existing terminal assignment.
 

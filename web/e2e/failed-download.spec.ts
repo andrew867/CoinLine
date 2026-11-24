@@ -32,6 +32,7 @@ test('find the table missing an acknowledgement on a phone’s failed download',
     ['/api/sip-modem', { listening: false }],
     ['/api/terminals', [phone]],
     [`/api/terminals/${phone.id}`, phone],
+    [`/api/terminals/${phone.id}/identity`, { terminalIdHex: phone.terminalIdHex, previousId: null, previousType: null, firstContactAtUtc: null }],
     [`/api/terminals/${phone.id}/diagnostics`, { snapshots: [], craftDiagnostics: [], tableReloadRequests: [], cdrUploadRequests: [] }],
     [`/api/operator/terminals/${phone.id}/timeline`, { terminalId: phone.id, items: [] }],
     ['/api/tables/sets', []], ['/api/terminal-groups', []], ['/api/ncc/sessions', []], ['/api/call-records', []],
@@ -60,7 +61,7 @@ test('find the table missing an acknowledgement on a phone’s failed download',
   await page.getByRole('link', { name: 'Phones', exact: true }).click()
   await page.getByRole('link', { name: phone.displayName }).click()
   await expect(page.getByRole('heading', { name: phone.displayName })).toBeVisible()
-  await expect(page.getByText(`Terminal id (hex): ${phone.terminalIdHex}`)).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Terminal identity history' }).getByText(phone.terminalIdHex, { exact: true })).toBeVisible()
   await page.getByTestId('download-status').getByRole('link', { name: 'Failed' }).click()
   await expect(page.getByRole('heading', { name: 'Download batch' })).toBeVisible()
   await expect(page.getByText(phone.id, { exact: true })).toBeVisible()

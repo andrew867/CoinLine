@@ -1,3 +1,5 @@
+using System.Data;
+using System.Text.Json;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Services;
 using HostPlatform.Domain;
@@ -5,6 +7,7 @@ using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HostPlatform.Api.Controllers;
 
@@ -16,6 +19,9 @@ public sealed class TerminalsController(
     FirmwareJobOrchestrator firmwareOrchestrator,
     Hosting.INccSessionOutbound outbound) : ControllerBase
 {
+    private const string WireIdChanged = "wire_id_changed";
+    private const string FamilyChanged = "terminal_family_changed";
+
     [HttpGet]
     public async Task<ActionResult<object>> GetAll(
         [FromQuery] Guid? siteId,
@@ -156,6 +162,9 @@ public sealed class TerminalsController(
             return BadRequest(new { error = "Choose a registered firmware version." });
         if (body.TerminalFamilyId != null && TerminalFamilies.Find(body.TerminalFamilyId) == null)
             return BadRequest(new { error = "Choose a terminal family from the catalogue." });
+        if (!IsWireId(body.TerminalIdHex))
+            return BadRequest(new { error = "Enter the five-byte terminal ID as ten hexadecimal digits." });
+        var wireId = body.TerminalIdHex.ToUpperInvariant();
         var e = new Terminal
         {
             SiteId = body.SiteId,
@@ -163,24 +172,32 @@ public sealed class TerminalsController(
             TransportEndpointId = body.TransportEndpointId,
             FirmwareVersionId = body.FirmwareVersionId,
             TerminalFamilyId = body.TerminalFamilyId,
-            TerminalIdHex = body.TerminalIdHex,
+            TerminalIdHex = wireId,
             DisplayName = body.DisplayName,
             Status = body.Status
         };
-        db.Terminals.Add(e);
-        await db.SaveChangesAsync(ct);
-        ApiAudit.Write(db, HttpContext, "terminals", "create", $"Terminal:{e.Id}",
-            new
-            {
-                e.SiteId,
-                e.DisplayName,
-                e.TerminalIdHex,
-                e.TerminalFamilyId,
-                status = e.Status,
-                HARDWARE_VALIDATION_REQUIRED =
-                    "Host-provisioned terminal row only — modem/NCC enrollment and field identity checks not asserted."
-            }, e.Id);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            if (await WireIdTaken(wireId, e.Id, ct))
+                return DuplicateWireId();
+            db.Terminals.Add(e);
+            ApiAudit.Write(db, HttpContext, "terminals", "create", $"Terminal:{e.Id}",
+                new
+                {
+                    e.SiteId,
+                    e.DisplayName,
+                    e.TerminalIdHex,
+                    e.TerminalFamilyId,
+                    status = e.Status,
+                    HARDWARE_VALIDATION_REQUIRED = "Verify modem enrollment and identity on the terminal."
+                }, e.Id);
+            await db.SaveChangesAsync(ct);
+            if (transaction != null)
+                await transaction.CommitAsync(ct);
+        }
+        catch (Exception ex) when (TerminalWriteConflict(ex)) { return ChangedTerminal(); }
         return Created($"/api/terminals/{e.Id}", new { e.Id });
     }
 
@@ -220,8 +237,9 @@ public sealed class TerminalsController(
         if (terminal.TerminalFamilyId == body.TerminalFamilyId)
             return NoContent();
 
-        terminal.TerminalFamilyId = body.TerminalFamilyId;
         terminal.Version++;
+        RecordIdentityChange(terminal, FamilyChanged, terminal.TerminalFamilyId, body.TerminalFamilyId);
+        terminal.TerminalFamilyId = body.TerminalFamilyId;
         ApiAudit.Write(db, HttpContext, "terminals", "set_family", $"Terminal:{id}", new { body.TerminalFamilyId }, id);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The phone record changed. Reload and try again." }); }
@@ -385,33 +403,123 @@ public sealed class TerminalsController(
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<ActionResult> Update(Guid id, [FromBody] TerminalUpdateDto body, CancellationToken ct)
+    public Task<ActionResult> Update(Guid id, [FromBody] TerminalUpdateDto body, CancellationToken ct) =>
+        SaveTerminal(id, body.TerminalIdHex, null, body, ct);
+
+    [HttpGet("{id:guid}/identity")]
+    public async Task<ActionResult<object>> Identity(Guid id, CancellationToken ct)
     {
-        var t = await db.Terminals.FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (t == null) return NotFound();
-        if (body.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
-            return BadRequest(new { error = "Choose a registered firmware version." });
-        t.DisplayName = body.DisplayName;
-        t.Status = body.Status;
-        t.TerminalIdHex = body.TerminalIdHex;
-        t.FirmwareVersionId = body.FirmwareVersionId;
-        t.TransportEndpointId = body.TransportEndpointId;
-        t.Version++;
-        ApiAudit.Write(db, HttpContext, "terminals", "update", $"Terminal:{id}",
-            new
+        var terminal = await db.Terminals.AsNoTracking().Where(t => t.Id == id)
+            .Select(t => new { t.TerminalIdHex, t.Version }).SingleOrDefaultAsync(ct);
+        if (terminal == null)
+            return NotFound();
+
+        var history = db.TerminalEvents.AsNoTracking().Where(e => e.TerminalId == id && e.Version <= terminal.Version)
+            .OrderByDescending(e => e.Version);
+        var priorId = await history.FirstOrDefaultAsync(e => e.EventType == WireIdChanged, ct);
+        var priorFamily = await history.FirstOrDefaultAsync(e => e.EventType == FamilyChanged, ct);
+        var previousId = priorId == null ? null : JsonSerializer.Deserialize<IdentityChange>(priorId.PayloadJson);
+        var previousFamily = priorFamily == null ? null : JsonSerializer.Deserialize<IdentityChange>(priorFamily.PayloadJson);
+        var wireId = terminal.TerminalIdHex.ToUpperInvariant();
+        var firstContact = priorId == null ? null : await db.NccSessionFrames.AsNoTracking()
+            .Where(f => f.NccSession!.TerminalId == id && f.TerminalMatched && !f.SentByHost &&
+                f.TerminalIdHex == wireId && f.CreatedAtUtc >= priorId.OccurredAtUtc)
+            .OrderBy(f => f.CreatedAtUtc).Select(f => (DateTime?)f.CreatedAtUtc).FirstOrDefaultAsync(ct);
+
+        return Ok(new
+        {
+            terminal.TerminalIdHex,
+            previousId = priorId == null ? null : new { value = previousId?.PreviousValue, changedAtUtc = priorId.OccurredAtUtc },
+            previousType = priorFamily == null ? null : new
             {
-                body.DisplayName,
-                body.Status,
-                body.TerminalIdHex,
-                body.FirmwareVersionId,
-                body.TransportEndpointId,
-                HARDWARE_VALIDATION_REQUIRED =
-                    "Catalog edit — verify modem routing and firmware pointers against bench hardware before production."
-            }, id);
-        try { await db.SaveChangesAsync(ct); }
-        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The phone record changed. Reload and try again." }); }
-        return NoContent();
+                value = TerminalFamilies.Find(previousFamily?.PreviousValue)?.Label ?? previousFamily?.PreviousValue,
+                changedAtUtc = priorFamily.OccurredAtUtc
+            },
+            firstContactAtUtc = firstContact
+        });
     }
+
+    [HttpPut("{id:guid}/identity")]
+    public Task<ActionResult> SetWireId(Guid id, [FromBody] TerminalWireIdDto body, CancellationToken ct) =>
+        SaveTerminal(id, body.TerminalIdHex, body.ExpectedTerminalIdHex, null, ct);
+
+    private async Task<ActionResult> SaveTerminal(Guid id, string wireId, string? expectedId, TerminalUpdateDto? details,
+        CancellationToken ct)
+    {
+        try
+        {
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == id, ct);
+            if (terminal == null)
+                return NotFound();
+            if (expectedId != null && !StringComparer.OrdinalIgnoreCase.Equals(expectedId, terminal.TerminalIdHex))
+                return ChangedTerminal();
+
+            var changed = !StringComparer.OrdinalIgnoreCase.Equals(wireId, terminal.TerminalIdHex);
+            if (details == null && !changed)
+                return NoContent();
+            if (changed)
+            {
+                if (!IsWireId(wireId))
+                    return BadRequest(new { error = "Enter the five-byte terminal ID as ten hexadecimal digits." });
+                wireId = wireId.ToUpperInvariant();
+                if (await WireIdTaken(wireId, id, ct))
+                    return DuplicateWireId();
+            }
+            if (details?.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
+                return BadRequest(new { error = "Choose a registered firmware version." });
+
+            terminal.Version++;
+            if (changed)
+            {
+                RecordIdentityChange(terminal, WireIdChanged, terminal.TerminalIdHex, wireId);
+                terminal.TerminalIdHex = wireId;
+            }
+            if (details != null)
+            {
+                terminal.DisplayName = details.DisplayName;
+                terminal.Status = details.Status;
+                terminal.FirmwareVersionId = details.FirmwareVersionId;
+                terminal.TransportEndpointId = details.TransportEndpointId;
+            }
+            ApiAudit.Write(db, HttpContext, "terminals", details == null ? "set_wire_id" : "update", $"Terminal:{id}",
+                new
+                {
+                    terminal.DisplayName,
+                    terminal.Status,
+                    terminal.TerminalIdHex,
+                    terminal.FirmwareVersionId,
+                    terminal.TransportEndpointId,
+                    HARDWARE_VALIDATION_REQUIRED = "Verify terminal identity and firmware on the terminal."
+                }, id);
+            await db.SaveChangesAsync(ct);
+            if (transaction != null)
+                await transaction.CommitAsync(ct);
+            return NoContent();
+        }
+        catch (Exception ex) when (TerminalWriteConflict(ex)) { return ChangedTerminal(); }
+    }
+
+    private void RecordIdentityChange(Terminal terminal, string eventType, string? previous, string? current) =>
+        db.TerminalEvents.Add(new TerminalEvent
+        {
+            TerminalId = terminal.Id,
+            Version = terminal.Version,
+            EventType = eventType,
+            OccurredAtUtc = DateTime.UtcNow,
+            PayloadJson = JsonSerializer.Serialize(new IdentityChange(previous, current))
+        });
+
+    private static bool IsWireId(string? value) => value is { Length: 10 } && value.All(Uri.IsHexDigit);
+    private Task<bool> WireIdTaken(string wireId, Guid exclude, CancellationToken ct) =>
+        db.Terminals.AnyAsync(t => t.Id != exclude && t.TerminalIdHex.ToUpper() == wireId, ct);
+    private ConflictObjectResult DuplicateWireId() => Conflict(new { error = "Another phone already uses this terminal ID." });
+    private ConflictObjectResult ChangedTerminal() => Conflict(new { error = "The phone record changed. Reload and try again." });
+    private static bool TerminalWriteConflict(Exception ex) => ex is DbUpdateConcurrencyException ||
+        (ex as PostgresException ?? ex.InnerException as PostgresException)?.SqlState == PostgresErrorCodes.SerializationFailure;
+
+    private sealed record IdentityChange(string? PreviousValue, string? CurrentValue);
 
     [HttpGet("{id:guid}/events")]
     public async Task<ActionResult<IEnumerable<object>>> Events(Guid id, CancellationToken ct) =>
@@ -585,6 +693,7 @@ public sealed class TerminalsController(
     public sealed record AssignGroupDto(Guid? TerminalGroupId);
     public sealed record TerminalFirmwareDto(Guid? FirmwareVersionId);
     public sealed record TerminalFamilyDto(string? TerminalFamilyId);
+    public sealed record TerminalWireIdDto(string TerminalIdHex, string ExpectedTerminalIdHex);
     public sealed record AssignGroupsDto(Guid[] GroupIds, int Revision);
 
     public sealed record TerminalCreateDto(

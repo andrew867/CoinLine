@@ -1,5 +1,6 @@
 import { SpecialCallback } from './SpecialCallback'
 import { TerminalInventoryPanel } from './TerminalInventoryPanel'
+import { TerminalIdentityPanel } from './TerminalIdentityPanel'
 import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
@@ -535,7 +536,6 @@ export function TerminalDetail() {
           title={`Operational status enum value ${term.status}`}
         />
       </p>
-      <p>Terminal id (hex): {term.terminalIdHex}</p>
       <form onSubmit={(event) => void saveInstalledFirmware(event)}
         style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginBottom: 12 }}>
         <FirmwareVersionSelect label="Installed firmware" value={firmwareSelection} onChange={setFirmwareEdit}
@@ -550,6 +550,7 @@ export function TerminalDetail() {
         <button type="submit" disabled={savingFamily || familySelection === (term.terminalFamilyId ?? '')}>Save family</button>
       </form>
       {familyNotice && <p role="status">{familyNotice}</p>}
+      <TerminalIdentityPanel key={term.id} terminalId={term.id} wireId={term.terminalIdHex} family={term.terminalFamilyId} />
       <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />
       <PhoneGroups key={`groups-${term.id}`} terminalId={term.id} />
 

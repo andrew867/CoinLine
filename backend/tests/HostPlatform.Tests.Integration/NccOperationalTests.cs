@@ -1852,6 +1852,86 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Terminal_identity_tracks_catalogue_changes_and_first_matched_contact_separately()
+    {
+        const string original = "0F0000A202";
+        const string replacement = "0F0000A203";
+        var seed = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
+            .Single(t => t.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        var siteId = seed.GetProperty("siteId").GetGuid();
+        using var created = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId, terminalIdHex = original, displayName = "Identity history fixture", terminalFamilyId = "mtr19-multipay", status = 0
+        }, Json);
+        created.EnsureSuccessStatusCode();
+        var terminalId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var path = $"/api/terminals/{terminalId}";
+        var identityPath = path + "/identity";
+
+        var blank = await fx.Client.GetFromJsonAsync<JsonElement>(identityPath, Json);
+        Assert.Equal(JsonValueKind.Null, blank.GetProperty("previousId").ValueKind);
+        Assert.Equal(JsonValueKind.Null, blank.GetProperty("previousType").ValueKind);
+        Assert.Equal(terminalId, (await Contact(original, 1)).GetProperty("terminalId").GetGuid());
+
+        using var family = await fx.Client.PutAsJsonAsync(path + "/family", new { terminalFamilyId = "mtr20-desk" }, Json);
+        family.EnsureSuccessStatusCode();
+        using var duplicate = await ChangeId(original, Convert.ToHexString(KnownId));
+        Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        using var malformed = await ChangeId(original, "not-a-wire-id");
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        using var rename = await ChangeId(original, replacement.ToLowerInvariant());
+        rename.EnsureSuccessStatusCode();
+        using var stale = await ChangeId(original, "0F0000A204");
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using var duplicateCreate = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId, terminalIdHex = replacement.ToLowerInvariant(), displayName = "Conflicting identity fixture", status = 0
+        }, Json);
+        Assert.Equal(HttpStatusCode.Conflict, duplicateCreate.StatusCode);
+
+        var pending = await fx.Client.GetFromJsonAsync<JsonElement>(identityPath, Json);
+        Assert.Equal(replacement, pending.GetProperty("terminalIdHex").GetString());
+        Assert.Equal(original, pending.GetProperty("previousId").GetProperty("value").GetString());
+        Assert.Equal("MTR 1.9 Multi-pay", pending.GetProperty("previousType").GetProperty("value").GetString());
+        Assert.Equal(JsonValueKind.Null, pending.GetProperty("firstContactAtUtc").ValueKind);
+        Assert.Equal(JsonValueKind.Null, (await Contact(original, 2)).GetProperty("terminalId").ValueKind);
+        Assert.Equal(terminalId, (await Contact(replacement, 3)).GetProperty("terminalId").GetGuid());
+
+        var observed = await fx.Client.GetFromJsonAsync<JsonElement>(identityPath, Json);
+        var first = observed.GetProperty("firstContactAtUtc").GetDateTime();
+        Assert.True(first >= observed.GetProperty("previousId").GetProperty("changedAtUtc").GetDateTime());
+        await Contact(replacement, 4);
+        var again = await fx.Client.GetFromJsonAsync<JsonElement>(identityPath, Json);
+        Assert.Equal(first, again.GetProperty("firstContactAtUtc").GetDateTime());
+
+        using var clear = await fx.Client.PutAsJsonAsync(path + "/family", new { terminalFamilyId = (string?)null }, Json);
+        clear.EnsureSuccessStatusCode();
+        using var legacy = await fx.Client.PutAsJsonAsync(path, new
+        {
+            terminalIdHex = original, displayName = "Identity history fixture", status = 0
+        }, Json);
+        legacy.EnsureSuccessStatusCode();
+        var returned = await fx.Client.GetFromJsonAsync<JsonElement>(identityPath, Json);
+        Assert.Equal(replacement, returned.GetProperty("previousId").GetProperty("value").GetString());
+        Assert.Equal("MTR 2.0 Desk", returned.GetProperty("previousType").GetProperty("value").GetString());
+        Assert.Equal(JsonValueKind.Null, returned.GetProperty("firstContactAtUtc").ValueKind);
+
+        Task<HttpResponseMessage> ChangeId(string expected, string desired) =>
+            fx.Client.PutAsJsonAsync(identityPath, new { expectedTerminalIdHex = expected, terminalIdHex = desired }, Json);
+
+        async Task<JsonElement> Contact(string wireId, byte marker)
+        {
+            var packet = Message(Convert.FromHexString(wireId), [84, marker]);
+            await using (var link = await OpenAsync())
+            {
+                await link.Stream.WriteAsync(packet);
+                AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            }
+            return await WaitSessionAsync(Convert.ToHexString(packet));
+        }
+    }
+
+    [Fact]
     public async Task Terminal_inventory_keeps_operator_details_separate_from_reported_serial()
     {
         const string wireId = "0000000202";

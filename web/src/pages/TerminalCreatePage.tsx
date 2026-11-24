@@ -1,7 +1,7 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { apiFetch, apiPost } from '../api/client'
+import { apiFetch, apiPostRaw } from '../api/client'
 import { EmptyHint, ErrorBanner } from '../components/AppStates'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
@@ -19,7 +19,7 @@ export function TerminalCreatePage() {
   const [firmwareVersionId, setFirmwareVersionId] = useState('')
   const [terminalFamilyId, setTerminalFamilyId] = useState('')
   const [displayName, setDisplayName] = useState('Bench terminal')
-  const [terminalIdHex, setTerminalIdHex] = useState('E2E010203')
+  const [terminalIdHex, setTerminalIdHex] = useState('')
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -40,7 +40,7 @@ export function TerminalCreatePage() {
     e.preventDefault()
     setErr(null)
     try {
-      const created = await apiPost<{ id: string }>('/api/terminals', {
+      const response = await apiPostRaw('/api/terminals', {
         siteId,
         terminalGroupId: groupId || null,
         transportEndpointId: null,
@@ -50,6 +50,11 @@ export function TerminalCreatePage() {
         displayName,
         status: 1,
       })
+      if (!response.ok) {
+        const problem = await response.json().catch(() => null)
+        throw new Error(problem?.error || `Could not create terminal (HTTP ${response.status}).`)
+      }
+      const created = await response.json() as { id: string }
       nav(`/terminals/${created.id}`)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'create failed')
@@ -110,7 +115,8 @@ export function TerminalCreatePage() {
           <input
             data-testid="terminal-create-hex"
             value={terminalIdHex}
-            onChange={(e) => setTerminalIdHex(e.target.value)}
+            required pattern="[0-9A-Fa-f]{10}" maxLength={10}
+            onChange={(e) => setTerminalIdHex(e.target.value.toUpperCase())}
             style={{ display: 'block', width: '100%', fontFamily: 'monospace' }}
           />
         </label>
