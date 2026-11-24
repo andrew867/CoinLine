@@ -201,6 +201,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         23 or 135 => "Carrier screens",
         SpareTableWire.MessageType => "Spare table",
         93 => "Stored-value parameters",
+        CodeDownloadWire.MessageType => "Code download schedule",
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
         95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}", 152 => "Holiday and time-of-day discounts",
         _ => $"MT{number}"

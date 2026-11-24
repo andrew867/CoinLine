@@ -314,6 +314,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             return NotFound();
         if (set.Status != TableSetStatus.Published)
             return BadRequest(new { error = "Publish the set before assigning it." });
+        if (await tables.FindCodeOnlyVersionAsync(id, ct) != null)
+            return BadRequest(new { error = "Use the call-in scheduler for a set that contains only MT94." });
 
         List<AssignmentTarget> targets;
         try
@@ -404,6 +406,9 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         var ready = body.AvailableAtUtc?.UtcDateTime ?? now;
         if (ready < now)
             return BadRequest(new { error = "Choose a future time or select Prepare now." });
+        if (TableDistributionService.CodeOnlyVersion(set.Versions) is { } codeVersion &&
+            CodeDownloadWire.DeliveryIssue(TableDistributionService.GetEffectivePayload(codeVersion), ready) is { } issue)
+            return BadRequest(new { error = issue });
         // PostgreSQL stores timestamps at microsecond precision.
         ready = ready.AddTicks(-(ready.Ticks % 10));
 

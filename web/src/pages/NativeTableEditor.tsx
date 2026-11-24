@@ -8,7 +8,7 @@ type Field = {
   key: string
   label: string
   editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password' | 'password-hex' | 'password-pin'
-    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard' | 'discount-method'
+    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard' | 'discount-method' | 'datetime'
   value: string | null
   min: number
   max: number
@@ -286,7 +286,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
             </figure>
           )}
           {!changingCardFamily && current.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
-            && !replacedDiscountFields.has(field.key)).map((field) => (
+            && !replacedDiscountFields.has(field.key) && (number !== 94 || !field.key.startsWith('start.'))).map((field) => (
             <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}
@@ -337,6 +337,7 @@ function FieldInput({ field, value, dirty, onChange }: {
   }
 
   const numeric = field.editor === 'number'
+  const calendar = field.editor === 'datetime'
   const password = isCredential(field)
   const hex = field.editor === 'password-hex'
   const pin = field.editor === 'password-pin'
@@ -351,8 +352,9 @@ function FieldInput({ field, value, dirty, onChange }: {
           {field.choices.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       ) : (
-        <input type={password ? 'password' : numeric ? 'number' : 'text'} value={clearingPin ? '' : value} min={numeric && dirty ? field.min : undefined}
-          max={numeric && dirty ? field.max : undefined} step={numeric ? 1 : undefined}
+        <input type={password ? 'password' : numeric ? 'number' : calendar ? 'datetime-local' : 'text'}
+          value={clearingPin ? '' : value} min={numeric && dirty ? field.min : undefined}
+          max={numeric && dirty ? field.max : undefined} step={numeric || calendar ? 1 : undefined}
           autoComplete={password ? 'new-password' : undefined} inputMode={password && !hex ? 'numeric' : undefined}
           pattern={password && field.maxLength ? `[${hex ? '0-9A-Fa-f' : '0-9'}]{${passwordLength}}` : undefined}
           maxLength={field.maxLength ?? undefined} required={numeric && dirty}
@@ -362,7 +364,7 @@ function FieldInput({ field, value, dirty, onChange }: {
           }} />
       )}
       {field.help && <small>{field.help}</small>}
-      {field.value === null && !dirty && !password && <small>Stored characters are outside this editor’s format.</small>}
+      {field.value === null && !dirty && !password && <small>{calendar ? 'No valid terminal start time is set.' : 'Stored characters are outside this editor’s format.'}</small>}
     </label>
   )
   if (!pin) return input

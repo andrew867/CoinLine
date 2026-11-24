@@ -13,14 +13,14 @@ type Scope = keyof typeof scopes
 type Option = { id: string; name?: string; displayName?: string }
 type Target = { id: string; displayName: string; eligible: boolean; reason: string | null }
 
-export function TableSetAssignment({ setId }: { setId: string }) {
+export function TableSetAssignment({ setId, codeOnly = false }: { setId: string; codeOnly?: boolean }) {
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
   const [targetId, setTargetId] = useState('')
   const [targets, setTargets] = useState<Target[] | null>(null)
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mode, setMode] = useState('assignment')
+  const [mode, setMode] = useState(codeOnly ? 'now' : 'assignment')
   const [availableAt, setAvailableAt] = useState('')
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
 
@@ -80,10 +80,11 @@ export function TableSetAssignment({ setId }: { setId: string }) {
   const eligible = targets?.filter((target) => target.eligible).length ?? 0
   return (
     <section className="table-config-panel" aria-labelledby="table-assignment-heading">
-      <h2 id="table-assignment-heading">Assign this set</h2>
-      <p className="page-intro">A group, location or customer assignment updates its current phones. The phones receive the set when they request a download.</p>
+      <h2 id="table-assignment-heading">{codeOnly ? 'Schedule firmware parameters' : 'Assign this set'}</h2>
+      <p className="page-intro">{codeOnly ? 'The selected phones pick up these parameters on a routine call-in or callback.'
+        : 'A group, location or customer assignment updates its current phones. The phones receive the set when they request a download.'}</p>
       <form className="table-config-selectors" onSubmit={(event) => void preview(event)}>
-        <label>Assign by
+        <label>{codeOnly ? 'Schedule by' : 'Assign by'}
           <select disabled={busy} value={scope} onChange={(event) => {
             setScope(event.target.value as Scope)
             setOptions([])
@@ -104,7 +105,7 @@ export function TableSetAssignment({ setId }: { setId: string }) {
             {options.map((item) => <option value={item.id} key={item.id}>{item.name ?? item.displayName}</option>)}
           </select>
         </label>
-        <button type="submit" disabled={!targetId || busy}>Preview assignment</button>
+        <button type="submit" disabled={!targetId || busy}>{codeOnly ? 'Preview phones' : 'Preview assignment'}</button>
       </form>
       {targets && (
         <div className="table-config-preview">
@@ -113,7 +114,7 @@ export function TableSetAssignment({ setId }: { setId: string }) {
           <div className="table-config-selectors">
             <label>Delivery
               <select value={mode} disabled={busy} onChange={(event) => setMode(event.target.value)}>
-                <option value="assignment">Assign for explicit table requests</option>
+                {!codeOnly && <option value="assignment">Assign for explicit table requests</option>}
                 <option value="now">Prepare now for the next call-in</option>
                 <option value="later">Prepare at a specific time</option>
               </select>

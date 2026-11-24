@@ -9,7 +9,7 @@ public enum TableFieldEncoding
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
     KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes,
     TerminatedDisplayText, CardStandard, CardServiceCode, CredentialHex, BigEndianWord, BigEndianBits, SignedByte,
-    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd
+    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd, TerminalCalendar
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -26,6 +26,7 @@ public sealed record NativeTableField(
         TableFieldEncoding.MessagingKey or TableFieldEncoding.CredentialBcd => "password",
         TableFieldEncoding.CredentialHex => "password-hex",
         TableFieldEncoding.PaddedCredentialBcd => "password-pin",
+        TableFieldEncoding.TerminalCalendar => "datetime",
         TableFieldEncoding.GraphicalKind => "screen-kind",
         TableFieldEncoding.GraphicalText => "screen-text",
         TableFieldEncoding.GraphicalLink => "screen-link",
@@ -95,6 +96,7 @@ public sealed record NativeTableField(
             TableFieldEncoding.SignedLong => Format(BinaryPrimitives.ReadInt32LittleEndian(data)),
             TableFieldEncoding.UnsignedLong => Format(BinaryPrimitives.ReadUInt32LittleEndian(data)),
             TableFieldEncoding.Text => ReadText(data),
+            TableFieldEncoding.TerminalCalendar => CodeDownloadWire.ReadCalendar(data),
             TableFieldEncoding.DisplayText => VisualPromptText.Read(data),
             TableFieldEncoding.TerminatedDisplayText => ReadTerminatedDisplayText(data),
             TableFieldEncoding.GraphicalText => GraphicalScreenText.Read(data),
@@ -128,6 +130,10 @@ public sealed record NativeTableField(
                     throw Invalid($"enter up to {Size} printable characters");
                 data.Fill((byte)' ');
                 System.Text.Encoding.ASCII.GetBytes(value, data);
+                return;
+            case TableFieldEncoding.TerminalCalendar:
+                if (!CodeDownloadWire.TryWriteCalendar(value, data))
+                    throw Invalid("enter a date and time within the terminal clock range");
                 return;
             case TableFieldEncoding.DisplayText:
             case TableFieldEncoding.TerminatedDisplayText:
@@ -318,6 +324,12 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             _ => Sections
         };
         var fields = sections.SelectMany(s => s.Fields).ToDictionary(f => f.Key, StringComparer.Ordinal);
+        if (Number == CodeDownloadWire.MessageType && changes.ContainsKey("startAt"))
+        {
+            var parts = changes.Keys.Where(key => key.StartsWith("start.", StringComparison.Ordinal)).ToArray();
+            if (parts.Length != 0 && DateFieldsChanged(original, fields, changes, parts))
+                throw new InvalidOperationException("Change either the terminal start time or its individual fields in this save.");
+        }
         foreach (var (key, value) in changes)
         {
             if (!fields.TryGetValue(key, out var field) || value == null)
@@ -330,6 +342,19 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             NativeTableLayouts.ValidateCardChanges(original, edited);
         if (Number is 23 or 135)
             NativeTableLayouts.ValidateCarrierChanges(original, edited);
+        if (Number == CodeDownloadWire.MessageType && !original.SequenceEqual(edited) && CodeDownloadWire.ConfigurationIssue(edited) is { } issue)
+            throw new InvalidOperationException(issue);
         return edited;
+    }
+
+    private static bool DateFieldsChanged(ReadOnlySpan<byte> original, Dictionary<string, NativeTableField> fields,
+        IReadOnlyDictionary<string, string> changes, string[] parts)
+    {
+        if (fields["startAt"].Read(original) != changes["startAt"])
+            return true;
+        foreach (var part in parts)
+            if (!fields.TryGetValue(part, out var field) || field.Read(original) != changes[part])
+                return true;
+        return false;
     }
 }

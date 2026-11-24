@@ -45,7 +45,8 @@ public static partial class NativeTableLayouts
         };
     }
 
-    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord or SpareTableWire.MessageType or 93 or 95 or >= 131 and <= 135 or 152
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord
+        or SpareTableWire.MessageType or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or 152
         ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
         : [];
 
@@ -59,6 +60,8 @@ public static partial class NativeTableLayouts
             InitializePaymentRecord(bytes);
         if (template.Number == 93 && template.Profile == Later)
             InitializeStoredValueRecord(bytes);
+        if (template.Number == CodeDownloadWire.MessageType)
+            InitializeCodeDownloadRecord(bytes);
         return bytes;
     }
 
@@ -286,13 +289,7 @@ public static partial class NativeTableLayouts
                  Field($"{key}.plan", "Numbering plan reference", 13 + i * 10),
                  Bits($"{key}.mode", "Supervision method code", 14 + i * 10, 7)])]);
 
-        yield return new NativeTableLayout(94, 100, Later, [Section("schedule", "Code download schedule",
-            [.. DateTimeFields("start", 2), DialField("server", "Code server number", 8, 10),
-             TextField("targetRom", "Requested ROM revision", 19, 7), TextField("targetApp", "Download application revision", 26, 4)]),
-            Section("retries", "Retries and alarms", Minute("accessMinutes", "Access retry minutes", 30),
-                Minute("accessSeconds", "Access retry seconds", 31), Field("accessAlarm", "Access failures before alarm", 32),
-                Minute("transferMinutes", "Transfer retry minutes", 33), Minute("transferSeconds", "Transfer retry seconds", 34),
-                Field("transferAlarm", "Transfer failures before alarm", 35))]);
+        yield return new NativeTableLayout(CodeDownloadWire.MessageType, CodeDownloadWire.RecordLength, Later, CodeDownloadSections());
 
         yield return new NativeTableLayout(95, 153, Later, [Section("display", "Promotion messages",
             TextField("prompt1", "First prompt", 91, 20), TextField("prompt2", "Second prompt", 111, 20), TextField("prompt3", "Third prompt", 131, 20)),

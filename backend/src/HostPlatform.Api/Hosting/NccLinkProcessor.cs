@@ -555,6 +555,12 @@ internal sealed class NccLinkProcessor(
         var scheduled = await db.ScheduledTableDownloads.Include(s => s.NccSession).Include(s => s.TableSet)
             .FirstOrDefaultAsync(s => s.TerminalId == terminal.Id && s.AvailableAtUtc <= now
                 && s.CompletedAtUtc == null && s.CancelledAtUtc == null, stoppingToken);
+        var codeVersion = scheduled == null ? null : await tables.FindCodeOnlyVersionAsync(scheduled.TableSetId, stoppingToken);
+        if (!callIn && codeVersion != null)
+        {
+            scheduled = null;
+            codeVersion = null;
+        }
         if (scheduled?.NccSession?.Status == NccSessionStatus.Active)
         {
             await SendInstallEndAsync(stream, terminalId);
@@ -562,7 +568,8 @@ internal sealed class NccLinkProcessor(
         }
 
         Guid? tableSetId = null;
-        if (scheduled != null && await IsScheduledSetEligibleAsync(scheduled, terminal))
+        var codeIssue = codeVersion == null ? null : CodeDownloadWire.DeliveryIssue(TableDistributionService.GetEffectivePayload(codeVersion), now);
+        if (scheduled != null && codeIssue == null && await IsScheduledSetEligibleAsync(scheduled, terminal))
             tableSetId = scheduled.TableSetId;
         else
         {
@@ -570,7 +577,7 @@ internal sealed class NccLinkProcessor(
             {
                 scheduled.CancelledAtUtc = DateTime.UtcNow;
                 scheduled.Version++;
-                var audit = Audit("scheduled_download_ineligible", new { scheduleId = scheduled.Id, scheduled.TableSetId }, terminal.Id);
+                var audit = Audit("scheduled_download_ineligible", new { scheduleId = scheduled.Id, scheduled.TableSetId, reason = codeIssue }, terminal.Id);
                 try { await db.SaveChangesAsync(stoppingToken); }
                 catch (DbUpdateConcurrencyException)
                 {

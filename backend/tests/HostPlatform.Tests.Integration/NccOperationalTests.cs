@@ -1,10 +1,12 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text.Json;
 using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
@@ -555,6 +557,116 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         finally
         {
             using var reset = await fx.Client.PutAsJsonAsync($"{phone}/firmware", new { firmwareVersionId = originalFirmware }, Json);
+            await AssignLabSetAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Firmware_parameters_schedule_delivers_mt94_on_call_in_and_keeps_the_table_assignment()
+    {
+        await AssignRateTableSetAsync("Firmware parameter baseline data set");
+        var terminals = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json);
+        var terminalId = terminals.EnumerateArray().Single(t => t.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId))
+            .GetProperty("id").GetGuid();
+        var assignmentPath = $"/api/terminals/{terminalId}/table-assignment";
+        var originalAssignment = (await fx.Client.GetFromJsonAsync<JsonElement>(assignmentPath, Json)).GetProperty("tableSetId").GetGuid();
+        using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Firmware parameter schedule test" }, Json);
+        created.EnsureSuccessStatusCode();
+        var setId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var setPath = $"/api/tables/sets/{setId}";
+        var fieldsPath = $"{setPath}/records/94/fields";
+        var missing = await fx.Client.GetFromJsonAsync<JsonElement>(fieldsPath, Json);
+        using var initialized = await fx.Client.PostAsJsonAsync(fieldsPath, missing.GetProperty("templates")[0], Json);
+        Assert.Equal(HttpStatusCode.NoContent, initialized.StatusCode);
+        var fields = await fx.Client.GetFromJsonAsync<JsonElement>(fieldsPath, Json);
+        var start = fx.Factory.Clock.GetUtcNow().AddHours(1);
+        var settings = new Dictionary<string, string>
+        {
+            ["enabled"] = "true", ["startAt"] = start.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
+            ["server"] = "1234", ["targetRom"] = "ROMTEST", ["targetApp"] = "A001", ["sector-0"] = "true",
+            ["serverAuthentication"] = Convert.ToHexString(Enumerable.Range(0, 6).Select(index => (byte)(0xA0 + index)).ToArray())
+        };
+        using var saved = await fx.Client.PutAsJsonAsync(fieldsPath, new
+        {
+            profile = fields.GetProperty("profile"), revision = fields.GetProperty("revision"), sha256 = fields.GetProperty("sha256"), changes = settings
+        }, Json);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var updated = await fx.Client.GetFromJsonAsync<JsonElement>(fieldsPath, Json);
+        var authentication = updated.GetProperty("sections")[0].GetProperty("fields").EnumerateArray()
+            .Single(field => field.GetProperty("key").GetString() == "serverAuthentication");
+        Assert.Equal(JsonValueKind.Null, authentication.GetProperty("value").ValueKind);
+        using var published = await fx.Client.PostAsync($"{setPath}/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+        var selection = new { targetType = "terminal", targetId = terminalId, terminalIds = new[] { terminalId } };
+        using var assignment = await fx.Client.PostAsJsonAsync($"{setPath}/assignments", selection, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, assignment.StatusCode);
+        using var direct = await fx.Client.PostAsJsonAsync(assignmentPath, new { tableSetId = setId }, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, direct.StatusCode);
+        var schedulePath = $"{setPath}/schedules";
+        using var late = await fx.Client.PostAsJsonAsync(schedulePath,
+            new { selection.targetType, selection.targetId, selection.terminalIds, availableAtUtc = start.AddMinutes(1) }, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, late.StatusCode);
+        using var scheduled = await fx.Client.PostAsJsonAsync(schedulePath, selection, Json);
+        scheduled.EnsureSuccessStatusCode();
+        var scheduleId = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("id").GetGuid();
+        try
+        {
+            var before = await BatchIdsAsync();
+            await using (var install = await OpenAsync())
+            {
+                await install.Stream.WriteAsync(Message(KnownId, [44, 2]));
+                AssertAck(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+                var header = Decode(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 18 }, header.Data);
+                await install.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+                Assert.Equal(73, Decode(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5))).Data[0]);
+            }
+            await WaitNewBatchAsync(before, 3);
+            Assert.Equal("Ready", (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("status").GetString());
+
+            var template = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(94)));
+            var expected = NativeTableLayouts.Find(94, template)!.Apply(template, settings);
+            before = await BatchIdsAsync();
+            await using (var callIn = await OpenAsync())
+            {
+                await callIn.Stream.WriteAsync(Message(KnownId, [8]));
+                AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                var header = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 18 }, header.Data);
+                await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+                var parameters = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(expected, parameters.Data);
+                await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | parameters.Control)));
+                await callIn.Stream.WriteAsync(Message(KnownId, [14, 94]));
+                AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                var end = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 13 }, end.Data);
+                await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+                await WaitNewBatchAsync(before, 2);
+            }
+            Assert.Equal("Delivered", (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("status").GetString());
+            Assert.Equal(originalAssignment, (await fx.Client.GetFromJsonAsync<JsonElement>(assignmentPath, Json)).GetProperty("tableSetId").GetGuid());
+
+            using var rescheduled = await fx.Client.PostAsJsonAsync(schedulePath, selection, Json);
+            rescheduled.EnsureSuccessStatusCode();
+            scheduleId = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("id").GetGuid();
+            fx.Factory.Clock.Advance(TimeSpan.FromHours(2));
+            before = await BatchIdsAsync();
+            await using (var expired = await OpenAsync())
+            {
+                await expired.Stream.WriteAsync(Message(KnownId, [8]));
+                AssertAck(await ReadFrameAsync(expired.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 13 }, Decode(await ReadFrameAsync(expired.Stream, TimeSpan.FromSeconds(5))).Data);
+            }
+            Assert.True(before.SetEquals(await BatchIdsAsync()));
+            var expiredSchedule = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json)).EnumerateArray()
+                .Single(row => row.GetProperty("id").GetGuid() == scheduleId);
+            Assert.Equal("Cancelled", expiredSchedule.GetProperty("status").GetString());
+        }
+        finally
+        {
+            fx.Factory.Clock.Advance(TimeSpan.Zero);
+            using var cleanup = await fx.Client.PostAsync($"{schedulePath}/{scheduleId}/cancel", null);
             await AssignLabSetAsync();
         }
     }

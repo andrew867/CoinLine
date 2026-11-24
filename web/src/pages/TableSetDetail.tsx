@@ -216,7 +216,7 @@ export function TableSetDetail() {
       )}
       <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}`} setId={id} draft={draft}
         versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />
-      {!draft && <TableSetAssignment key={id} setId={id} />}
+      {!draft && <TableSetAssignment key={id} setId={id} codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} />}
       <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>
       </p>

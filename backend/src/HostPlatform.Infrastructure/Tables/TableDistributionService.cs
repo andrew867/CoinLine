@@ -17,6 +17,19 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     public static string ComputePayloadSha256Hex(TableVersion v) =>
         TablePayloadHasher.Sha256Hex(GetEffectivePayload(v));
 
+    public static TableVersion? CodeOnlyVersion(ICollection<TableVersion> versions)
+    {
+        var version = versions.Count == 1 ? versions.First() : null;
+        return version?.TableDefinition?.TableNumber == CodeDownloadWire.MessageType ? version : null;
+    }
+
+    public async Task<TableVersion?> FindCodeOnlyVersionAsync(Guid tableSetId, CancellationToken ct)
+    {
+        var versions = await db.TableVersions.AsNoTracking().Include(version => version.TableDefinition).Include(version => version.TablePayload)
+            .Where(version => version.TableSetId == tableSetId).Take(2).ToListAsync(ct);
+        return CodeOnlyVersion(versions);
+    }
+
     public static bool HasCompleteDlogRecords(IEnumerable<TableVersion> versions)
     {
         var types = new HashSet<int>();
@@ -352,6 +365,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             .FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
             ?? throw new InvalidOperationException("Table set not found.");
         CheckFirmwareTarget(set, terminal.FirmwareVersionId);
+        if (await FindCodeOnlyVersionAsync(tableSetId, ct) != null)
+            throw new InvalidOperationException("Use the call-in scheduler for a set that contains only MT94.");
 
         var existing = await db.TerminalTableAssignments.FirstOrDefaultAsync(a => a.TerminalId == terminalId, ct);
         if (existing != null)
@@ -408,6 +423,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     public async Task StageDeliveredAssignmentAsync(ScheduledTableDownload schedule, DateTime completedAt,
         CancellationToken ct)
     {
+        if (await FindCodeOnlyVersionAsync(schedule.TableSetId, ct) != null)
+            return;
         var terminal = await db.Terminals.AsNoTracking().Where(t => t.Id == schedule.TerminalId)
             .Select(t => new { t.SiteId, t.Site!.CustomerId, t.FirmwareVersionId }).SingleAsync(ct);
         if (schedule.TableSet != null && TableSetFirmwareCompatibility.Mismatch(schedule.TableSet, terminal.FirmwareVersionId) != null)
