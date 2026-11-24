@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiFetch, apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { TableSetAssignment } from './TableSetAssignment'
+import type { FirmwareSchedule } from './TableSetAssignment'
 import { TableSetConfiguration } from './TableSetConfiguration'
 import { TableRecordCopy } from './TableRecordCopy'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
@@ -40,6 +41,7 @@ type Detail = {
   tableProfile: string | null
   tableProfileEvidence?: { recordCount: number; terminalAcknowledgedCount: number; completeCatalogue: boolean } | null
   firmwareFindings: { tableNumber: number; blocking: boolean; message: string }[]
+  firmwareSchedule?: FirmwareSchedule | null
   versions: Ver[]
   provisioning?: {
     operatingType: string | null
@@ -233,7 +235,7 @@ export function TableSetDetail() {
       <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
         versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />
       {!draft && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
-        codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} />}
+        codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} firmwareSchedule={d.firmwareSchedule} />}
       <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>
       </p>

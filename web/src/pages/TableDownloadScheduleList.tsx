@@ -8,6 +8,9 @@ type Schedule = {
   phone: string
   tableSetId: string
   tableSet: string
+  sourceTableSetId?: string | null
+  firmwareStartAtUtc?: string | null
+  firmwareSlotEndAtUtc?: string | null
   availableAtUtc: string
   preparedAtUtc: string | null
   startedAtUtc: string | null
@@ -31,6 +34,8 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
   const [firmwareCancellation, setFirmwareCancellation] = useState<{ phone: string; batchId: string } | null>(null)
   const endpoint = setId ? `/api/tables/sets/${setId}/schedules`
     : '/api/tables/schedules' + (terminalId ? `?terminalId=${encodeURIComponent(terminalId)}` : '')
+  const hasFirmwareStarts = rows?.some(row => row.firmwareStartAtUtc)
+  const utcLabel = (value: string) => new Date(value).toISOString().slice(0, 16).replace('T', ' ')
 
   useEffect(() => {
     let current = true
@@ -86,13 +91,20 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
       {rows && rows.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
           <table>
-            <thead><tr><th>Phone</th>{!setId && <th>Table set</th>}<th>Records</th><th>Prepare at</th><th>Prepared</th><th>Status</th><th>Delivery</th></tr></thead>
+            <thead><tr><th>Phone</th>{!setId && <th>Table set</th>}<th>Records</th><th>Prepare at</th>
+              {hasFirmwareStarts && <th>Firmware start (UTC)</th>}<th>Prepared</th><th>Status</th><th>Delivery</th></tr></thead>
             <tbody>{rows.map((row) => (
               <tr key={row.id}>
                 <td><Link to={`/terminals/${row.terminalId}`}>{row.phone}</Link></td>
                 {!setId && <td><Link to={`/table-sets/${row.tableSetId}`}>{row.tableSet}</Link></td>}
-                <td>{row.recordNumbers?.map(number => `MT${number}`).join(', ') ?? 'All records'}</td>
+                <td>{row.sourceTableSetId && setId && row.tableSetId !== setId
+                  ? <Link to={`/table-sets/${row.tableSetId}`}>MT94 allocated record</Link>
+                  : row.recordNumbers?.map(number => `MT${number}`).join(', ') ?? 'All records'}</td>
                 <td><time dateTime={row.availableAtUtc}>{new Date(row.availableAtUtc).toLocaleString()}</time></td>
+                {hasFirmwareStarts && <td>{row.firmwareStartAtUtc && <>
+                  <time dateTime={row.firmwareStartAtUtc}>{utcLabel(row.firmwareStartAtUtc)}</time>
+                  {row.firmwareSlotEndAtUtc && <div>Slot ends <time dateTime={row.firmwareSlotEndAtUtc}>{utcLabel(row.firmwareSlotEndAtUtc)}</time></div>}
+                </>}</td>}
                 <td>{row.preparedAtUtc ? <time dateTime={row.preparedAtUtc}>{new Date(row.preparedAtUtc).toLocaleString()}</time> : 'Pending'}</td>
                 <td>{row.status === 'Ready' ? 'Ready for pickup' : row.status}</td>
                 <td>

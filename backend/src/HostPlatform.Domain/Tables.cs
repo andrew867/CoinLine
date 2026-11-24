@@ -87,6 +87,9 @@ public class ScheduledTableDownload : AuditableEntity
     public Terminal? Terminal { get; set; }
     public Guid TableSetId { get; set; }
     public TableSet? TableSet { get; set; }
+    public Guid? SourceTableSetId { get; set; }
+    public TableSet? SourceTableSet { get; set; }
+    public DateTime? FirmwareSlotEndAtUtc { get; set; }
     public DateTime AvailableAtUtc { get; set; }
     public int[]? RecordNumbers { get; set; }
     public Guid? NccSessionId { get; set; }

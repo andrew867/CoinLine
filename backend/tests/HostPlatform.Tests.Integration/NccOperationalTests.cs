@@ -1301,6 +1301,123 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Firmware_window_schedules_distinct_immutable_records_and_delivers_each_allocated_start()
+    {
+        var site = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/sites", Json))[0].GetProperty("id").GetGuid();
+        string[] wireIds = ["0000000911", "0000000912", "0000000913"];
+        var phones = new List<Guid>();
+        foreach (var wire in wireIds)
+        {
+            using var created = await fx.Client.PostAsJsonAsync("/api/terminals",
+                new { siteId = site, displayName = "Firmware window fixture " + phones.Count, terminalIdHex = wire, status = 0 }, Json);
+            created.EnsureSuccessStatusCode();
+            phones.Add((await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid());
+        }
+
+        using var setResponse = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Firmware window fixture" }, Json);
+        setResponse.EnsureSuccessStatusCode();
+        var source = (await setResponse.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{source}";
+        var fieldPath = $"{path}/records/94/fields";
+        var missing = await fx.Client.GetFromJsonAsync<JsonElement>(fieldPath, Json);
+        using var initialized = await fx.Client.PostAsJsonAsync(fieldPath, missing.GetProperty("templates")[0], Json);
+        initialized.EnsureSuccessStatusCode();
+        var fields = await fx.Client.GetFromJsonAsync<JsonElement>(fieldPath, Json);
+        var date = DateOnly.FromDateTime(fx.Factory.Clock.GetUtcNow().UtcDateTime.AddDays(1));
+        var settings = new Dictionary<string, string>
+        {
+            ["enabled"] = "true", ["startAt"] = date.ToDateTime(new TimeOnly(1, 0)).ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
+            ["server"] = "1234", ["targetRom"] = "ROMTEST", ["targetApp"] = "A001",
+            ["sector-0"] = "true", ["sector-31"] = "true", ["sector-255"] = "true"
+        };
+        using var saved = await fx.Client.PutAsJsonAsync(fieldPath, new
+        {
+            profile = fields.GetProperty("profile"), revision = fields.GetProperty("revision"), sha256 = fields.GetProperty("sha256"), changes = settings
+        }, Json);
+        saved.EnsureSuccessStatusCode();
+        using var published = await fx.Client.PostAsync($"{path}/publish?confirm=true", null);
+        published.EnsureSuccessStatusCode();
+        var template = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(94)));
+        var original = NativeTableLayouts.Find(94, template)!.Apply(template, settings);
+        var target = new { terminalIdFrom = wireIds[0], terminalIdTo = wireIds[^1] };
+        var window = new { startDate = date, dailyStart = new TimeOnly(2, 0), dailyEnd = new TimeOnly(2, 30), activeServers = 2, slotMinutes = 30 };
+        var previewUrl = $"{path}/assignment-preview?targetType=terminal-id-range&firmwareTarget.terminalIdFrom={wireIds[0]}&firmwareTarget.terminalIdTo={wireIds[^1]}" +
+            $"&firmwareWindow.startDate={date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}&firmwareWindow.dailyStart=02%3A00&firmwareWindow.dailyEnd=02%3A30" +
+            "&firmwareWindow.activeServers=2&firmwareWindow.slotMinutes=30";
+        var preview = await fx.Client.GetFromJsonAsync<JsonElement>(previewUrl, Json);
+        var allocation = preview.GetProperty("firmwareAllocation");
+        Assert.Equal(3, allocation.GetProperty("selectedBlocks").GetInt32());
+        var first = date.ToDateTime(new TimeOnly(2, 0), DateTimeKind.Utc);
+        var starts = new[] { first, first, first.AddDays(1) };
+        var targets = preview.GetProperty("targets").EnumerateArray().ToDictionary(row => row.GetProperty("id").GetGuid());
+        for (var i = 0; i < phones.Count; i++)
+            Assert.Equal(starts[i], targets[phones[i]].GetProperty("firmwareStartAtUtc").GetDateTime());
+
+        using var stale = await fx.Client.PostAsJsonAsync($"{path}/schedules", new
+        {
+            targetType = "terminal-id-range", firmwareTarget = target, terminalIds = phones, firmwareWindow = window, firmwarePreviewToken = "stale"
+        }, Json);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Empty((await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json)).EnumerateArray());
+        using var scheduled = await fx.Client.PostAsJsonAsync($"{path}/schedules", new
+        {
+            targetType = "terminal-id-range", firmwareTarget = target, terminalIds = phones,
+            firmwareWindow = window, firmwarePreviewToken = allocation.GetProperty("previewToken").GetString()
+        }, Json);
+        scheduled.EnsureSuccessStatusCode();
+        var schedules = (await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json)).EnumerateArray()
+            .ToDictionary(row => row.GetProperty("terminalId").GetGuid());
+        Assert.Equal(schedules[phones[0]].GetProperty("tableSetId").GetGuid(), schedules[phones[1]].GetProperty("tableSetId").GetGuid());
+        Assert.NotEqual(schedules[phones[0]].GetProperty("tableSetId").GetGuid(), schedules[phones[2]].GetProperty("tableSetId").GetGuid());
+        for (var i = 0; i < phones.Count; i++)
+        {
+            var row = schedules[phones[i]];
+            Assert.Equal(source, row.GetProperty("sourceTableSetId").GetGuid());
+            Assert.Equal(starts[i], row.GetProperty("firmwareStartAtUtc").GetDateTime());
+            Assert.Equal(starts[i].AddMinutes(30), row.GetProperty("firmwareSlotEndAtUtc").GetDateTime());
+            await DeliverAsync(wireIds[i], CodeDownloadWire.WithStart(original, starts[i]), row.GetProperty("lastBatchId").GetGuid());
+        }
+        var stored = await fx.Client.GetFromJsonAsync<JsonElement>(fieldPath, Json);
+        Assert.Equal(settings["startAt"], stored.GetProperty("sections")[0].GetProperty("fields").EnumerateArray()
+            .Single(field => field.GetProperty("key").GetString() == "startAt").GetProperty("value").GetString());
+        var delivered = (await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json)).EnumerateArray();
+        Assert.All(delivered, row => Assert.Equal("Delivered", row.GetProperty("status").GetString()));
+
+        var lastScheduleId = schedules[phones[^1]].GetProperty("id").GetGuid();
+        using var cleared = await fx.Client.PostAsync($"{path}/schedules/{lastScheduleId}/clear-firmware", null);
+        cleared.EnsureSuccessStatusCode();
+        var clearing = await cleared.Content.ReadFromJsonAsync<JsonElement>(Json);
+        await DeliverAsync(wireIds[^1], CodeDownloadWire.Disable(CodeDownloadWire.WithStart(original, starts[^1])),
+            clearing.GetProperty("batchId").GetGuid());
+        var history = (await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json)).EnumerateArray().ToArray();
+        Assert.Equal(4, history.Length);
+        var clearRow = history.Single(row => row.GetProperty("id").GetGuid() == clearing.GetProperty("scheduleId").GetGuid());
+        Assert.Equal(source, clearRow.GetProperty("sourceTableSetId").GetGuid());
+        Assert.Equal("Delivered", clearRow.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, clearRow.GetProperty("firmwareStartAtUtc").ValueKind);
+
+        async Task DeliverAsync(string wireId, byte[] expected, Guid batchId)
+        {
+            await using var callIn = await OpenAsync();
+            var wire = Convert.FromHexString(wireId);
+            await callIn.Stream.WriteAsync(Message(wire, [8]));
+            AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            var header = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+            var parameters = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(expected, parameters.Data);
+            await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | parameters.Control)));
+            await callIn.Stream.WriteAsync(Message(wire, [14, 94]));
+            AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            var end = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+            await WaitBatchAsync(batchId, 2);
+        }
+    }
+
+    [Fact]
     public async Task Time_area_firmware_schedule_delivers_mt94_on_call_in_and_keeps_the_table_assignment()
     {
         await AssignRateTableSetAsync("Firmware parameter baseline data set");

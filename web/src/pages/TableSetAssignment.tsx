@@ -20,7 +20,17 @@ const scopes = {
 
 type Scope = keyof typeof scopes
 type Option = { id: string; name?: string; displayName?: string; code?: string | null }
-type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null; terminalIdHex?: string | null; replacesFirmwareScheduleId?: string | null }
+type Target = {
+  id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null
+  terminalIdHex?: string | null; replacesFirmwareScheduleId?: string | null
+  firmwareStartAtUtc?: string | null; firmwareSlotEndAtUtc?: string | null; firmwareServerSlot?: number | null
+}
+export type FirmwareSchedule = { enabled: boolean; selectedBlocks: number; minimumTransferMinutes: number | null; startAtUtc: string | null }
+type FirmwareAllocation = {
+  previewToken: string; selectedBlocks: number; minimumTransferMinutes: number; activeServers: number; slotMinutes: number
+  firstStartAtUtc: string | null; lastEndAtUtc: string | null
+}
+const utcTime = (value: string) => new Date(value).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
 type SavedRecord = {
   tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean; configurationId: string | null
 }
@@ -39,12 +49,13 @@ type UpdatedSet = { id: string; name: string }
 const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
 const callInParameters = 35
 
-export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false }: {
+export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false, firmwareSchedule }: {
   setId: string
   revision: number
   versions: SavedRecord[]
   optionalRecords: OptionalRecord[]
   codeOnly?: boolean
+  firmwareSchedule?: FirmwareSchedule | null
 }) {
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
@@ -58,6 +69,12 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [mode, setMode] = useState(codeOnly ? 'now' : 'assignment')
   const [availableAt, setAvailableAt] = useState('')
   const [allowFirmwareReschedule, setAllowFirmwareReschedule] = useState(false)
+  const [allocateFirmwareWindow, setAllocateFirmwareWindow] = useState(false)
+  const [firmwareWindow, setFirmwareWindow] = useState({
+    startDate: new Date(Date.now() + 86400000).toISOString().slice(0, 10),
+    dailyStart: '00:00', dailyEnd: '04:00', activeServers: '1', slotMinutes: '',
+  })
+  const [firmwareAllocation, setFirmwareAllocation] = useState<FirmwareAllocation | null>(null)
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
   const [action, setAction] = useState<AssignmentAction>('set')
   const [actions, setActions] = useState<Record<number, RecordAction>>({})
@@ -130,6 +147,12 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     setUpdatePreview(null)
     setResultSets([])
     setFeedback('')
+    setFirmwareAllocation(null)
+  }
+
+  function changeFirmwareWindow(field: keyof typeof firmwareWindow, value: string) {
+    setFirmwareWindow(current => ({ ...current, [field]: value }))
+    clearReview()
   }
 
   function changeScope(next: Scope) {
@@ -151,6 +174,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     }
     setTargets(null)
     setWireSelection(null)
+    setFirmwareAllocation(null)
     setFeedback('')
     setBusy(true)
     try {
@@ -165,11 +189,15 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       if (scopeSelection.configurationId) params.set('configurationId', scopeSelection.configurationId)
       if (partialSchedule) selectedDeliveryRecords.forEach(number => params.append('recordNumbers', String(number)))
       if (codeOnly) params.set('allowFirmwareReschedule', String(allowFirmwareReschedule))
+      if (codeOnly && allocateFirmwareWindow)
+        for (const [key, value] of Object.entries(firmwareWindow))
+          params.set(`firmwareWindow.${key}`, value)
       const response = await apiGetRaw(`/api/tables/sets/${setId}/assignment-preview?${params}`)
       const result = await response.json().catch(() => null)
       if (!response.ok) throw new Error(result?.error ?? 'Could not preview this assignment.')
       setTargets(result.targets)
       setWireSelection(result.recordNumbers)
+      setFirmwareAllocation(result.firmwareAllocation ?? null)
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Could not preview this assignment.')
     } finally {
@@ -215,6 +243,11 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       setFeedback('Choose a future date and time.')
       return
     }
+    if (firmwareAllocation?.firstStartAtUtc && selected &&
+        selected.getTime() >= new Date(firmwareAllocation.firstStartAtUtc).getTime()) {
+      setFeedback('Choose parameter preparation before the first allocated terminal start.')
+      return
+    }
     setBusy(true)
     setFeedback('')
     try {
@@ -226,6 +259,13 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           allowFirmwareReschedule,
           replacesFirmwareScheduleIds: targets?.filter(target => target.eligible && target.replacesFirmwareScheduleId)
             .map(target => target.replacesFirmwareScheduleId) ?? [],
+          ...(allocateFirmwareWindow ? {
+            firmwareWindow: {
+              ...firmwareWindow, dailyStart: firmwareWindow.dailyStart + ':00', dailyEnd: firmwareWindow.dailyEnd + ':00',
+              activeServers: Number(firmwareWindow.activeServers), slotMinutes: Number(firmwareWindow.slotMinutes),
+            },
+            firmwarePreviewToken: firmwareAllocation?.previewToken,
+          } : {}),
         } : {}),
       })
       const result = await response.json().catch(() => null)
@@ -238,6 +278,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       } else
         setFeedback(`Updated ${result.changed} of ${result.targetCount} eligible phone assignments.`)
       setTargets(null)
+      setFirmwareAllocation(null)
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Could not save the assignment.')
     } finally {
@@ -383,6 +424,33 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             onChange={event => { setAllowFirmwareReschedule(event.target.checked); clearReview() }} />
           Allow rescheduling existing firmware parameters
         </label>}
+        {codeOnly && firmwareSchedule?.enabled && (firmwareSchedule.minimumTransferMinutes ?? 0) > 0 && <label className="native-table-toggle">
+          <input type="checkbox" checked={allocateFirmwareWindow} disabled={busy}
+            onChange={event => { setAllocateFirmwareWindow(event.target.checked); clearReview() }} />
+          Allocate terminal starts across a daily download window
+        </label>}
+        {codeOnly && allocateFirmwareWindow && <fieldset className="scope-record-choices" disabled={busy}>
+          <legend>Firmware download window (UTC)</legend>
+          <label>First date
+            <input type="date" required value={firmwareWindow.startDate} onChange={event => changeFirmwareWindow('startDate', event.target.value)} />
+          </label>
+          <label>Daily start
+            <input type="time" required value={firmwareWindow.dailyStart} onChange={event => changeFirmwareWindow('dailyStart', event.target.value)} />
+          </label>
+          <label>Daily end
+            <input type="time" required value={firmwareWindow.dailyEnd} onChange={event => changeFirmwareWindow('dailyEnd', event.target.value)} />
+          </label>
+          <label>Active servers
+            <input type="number" min={1} max={99} required value={firmwareWindow.activeServers}
+              onChange={event => changeFirmwareWindow('activeServers', event.target.value)} />
+          </label>
+          <label>Minutes per phone
+            <input type="number" min={firmwareSchedule?.minimumTransferMinutes ?? 1} max={1440} required
+              value={firmwareWindow.slotMinutes} onChange={event => changeFirmwareWindow('slotMinutes', event.target.value)} />
+          </label>
+          <p>{firmwareSchedule?.selectedBlocks} selected 4 KiB blocks require at least {firmwareSchedule?.minimumTransferMinutes} minutes of raw modem transfer.
+            Estimate the complete slot, including connection overhead and retries. Allocation repeats daily if more phones remain.</p>
+        </fieldset>}
         <button type="submit" disabled={!targetId || busy || (scope === 'software-version' && !secondTarget.trim())
           || (selectedRecords && !copyRecords.length && !removeRecords.length)
           || (configurationScope && !configurationRecord) || (partialSchedule && !selectedDeliveryRecords.length)}>
@@ -409,10 +477,17 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         <div className="table-config-preview">
           <strong>{eligible} eligible {eligible === 1 ? 'phone' : 'phones'}</strong>
           {codeOnly && <p>{replacements} existing {replacements === 1 ? 'schedule' : 'schedules'} to replace. {targets.length - eligible} {targets.length - eligible === 1 ? 'phone' : 'phones'} to skip.</p>}
+          {firmwareAllocation && <p>
+            {firmwareAllocation.selectedBlocks} selected blocks. {firmwareAllocation.activeServers} active server slots, {firmwareAllocation.slotMinutes} minutes per phone.
+            {firmwareAllocation.firstStartAtUtc && firmwareAllocation.lastEndAtUtc &&
+              <> First start {utcTime(firmwareAllocation.firstStartAtUtc)}. Last slot ends {utcTime(firmwareAllocation.lastEndAtUtc)}.</>}
+          </p>}
           {wireSelection && <p>Records to send {wireSelection.map(number => `MT${number}`).join(', ')}</p>}
           {targets.length > 0 && <ul>{targets.map((item) => <li key={item.id}>
             {item.displayName}{item.terminalIdHex && ` · ${item.terminalIdHex}`}
             {item.terminalFamilyLabel && ` · ${item.terminalFamilyLabel}`}{item.reason && ` · ${item.reason}`}
+            {item.firmwareStartAtUtc && item.firmwareSlotEndAtUtc &&
+              <div>{utcTime(item.firmwareStartAtUtc)} to {utcTime(item.firmwareSlotEndAtUtc)} · Server slot {item.firmwareServerSlot}</div>}
           </li>)}</ul>}
           <div className="table-config-selectors">
             <label>Delivery
@@ -425,7 +500,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             {deliveryMode === 'later' && <label>Prepare at (local time)
               <input type="datetime-local" value={availableAt} disabled={busy} onChange={(event) => setAvailableAt(event.target.value)} />
             </label>}
-            <button type="button" disabled={!eligible || busy || (deliveryMode === 'later' && !availableAt)} onClick={() => void assign()}>
+            <button type="button" disabled={!eligible || busy || (deliveryMode === 'later' && !availableAt) ||
+              (allocateFirmwareWindow && !firmwareAllocation)} onClick={() => void assign()}>
               {deliveryMode === 'assignment' ? 'Assign to' : 'Schedule for'} {eligible} {eligible === 1 ? 'phone' : 'phones'}
             </button>
           </div>

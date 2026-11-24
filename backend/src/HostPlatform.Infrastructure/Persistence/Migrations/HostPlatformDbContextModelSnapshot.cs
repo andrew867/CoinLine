@@ -2692,6 +2692,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("FirmwareSlotEndAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<Guid?>("LastBatchId")
                         .HasColumnType("uuid");
 
@@ -2703,6 +2706,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.PrimitiveCollection<int[]>("RecordNumbers")
                         .HasColumnType("integer[]");
+
+                    b.Property<Guid?>("SourceTableSetId")
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime?>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -2732,6 +2738,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("LastBatchId");
 
                     b.HasIndex("NccSessionId");
+
+                    b.HasIndex("SourceTableSetId");
 
                     b.HasIndex("TerminalId")
                         .IsUnique()
@@ -4495,6 +4503,11 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("NccSessionId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("HostPlatform.Domain.TableSet", "SourceTableSet")
+                        .WithMany()
+                        .HasForeignKey("SourceTableSetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("HostPlatform.Domain.TableSet", "TableSet")
                         .WithMany()
                         .HasForeignKey("TableSetId")
@@ -4510,6 +4523,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("LastBatch");
 
                     b.Navigation("NccSession");
+
+                    b.Navigation("SourceTableSet");
 
                     b.Navigation("TableSet");
 

@@ -208,6 +208,7 @@ public class HostPlatformDbContext : DbContext
             b.Property(s => s.Version).IsConcurrencyToken();
             b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId);
             b.HasOne(s => s.TableSet).WithMany().HasForeignKey(s => s.TableSetId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(s => s.SourceTableSet).WithMany().HasForeignKey(s => s.SourceTableSetId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne(s => s.NccSession).WithMany().HasForeignKey(s => s.NccSessionId).OnDelete(DeleteBehavior.SetNull);
             b.HasOne(s => s.LastBatch).WithMany().HasForeignKey(s => s.LastBatchId).OnDelete(DeleteBehavior.SetNull);
             b.HasIndex(s => s.TerminalId).IsUnique()

@@ -22,9 +22,9 @@ public static partial class NativeTableLayouts
             Field("transferMinutes", "Transfer retry minutes", 33, max: 99), Minute("transferSeconds", "Transfer retry seconds", 34),
             Field("transferAlarm", "Transfer failures before alarm", 35)),
         .. Enumerable.Range(0, 8).Select(group =>
-            Section($"sector-group-{group}", $"Flash sectors {group * 32} through {group * 32 + 31}",
+                Section($"sector-group-{group}", $"Code blocks {group * 32} through {group * 32 + 31}",
                 Enumerable.Range(group * 32, 32).Select(sector =>
-                    Toggle($"sector-{sector}", $"Request sector {sector}", 36 + sector / 8, 1 << (sector % 8))).ToArray())),
+                    Toggle($"sector-{sector}", $"Request 4 KiB code block {sector}", 36 + sector / 8, 1 << (sector % 8))).ToArray())),
         Section("reserved", "Reserved code-download bytes",
             new NativeTableField("spareParameters", "Encoded spare parameters", 74, HexBytes, 26))
     ];
