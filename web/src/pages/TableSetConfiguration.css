@@ -103,3 +103,16 @@
 .native-table-bitmap { display: grid; gap: 8px; grid-column: 1 / -1; }
 .native-table-bitmap canvas { width: min(100%, 336px); height: auto; image-rendering: pixelated; border-radius: 8px; }
 .native-table-bitmap label { display: grid; gap: 5px; }
+.local-dialing-import {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 14px;
+  background: var(--surface);
+}
+
+.local-dialing-import summary { cursor: pointer; font-weight: 650; }
+.exchange-import-source { overflow-wrap: anywhere; }
+.local-dialing-import select[multiple] { min-width: min(100%, 210px); }
+.local-dialing-import table { border-collapse: collapse; margin-bottom: 12px; text-align: left; }
+.local-dialing-import table :is(th, td) { border-bottom: 1px solid var(--line); padding: 4px 12px 4px 0; }
+.local-dialing-import caption { text-align: left; font-weight: 600; }

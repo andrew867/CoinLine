@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { apiGet, apiPost, apiPostRaw } from '../api/client'
 import { AdvertisingSimulator } from './AdvertisingSimulator'
-import { NativeTableEditor } from './NativeTableEditor'
 import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback'
+import type { ExchangeFile } from './localDialingExchangeData'
+
+const NativeTableEditor = lazy(async () => ({ default: (await import('./NativeTableEditor')).NativeTableEditor }))
 
 type AdvertisingSnapshot = AdvertisingFeatures & { slots: AdvertisingSlot[]; revision: number; sha256: string | null }
 type Definition = { id: string; tableNumber: number; name: string }
@@ -40,6 +42,7 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
   const initialPanel = panels.findIndex(({ records }) => records.some(([number]) => number === initialRecord))
   const [panelIndex, setPanelIndex] = useState(Math.max(0, initialPanel))
   const [tableNumber, setTableNumber] = useState(initialPanel < 0 ? 29 : initialRecord)
+  const [exchangeFile, setExchangeFile] = useState<ExchangeFile | null>(null)
   const panel = panels[panelIndex]
   const record = panel.records.find(([number]) => number === tableNumber)!
   const version = versions.find((item) => item.tableNumber === tableNumber)
@@ -76,8 +79,11 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
         <AdvertisingEditor key={setId} setId={setId} draft={draft} onSaved={onSaved} onDirty={onRecordDirty} />
       ) : (
         <div key={`${setId}:${tableNumber}`}>
-          <NativeTableEditor setId={setId} number={tableNumber} revision={version?.tableRevision ?? 0}
-            onSaved={onSaved} onDirty={onRecordDirty} />
+          <Suspense fallback={<p role="status">Loading record editor…</p>}>
+            <NativeTableEditor setId={setId} number={tableNumber} revision={version?.tableRevision ?? 0}
+              exchangeFile={exchangeFile} onExchangeFile={setExchangeFile}
+              onSaved={onSaved} onDirty={onRecordDirty} />
+          </Suspense>
           {!recordDirty && (version && draft ? (
             <details><summary>Import replacement record</summary>
               <RecordImport setId={setId} draft={draft} version={version} versions={versions} onSaved={onSaved} record={record} />

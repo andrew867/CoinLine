@@ -3,6 +3,8 @@ import { NativeBitmapField } from './NativeBitmapField'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
 import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
+import { LocalDialingImport } from './LocalDialingImport'
+import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 
 type Field = {
   key: string
@@ -39,13 +41,15 @@ type Props = {
   setId: string
   number: number
   revision: number
+  exchangeFile: ExchangeFile | null
+  onExchangeFile: (value: ExchangeFile | null) => void
   onSaved: () => void
   onDirty: (dirty: boolean) => void
 }
 
 const isCredential = (field: Field) => field.editor === 'password' || field.editor === 'password-hex' || field.editor === 'password-pin'
 
-export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }: Props) {
+export function NativeTableEditor({ setId, number, revision, exchangeFile, onExchangeFile, onSaved, onDirty }: Props) {
   const [layout, setLayout] = useState<Layout | null>(null)
   const [sectionKey, setSectionKey] = useState('')
   const [search, setSearch] = useState('')
@@ -213,6 +217,11 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
     return [`${prefix}Initial`, `${prefix}Later`]
   }))
   const effectiveValue = (field: Field) => edits[field.key] ?? field.value
+  const areaField = layout.sections[0]?.fields.find(field => field.key === 'areaCode')
+  const exchangeFields = areaField ? layout.sections.slice(1).flatMap(section => section.fields) : []
+  const exchangeSegment = areaField && exchangeFields.length === exchangeCount
+    ? { area: effectiveValue(areaField), storedArea: areaField.value, maxRate: exchangeFields[0].max,
+        fields: exchangeFields.map(field => ({ key: field.key, value: effectiveValue(field) })) } : null
 
   return (
     <form className="native-table-editor" onSubmit={(event) => void save(event)}>
@@ -237,6 +246,18 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
         <button type="button" aria-pressed={showingSettings} onClick={() => setView('settings')}>Settings</button>
         <button type="button" aria-pressed={!!showingBytes} onClick={() => setView('bytes')}>Byte grid</button>
       </div>}
+      {exchangeSegment && areaField && <LocalDialingImport segment={exchangeSegment} editable={layout.editable && !busy}
+        exchangeFile={exchangeFile} onExchangeFile={onExchangeFile} stage={fields => {
+        const updated = { ...edits }
+        for (const field of [areaField, ...exchangeFields]) {
+          if (!(field.key in fields)) continue
+          if (fields[field.key] === field.value) delete updated[field.key]
+          else updated[field.key] = fields[field.key]
+        }
+        setEdits(updated)
+        onDirty(Object.keys(updated).length > 0)
+        setMessage('')
+      }} />}
       {showingRules && layout.numberingPlan && <NumberingPlanEditor plan={layout.numberingPlan} changes={ruleEdits}
         editable={layout.editable && !busy} onChange={(group, rules) => {
           const updated = { ...ruleEdits }
