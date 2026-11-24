@@ -77,9 +77,16 @@ Inmate and electronic purse validation remain outside the first-release acceptan
 
 - Verify the phone's 40-group limit and targeting across primary and additional memberships. Check the affected count, Configuration ID selection, partial family changes, and the difference between retaining and clearing an optional assignment.
 - Check both the scheduled preparation time and the terminal's actual pickup. Verify a failed operation can resume at its first failed phone or skip that phone without repeating completed work.
-- For the Downloads workflow, queue one record and record the batch ID. Use a routine terminal call-in, verify the returned MT14 updates that exact batch, and check every outbound table type. Repeat after an explicit MT44 request. The published-set schedule already supports a subset but creates an attempt batch when the phone calls in. The Downloads start and retry actions require their own batch-identity test.
+- **Selected downloads verified with PostgreSQL and TCP.** An upgrade preserved the ID of an older operator batch with queued items. A routine MT8 call picked up that batch. An operator then used the browser to queue MT26 from a set that also contained MT73. MT44 delivered MT26 alone, and MT14 updated the same batch the browser had opened. Both cases retained the assigned set and rejected a competing transfer. After an abrupt test API exit, startup recorded the interrupted batch and session as failed and closed respectively. Retrying queued the original selection. Physical terminal validation remains pending.
 
-An isolated NCC fixture queued only MT73 through the Downloads start endpoint. The routine MT8 returned MT13 and left the requested item pending. An explicit MT44 created a separate full batch and sent the unrelated MT26 record from the current assignment. The original batch's acknowledgement status remained `pending_terminal_ack`. The Downloads form currently submits a full batch. Add selected-record input and verify that both call-in paths deliver the specific batch already created by the operator.
+### Backend and bench queue
+
+| Priority | Work | Acceptance evidence |
+| --- | --- | --- |
+| 1 | Cashbox accounting | Extend the existing MT38 and MT51 decode and event storage into status and collection accounting keyed by phone and cashbox. The reference Manager checks MT44 reason bit `0x80` and replies with MT38 from stored status. Verify the record layout on the target build and return the last known status on that request. Keep quoted charge, deposited coins and reported collection separately observable. Run the quarter-call scenario and replay its CDR and collection across a reconnect to verify they are each counted once. Physical acceptance is pending. |
+| 2 | NCC capture export | Add a redacted Wireshark-ready export to the NCC session view. Use the legacy Manager capture and decoding behavior as a format reference. Verify frame order, direction and timestamps, and test that the export omits protected data. |
+| 3 | Home-exchange LCD generation | Start from a phone's home NPA-NXX, derive its calling area using US LATA or Canadian LIR data as applicable, and feed the existing local-dialing editor. Verify the grouping and resulting records against a known case from each country. |
+| 4 | Physical compatibility | Run a stock MTR 2.x Multi-pay bench test, then a Desk install. Record exact firmware, records delivered, application acknowledgements and observed behavior separately for each terminal. Physical acceptance is pending. |
 
 ## Advertising text field map
 
