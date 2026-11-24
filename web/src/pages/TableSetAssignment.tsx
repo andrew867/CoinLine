@@ -1,18 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet, apiPostRaw } from '../api/client'
+import { apiGet, apiGetRaw, apiPostRaw } from '../api/client'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 
 const scopes = {
   terminal: { label: 'Phone', path: '/api/terminals' },
   group: { label: 'Phone group', path: '/api/terminal-groups' },
+  'group-pattern': { label: 'Group ID pattern', path: null },
   region: { label: 'Region', path: '/api/terminals/regions' },
+  'time-area': { label: 'Time area', path: '/api/terminals/time-areas' },
   site: { label: 'Location', path: '/api/sites' },
   customer: { label: 'Customer', path: '/api/customers' },
 } as const
 
 type Scope = keyof typeof scopes
-type Option = { id: string; name?: string; displayName?: string }
+type Option = { id: string; name?: string; displayName?: string; code?: string | null }
 type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null }
 type SavedRecord = { tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean }
 type OptionalRecord = { tableNumber: number; name: string }
@@ -25,6 +27,7 @@ type UpdateTarget = Omit<Target, 'eligible'> & {
 type UpdatePreview = { changeCount: number; setCount: number; previewToken: string; targets: UpdateTarget[] }
 type UpdatedSet = { id: string; name: string }
 const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
+const callInParameters = 35
 
 export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false }: {
   setId: string
@@ -65,18 +68,23 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const selectedRecords = action === 'records'
   const partialSchedule = action === 'schedule-records'
   const schedulesOnly = codeOnly || partialSchedule
+  const hasRegionFilter = scope === 'group' || scope === 'group-pattern'
+  const canTargetTimeArea = codeOnly || (partialSchedule && choices.get(callInParameters)?.copyable)
   const deliveryMode = schedulesOnly && mode === 'assignment' ? 'now' : mode
   const scopeSelection = {
     targetType: scope,
-    targetId: scope === 'region' ? null : targetId,
-    regionCode: (scope === 'region' ? targetId : scope === 'group' ? groupRegion : '') || undefined,
+    targetId: scope === 'region' || scope === 'group-pattern' || scope === 'time-area' ? null : targetId,
+    regionCode: (scope === 'region' ? targetId : hasRegionFilter ? groupRegion : '') || undefined,
+    groupPattern: scope === 'group-pattern' ? targetId.trim() : undefined,
+    timeAreaCode: scope === 'time-area' ? targetId : undefined,
   }
 
   useEffect(() => {
     let current = true
+    const path = scopes[scope].path
     void Promise.all([
-      apiGet<Option[]>(scopes[scope].path),
-      scope === 'group' ? apiGet<Option[]>(scopes.region.path) : Promise.resolve([]),
+      path ? apiGet<Option[]>(path) : Promise.resolve([]),
+      hasRegionFilter ? apiGet<Option[]>(scopes.region.path) : Promise.resolve([]),
     ]).then(([choices, groupRegions]) => {
       if (!current) return
       setOptions(choices)
@@ -84,7 +92,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     })
       .catch(() => { if (current) setFeedback('Could not load assignment targets.') })
     return () => { current = false }
-  }, [scope])
+  }, [scope, hasRegionFilter])
 
   function clearReview() {
     setTargets(null)
@@ -92,6 +100,16 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     setUpdatePreview(null)
     setResultSets([])
     setFeedback('')
+  }
+
+  function changeScope(next: Scope) {
+    if (scope === next) return
+    setScope(next)
+    setOptions([])
+    setTargetId('')
+    setGroupRegion('')
+    if (next === 'time-area' && partialSchedule) setDeliveryRecords([callInParameters])
+    clearReview()
   }
 
   async function preview(event: React.FormEvent) {
@@ -108,12 +126,16 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       const params = new URLSearchParams({ targetType: scope })
       if (scopeSelection.targetId) params.set('targetId', scopeSelection.targetId)
       if (scopeSelection.regionCode) params.set('regionCode', scopeSelection.regionCode)
+      if (scopeSelection.groupPattern) params.set('groupPattern', scopeSelection.groupPattern)
+      if (scopeSelection.timeAreaCode) params.set('timeAreaCode', scopeSelection.timeAreaCode)
       if (partialSchedule) deliveryRecords.forEach(number => params.append('recordNumbers', String(number)))
-      const result = await apiGet<{ targets: Target[]; recordNumbers: number[] | null }>(`/api/tables/sets/${setId}/assignment-preview?${params}`)
+      const response = await apiGetRaw(`/api/tables/sets/${setId}/assignment-preview?${params}`)
+      const result = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(result?.error ?? 'Could not preview this assignment.')
       setTargets(result.targets)
       setWireSelection(result.recordNumbers)
-    } catch {
-      setFeedback('Could not preview this assignment.')
+    } catch (error) {
+      setFeedback(error instanceof Error ? error.message : 'Could not preview this assignment.')
     } finally {
       setBusy(false)
     }
@@ -185,8 +207,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       <form className="table-config-selectors" onSubmit={(event) => void preview(event)}>
         {!codeOnly && <label>Assignment action
           <select value={action} disabled={busy} onChange={(event) => {
-            setAction(event.target.value as AssignmentAction)
-            clearReview()
+            const next = event.target.value as AssignmentAction
+            setAction(next)
+            if (scope === 'time-area' && next !== 'schedule-records') changeScope('terminal')
+            else clearReview()
           }}>
             <option value="set">Assign full set</option>
             <option value="records">Update selected records</option>
@@ -194,26 +218,28 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           </select>
         </label>}
         <label>{schedulesOnly ? 'Schedule by' : 'Assign by'}
-          <select disabled={busy} value={scope} onChange={(event) => {
-            setScope(event.target.value as Scope)
-            setOptions([])
-            setTargetId('')
-            setGroupRegion('')
-            clearReview()
-          }}>
-            {Object.entries(scopes).map(([value, { label }]) => <option value={value} key={value}>{label}</option>)}
+          <select disabled={busy} value={scope} onChange={(event) => changeScope(event.target.value as Scope)}>
+            {Object.entries(scopes).filter(([value]) => value !== 'time-area' || canTargetTimeArea)
+              .map(([value, { label }]) => <option value={value} key={value}>{label}</option>)}
           </select>
         </label>
-        <label>{scopes[scope].label}
+        {scope === 'group-pattern' ? <label>Group ID pattern
+          <input value={targetId} disabled={busy} maxLength={6} placeholder="ABC*" onChange={event => {
+            setTargetId(event.target.value)
+            clearReview()
+          }} />
+        </label> : <label>{scopes[scope].label}
           <select disabled={busy} value={targetId} onChange={(event) => {
             setTargetId(event.target.value)
             clearReview()
           }}>
             <option value="">Choose {scopes[scope].label.toLowerCase()}</option>
-            {options.map((item) => <option value={item.id} key={item.id}>{item.name ?? item.displayName}</option>)}
+            {options.map((item) => <option value={item.id} key={item.id}>
+              {item.name ?? item.displayName}{item.code && ` (${item.code})`}
+            </option>)}
           </select>
-        </label>
-        {scope === 'group' && <label>Within region
+        </label>}
+        {hasRegionFilter && <label>Within region
           <select disabled={busy} value={groupRegion} onChange={event => {
             setGroupRegion(event.target.value)
             clearReview()
@@ -242,7 +268,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         </fieldset>}
         {partialSchedule && <fieldset className="scope-record-choices" disabled={busy}>
           <legend>Records to download</legend>
-          {[...choices].filter(([, choice]) => choice.copyable).sort(([first], [second]) => first - second).map(([number, choice]) =>
+          {[...choices].filter(([number, choice]) => choice.copyable && (scope !== 'time-area' || number === callInParameters))
+            .sort(([first], [second]) => first - second).map(([number, choice]) =>
             <label className="native-table-toggle" key={number}>
               <input type="checkbox" checked={deliveryRecords.includes(number)} onChange={event => {
                 setDeliveryRecords(current => event.target.checked ? [...current, number] : current.filter(record => record !== number))

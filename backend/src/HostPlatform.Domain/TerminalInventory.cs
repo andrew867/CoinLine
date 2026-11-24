@@ -11,9 +11,13 @@ public sealed class TerminalInventory : AuditableEntity
 public sealed record TerminalInventoryDetails
 {
     public const int RegionCodeLength = 32;
+    public const string TimeAreaCodePattern = "(?:[A-Za-z0-9]{2}|[+-][0-9])";
 
     [StringLength(RegionCodeLength)]
     public string? RegionCode { get; init; }
+    [StringLength(2)]
+    [RegularExpression(TimeAreaCodePattern)]
+    public string? TimeAreaCode { get; init; }
     [StringLength(24)]
     public string? Route { get; init; }
     [StringLength(24)]

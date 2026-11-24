@@ -1,11 +1,15 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Tables;
 using Microsoft.EntityFrameworkCore;
 
 namespace HostPlatform.Infrastructure.Tables;
+
+public record TableTargetScope(string TargetType, Guid? TargetId, string? RegionCode = null,
+    string? GroupPattern = null, string? TimeAreaCode = null);
 
 public sealed class TableDistributionService(HostPlatformDbContext db)
 {
@@ -31,27 +35,53 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         ValidationDiagnosticsJson = source.ValidationDiagnosticsJson
     };
 
-    public IQueryable<Terminal> PhonesInScope(string targetType, Guid? targetId, string? regionCode = null)
+    public IQueryable<Terminal> PhonesInScope(TableTargetScope scope)
     {
+        var (targetType, targetId, regionCode, groupPattern, timeAreaCode) = scope;
         var phones = db.Terminals.AsNoTracking();
         if (regionCode != null)
         {
-            if (targetType is not ("region" or "group"))
+            if (targetType is not ("region" or "group" or "group-pattern"))
                 throw new InvalidOperationException("A region can only be used on its own or with a phone group.");
             if (string.IsNullOrWhiteSpace(regionCode) || regionCode.Trim().Length > TerminalInventoryDetails.RegionCodeLength)
                 throw new InvalidOperationException("Choose a valid region code.");
             phones = FilterByRegion(phones, regionCode);
         }
+        if ((groupPattern != null && targetType != "group-pattern") || (timeAreaCode != null && targetType != "time-area"))
+            throw new InvalidOperationException("Use a group pattern or time-area code with its matching scope.");
 
         return targetType switch
         {
             "region" when targetId == null && regionCode != null => phones,
             "terminal" when targetId != null => phones.Where(phone => phone.Id == targetId),
             "group" when targetId != null => phones.Where(phone => phone.TerminalGroupId == targetId || phone.AdditionalGroups.Any(m => m.TerminalGroupId == targetId)),
+            "group-pattern" when targetId == null && groupPattern != null => FilterByGroupPattern(phones, groupPattern),
+            "time-area" when targetId == null && timeAreaCode != null => FilterByTimeArea(phones, timeAreaCode),
             "site" when targetId != null => phones.Where(phone => phone.SiteId == targetId),
             "customer" when targetId != null => phones.Where(phone => phone.Site!.CustomerId == targetId),
-            _ => throw new InvalidOperationException("Choose a phone, group, location, customer or region.")
+            _ => throw new InvalidOperationException("Choose a phone, group, group pattern, location, customer, region or time area.")
         };
+    }
+
+    private IQueryable<Terminal> FilterByGroupPattern(IQueryable<Terminal> phones, string groupPattern)
+    {
+        var pattern = groupPattern.Trim().ToUpperInvariant();
+        if (pattern.Length > 6 || !Regex.IsMatch(pattern, @"\A[A-Z0-9]{3}[A-Z0-9?]{0,3}\*?\z"))
+            throw new InvalidOperationException("Enter three letters or digits first. Use ? for one position and a final * for any remaining positions.");
+
+        var match = pattern.Replace('?', '_').Replace('*', '%');
+        var groupIds = db.TerminalGroups.Where(group => group.Code != null && EF.Functions.Like(group.Code, match))
+            .Select(group => group.Id);
+        return phones.Where(phone => (phone.TerminalGroupId.HasValue && groupIds.Contains(phone.TerminalGroupId.Value))
+            || phone.AdditionalGroups.Any(membership => groupIds.Contains(membership.TerminalGroupId)));
+    }
+
+    private IQueryable<Terminal> FilterByTimeArea(IQueryable<Terminal> phones, string timeAreaCode)
+    {
+        var code = timeAreaCode.Trim().ToUpperInvariant();
+        if (!Regex.IsMatch(code, $"\\A{TerminalInventoryDetails.TimeAreaCodePattern}\\z"))
+            throw new InvalidOperationException("Choose a two-character time area.");
+        return phones.Where(phone => db.TerminalInventories.Any(row => row.TerminalId == phone.Id && row.Details.TimeAreaCode == code));
     }
 
     public IQueryable<Terminal> FilterByRegion(IQueryable<Terminal> phones, string regionCode)

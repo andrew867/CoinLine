@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using HostPlatform.Api.Audit;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
@@ -19,6 +20,9 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
             {
                 g.Id,
                 g.Name,
+                g.Code,
+                g.Description,
+                revision = g.Version,
                 g.CustomerId,
                 terminalCount = g.Terminals.Count + db.TerminalGroupMemberships.Count(m => m.TerminalGroupId == g.Id)
             })
@@ -32,17 +36,19 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
         var name = (body.Name ?? "").Trim();
         if (name.Length < 2)
             return BadRequest(new { error = "A group needs a name." });
+        var code = CleanText(body.Code)?.ToUpperInvariant();
+        if (!IsValidCode(code))
+            return BadRequest(new { error = "Enter a group ID of three to six letters or digits." });
         if (body.CustomerId is { } customerId &&
             !await db.Customers.AsNoTracking().AnyAsync(c => c.Id == customerId, ct))
             return NotFound(new { error = "Unknown customer." });
 
-        var group = new TerminalGroup { Name = name, CustomerId = body.CustomerId };
+        var group = new TerminalGroup { Name = name, Code = code, Description = CleanText(body.Description), CustomerId = body.CustomerId };
         db.TerminalGroups.Add(group);
-        await db.SaveChangesAsync(ct);
         ApiAudit.Write(db, HttpContext, "terminals", "create_group", $"TerminalGroup:{group.Id}",
-            new { group.Name, group.CustomerId });
+            new { group.Name, group.Code, group.CustomerId });
         await db.SaveChangesAsync(ct);
-        return Created($"/api/terminal-groups/{group.Id}", new { group.Id, group.Name, group.CustomerId });
+        return Created($"/api/terminal-groups/{group.Id}", new { group.Id, group.Name, group.Code, group.Description, group.CustomerId });
     }
 
     [HttpPut("{id:guid}")]
@@ -55,10 +61,35 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
         if (group == null)
             return NotFound();
         group.Name = name;
-        await db.SaveChangesAsync(ct);
+        group.Version++;
         ApiAudit.Write(db, HttpContext, "terminals", "rename_group", $"TerminalGroup:{group.Id}", new { group.Name });
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Changed(); }
         return Ok(new { group.Id, group.Name });
+    }
+
+    [HttpPut("{id:guid}/details")]
+    public async Task<ActionResult<object>> UpdateDetails(Guid id, [FromBody] GroupDto body, CancellationToken ct)
+    {
+        var name = (body.Name ?? "").Trim();
+        if (name.Length < 2)
+            return BadRequest(new { error = "A group needs a name." });
+        var code = CleanText(body.Code)?.ToUpperInvariant();
+        if (!IsValidCode(code))
+            return BadRequest(new { error = "Enter a group ID of three to six letters or digits." });
+        var group = await db.TerminalGroups.FirstOrDefaultAsync(g => g.Id == id, ct);
+        if (group == null)
+            return NotFound();
+        if (group.Version != body.Revision)
+            return Changed();
+        group.Name = name;
+        group.Code = code;
+        group.Description = CleanText(body.Description);
+        group.Version++;
+        ApiAudit.Write(db, HttpContext, "terminals", "update_group", $"TerminalGroup:{group.Id}", new { group.Name, group.Code });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Changed(); }
+        return Ok(new { group.Id, group.Name, group.Code, group.Description, revision = group.Version });
     }
 
     [HttpDelete("{id:guid}")]
@@ -72,11 +103,17 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
         if (phones > 0)
             return Conflict(new { error = "Move the phones out of this group first." });
         db.TerminalGroups.Remove(group);
-        await db.SaveChangesAsync(ct);
         ApiAudit.Write(db, HttpContext, "terminals", "delete_group", $"TerminalGroup:{id}", new { group.Name });
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Changed(); }
         return NoContent();
     }
 
-    public sealed record GroupDto(string? Name, Guid? CustomerId);
+    private static string? CleanText(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsValidCode(string? code) => code == null || Regex.IsMatch(code, $"\\A{TerminalGroup.CodePattern}\\z");
+
+    private ConflictObjectResult Changed() => Conflict(new { error = "The group changed. Reload the groups and try again." });
+
+    public sealed record GroupDto(string? Name, Guid? CustomerId, string? Code = null, string? Description = null, int? Revision = null);
 }

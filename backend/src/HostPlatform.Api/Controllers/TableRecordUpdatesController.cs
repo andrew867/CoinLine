@@ -29,8 +29,11 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
             || requested.Any(number => number is < 1 or > 255 or CodeDownloadWire.MessageType))
             return BadRequest(new { error = "Choose one action per data record. Firmware schedules are handled separately." });
 
+        if (request.TargetType == "time-area")
+            return BadRequest(new { error = "Use scheduled delivery to target a time area." });
+
         IQueryable<Terminal> scope;
-        try { scope = tables.PhonesInScope(request.TargetType, request.TargetId, request.RegionCode); }
+        try { scope = tables.PhonesInScope(request); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
 
         try
@@ -103,6 +106,7 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
             var previewToken = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
             {
                 id, source.Version, request.TargetType, request.TargetId, regionCode = request.RegionCode?.Trim().ToLowerInvariant(),
+                groupPattern = request.GroupPattern?.Trim().ToUpperInvariant(),
                 copies, removals, targets,
                 phones = phones.Select(phone => new { phone.Id, phone.Version, phone.SiteId, phone.Site!.CustomerId, phone.FirmwareVersionId, phone.TerminalIdHex }),
                 assignments = assignments.Values.OrderBy(row => row.TerminalId).Select(row => new { row.Id, row.Version, row.TableSetId }),
@@ -139,7 +143,8 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
                 }
                 ApiAudit.Write(db, HttpContext, "tables.set", "update_scope_records", id.ToString(), new
                 {
-                    request.TargetType, request.TargetId, request.RegionCode, copies, removals, changed = changed.Count, sets = updatedSets.Select(set => set.Id)
+                    request.TargetType, request.TargetId, request.RegionCode, request.GroupPattern,
+                    copies, removals, changed = changed.Count, sets = updatedSets.Select(set => set.Id)
                 });
                 await db.SaveChangesAsync(ct);
             }
@@ -175,5 +180,6 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
         Guid? BaseSetId, string? BaseSetName, IReadOnlyList<TableRecordUpdateChange> Changes, string? Reason);
 
     public sealed record RecordUpdateRequest(string TargetType, Guid? TargetId, int SourceRevision, int[] CopyRecords, int[] RemoveRecords,
-        string? PreviewToken = null, string? RegionCode = null);
+        string? PreviewToken = null, string? RegionCode = null, string? GroupPattern = null, string? TimeAreaCode = null)
+        : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
 }

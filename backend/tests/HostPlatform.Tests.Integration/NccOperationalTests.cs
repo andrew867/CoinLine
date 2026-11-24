@@ -862,7 +862,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
-    public async Task Firmware_parameters_schedule_delivers_mt94_on_call_in_and_keeps_the_table_assignment()
+    public async Task Time_area_firmware_schedule_delivers_mt94_on_call_in_and_keeps_the_table_assignment()
     {
         await AssignRateTableSetAsync("Firmware parameter baseline data set");
         var terminals = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json);
@@ -870,6 +870,12 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             .GetProperty("id").GetGuid();
         var assignmentPath = $"/api/terminals/{terminalId}/table-assignment";
         var originalAssignment = (await fx.Client.GetFromJsonAsync<JsonElement>(assignmentPath, Json)).GetProperty("tableSetId").GetGuid();
+        var inventoryPath = $"/api/terminals/{terminalId}/inventory";
+        var inventory = await fx.Client.GetFromJsonAsync<JsonElement>(inventoryPath, Json);
+        var profile = inventory.GetProperty("profile").Deserialize<Dictionary<string, JsonElement>>()!;
+        profile["timeAreaCode"] = JsonSerializer.SerializeToElement("e7");
+        using var timeArea = await fx.Client.PutAsJsonAsync(inventoryPath, new { profile, revision = inventory.GetProperty("revision") }, Json);
+        timeArea.EnsureSuccessStatusCode();
         using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Firmware parameter schedule test" }, Json);
         created.EnsureSuccessStatusCode();
         var setId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
@@ -897,14 +903,16 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(JsonValueKind.Null, authentication.GetProperty("value").ValueKind);
         using var published = await fx.Client.PostAsync($"{setPath}/publish?confirm=true", null);
         Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
-        var selection = new { targetType = "terminal", targetId = terminalId, terminalIds = new[] { terminalId } };
+        var selection = new { targetType = "time-area", timeAreaCode = "E7", terminalIds = new[] { terminalId } };
+        var preview = await fx.Client.GetFromJsonAsync<JsonElement>($"{setPath}/assignment-preview?targetType=time-area&timeAreaCode=e7", Json);
+        Assert.Equal(terminalId, Assert.Single(preview.GetProperty("targets").EnumerateArray()).GetProperty("id").GetGuid());
         using var assignment = await fx.Client.PostAsJsonAsync($"{setPath}/assignments", selection, Json);
         Assert.Equal(HttpStatusCode.BadRequest, assignment.StatusCode);
         using var direct = await fx.Client.PostAsJsonAsync(assignmentPath, new { tableSetId = setId }, Json);
         Assert.Equal(HttpStatusCode.BadRequest, direct.StatusCode);
         var schedulePath = $"{setPath}/schedules";
         using var late = await fx.Client.PostAsJsonAsync(schedulePath,
-            new { selection.targetType, selection.targetId, selection.terminalIds, availableAtUtc = start.AddMinutes(1) }, Json);
+            new { selection.targetType, selection.timeAreaCode, selection.terminalIds, availableAtUtc = start.AddMinutes(1) }, Json);
         Assert.Equal(HttpStatusCode.BadRequest, late.StatusCode);
         using var scheduled = await fx.Client.PostAsJsonAsync(schedulePath, selection, Json);
         scheduled.EnsureSuccessStatusCode();
@@ -969,6 +977,70 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             using var cleanup = await fx.Client.PostAsync($"{schedulePath}/{scheduleId}/cancel", null);
             await AssignLabSetAsync();
         }
+    }
+
+    [Fact]
+    public async Task Time_area_call_in_parameters_deliver_mt35_as_partial_without_an_assignment()
+    {
+        var seed = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
+            .Single(t => t.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        const string wireId = "0000000629";
+        using var phone = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId = seed.GetProperty("siteId"), terminalIdHex = wireId, displayName = "Call-in area fixture", status = 0
+        }, Json);
+        phone.EnsureSuccessStatusCode();
+        var terminalId = (await phone.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        using var inventory = await fx.Client.PutAsJsonAsync($"/api/terminals/{terminalId}/inventory",
+            new { profile = new { timeAreaCode = "+1" } }, Json);
+        inventory.EnsureSuccessStatusCode();
+        var areas = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals/time-areas", Json);
+        Assert.Equal(1, areas.EnumerateArray().Single(area => area.GetProperty("id").GetString() == "+1")
+            .GetProperty("phoneCount").GetInt32());
+
+        using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Area call-in parameter set" }, Json);
+        created.EnsureSuccessStatusCode();
+        var setId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var endpoint = $"/api/tables/sets/{setId}";
+        var fields = $"{endpoint}/records/35/fields";
+        var templates = await fx.Client.GetFromJsonAsync<JsonElement>(fields, Json);
+        using var saved = await fx.Client.PostAsJsonAsync(fields, templates.GetProperty("templates")[0], Json);
+        saved.EnsureSuccessStatusCode();
+        using var published = await fx.Client.PostAsync($"{endpoint}/publish?confirm=true", null);
+        published.EnsureSuccessStatusCode();
+        var scoped = new { targetType = "time-area", timeAreaCode = "+1", terminalIds = new[] { terminalId } };
+        var preview = await fx.Client.GetFromJsonAsync<JsonElement>(
+            $"{endpoint}/assignment-preview?targetType=time-area&timeAreaCode=%2B1", Json);
+        Assert.Equal(terminalId, Assert.Single(preview.GetProperty("targets").EnumerateArray()).GetProperty("id").GetGuid());
+        Assert.Equal(new[] { 35 }, preview.GetProperty("recordNumbers").Deserialize<int[]>());
+        using var forbidden = await fx.Client.PostAsJsonAsync($"{endpoint}/assignments", scoped, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, forbidden.StatusCode);
+        var unrelatedSet = await CreateRateTableSetAsync("Area schedule invalid record");
+        using var invalid = await fx.Client.PostAsJsonAsync($"/api/tables/sets/{unrelatedSet}/schedules", scoped, Json);
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var scheduled = await fx.Client.PostAsJsonAsync($"{endpoint}/schedules", scoped, Json);
+        scheduled.EnsureSuccessStatusCode();
+        var before = await BatchIdsAsync();
+
+        var wire = Convert.FromHexString(wireId);
+        await using var link = await OpenAsync();
+        await link.Stream.WriteAsync(Message(wire, [8]));
+        AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        var header = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(new byte[] { 18 }, header.Data);
+        await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+        var record = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(21, record.Data.Length);
+        Assert.Equal(35, record.Data[0]);
+        await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | record.Control)));
+        await link.Stream.WriteAsync(Message(wire, [14, 35]));
+        AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        var end = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(new byte[] { 13 }, end.Data);
+        await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+        await WaitNewBatchAsync(before, 2);
+        using var assignment = await fx.Client.GetAsync($"/api/terminals/{terminalId}/table-assignment");
+        Assert.Equal(HttpStatusCode.NotFound, assignment.StatusCode);
     }
 
     [Fact]

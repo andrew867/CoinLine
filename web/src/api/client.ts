@@ -1,5 +1,5 @@
 export async function apiGet<T>(path: string): Promise<T> {
-  const r = await fetch(path, { headers: { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } })
+  const r = await apiGetRaw(path)
   if (!r.ok) throw new Error(`${path} ${r.status}`)
   return (await r.json()) as T
 }
@@ -11,6 +11,10 @@ const jsonHeaders = {
 } as const
 
 const opHeaders = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } as const
+
+export function apiGetRaw(path: string): Promise<Response> {
+  return fetch(path, { headers: opHeaders })
+}
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const r = await fetch(path, {

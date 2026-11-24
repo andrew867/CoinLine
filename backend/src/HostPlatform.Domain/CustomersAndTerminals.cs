@@ -18,7 +18,10 @@ public class Site : AuditableEntity
 
 public class TerminalGroup : AuditableEntity
 {
+    public const string CodePattern = "[A-Za-z0-9]{3,6}";
     public string Name { get; set; } = string.Empty;
+    public string? Code { get; set; }
+    public string? Description { get; set; }
     public Guid? CustomerId { get; set; }
     public Customer? Customer { get; set; }
     public ICollection<Terminal> Terminals { get; set; } = new List<Terminal>();

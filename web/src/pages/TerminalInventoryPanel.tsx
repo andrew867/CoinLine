@@ -17,6 +17,7 @@ type Field = {
   label: string
   kind?: 'digits' | 'count' | 'cost' | 'check'
   length?: number
+  pattern?: string
 }
 
 const sections: { title: string; fields: Field[] }[] = [
@@ -24,6 +25,7 @@ const sections: { title: string; fields: Field[] }[] = [
     title: 'Site details',
     fields: [
       { key: 'regionCode', label: 'Region code', length: 32 },
+      { key: 'timeAreaCode', label: 'Time area', length: 2, pattern: '[A-Za-z0-9]{2}|[+\\-][0-9]' },
       { key: 'route', label: 'Route', length: 24 },
       { key: 'stop', label: 'Stop', length: 24 },
       { key: 'siteDescription', label: 'Site description', length: 120 },
@@ -91,7 +93,7 @@ function InventoryInput({ field, value, onChange, disabled }: {
       max={field.kind === 'cost' ? 9999999999.99 : field.kind === 'count' ? 9999 : undefined}
       step={field.kind === 'cost' ? 0.01 : undefined}
       inputMode={field.kind === 'digits' ? 'numeric' : field.kind === 'cost' ? 'decimal' : undefined}
-      pattern={field.kind === 'digits' ? '[0-9]+' : undefined}
+      pattern={field.kind === 'digits' ? '[0-9]+' : field.pattern}
       disabled={disabled}
       onChange={event => onChange(event.target.value)}
     />

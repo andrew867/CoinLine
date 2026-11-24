@@ -483,6 +483,72 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Wildcard_group_targets_include_secondary_members_once_and_respect_region()
+    {
+        var site = (await _client.GetFromJsonAsync<JsonElement>("/api/sites"))[0].GetProperty("id").GetGuid();
+        var narrow = await CreateGroup("Pattern secondary", "rxa1b0");
+        var broad = await CreateGroup("Pattern primary", "RXA1A0");
+        var different = await CreateGroup("Pattern other suffix", "RXA2C0");
+        var first = await CreatePhone("0000000621", broad, "LAB-Q");
+        var west = await CreatePhone("0000000622", broad, "LAB-W");
+        var outside = await CreatePhone("0000000623", different, "LAB-Q");
+        var groups = await _client.GetFromJsonAsync<JsonElement>($"/api/terminals/{first}/groups");
+        using var members = await _client.PutAsJsonAsync($"/api/terminals/{first}/groups",
+            new { groupIds = new[] { broad, narrow }, revision = groups.GetProperty("revision") });
+        members.EnsureSuccessStatusCode();
+        using var rename = await _client.PutAsJsonAsync($"/api/terminal-groups/{narrow}", new { name = "Renamed secondary" });
+        rename.EnsureSuccessStatusCode();
+        var groupRow = (await _client.GetFromJsonAsync<JsonElement>("/api/terminal-groups")).EnumerateArray()
+            .Single(row => row.GetProperty("id").GetGuid() == narrow);
+        Assert.Equal("RXA1B0", groupRow.GetProperty("code").GetString());
+        using var staleDetails = await _client.PutAsJsonAsync($"/api/terminal-groups/{narrow}/details",
+            new { name = "Stale details", code = "ZZZ001", revision = 0 });
+        Assert.Equal(HttpStatusCode.Conflict, staleDetails.StatusCode);
+
+        var set = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets")).EnumerateArray()
+            .First(row => row.GetProperty("isDefault").GetBoolean()).GetProperty("id").GetGuid();
+        var endpoint = $"/api/tables/sets/{set}";
+        var preview = $"{endpoint}/assignment-preview?targetType=group-pattern&regionCode=lab-q";
+        Assert.Equal(first, Assert.Single(await Targets($"{preview}&groupPattern=rxa1%3F0")));
+        Assert.Equal(new[] { first, outside }.Order(), (await Targets($"{preview}&groupPattern=RXA*")).Order());
+        Assert.Equal(first, Assert.Single(await Targets($"{preview}&groupPattern=RXA1B0")));
+        using var invalid = await _client.GetAsync($"{preview}&groupPattern=RX%3FA*");
+        Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using var embeddedStar = await _client.GetAsync($"{preview}&groupPattern=RXA*0");
+        Assert.Equal(HttpStatusCode.BadRequest, embeddedStar.StatusCode);
+        using var forged = await _client.PostAsJsonAsync($"{endpoint}/assignments",
+            new { targetType = "group-pattern", groupPattern = "RXA1?0", regionCode = "lab-q", terminalIds = new[] { first, west } });
+        Assert.Equal(HttpStatusCode.Conflict, forged.StatusCode);
+        using var assigned = await _client.PostAsJsonAsync($"{endpoint}/assignments",
+            new { targetType = "group-pattern", groupPattern = "RXA1?0", regionCode = "lab-q", terminalIds = new[] { first } });
+        assigned.EnsureSuccessStatusCode();
+
+        async Task<Guid> CreateGroup(string name, string code)
+        {
+            using var response = await _client.PostAsJsonAsync("/api/terminal-groups", new { name, code, description = "Synthetic fixture" });
+            response.EnsureSuccessStatusCode();
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        }
+
+        async Task<Guid> CreatePhone(string terminalIdHex, Guid terminalGroupId, string regionCode)
+        {
+            using var response = await _client.PostAsJsonAsync("/api/terminals", new
+            {
+                displayName = $"Pattern fixture {terminalIdHex[^2..]}", terminalIdHex, terminalGroupId, siteId = site, status = 0
+            });
+            response.EnsureSuccessStatusCode();
+            var id = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            using var inventory = await _client.PutAsJsonAsync($"/api/terminals/{id}/inventory", new { profile = new { regionCode } });
+            inventory.EnsureSuccessStatusCode();
+            return id;
+        }
+
+        async Task<Guid[]> Targets(string path) =>
+            (await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("targets").EnumerateArray()
+                .Select(row => row.GetProperty("id").GetGuid()).ToArray();
+    }
+
+    [Fact]
     public async Task Phone_group_membership_adds_the_phone_to_each_assignment_preview()
     {
         var terminal = (await _client.GetFromJsonAsync<JsonElement>("/api/terminals"))[0].GetProperty("id").GetGuid();

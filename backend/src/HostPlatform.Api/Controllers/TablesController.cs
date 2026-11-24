@@ -332,10 +332,11 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
     [HttpGet("sets/{id:guid}/assignment-preview")]
     public async Task<ActionResult<object>> PreviewAssignments(Guid id, [FromQuery] string targetType,
-        [FromQuery] Guid? targetId, [FromQuery] string? regionCode, [FromQuery] int[]? recordNumbers, CancellationToken ct)
+        [FromQuery] Guid? targetId, [FromQuery] string? regionCode, [FromQuery] string? groupPattern,
+        [FromQuery] string? timeAreaCode, [FromQuery] int[]? recordNumbers, CancellationToken ct)
     {
         var query = db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).AsQueryable();
-        if (recordNumbers is { Length: > 0 })
+        if (recordNumbers is { Length: > 0 } || targetType == "time-area")
             query = query.Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
                 .Include(s => s.Versions).ThenInclude(v => v.TablePayload);
         var set = await query.FirstOrDefaultAsync(s => s.Id == id, ct);
@@ -344,9 +345,9 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
         try
         {
-            var records = recordNumbers is { Length: > 0 }
-                ? TableDistributionService.SelectDataDownloadRecords(set.Versions.ToArray(), recordNumbers) : null;
-            var targets = await AssignmentTargetsAsync(set, targetType, targetId, regionCode, ct, records);
+            var records = SelectScheduleRecords(set, targetType, recordNumbers is { Length: > 0 } ? recordNumbers : null);
+            var targets = await AssignmentTargetsAsync(set, new TableTargetScope(targetType, targetId, regionCode, groupPattern, timeAreaCode),
+                ct, records);
             return Ok(new { targets, recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber) });
         }
         catch (InvalidOperationException ex)
@@ -358,6 +359,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     [HttpPost("sets/{id:guid}/assignments")]
     public async Task<ActionResult<object>> AssignToScope(Guid id, [FromBody] TableScopeDto body, CancellationToken ct)
     {
+        if (body.TargetType == "time-area")
+            return BadRequest(new { error = "Use scheduled delivery to target a time area." });
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
         if (set == null)
             return NotFound();
@@ -369,7 +372,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         List<AssignmentTarget> targets;
         try
         {
-            targets = await AssignmentTargetsAsync(set, body.TargetType, body.TargetId, body.RegionCode, ct);
+            targets = await AssignmentTargetsAsync(set, body, ct);
         }
         catch (InvalidOperationException ex)
         {
@@ -410,7 +413,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         if (changed > 0)
         {
             ApiAudit.Write(db, HttpContext, "tables.set", "assign_scope", id.ToString(),
-                new { tableSetId = id, body.TargetType, body.TargetId, body.RegionCode, changed });
+                new { tableSetId = id, body.TargetType, body.TargetId, body.RegionCode, body.GroupPattern, changed });
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException ex) when (ex is DbUpdateConcurrencyException ||
                 ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
@@ -470,9 +473,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         List<AssignmentTarget> targets;
         try
         {
-            records = body.RecordNumbers == null ? null
-                : TableDistributionService.SelectDataDownloadRecords(set.Versions.ToArray(), body.RecordNumbers);
-            targets = await AssignmentTargetsAsync(set, body.TargetType, body.TargetId, body.RegionCode, ct, records);
+            records = SelectScheduleRecords(set, body.TargetType, body.RecordNumbers);
+            targets = await AssignmentTargetsAsync(set, body, ct, records);
         }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         var recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber).ToArray();
@@ -497,7 +499,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 TerminalId = terminalId, TableSetId = id, AvailableAtUtc = ready, RecordNumbers = recordNumbers
             }));
             ApiAudit.Write(db, HttpContext, "tables.set", "schedule_scope", id.ToString(),
-                new { body.TargetType, body.TargetId, body.RegionCode, recordNumbers, ready, count = ids.Count });
+                new { body.TargetType, body.TargetId, body.RegionCode, body.GroupPattern, body.TimeAreaCode, recordNumbers, ready, count = ids.Count });
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
             {
@@ -527,10 +529,29 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         return NoContent();
     }
 
-    private async Task<List<AssignmentTarget>> AssignmentTargetsAsync(TableSet set, string targetType, Guid? targetId,
-        string? regionCode, CancellationToken ct, IReadOnlyList<TableVersion>? records = null)
+    private static IReadOnlyList<TableVersion>? SelectScheduleRecords(TableSet set, string targetType, int[]? numbers)
     {
-        var selected = tables.PhonesInScope(targetType, targetId, regionCode);
+        const int callInParameters = 35;
+        const string timeAreaIssue = "Time-area schedules accept only MT35 call-in parameters or a dedicated MT94 firmware set.";
+        if (targetType == "time-area" && numbers == null)
+        {
+            if (TableDistributionService.CodeOnlyVersion(set.Versions) != null)
+                return null;
+            if (set.Versions.Count != 1 || set.Versions.Single().TableDefinition?.TableNumber != callInParameters)
+                throw new InvalidOperationException(timeAreaIssue);
+            numbers = [callInParameters];
+        }
+        var records = numbers == null ? null : TableDistributionService.SelectDataDownloadRecords(set.Versions.ToArray(), numbers);
+        if (targetType == "time-area" && records != null &&
+            (records.Count != 1 || records[0].TableDefinition!.TableNumber != callInParameters))
+            throw new InvalidOperationException(timeAreaIssue);
+        return records;
+    }
+
+    private async Task<List<AssignmentTarget>> AssignmentTargetsAsync(TableSet set, TableTargetScope scope,
+        CancellationToken ct, IReadOnlyList<TableVersion>? records = null)
+    {
+        var selected = tables.PhonesInScope(scope);
         var access = records == null
             ? await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
                 .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21).Take(2).ToListAsync(ct)
@@ -682,9 +703,12 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     public sealed record TableCloneDto(string Name);
     public sealed record TableRecordCopyRequest(Guid SourceSetId, int SourceRevision, int DestinationRevision, int[] RecordNumbers);
     public sealed record AdvertisingDto(AdvertisingSlot[] Slots, int? Revision = null, string? Sha256 = null);
-    public sealed record TableScopeDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, string? RegionCode = null);
+    public sealed record TableScopeDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, string? RegionCode = null,
+        string? GroupPattern = null, string? TimeAreaCode = null)
+        : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
     public sealed record TableScopeScheduleDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc,
-        string? RegionCode = null, int[]? RecordNumbers = null);
+        string? RegionCode = null, int[]? RecordNumbers = null, string? GroupPattern = null, string? TimeAreaCode = null)
+        : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
     private sealed record AssignmentTarget(Guid Id, string DisplayName, Guid SiteId, Guid CustomerId, string? TerminalFamilyLabel,
         bool Eligible, string? Reason);
 

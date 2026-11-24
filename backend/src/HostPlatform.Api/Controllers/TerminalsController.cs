@@ -201,6 +201,16 @@ public sealed class TerminalsController(
         return Ok(regions);
     }
 
+    [HttpGet("time-areas")]
+    public async Task<ActionResult<object>> TimeAreas(CancellationToken ct)
+    {
+        var areas = await db.TerminalInventories.AsNoTracking().Where(row => row.Details.TimeAreaCode != null)
+            .GroupBy(row => row.Details.TimeAreaCode).OrderBy(group => group.Key)
+            .Select(group => new { id = group.Key, name = group.Key, phoneCount = group.Count() })
+            .ToListAsync(ct);
+        return Ok(areas);
+    }
+
     [HttpPut("{id:guid}/family")]
     public async Task<ActionResult> SetFamily(Guid id, [FromBody] TerminalFamilyDto body, CancellationToken ct)
     {

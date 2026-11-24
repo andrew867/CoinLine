@@ -4,14 +4,26 @@ import { ErrorBanner } from '../components/AppStates'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
-type GroupRow = { id: string; name: string; customerId: string | null; terminalCount: number }
+type GroupFields = { name: string; code: string | null; description: string | null }
+type GroupRow = GroupFields & { id: string; customerId: string | null; terminalCount: number; revision: number }
 type Cust = { id: string; name: string; code: string }
+
+async function saveGroup(path: string, method: 'POST' | 'PUT', details: GroupFields & { customerId?: string | null; revision?: number }) {
+  const response = await fetch(path, {
+    method,
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify(details),
+  })
+  if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not save the group.')
+}
 
 export function TerminalGroupsPage() {
   const [rows, setRows] = useState<GroupRow[] | null>(null)
   const [customers, setCustomers] = useState<Cust[]>([])
   const [customerId, setCustomerId] = useState('')
   const [name, setName] = useState('')
+  const [code, setCode] = useState('')
+  const [description, setDescription] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
@@ -37,13 +49,11 @@ export function TerminalGroupsPage() {
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch('/api/terminal-groups', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), customerId: customerId || null }),
-      })
-      if (!r.ok) throw new Error(String(r.status))
+      await saveGroup('/api/terminal-groups', 'POST',
+        { name, code, description, customerId: customerId || null })
       setName('')
+      setCode('')
+      setDescription('')
       await load()
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'create failed')
@@ -52,18 +62,14 @@ export function TerminalGroupsPage() {
     }
   }
 
-  async function rename(id: string, name: string) {
+  async function update(group: GroupRow, details: GroupFields) {
     setErr(null)
-    const r = await fetch(`/api/terminal-groups/${id}`, {
-      method: 'PUT',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
-    })
-    if (!r.ok) {
-      setErr('Could not rename that group.')
-      return
+    try {
+      await saveGroup(`/api/terminal-groups/${group.id}/details`, 'PUT', { ...details, revision: group.revision })
+      await load()
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : 'Could not save the group.')
     }
-    await load()
   }
 
   async function remove(id: string) {
@@ -92,6 +98,12 @@ export function TerminalGroupsPage() {
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
         </label>
+        <label>Group ID
+          <input value={code} onChange={e => setCode(e.target.value)} maxLength={6} pattern="[A-Za-z0-9]{3,6}" />
+        </label>
+        <label>Description
+          <input value={description} onChange={e => setDescription(e.target.value)} />
+        </label>
         <label>
           Customer
           <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
@@ -113,6 +125,8 @@ export function TerminalGroupsPage() {
           <thead>
             <tr>
               <th>Name</th>
+              <th>Group ID</th>
+              <th>Description</th>
               <th>Customer</th>
               <th>Phones</th>
               <th></th>
@@ -121,10 +135,10 @@ export function TerminalGroupsPage() {
           <tbody>
             {rows.map((g) => (
               <GroupEditor
-                key={g.id}
+                key={`${g.id}-${g.revision}`}
                 group={g}
                 customer={customerName(g.customerId)}
-                onRename={(name) => void rename(g.id, name)}
+                onSave={(details) => update(g, details)}
                 onRemove={() => void remove(g.id)}
               />
             ))}
@@ -138,25 +152,37 @@ export function TerminalGroupsPage() {
 function GroupEditor({
   group,
   customer,
-  onRename,
+  onSave,
   onRemove,
 }: {
   group: GroupRow
   customer: string
-  onRename: (name: string) => void
+  onSave: (details: GroupFields) => Promise<void>
   onRemove: () => void
 }) {
   const [name, setName] = useState(group.name)
+  const [code, setCode] = useState(group.code ?? '')
+  const [description, setDescription] = useState(group.description ?? '')
+  const [saving, setSaving] = useState(false)
   return (
     <tr>
       <td>
         <input value={name} onChange={(e) => setName(e.target.value)} aria-label={`Name for ${group.name}`} />
       </td>
+      <td>
+        <input value={code} onChange={e => setCode(e.target.value)} maxLength={6} aria-label={`Group ID for ${group.name}`} />
+      </td>
+      <td>
+        <input value={description} onChange={e => setDescription(e.target.value)} aria-label={`Description for ${group.name}`} />
+      </td>
       <td>{customer}</td>
       <td>{group.terminalCount}</td>
       <td className="row-actions">
-        <button type="button" className="quiet" onClick={() => onRename(name.trim())}>
-          Save name
+        <button type="button" className="quiet" disabled={saving} onClick={() => {
+          setSaving(true)
+          void onSave({ name, code, description }).finally(() => setSaving(false))
+        }}>
+          Save group
         </button>
         <button type="button" className="quiet" onClick={onRemove}>
           Remove

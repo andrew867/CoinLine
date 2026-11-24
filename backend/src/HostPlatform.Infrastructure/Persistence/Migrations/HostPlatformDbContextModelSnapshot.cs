@@ -3365,6 +3365,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Code")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -3374,6 +3378,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3387,6 +3394,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -4700,6 +4708,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                             b1.Property<string>("Stop")
                                 .HasMaxLength(24)
                                 .HasColumnType("character varying(24)");
+
+                            b1.Property<string>("TimeAreaCode")
+                                .HasMaxLength(2)
+                                .HasColumnType("character varying(2)");
 
                             b1.Property<string>("VoucherAccountCode")
                                 .HasColumnType("text");

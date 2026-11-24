@@ -59,7 +59,11 @@ public sealed class TerminalInventoryController(HostPlatformDbContext db) : Cont
         }
 
         var region = input.Profile.RegionCode?.Trim();
-        inventory.Details = input.Profile with { RegionCode = string.IsNullOrEmpty(region) ? null : region };
+        inventory.Details = input.Profile with
+        {
+            RegionCode = string.IsNullOrEmpty(region) ? null : region,
+            TimeAreaCode = string.IsNullOrEmpty(input.Profile.TimeAreaCode) ? null : input.Profile.TimeAreaCode.ToUpperInvariant()
+        };
         inventory.Version++;
         ApiAudit.Write(db, HttpContext, "terminals.inventory", "update", $"Terminal:{terminalId}", new { }, terminalId);
         try { await db.SaveChangesAsync(ct); }

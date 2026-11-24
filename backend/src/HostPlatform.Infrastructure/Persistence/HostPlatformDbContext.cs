@@ -117,7 +117,12 @@ public class HostPlatformDbContext : DbContext
         });
 
         modelBuilder.Entity<Site>(b => b.HasOne(s => s.Customer).WithMany(c => c.Sites).HasForeignKey(s => s.CustomerId));
-        modelBuilder.Entity<TerminalGroup>(b => b.HasOne(g => g.Customer).WithMany().HasForeignKey(g => g.CustomerId));
+        modelBuilder.Entity<TerminalGroup>(b =>
+        {
+            b.HasOne(g => g.Customer).WithMany().HasForeignKey(g => g.CustomerId);
+            b.Property(g => g.Code).HasMaxLength(6);
+            b.Property(g => g.Version).IsConcurrencyToken();
+        });
 
         modelBuilder.Entity<FirmwareVersion>().Property(f => f.TableProfileId).HasMaxLength(48);
         modelBuilder.Entity<InmateFeatureConfiguration>(b =>
