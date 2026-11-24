@@ -18,6 +18,7 @@ public sealed class DownloadsController(HostPlatformDbContext db, TableDistribut
             {
                 b.Id,
                 b.TerminalId,
+                b.NccSessionId,
                 b.TableSetId,
                 b.Status,
                 b.Scope,
@@ -53,6 +54,7 @@ public sealed class DownloadsController(HostPlatformDbContext db, TableDistribut
         {
             b.Id,
             b.TerminalId,
+            b.NccSessionId,
             b.TableSetId,
             TableSetName = b.TableSet?.Name,
             b.Status,

@@ -161,7 +161,7 @@ internal sealed class NccLinkProcessor(
         }
         finally
         {
-            if (HasPendingInstall)
+            if (_batch?.Status == DownloadBatchStatus.Running)
                 await FailOutstandingAsync("acknowledgement was missing");
 
             outbound.Unregister(_session.Id);
@@ -766,6 +766,12 @@ internal sealed class NccLinkProcessor(
                 await SendInstallEndAsync(stream, terminalId);
             return;
         }
+        if (await db.DownloadBatches.AnyAsync(batch => batch.TerminalId == terminal.Id &&
+            batch.Status == DownloadBatchStatus.Running && batch.NccSessionId != null, stoppingToken))
+        {
+            await SendInstallEndAsync(stream, terminalId);
+            return;
+        }
 
         var now = clock.GetUtcNow().UtcDateTime;
         var scheduled = await db.ScheduledTableDownloads.Include(s => s.NccSession).Include(s => s.TableSet)
@@ -819,6 +825,14 @@ internal sealed class NccLinkProcessor(
             }
             scheduled = null;
             partialDefinitions = null;
+            var queued = await db.DownloadBatches.Include(batch => batch.TableSet)
+                .Where(batch => batch.TerminalId == terminal.Id && batch.Status == DownloadBatchStatus.Pending)
+                .OrderBy(batch => batch.CreatedAtUtc).ThenBy(batch => batch.Id).FirstOrDefaultAsync(stoppingToken);
+            if (queued != null)
+            {
+                await StartQueuedBatchAsync(stream, terminalId, terminal, queued);
+                return;
+            }
             if (!callIn)
                 tableSetId = await db.TerminalTableAssignments.AsNoTracking()
                     .Where(a => a.TerminalId == terminal.Id && a.TableSet!.Status == TableSetStatus.Published)
@@ -839,6 +853,7 @@ internal sealed class NccLinkProcessor(
         }
 
         _installStarted = true;
+        DownloadBatch? prepared = null;
         try
         {
             if (scheduled != null)
@@ -847,32 +862,80 @@ internal sealed class NccLinkProcessor(
                 scheduled.StartedAtUtc = DateTime.UtcNow;
                 scheduled.Version++;
             }
-            var (created, _) = await tables.CreateDownloadBatchAsync(
+            var (batch, _) = await tables.PrepareDownloadBatchAsync(
                 terminal.Id,
                 tableSetId.Value,
                 partialDefinitions == null ? DownloadScope.Full : DownloadScope.Partial,
                 partialDefinitions,
                 stoppingToken,
                 "ncc-install-" + _session.Id.ToString("N"),
-                scheduled);
-            _batch = created;
+                nccSessionId: _session.Id);
+            prepared = batch;
+            if (scheduled != null)
+                scheduled.LastBatch = batch;
+            await db.SaveChangesAsync(stoppingToken);
+            _batch = batch;
             _scheduledDownload = scheduled;
         }
         catch (Exception ex)
         {
             if (scheduled != null)
                 db.Entry(scheduled).State = EntityState.Detached;
+            if (prepared != null && db.Entry(prepared).State == EntityState.Added)
+            {
+                foreach (var item in prepared.Items.ToArray())
+                    db.Entry(item).State = EntityState.Detached;
+                db.Entry(prepared).State = EntityState.Detached;
+            }
             logger.LogWarning(ex, "Install batch was not created.");
             await SendInstallEndAsync(stream, terminalId);
             return;
         }
 
+        await SendBatchAsync(stream, terminalId, terminal, _batch);
+    }
+
+    private async Task StartQueuedBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch queued)
+    {
+        _installStarted = true;
+        queued.Status = DownloadBatchStatus.Running;
+        queued.NccSessionId = _session.Id;
+        try
+        {
+            await db.SaveChangesAsync(stoppingToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            db.Entry(queued).State = EntityState.Detached;
+            logger.LogInformation(ex, "Queued download {BatchId} could not be claimed for session {SessionId}.", queued.Id, _session.Id);
+            await SendInstallEndAsync(stream, terminalId);
+            return;
+        }
+        _batch = queued;
+        await SendBatchAsync(stream, terminalId, terminal, queued, queuedByOperator: true);
+    }
+
+    private async Task SendBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch batch,
+        bool queuedByOperator = false)
+    {
         var items = await db.DownloadBatchItems
             .Include(i => i.TableVersion)!.ThenInclude(v => v!.TableDefinition)
             .Include(i => i.TableVersion)!.ThenInclude(v => v!.TablePayload)
-            .Where(i => i.DownloadBatchId == _batch.Id)
+            .Where(i => i.DownloadBatchId == batch.Id)
             .OrderBy(i => i.StepIndex)
             .ToListAsync(stoppingToken);
+
+        if (queuedByOperator)
+        {
+            var versions = items.Select(item => item.TableVersion).OfType<TableVersion>().ToArray();
+            var definitions = versions.Select(version => version.TableDefinitionId).ToArray();
+            if (versions.Any(version => version.TableDefinition?.TableNumber == CodeDownloadWire.MessageType) ||
+                !await IsSetEligibleAsync(batch.TableSet, terminal, definitions))
+            {
+                await RejectBatchBeforeSendAsync(stream, terminalId, items, "The queued records no longer match the phone or its configuration.");
+                return;
+            }
+        }
 
         await StartFirmwareTableTransferAsync(stream, terminalId, items);
     }
@@ -898,17 +961,8 @@ internal sealed class NccLinkProcessor(
         if (items.Any(item => item.TableVersion == null) ||
             !TableDistributionService.HasCompleteDlogRecords(items.Select(item => item.TableVersion!)))
         {
-            const string reason = "The assigned set must contain complete DLOG table records with matching message types.";
-            foreach (var item in items)
-            {
-                Advance(item, TableDownloadTrigger.FailPermanent);
-                item.Succeeded = false;
-                item.LastAckStatus = "not_sent";
-                item.ErrorDetail = reason;
-            }
-            await FinishBatchAsync(reason);
-            logger.LogInformation("NCC session {SessionId} has no complete install table set to send.", _session.Id);
-            await SendInstallEndAsync(stream, terminalId);
+            await RejectBatchBeforeSendAsync(stream, terminalId, items,
+                "The download must contain complete DLOG table records with matching message types.");
             return;
         }
 
@@ -926,6 +980,19 @@ internal sealed class NccLinkProcessor(
         }
         _firmwareTables = transfer;
         await SendNextFirmwareTableFrameAsync(stream, transfer);
+    }
+
+    private async Task RejectBatchBeforeSendAsync(NetworkStream stream, byte[] terminalId,
+        List<DownloadBatchItem> items, string reason)
+    {
+        foreach (var item in items)
+        {
+            Advance(item, TableDownloadTrigger.FailPermanent);
+            item.LastAckStatus = "not_sent";
+            item.ErrorDetail = reason;
+        }
+        await FinishBatchAsync(reason);
+        await SendInstallEndAsync(stream, terminalId);
     }
 
     private async Task SendNextFirmwareTableFrameAsync(NetworkStream stream, FirmwareTableTransfer transfer)

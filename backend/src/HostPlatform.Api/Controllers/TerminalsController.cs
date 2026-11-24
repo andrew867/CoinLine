@@ -531,11 +531,16 @@ public sealed class TerminalsController(
     [HttpPost("{id:guid}/downloads")]
     public async Task<ActionResult<object>> StartDownload(Guid id, [FromBody] DownloadStartDto body, CancellationToken ct)
     {
-        var scope = ParseDownloadScope(body.Scope);
+        var requested = body.Scope?.Trim();
+        var partial = string.Equals(requested, "Partial", StringComparison.OrdinalIgnoreCase);
+        var full = string.IsNullOrEmpty(requested) || string.Equals(requested, "Full", StringComparison.OrdinalIgnoreCase);
+        if (!partial && (!full || body.PartialTableDefinitionIds is { Length: > 0 }))
+            return BadRequest(new { error = "Use Full for the entire set or Partial with selected record IDs." });
+        var scope = partial ? DownloadScope.Partial : DownloadScope.Full;
         try
         {
             var (batch, wasExisting) =
-                await tables.CreateDownloadBatchAsync(id, body.TableSetId, scope, body.PartialTableDefinitionIds, ct,
+                await tables.PrepareDownloadBatchAsync(id, body.TableSetId, scope, body.PartialTableDefinitionIds, ct,
                     body.ClientIdempotencyKey);
             ApiAudit.Write(db, HttpContext, "tables.download", wasExisting ? "start_duplicate" : "start",
                 batch.Id.ToString(), new
@@ -563,11 +568,6 @@ public sealed class TerminalsController(
             return BadRequest(new { error = ex.Message });
         }
     }
-
-    private static DownloadScope ParseDownloadScope(string? scope) =>
-        scope != null && scope.Equals("Partial", StringComparison.OrdinalIgnoreCase)
-            ? DownloadScope.Partial
-            : DownloadScope.Full;
 
     [HttpPost("{id:guid}/firmware-jobs")]
     public async Task<ActionResult<object>> StartFirmwareJob(Guid id, [FromBody] FirmwareJobDto body, CancellationToken ct)

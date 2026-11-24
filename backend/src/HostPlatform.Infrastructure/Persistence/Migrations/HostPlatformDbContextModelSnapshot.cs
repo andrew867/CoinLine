@@ -1409,6 +1409,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("LastError")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("NccSessionId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("PartialDefinitionIdsJson")
                         .HasColumnType("text");
 
@@ -1419,6 +1422,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer");
 
                     b.Property<int>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<Guid>("TableSetId")
@@ -1443,9 +1447,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("\"ClientIdempotencyKey\" IS NOT NULL AND \"ClientIdempotencyKey\" <> ''");
 
+                    b.HasIndex("NccSessionId");
+
                     b.HasIndex("TableSetId");
 
                     b.HasIndex("TerminalId");
+
+                    b.HasIndex(new[] { "TerminalId" }, "IX_DownloadBatches_TerminalId_ActiveTransfer")
+                        .IsUnique()
+                        .HasFilter("\"NccSessionId\" IS NOT NULL AND \"Status\" = 1");
 
                     b.ToTable("DownloadBatches");
                 });
@@ -4075,6 +4085,11 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HostPlatform.Domain.DownloadBatch", b =>
                 {
+                    b.HasOne("HostPlatform.Domain.NccSession", "NccSession")
+                        .WithMany()
+                        .HasForeignKey("NccSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("HostPlatform.Domain.TableSet", "TableSet")
                         .WithMany()
                         .HasForeignKey("TableSetId")
@@ -4086,6 +4101,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("TerminalId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("NccSession");
 
                     b.Navigation("TableSet");
 

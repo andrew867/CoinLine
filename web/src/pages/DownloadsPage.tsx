@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { apiPost } from '../api/client'
+import { apiGet, apiPostRaw } from '../api/client'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
@@ -18,6 +18,7 @@ type Batch = {
 
 type Term = { id: string; displayName: string }
 type SetRow = { id: string; name: string; status: number }
+type RecordChoice = { tableDefinitionId: string; tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean }
 
 export function DownloadsPage() {
   const [search] = useSearchParams()
@@ -28,6 +29,12 @@ export function DownloadsPage() {
   const [sets, setSets] = useState<SetRow[] | null>(null)
   const [terminalId, setTerminalId] = useState(preTerm)
   const [tableSetId, setTableSetId] = useState('')
+  const [records, setRecords] = useState<RecordChoice[] | null>(null)
+  const [scope, setScope] = useState<'Full' | 'Partial'>('Full')
+  const [selected, setSelected] = useState<string[]>([])
+  const [queuedId, setQueuedId] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [recordsError, setRecordsError] = useState('')
   const [err, setErr] = useState<string | null>(null)
 
   const load = () => {
@@ -77,21 +84,41 @@ export function DownloadsPage() {
     if (preTerm) setTerminalId(preTerm)
   }, [preTerm])
 
+  useEffect(() => {
+    if (!tableSetId) return
+    let current = true
+    void apiGet<{ versions: RecordChoice[] }>(`/api/tables/sets/${tableSetId}`)
+      .then(set => { if (current) setRecords(set.versions) })
+      .catch(() => { if (current) setRecordsError('Could not load the records in this set.') })
+    return () => { current = false }
+  }, [tableSetId])
+
   const visibleRows = (rows ?? []).filter((b) => (failedOnly ? b.status === 3 : true))
 
   async function startDownload(e: React.FormEvent) {
     e.preventDefault()
     setErr(null)
+    setQueuedId(null)
+    setSaving(true)
     try {
-      await apiPost<{ id: string }>('/api/terminals/' + terminalId + '/downloads', {
+      const response = await apiPostRaw(`/api/terminals/${terminalId}/downloads`, {
         tableSetId,
-        scope: 'Full',
+        scope,
+        ...(scope === 'Partial' ? { partialTableDefinitionIds: selected } : {}),
       })
+      const result = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(result?.error ?? `Could not queue the download (HTTP ${response.status}).`)
+      setQueuedId(result.id)
       load()
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'error')
+    } finally {
+      setSaving(false)
     }
   }
+
+  const choices = records?.filter(record => record.validationPassed && record.payloadLengthBytes > 2 && record.tableNumber !== 94) ?? []
+  const includesFirmware = records?.some(record => record.tableNumber === 94) ?? false
 
   const statusLabel = (n: number) =>
     (
@@ -109,8 +136,8 @@ export function DownloadsPage() {
     <div>
       <h1>Download batches</h1>
       <p style={{ color: '#555' }}>
-        Batches show the result of each table transfer. To prepare a download for a phone’s next call-in, open a published
-        set under <Link to="/table-sets">Table sets</Link> and schedule delivery.
+        Create a batch for one phone’s next call-in. To set a time or target a group, schedule delivery from a published
+        set under <Link to="/table-sets">Table sets</Link>.
       </p>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       <TableDownloadScheduleList terminalId={preTerm || undefined} />
@@ -151,7 +178,12 @@ export function DownloadsPage() {
           <select
             required
             value={tableSetId}
-            onChange={(e) => setTableSetId(e.target.value)}
+            onChange={(e) => {
+              setTableSetId(e.target.value)
+              setRecords(null)
+              setRecordsError('')
+              setSelected([])
+            }}
             style={{ display: 'block', minWidth: 200 }}
           >
             {(sets ?? [])
@@ -163,8 +195,35 @@ export function DownloadsPage() {
               ))}
           </select>
         </label>
-        <button type="submit">Create batch</button>
+        <label>
+          Records
+          <select value={scope} onChange={event => setScope(event.target.value as 'Full' | 'Partial')}>
+            <option value="Full">Entire set</option>
+            <option value="Partial">Selected records</option>
+          </select>
+        </label>
+        {scope === 'Partial' && records && (
+          <fieldset className="scope-record-choices" disabled={saving}>
+            <legend>Records to download</legend>
+            {choices.map(record => (
+              <label className="native-table-toggle" key={record.tableDefinitionId}>
+                <input type="checkbox" checked={selected.includes(record.tableDefinitionId)} onChange={event => {
+                  setSelected(current => event.target.checked ? [...current, record.tableDefinitionId]
+                    : current.filter(id => id !== record.tableDefinitionId))
+                }} />
+                MT{record.tableNumber} · {record.definitionName}
+              </label>
+            ))}
+            {choices.length > 0 ? <p>Required records are included automatically.</p> : <p>No complete data records are available in this set.</p>}
+          </fieldset>
+        )}
+        {includesFirmware && scope === 'Full' && <p>Use the firmware scheduler in <Link to={`/table-sets/${tableSetId}`}>this set</Link> for MT94.</p>}
+        {recordsError && <p role="alert">{recordsError}</p>}
+        <button type="submit" disabled={saving || !records || !terminalId || (scope === 'Full' ? includesFirmware : !selected.length)}>
+          Create batch
+        </button>
       </form>
+      {queuedId && <p role="status"><Link to={`/downloads/${queuedId}`}>View queued batch</Link>. The phone picks it up on its next eligible call.</p>}
 
       <h2>Recent batches</h2>
       <p className="page-intro">

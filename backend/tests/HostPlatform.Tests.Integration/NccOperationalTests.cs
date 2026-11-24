@@ -1352,6 +1352,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(HttpStatusCode.Created, retry.StatusCode);
         var created = JsonSerializer.Deserialize<JsonElement>(await retry.Content.ReadAsStringAsync(), Json);
         Assert.NotEqual(id, created.GetProperty("id").GetGuid());
+        Assert.Equal(0, created.GetProperty("status").GetInt32());
+        using var cancel = await fx.Client.PostAsync($"/api/downloads/{created.GetProperty("id").GetGuid()}/cancel?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, cancel.StatusCode);
     }
 
     [Fact]
@@ -1374,6 +1377,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Contains(Convert.ToHexString(nak), error, StringComparison.OrdinalIgnoreCase);
         var retry = await fx.Client.PostAsync($"/api/downloads/{batch.GetProperty("id").GetGuid()}/retry?confirm=true", null);
         Assert.Equal(HttpStatusCode.Created, retry.StatusCode);
+        var replacement = await retry.Content.ReadFromJsonAsync<JsonElement>(Json);
+        using var cancel = await fx.Client.PostAsync($"/api/downloads/{replacement.GetProperty("id").GetGuid()}/cancel?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, cancel.StatusCode);
     }
 
     [Fact]
@@ -1739,6 +1745,103 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
 
     private async Task AssignRateTableSetAsync(string name, byte[]? payload = null)
         => await AssignSetAsync(await CreateRateTableSetAsync(name, payload));
+
+    [Theory]
+    [InlineData(8)]
+    [InlineData(44)]
+    public async Task Terminal_call_sends_only_the_selected_records_and_acknowledges_the_original_batch(int trigger)
+    {
+        var terminal = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
+            .Single(row => row.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        var phoneId = terminal.GetProperty("id").GetGuid();
+        var definitions = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/definitions", Json)).EnumerateArray()
+            .Where(row => row.GetProperty("tableNumber").GetInt32() is 26 or 73)
+            .ToDictionary(row => row.GetProperty("tableNumber").GetInt32(), row => row.GetProperty("id").GetGuid());
+        var assignedSet = await CreateRateTableSetAsync("Queued download preserved assignment");
+        await AssignSetAsync(assignedSet);
+
+        using var source = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = $"Selected download MT{trigger} fixture" }, Json);
+        source.EnsureSuccessStatusCode();
+        var tableSetId = (await source.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var selected = new byte[72];
+        selected[0] = 26;
+        selected[^1] = 0x43;
+        var unrelated = new byte[1192];
+        unrelated[0] = 73;
+        foreach (var payload in new[] { selected, unrelated })
+        {
+            using var version = await fx.Client.PostAsJsonAsync("/api/tables/versions", new
+            {
+                tableSetId, tableDefinitionId = definitions[payload[0]], tableRevision = 1,
+                payloadBase64 = Convert.ToBase64String(payload), sortOrder = (int)payload[0]
+            }, Json);
+            version.EnsureSuccessStatusCode();
+        }
+        using var published = await fx.Client.PostAsync($"/api/tables/sets/{tableSetId}/publish?confirm=true", null);
+        published.EnsureSuccessStatusCode();
+        using var queued = await fx.Client.PostAsJsonAsync($"/api/terminals/{phoneId}/downloads", new
+        {
+            tableSetId, scope = "Partial", partialTableDefinitionIds = new[] { definitions[26] }
+        }, Json);
+        queued.EnsureSuccessStatusCode();
+        var prepared = await queued.Content.ReadFromJsonAsync<JsonElement>(Json);
+        var batchId = prepared.GetProperty("id").GetGuid();
+        Assert.Equal(0, prepared.GetProperty("status").GetInt32());
+        var batchPath = $"/api/downloads/{batchId}";
+        var prior = await BatchIdsAsync();
+
+        try
+        {
+            await using var call = await OpenAsync();
+            var request = trigger == 8 ? new byte[] { 8 } : new byte[] { 44, 2 };
+            await call.Stream.WriteAsync(Message(KnownId, request));
+            AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+            var header = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            var active = await fx.Client.GetFromJsonAsync<JsonElement>(batchPath, Json);
+            Assert.Equal(1, active.GetProperty("status").GetInt32());
+            var sessionId = active.GetProperty("nccSessionId").GetGuid();
+            using var cancel = await fx.Client.PostAsync($"{batchPath}/cancel?confirm=true", null);
+            Assert.Equal(HttpStatusCode.BadRequest, cancel.StatusCode);
+
+            await using (var competing = await OpenAsync())
+            {
+                await competing.Stream.WriteAsync(Message(KnownId, [44, 2]));
+                AssertAck(await ReadFrameAsync(competing.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 13 }, Decode(await ReadFrameAsync(competing.Stream, TimeSpan.FromSeconds(5))).Data);
+            }
+
+            await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+            var record = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(selected, record.Data);
+            await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | record.Control)));
+            await call.Stream.WriteAsync(Message(KnownId, [14, 26]));
+            AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+            var end = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+
+            JsonElement completed = default;
+            for (var attempt = 0; attempt < 30; attempt++)
+            {
+                completed = await fx.Client.GetFromJsonAsync<JsonElement>(batchPath, Json);
+                if (completed.GetProperty("status").GetInt32() == 2)
+                    break;
+                await Task.Delay(100);
+            }
+            Assert.Equal(2, completed.GetProperty("status").GetInt32());
+            Assert.Equal(sessionId, completed.GetProperty("nccSessionId").GetGuid());
+            var step = Assert.Single(completed.GetProperty("timeline").EnumerateArray());
+            Assert.Equal("ack", step.GetProperty("lastAckStatus").GetString());
+            Assert.True(prior.SetEquals(await BatchIdsAsync()));
+            var assignment = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/terminals/{phoneId}/table-assignment", Json);
+            Assert.Equal(assignedSet, assignment.GetProperty("tableSetId").GetGuid());
+        }
+        finally
+        {
+            await AssignLabSetAsync();
+        }
+    }
 
     private async Task<Guid> CreateRateTableSetAsync(string name, byte[]? payload = null)
     {

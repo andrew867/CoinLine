@@ -130,6 +130,8 @@ public class DownloadBatch : AuditableEntity
 
     public Guid TerminalId { get; set; }
     public Terminal? Terminal { get; set; }
+    public Guid? NccSessionId { get; set; }
+    public NccSession? NccSession { get; set; }
     public Guid TableSetId { get; set; }
     public TableSet? TableSet { get; set; }
     public DownloadBatchStatus Status { get; set; } = DownloadBatchStatus.Pending;

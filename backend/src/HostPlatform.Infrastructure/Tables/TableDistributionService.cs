@@ -359,14 +359,15 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         set.Version++;
     }
 
-    public async Task<(DownloadBatch Batch, bool WasExisting)> CreateDownloadBatchAsync(
+    public async Task<(DownloadBatch Batch, bool WasExisting)> PrepareDownloadBatchAsync(
         Guid terminalId,
         Guid tableSetId,
         DownloadScope scope,
         IReadOnlyList<Guid>? partialDefinitionIds,
         CancellationToken ct,
         string? clientIdempotencyKey = null,
-        ScheduledTableDownload? scheduled = null)
+        Guid? nccSessionId = null,
+        int retryCount = 0)
     {
         var trimmedKey = string.IsNullOrWhiteSpace(clientIdempotencyKey)
             ? null
@@ -377,6 +378,10 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
                 .FirstOrDefaultAsync(b => b.ClientIdempotencyKey == trimmedKey, ct);
             if (dup != null)
             {
+                if (dup.TerminalId != terminalId || dup.TableSetId != tableSetId || dup.Scope != scope ||
+                    (scope == DownloadScope.Partial && !(partialDefinitionIds ?? []).ToHashSet().SetEquals(
+                        JsonSerializer.Deserialize<Guid[]>(dup.PartialDefinitionIdsJson ?? "[]") ?? [])))
+                    throw new InvalidOperationException("This request key already belongs to a different download.");
                 var existing = await db.DownloadBatches.Include(b => b.Items).FirstAsync(b => b.Id == dup.Id, ct);
                 return (existing, true);
             }
@@ -390,6 +395,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         CheckFirmwareTarget(set, terminal.FirmwareVersionId);
 
         var versions = await db.TableVersions
+            .Include(v => v.TableDefinition)
             .Include(v => v.TablePayload)
             .AsNoTracking()
             .Where(v => v.TableSetId == tableSetId)
@@ -406,13 +412,15 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             {
                 var id = stack.Pop();
                 if (!byDef.TryGetValue(id, out var ver))
-                    continue;
+                    throw new InvalidOperationException("A selected or required record is missing from the published set.");
                 if (ver.DependsOnTableDefinitionId is { } dep && closure.Add(dep))
                     stack.Push(dep);
             }
 
             versions = versions.Where(v => closure.Contains(v.TableDefinitionId)).ToList();
         }
+        if (nccSessionId == null && versions.Any(v => v.TableDefinition?.TableNumber == CodeDownloadWire.MessageType))
+            throw new InvalidOperationException("Use the firmware scheduler for MT94.");
 
         IReadOnlyList<TableVersion> ordered;
         try
@@ -429,8 +437,10 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             ClientIdempotencyKey = trimmedKey,
             TerminalId = terminalId,
             TableSetId = tableSetId,
-            Status = DownloadBatchStatus.Preparing,
+            NccSessionId = nccSessionId,
+            Status = nccSessionId == null ? DownloadBatchStatus.Pending : DownloadBatchStatus.Running,
             Scope = scope,
+            RetryCount = retryCount,
             PartialDefinitionIdsJson = scope == DownloadScope.Partial
                 ? JsonSerializer.Serialize(partialDefinitionIds, JsonOpts)
                 : null
@@ -449,7 +459,6 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             });
         }
 
-        batch.Status = DownloadBatchStatus.Running;
         batch.DiagnosticsJson = JsonSerializer.Serialize(new
         {
             phase = "prepared",
@@ -459,19 +468,6 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
                 "Per-item HostDownloadPhase tracks host orchestration; Completed/Succeeded requires terminal ACK validated under field conditions."
         }, JsonOpts);
         db.DownloadBatches.Add(batch);
-        if (scheduled != null)
-            scheduled.LastBatch = batch;
-        try
-        {
-            await db.SaveChangesAsync(ct);
-        }
-        catch
-        {
-            foreach (var item in batch.Items.ToArray())
-                db.Entry(item).State = EntityState.Detached;
-            db.Entry(batch).State = EntityState.Detached;
-            throw;
-        }
         return (batch, false);
     }
 
@@ -482,6 +478,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             throw new InvalidOperationException("Cancel the schedule between delivery attempts.");
         var b = await db.DownloadBatches.Include(x => x.Items).FirstOrDefaultAsync(x => x.Id == batchId, ct)
                 ?? throw new InvalidOperationException("Download batch not found.");
+        if (b.Status == DownloadBatchStatus.Running && b.NccSessionId != null)
+            throw new InvalidOperationException("The phone is receiving this batch. Try again after the call ends.");
         if (b.Status is DownloadBatchStatus.Completed or DownloadBatchStatus.Cancelled)
             throw new InvalidOperationException("Batch is already completed or cancelled.");
 
@@ -494,7 +492,11 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             i.HostDownloadPhase = TableDownloadHostPhase.Cancelled;
         }
 
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("The download changed while it was being cancelled. Refresh its status.", ex);
+        }
     }
 
     public async Task<DownloadBatch> RetryDownloadAsync(Guid batchId, CancellationToken ct)
@@ -511,12 +513,9 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         if (!string.IsNullOrEmpty(old.PartialDefinitionIdsJson))
             partialIds = JsonSerializer.Deserialize<List<Guid>>(old.PartialDefinitionIdsJson);
 
-        var (nb, _) = await CreateDownloadBatchAsync(old.TerminalId, old.TableSetId, old.Scope, partialIds, ct,
-            clientIdempotencyKey: null);
-        var tracked = await db.DownloadBatches.FirstAsync(x => x.Id == nb.Id, ct);
-        tracked.RetryCount = old.RetryCount + 1;
-        await db.SaveChangesAsync(ct);
-        return tracked;
+        var (batch, _) = await PrepareDownloadBatchAsync(old.TerminalId, old.TableSetId, old.Scope, partialIds, ct,
+            retryCount: old.RetryCount + 1);
+        return batch;
     }
 
     public async Task<TerminalTableAssignment> AssignTableSetAsync(

@@ -209,6 +209,11 @@ public class HostPlatformDbContext : DbContext
         {
             b.HasOne(d => d.Terminal).WithMany().HasForeignKey(d => d.TerminalId);
             b.HasOne(d => d.TableSet).WithMany().HasForeignKey(d => d.TableSetId);
+            b.HasOne(d => d.NccSession).WithMany().HasForeignKey(d => d.NccSessionId).OnDelete(DeleteBehavior.SetNull);
+            b.Property(d => d.Status).IsConcurrencyToken();
+            b.HasIndex(d => d.TerminalId);
+            b.HasIndex(d => d.TerminalId, "IX_DownloadBatches_TerminalId_ActiveTransfer").IsUnique()
+                .HasFilter($"\"NccSessionId\" IS NOT NULL AND \"Status\" = {(int)DownloadBatchStatus.Running}");
         });
 
         modelBuilder.Entity<DownloadBatchItem>(b =>

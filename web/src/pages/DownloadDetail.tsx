@@ -21,6 +21,7 @@ type Step = {
 type Detail = {
   id: string
   terminalId: string
+  nccSessionId: string | null
   tableSetId: string
   tableSetName: string | null
   status: number
@@ -104,7 +105,7 @@ export function DownloadDetail() {
       } as Record<number, string>
     )[n] ?? String(n)
 
-  const canCancel = d.status === 1 || d.status === 5
+  const canCancel = d.status === 0 || (d.status === 1 && !d.nccSessionId) || d.status === 5
   const canRetry = d.status === 3 || d.status === 4
 
   return (
@@ -117,6 +118,7 @@ export function DownloadDetail() {
       <p>
         <strong>{statusLabel(d.status)}</strong> · Terminal <code>{d.terminalId}</code>
       </p>
+      {d.nccSessionId && <p>NCC session <code>{d.nccSessionId}</code></p>}
       <p>
         Set: {d.tableSetName ?? d.tableSetId} · Scope: {d.scope === 1 ? 'Partial' : 'Full'} · Retries: {d.retryCount}
       </p>

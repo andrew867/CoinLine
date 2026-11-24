@@ -741,7 +741,7 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         Assert.Equal(HttpStatusCode.Created, dl.StatusCode);
         var batchId = JsonSerializer.Deserialize<JsonElement>(await dl.Content.ReadAsStringAsync(), JsonOpts).GetProperty("id").GetGuid();
         var batch = await _client.GetFromJsonAsync<JsonElement>($"/api/downloads/{batchId}");
-        Assert.Equal(1, batch!.GetProperty("status").GetInt32()); // Running
+        Assert.Equal(0, batch!.GetProperty("status").GetInt32()); // Pending until the phone calls
 
         Assert.Equal(HttpStatusCode.BadRequest,
             (await _client.PostAsync($"/api/downloads/{batchId}/cancel", null)).StatusCode);
@@ -756,6 +756,7 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         Assert.Equal(HttpStatusCode.Created, retry.StatusCode);
         var retryBody = JsonSerializer.Deserialize<JsonElement>(await retry.Content.ReadAsStringAsync(), JsonOpts);
         Assert.Equal(1, retryBody.GetProperty("retryCount").GetInt32());
+        Assert.Equal(0, retryBody.GetProperty("status").GetInt32());
     }
 
     [Fact]
@@ -824,7 +825,12 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         await _client.PostAsync($"/api/tables/sets/{setId}/publish?confirm=true", null);
 
         var term = (await _client.GetFromJsonAsync<JsonElement>("/api/terminals"))![0].GetProperty("id").GetGuid();
-        var dl = await _client.PostAsJsonAsync($"/api/terminals/{term}/downloads", new
+        var endpoint = $"/api/terminals/{term}/downloads";
+        using var ambiguous = await _client.PostAsJsonAsync(endpoint, new { tableSetId = setId, partialTableDefinitionIds = new[] { idB } });
+        Assert.Equal(HttpStatusCode.BadRequest, ambiguous.StatusCode);
+        using var unknown = await _client.PostAsJsonAsync(endpoint, new { tableSetId = setId, scope = "Selected" });
+        Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
+        var dl = await _client.PostAsJsonAsync(endpoint, new
         {
             tableSetId = setId,
             scope = "Partial",

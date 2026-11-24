@@ -108,9 +108,6 @@ public sealed class NccModemListenService(
             var orphans = await db.NccSessions
                 .Where(s => s.Status == NccSessionStatus.Active)
                 .ToListAsync(ct);
-            if (orphans.Count == 0)
-                return;
-
             var now = DateTime.UtcNow;
             foreach (var s in orphans)
             {
@@ -120,16 +117,24 @@ public sealed class NccModemListenService(
             }
 
             var orphanIds = orphans.Select(s => s.Id).ToArray();
-            var schedules = await db.ScheduledTableDownloads.Include(s => s.LastBatch).ThenInclude(b => b!.Items)
+            var schedules = await db.ScheduledTableDownloads
                 .Where(s => s.NccSessionId != null && orphanIds.Contains(s.NccSessionId.Value))
                 .ToListAsync(ct);
-            const string reason = "The host restarted before the scheduled transfer completed.";
+            var scheduledBatchIds = schedules.Where(s => s.LastBatchId != null).Select(s => s.LastBatchId!.Value).ToArray();
             foreach (var schedule in schedules)
             {
                 schedule.NccSessionId = null;
                 schedule.Version++;
-                if (schedule.LastBatch is not { Status: DownloadBatchStatus.Running } interrupted)
-                    continue;
+            }
+
+            var interruptedBatches = await db.DownloadBatches.Include(batch => batch.Items)
+                .Where(batch => batch.Status == DownloadBatchStatus.Running && (scheduledBatchIds.Contains(batch.Id) ||
+                    (batch.NccSessionId != null && (orphanIds.Contains(batch.NccSessionId.Value) ||
+                        batch.NccSession!.Status != NccSessionStatus.Active))))
+                .ToListAsync(ct);
+            const string reason = "The host restarted before the download completed.";
+            foreach (var interrupted in interruptedBatches)
+            {
                 interrupted.Status = DownloadBatchStatus.Failed;
                 interrupted.LastError = reason;
                 interrupted.CompletedAtUtc = now;
@@ -143,7 +148,9 @@ public sealed class NccModemListenService(
             }
 
             await db.SaveChangesAsync(ct);
-            logger.LogInformation("Closed {Count} orphan Active NCC session(s) at listener start.", orphans.Count);
+            if (orphans.Count > 0 || interruptedBatches.Count > 0)
+                logger.LogInformation("Closed {SessionCount} orphan NCC session(s) and failed {BatchCount} interrupted download(s).",
+                    orphans.Count, interruptedBatches.Count);
         }
         catch (Exception ex)
         {
