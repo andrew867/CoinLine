@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
@@ -362,6 +363,126 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => ReadFrameAsync(link.Stream, TimeSpan.FromMilliseconds(400)));
         Assert.True(before.SetEquals(await BatchIdsAsync()));
+    }
+
+    [Fact]
+    public async Task Terminal_call_uploads_are_saved_before_the_receipts_and_deduplicated_after_reconnect()
+    {
+        var tableBatches = await BatchIdsAsync();
+        var existing = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+        var before = existing.EnumerateArray().Select(row => row.GetProperty("id").GetGuid()).ToHashSet();
+        var card = TerminalCallDetail(4, 0x1248, 0x44);
+        var coin = TerminalCallDetail(61, 0x1249, 0x33);
+        var combined = TerminalCallDetail(53, 0x124A, 0x65);
+        byte[] bundle = [.. card, .. coin, .. combined, 13];
+        byte[] receipts = [5, 0x48, 0x12, 5, 0x49, 0x12, 5, 0x4A, 0x12];
+        await using (var upload = await OpenAsync())
+        {
+            await upload.Stream.WriteAsync(Message(KnownId, [42, 0]));
+            AssertAck(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
+            var request = Decode(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 17 }, request.Data);
+            await upload.Stream.WriteAsync(Control((byte)(NccControl.Ack | request.Control)));
+
+            await upload.Stream.WriteAsync(Message(KnownId, bundle));
+            AssertAck(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
+            var actual = Decode(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(receipts, actual.Data);
+            var stored = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+            var additions = stored.EnumerateArray().Where(row => !before.Contains(row.GetProperty("id").GetGuid())).ToArray();
+            Assert.Equal(3, additions.Length);
+            var uploaded = new Dictionary<int, JsonElement>();
+            foreach (var row in additions)
+            {
+                Assert.True(row.GetProperty("isTerminalCallDetail").GetBoolean());
+                Assert.Equal("", row.GetProperty("rawPayloadHex").GetString());
+                Assert.Equal(2, row.GetProperty("status").GetInt32());
+                var path = $"/api/uploads/{row.GetProperty("id").GetGuid()}";
+                var detail = await fx.Client.GetFromJsonAsync<JsonElement>(path, Json);
+                var record = Assert.Single(detail.GetProperty("records").EnumerateArray());
+                Assert.Equal("", record.GetProperty("rawPayloadHex").GetString());
+                Assert.DoesNotContain("ABABAB", detail.GetRawText(), StringComparison.OrdinalIgnoreCase);
+                var call = record.GetProperty("terminalCall");
+                uploaded.Add(call.GetProperty("messageType").GetInt32(), call);
+                using var reprocess = await fx.Client.PostAsync($"{path}/reprocess?confirm=true", null);
+                Assert.Equal(HttpStatusCode.Conflict, reprocess.StatusCode);
+            }
+            Assert.Equal("Credit card", uploaded[4].GetProperty("payment").GetString());
+            Assert.Equal(JsonValueKind.Null, uploaded[4].GetProperty("amountCharged").ValueKind);
+            Assert.Equal("Coins", uploaded[61].GetProperty("payment").GetString());
+            Assert.Equal(80, uploaded[61].GetProperty("amountCollected").GetInt32());
+            Assert.Equal("5550196", uploaded[53].GetProperty("dialedDigits").GetString());
+            Assert.Equal("2028-02-29T10:11:12", uploaded[53].GetProperty("terminalStart").GetString());
+            Assert.Equal(65, uploaded[53].GetProperty("durationSeconds").GetInt32());
+            Assert.Equal(25, uploaded[53].GetProperty("amountCharged").GetInt32());
+            var sessions = await fx.Client.GetFromJsonAsync<JsonElement>("/api/ncc/sessions", Json);
+            var id = sessions.EnumerateArray().First(row => row.GetProperty("socketBound").GetBoolean()).GetProperty("id").GetGuid();
+            var session = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{id}", Json);
+            Assert.Equal("", session.GetProperty("frames").EnumerateArray().Last().GetProperty("rawHex").GetString());
+            await upload.Stream.WriteAsync(HeaderOnlyRetransmission(KnownId, 0));
+            AssertAck(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
+            var repeated = Decode(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(actual.Control | NccControl.ReTrans, repeated.Control);
+            Assert.Equal(receipts, repeated.Data);
+            await upload.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | actual.Control)));
+        }
+
+        await using (var retry = await OpenAsync())
+        {
+            await retry.Stream.WriteAsync(Message(KnownId, bundle));
+            AssertAck(await ReadFrameAsync(retry.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(receipts, Decode(await ReadFrameAsync(retry.Stream, TimeSpan.FromSeconds(5))).Data);
+        }
+        await using (var truncated = await OpenAsync())
+        {
+            await truncated.Stream.WriteAsync(Message(KnownId, combined[..^1]));
+            AssertAck(await ReadFrameAsync(truncated.Stream, TimeSpan.FromSeconds(5)));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => ReadFrameAsync(truncated.Stream, TimeSpan.FromMilliseconds(400)));
+        }
+        var after = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+        Assert.Equal(before.Count + 3, after.GetArrayLength());
+        Assert.True(tableBatches.SetEquals(await BatchIdsAsync()));
+    }
+
+    [Fact]
+    public async Task Rating_with_a_call_detail_suffix_keeps_the_suffix_out_of_captures()
+    {
+        var request = DlogRateWire.EncodeRequest("5550187", international: false);
+        await using var link = await OpenAsync();
+        await link.Stream.WriteAsync(Message(KnownId, [.. request, .. TerminalCallDetail(53, 0xF005, 0x45)]));
+        AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(64, Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5))).Data[0]);
+        var call = await WaitCallAsync("5550187");
+        var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/call-records/{call.GetProperty("id").GetGuid()}", Json);
+        Assert.Equal(Convert.ToHexString(request), detail.GetProperty("requestRawHex").GetString());
+        var sessions = await fx.Client.GetFromJsonAsync<JsonElement>("/api/ncc/sessions", Json);
+        var session = sessions.EnumerateArray().First(row => row.GetProperty("socketBound").GetBoolean());
+        Assert.Equal("", session.GetProperty("lastFrameSampleHex").GetString());
+    }
+
+    private static byte[] TerminalCallDetail(byte type, ushort sequence, byte classification)
+    {
+        var combined = type == 53;
+        var record = new byte[combined ? 54 : 35];
+        record[0] = type;
+        var digits = DlogRateWire.EncodeRequest("5550196", international: false);
+        digits.AsSpan(3, 10).CopyTo(record.AsSpan(2));
+        if (type != 61)
+            record.AsSpan(13, 10).Fill(0xAB);
+        if (combined)
+            record.AsSpan(43, 8).Fill(0xAB);
+        if (type != 4)
+        {
+            var amountOffset = combined ? 23 : 13;
+            BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(amountOffset), 80);
+            BinaryPrimitives.WriteInt32LittleEndian(record.AsSpan(amountOffset + 4), 25);
+        }
+        var offset = combined ? 31 : 23;
+        BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(offset), sequence);
+        byte[] time = [128, 2, 29, 10, 11, 12, 0, 1, 5, classification];
+        time.CopyTo(record, offset + 2);
+        return record;
     }
 
     [Fact]

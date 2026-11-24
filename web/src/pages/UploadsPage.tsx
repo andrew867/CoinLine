@@ -8,6 +8,7 @@ type Row = {
   terminalId: string | null
   status: number
   idempotencyKey: string
+  isTerminalCallDetail?: boolean
   rawPayloadHex: string
   recordCount: number
 }
@@ -42,8 +43,7 @@ export function UploadsPage() {
     <div>
       <h1>Upload batches</h1>
       <p style={{ color: '#555', maxWidth: 720 }}>
-        Host-ingested payloads (CDR / diagnostic batches). Use ingest on the detail page to derive{' '}
-        <strong>records</strong> from JSON arrays, a <code>records</code> envelope, or a single monolithic binary slice.
+        Review call records received from terminals and manually imported diagnostic batches.
       </p>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!rows && <p>Loading…</p>}
@@ -54,6 +54,7 @@ export function UploadsPage() {
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
               <th>Id</th>
               <th>Status</th>
+              <th>Source</th>
               <th>Records</th>
               <th>Terminal</th>
             </tr>
@@ -65,6 +66,7 @@ export function UploadsPage() {
                   <Link to={`/uploads/${b.id}`}>{b.id.slice(0, 8)}…</Link>
                 </td>
                 <td>{statusLabel(b.status)}</td>
+                <td>{b.isTerminalCallDetail ? 'Terminal call detail' : 'Imported batch'}</td>
                 <td>{b.recordCount}</td>
                 <td>{b.terminalId ? <code>{b.terminalId.slice(0, 8)}…</code> : '—'}</td>
               </tr>

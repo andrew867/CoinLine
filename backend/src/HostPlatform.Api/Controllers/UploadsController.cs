@@ -24,6 +24,7 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
                 x.TerminalId,
                 x.Status,
                 x.IdempotencyKey,
+                IsTerminalCallDetail = x.IdempotencyKey.StartsWith(TerminalCallUploads.KeyPrefix),
                 RawPayloadHex = Convert.ToHexString(x.RawPayload),
                 RecordCount = x.Records.Count
             }).ToListAsync(ct));
@@ -38,12 +39,14 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
             .FirstOrDefaultAsync(x => x.Id == id, ct);
         if (u == null)
             return NotFound();
+        var isTerminalCallDetail = TerminalCallUploads.IsTerminalCallDetail(u.IdempotencyKey);
         return Ok(new
         {
             u.Id,
             u.TerminalId,
             u.Status,
             u.IdempotencyKey,
+            isTerminalCallDetail,
             RawPayloadHex = Convert.ToHexString(u.RawPayload),
             u.DecodedMetadataJson,
             u.RelatedDlogTransactionId,
@@ -54,6 +57,7 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
                 r.Id,
                 RawPayloadHex = Convert.ToHexString(r.RawPayload),
                 r.DecodedMetadataJson,
+                TerminalCall = isTerminalCallDetail ? TerminalCallUploads.ReadMetadata(r.DecodedMetadataJson) : null,
                 r.CreatedAtUtc
             })
         });
@@ -65,6 +69,8 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
     public async Task<ActionResult<object>> Create([FromBody] UploadCreateDto body, CancellationToken ct)
     {
         var key = string.IsNullOrWhiteSpace(body.IdempotencyKey) ? Guid.NewGuid().ToString("N") : body.IdempotencyKey;
+        if (TerminalCallUploads.IsTerminalCallDetail(key))
+            return BadRequest(new { error = "This key prefix is reserved for terminal call uploads." });
         var existing = await db.UploadBatches.FirstOrDefaultAsync(x => x.IdempotencyKey == key, ct);
         if (existing != null)
             return Ok(new { existing.Id, deduped = true });
@@ -91,9 +97,11 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<object>> Ingest(Guid id, CancellationToken ct)
     {
-        var exists = await db.UploadBatches.AsNoTracking().AnyAsync(x => x.Id == id, ct);
-        if (!exists)
+        var key = await FindKeyAsync(id, ct);
+        if (key == null)
             return NotFound();
+        if (TerminalCallUploads.IsTerminalCallDetail(key))
+            return Conflict(new { error = "Terminal call details are decoded when received." });
         var result = await UploadBatchProcessor.IngestAsync(db, id, replaceExistingRecords: true, ct);
         ApiAudit.Write(db, HttpContext, "uploads", "ingest", id.ToString(),
             new { batchId = id, result.RecordCount, result.Mode, result.Error }, null);
@@ -110,9 +118,11 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
     {
         if (!confirm)
             return BadRequest(new { error = DestructiveOperationMessages.RepeatWithConfirmTrue });
-        var exists = await db.UploadBatches.AsNoTracking().AnyAsync(x => x.Id == id, ct);
-        if (!exists)
+        var key = await FindKeyAsync(id, ct);
+        if (key == null)
             return NotFound();
+        if (TerminalCallUploads.IsTerminalCallDetail(key))
+            return Conflict(new { error = "Terminal call details are decoded when received." });
         var result = await UploadBatchProcessor.IngestAsync(db, id, replaceExistingRecords: true, ct);
         ApiAudit.Write(db, HttpContext, "uploads", "reprocess", id.ToString(),
             new { batchId = id, result.RecordCount, result.Mode, result.Error }, null);
@@ -162,4 +172,7 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
         Guid? RelatedDlogTransactionId);
 
     public sealed record OperatorReviewDto(string? Note);
+
+    private Task<string?> FindKeyAsync(Guid id, CancellationToken ct) => db.UploadBatches.AsNoTracking()
+        .Where(batch => batch.Id == id).Select(batch => batch.IdempotencyKey).FirstOrDefaultAsync(ct);
 }
