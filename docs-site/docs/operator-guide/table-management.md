@@ -109,6 +109,8 @@ Select **Terminal family** when adding or editing a phone. The picker lists the 
 
 Open **Terminal status** to filter decoded alarms, maintenance reports, status flags and software versions by phone or report type. An upload or table request can include status and version records in the same message. The console shows each report separately. The version report includes the operating mode stored in the phone.
 
+Open an alarm to see its name and number, the phone that reported it, and when CoinLine recorded it. The phone's own timestamp appears separately when the record contains a valid clock. Unlisted alarms retain their numeric code. Expand **Technical record** to inspect the decoded JSON or download the captured bytes.
+
 ## Inmate Feature Configurations
 
 From **Table sets**, open **Inmate Feature Configurations**. The editor covers PIN entry, call processing, voice announcements, disconnect warnings, recording equipment, call timers and other settings. Enter a name of up to six characters and an optional description. Use **Copy as new** to reuse the current settings under a new name.

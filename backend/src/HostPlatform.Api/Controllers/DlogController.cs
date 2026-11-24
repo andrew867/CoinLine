@@ -110,6 +110,17 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             .Where(l => l.RequestTransactionId == id || l.ResponseTransactionId == id)
             .Select(l => new { l.Id, l.RequestTransactionId, l.ResponseTransactionId, l.LinkRule })
             .ToListAsync(ct);
+        var alarm = FieldEventSummary.ReadAlarm(x.MessageType, x.RawPayload);
+        var fieldEvent = FieldEventCatalog.TryDescribe(x.MessageType, out var title)
+            ? new
+            {
+                title,
+                category = FieldEventCatalog.Category(x.MessageType),
+                summary = x.MessageType is 7 or 16 ? alarm?.Summary : FieldEventSummary.TryBuild(x.MessageType, x.RawPayload),
+                alarmNumber = alarm?.Number,
+                phoneTime = alarm?.PhoneTime
+            }
+            : null;
         return Ok(new
         {
             x.Id,
@@ -122,6 +133,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             x.CorrelationKey,
             RawPayloadHex = Convert.ToHexString(x.RawPayload),
             x.DecodedJson,
+            fieldEvent,
             x.IsUnknownMessageType,
             x.ImmediateClear,
             x.ProcessingStatus,

@@ -17,7 +17,7 @@ Every implemented UI route (`coinline/web/src/App.tsx`) with operator-facing pur
 | `/ncc-sessions` | JsonPanel | `/api/ncc/sessions` | Read-only list |
 | `/ncc-frame-captures` | `NccFrameCaptures` | `/api/ncc/frame-captures` | Upload captures — sensitive |
 | `/dlog` | `DlogTransactions` | `/api/dlog/transactions` | |
-| `/dlog/:id` | `DlogTransactionDetail` | `/api/dlog/transactions/{id}` | Hex viewer |
+| `/dlog/:id` | `DlogTransactionDetail` | `/api/dlog/transactions/{id}` | Terminal report summary, decoded alarm fields and technical payload |
 | `/dlog/replay-debug` | `DlogReplayDebug` | `/api/dlog/replay` | **Dangerous** export — confirm |
 | `/table-definitions` | `TableDefinitions` | `/api/tables/definitions` | |
 | `/table-definitions/:id` | `TableDefinitionDetail` | definitions API | |

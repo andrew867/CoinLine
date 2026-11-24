@@ -18,6 +18,7 @@ type Detail = {
   immediateClear: boolean
   rawPayloadHex: string
   decodedJson: string
+  fieldEvent: { title: string; category: string; summary: string | null; phoneTime: string | null } | null
   idempotencyKey: string
   capturedAtUtc: string
   sessionCorrelationId: string | null
@@ -61,8 +62,9 @@ export function DlogTransactionDetail() {
   if (err) return <p style={{ color: 'crimson' }}>{err}</p>
   if (!detail) return <p>No data.</p>
 
-  const title = fieldTitle(detail.messageType) ?? 'Stored message'
-  const fromPhone = fieldTitle(detail.messageType) != null
+  const fieldEvent = detail.fieldEvent
+  const isAlarm = fieldEvent?.category === 'alarm'
+  const fields = decodedFields(detail.decodedJson)
 
   async function download(messageId: string) {
     setDownloadError('')
@@ -73,35 +75,53 @@ export function DlogTransactionDetail() {
     }
   }
 
+  const rawBytes = (
+    <>
+      <h2>Raw bytes</h2>
+      <HexViewer hex={detail.rawPayloadHex} />
+      <p>
+        <button type="button" onClick={() => void download(detail.id)}>
+          Download raw bytes
+        </button>
+      </p>
+      {downloadError && <p role="alert">{downloadError}</p>}
+    </>
+  )
+  const jsonFields = fields != null && (
+    <pre style={{ background: '#f6f8fa', padding: '0.75rem', overflow: 'auto', maxWidth: 720 }}>
+      {JSON.stringify(fields, null, 2)}
+    </pre>
+  )
+
   return (
     <div>
       <p>
-        <Link to={fromPhone ? '/field-events' : '/dlog'}>{fromPhone ? '← Terminal status' : '← Message log'}</Link>
+        <Link to={fieldEvent ? '/field-events' : '/dlog'}>{fieldEvent ? '← Terminal status' : '← Message log'}</Link>
       </p>
-      <h1>{title}</h1>
-      <p className="page-intro">
-        {fromPhone
-          ? 'This phone report includes any fields CoinLine could decode from its documented layout.'
-          : 'This is a message stored from a phone session.'}
-      </p>
-      {(() => {
-        const fields = decodedFields(detail.decodedJson)
-        if (fields == null) return null
-        return (
-          <>
-            <h2>Decoded fields</h2>
-            <pre style={{ background: '#f6f8fa', padding: '0.75rem', overflow: 'auto', maxWidth: 720 }}>
-              {JSON.stringify(fields, null, 2)}
-            </pre>
-          </>
-        )
-      })()}
+      <h1>{fieldEvent?.title ?? 'Stored message'}</h1>
+      {isAlarm && <h2>Decoded alarm</h2>}
+      {!isAlarm && fieldEvent?.summary && <p className="page-intro">{fieldEvent.summary}</p>}
+      {!isAlarm && jsonFields && <><h2>Decoded fields</h2>{jsonFields}</>}
       {detail.isUnknownMessageType && (
         <p role="status">This message type is not in the catalog. The raw bytes are still stored.</p>
       )}
       <dl style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 8, maxWidth: 720 }}>
-        <dt>When</dt>
-        <dd>{new Date(detail.capturedAtUtc).toLocaleString()}</dd>
+        {isAlarm && (
+          <>
+            <dt>Alarm</dt>
+            <dd><strong>{fieldEvent?.summary ?? 'Alarm details unavailable'}</strong></dd>
+            {detail.messageType === 7 && (
+              <>
+                <dt>Phone-reported time</dt>
+                <dd>{fieldEvent?.phoneTime
+                  ? <time dateTime={fieldEvent.phoneTime}>{fieldEvent.phoneTime.replace('T', ' ')}</time>
+                  : 'Unavailable'}</dd>
+              </>
+            )}
+          </>
+        )}
+        <dt>Recorded by CoinLine</dt>
+        <dd><time dateTime={detail.capturedAtUtc}>{new Date(detail.capturedAtUtc).toLocaleString()}</time></dd>
         <dt>Phone</dt>
         <dd>
           {detail.terminalId ? (
@@ -118,17 +138,12 @@ export function DlogTransactionDetail() {
         <dd>{detail.sessionCorrelationId ?? '—'}</dd>
       </dl>
 
-      <h2>Raw bytes</h2>
-      <HexViewer hex={detail.rawPayloadHex} />
-      <p>
-        <button type="button" onClick={() => void download(detail.id)}>
-          Download raw bytes
-        </button>
-      </p>
-      {downloadError && <p role="alert">{downloadError}</p>}
+      {!isAlarm && rawBytes}
 
       <details>
         <summary>Technical record</summary>
+        {isAlarm && rawBytes}
+        {isAlarm && jsonFields && <><h2>Decoded JSON</h2>{jsonFields}</>}
         <dl style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 8, maxWidth: 720 }}>
           <dt>Record id</dt>
           <dd>{detail.id}</dd>
@@ -166,24 +181,6 @@ function decodedFields(decodedJson: string): unknown | null {
   } catch {
     return null
   }
-}
-
-function fieldTitle(messageType: number): string | null {
-  if (messageType === 6) return 'Maintenance report'
-  if (messageType === 7) return 'Alarm'
-  if (messageType === 10) return 'Phone status'
-  if (messageType === 15) return 'Maintenance acknowledgement'
-  if (messageType === 16) return 'Alarm acknowledgement'
-  if (messageType === 38) return 'Cash box status'
-  if (messageType === 39) return 'Attention callback'
-  if (messageType >= 40 && messageType <= 47) {
-    if (messageType === 42) return 'Attention required (CDR upload)'
-    if (messageType === 44) return 'Attention required (tables)'
-    return 'Attention required'
-  }
-  if (messageType === 51) return 'Cash box collection'
-  if (messageType === 83) return 'Phone error'
-  return null
 }
 
 function statusWord(status: number): string {

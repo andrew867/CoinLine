@@ -59,6 +59,8 @@ public sealed class DlogFieldLayoutTests
         var meta = DlogPayloadClassifier.Classify(new byte[] { 7, 1, 2 }, null, true);
         Assert.Null(meta.Fields);
         Assert.Contains(meta.Diagnostics, d => d.Code == "PAYLOAD_LAYOUT" && d.Severity == "Warning");
+        Assert.Null(FieldEventSummary.ReadAlarm(7, [7, 1, 2]));
+        Assert.Null(FieldEventSummary.ReadAlarm(7, [16, 126, 11, 23, 12, 0, 0, 22]));
     }
 
     [Fact]
@@ -83,6 +85,9 @@ public sealed class DlogFieldLayoutTests
             Assert.Equal(5, doc.RootElement.GetProperty("Fields").GetProperty("reasons").GetInt32());
 
         Assert.Equal("Display not responding (alarm 9)", FieldEventSummary.TryBuild(16, [16, 9]));
+        var alarm = Assert.IsType<FieldEventSummary.AlarmDetails>(FieldEventSummary.ReadAlarm(16, [16, 9]));
+        Assert.Equal(9, alarm.Number);
+        Assert.Null(alarm.PhoneTime);
         Assert.Equal("Call record store full, Unlisted reason bits (1)", FieldEventSummary.TryBuild(42, [42, 0x05]));
         Assert.Equal("Technician requested download, Cash box follow-up", FieldEventSummary.TryBuild(44, [44, 0x81]));
         Assert.True(FieldEventCatalog.TryDescribe(39, out var title));

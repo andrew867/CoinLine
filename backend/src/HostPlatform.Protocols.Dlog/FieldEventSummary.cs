@@ -7,13 +7,15 @@ public static class FieldEventSummary
 {
     public static string? TryBuild(int messageType, ReadOnlySpan<byte> raw)
     {
+        if (messageType is 7 or 16)
+            return ReadAlarm(messageType, raw)?.Summary;
+
         if (!DlogFieldLayouts.TryDecodeFields(messageType, raw, out var fields, out _))
             return null;
 
         return messageType switch
         {
             6 or 15 => FormatMaintenance(fields),
-            7 or 16 => FormatAlarm(fields),
             10 => FormatStatus(fields),
             38 or 51 => FormatCash(fields),
             39 => fields["callTime"]?.GetValue<string>(),
@@ -23,43 +25,53 @@ public static class FieldEventSummary
         };
     }
 
-    private static string? FormatAlarm(JsonObject fields)
+    public static AlarmDetails? ReadAlarm(int messageType, ReadOnlySpan<byte> raw)
     {
-        if (!TryInt(fields["alarmNum"], out var num))
+        if (messageType is not (7 or 16) || raw.IsEmpty || raw[0] != messageType ||
+            !DlogFieldLayouts.TryDecodeFields(messageType, raw, out var fields, out _) ||
+            !TryInt(fields["alarmNum"], out var number))
             return null;
-        var label = num switch
-        {
-            0 => "Handset fault",
-            1 => "Telephony not responding",
-            8 => "Power interruption",
-            9 => "Display not responding",
-            10 => "Voice prompts unavailable",
-            12 => "Card reader blocked",
-            16 => "Call record checksum fault",
-            17 => "Statistics checksum fault",
-            18 => "Table checksum fault",
-            19 => "Other data checksum fault",
-            20 => "Call record store full",
-            21 => "EEPROM fault",
-            22 => "Memory lost",
-            23 => "Memory hardware fault",
-            24 => "Access cover open",
-            25 => "Stuck keypad keys",
-            26 => "Phone removed from mount",
-            27 => "Cash box threshold reached",
-            28 => "Cash box cover open",
-            29 => "Cash box removed",
-            30 => "Cash box full",
-            31 => "Coin jam",
-            32 => "Coin escrow jam",
-            33 => "Coin validator fault",
-            34 => "Line check failed",
-            35 => "Data call failed",
-            99 => "Fault cleared",
-            _ => null
-        };
-        return label == null ? $"Unlisted alarm {num}" : $"{label} (alarm {num})";
+
+        var phoneTime = messageType == 7 ? DlogFieldLayouts.ReadClock(raw.Slice(1, DlogFieldLayouts.YmdhmsBytes)) : null;
+        return new AlarmDetails(number, AlarmName(number), phoneTime);
     }
+
+    public sealed record AlarmDetails(int Number, string? Name, DateTime? PhoneTime)
+    {
+        public string Summary => Name == null ? $"Unlisted alarm {Number}" : $"{Name} (alarm {Number})";
+    }
+
+    private static string? AlarmName(int number) => number switch
+    {
+        0 => "Handset fault",
+        1 => "Telephony not responding",
+        8 => "Power interruption",
+        9 => "Display not responding",
+        10 => "Voice prompts unavailable",
+        12 => "Card reader blocked",
+        16 => "Call record checksum fault",
+        17 => "Statistics checksum fault",
+        18 => "Table checksum fault",
+        19 => "Other data checksum fault",
+        20 => "Call record store full",
+        21 => "EEPROM fault",
+        22 => "Memory lost",
+        23 => "Memory hardware fault",
+        24 => "Access cover open",
+        25 => "Stuck keypad keys",
+        26 => "Phone removed from mount",
+        27 => "Cash box threshold reached",
+        28 => "Cash box cover open",
+        29 => "Cash box removed",
+        30 => "Cash box full",
+        31 => "Coin jam",
+        32 => "Coin escrow jam",
+        33 => "Coin validator fault",
+        34 => "Line check failed",
+        35 => "Data call failed",
+        99 => "Fault cleared",
+        _ => null
+    };
 
     private static string? FormatMaintenance(JsonObject fields)
     {

@@ -2295,8 +2295,8 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     public async Task Complete_alarm_dialogue_receives_alarm_acknowledgements_and_end_data()
     {
         var bundle = new byte[2 * 8 + 11 + 28 + 57 + 1];
-        bundle[0] = 7;
-        bundle[7] = 22;
+        byte[] memoryLost = [7, 126, 11, 23, 12, 0, 0, 22];
+        memoryLost.CopyTo(bundle, 0);
         bundle[8] = 7;
         bundle[15] = 91;
         bundle[16] = 10;
@@ -2313,8 +2313,21 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
 
         var events = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/field-events", Json))!;
         var rows = events.GetProperty("items").EnumerateArray().ToList();
-        Assert.Contains(rows, row => row.GetProperty("summary").GetString() == "Memory lost (alarm 22)");
-        Assert.Contains(rows, row => row.GetProperty("summary").GetString() == "Unlisted alarm 91");
+        var terminalReports = rows.Where(row => row.GetProperty("messageType").GetInt32() == 7).ToList();
+        foreach (var (number, summary, phoneTime) in new (int, string, string?)[]
+        {
+            (22, "Memory lost (alarm 22)", "2026-11-23T12:00:00"),
+            (91, "Unlisted alarm 91", null)
+        })
+        {
+            var row = terminalReports.First(eventRow => eventRow.GetProperty("summary").GetString() == summary);
+            var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/dlog/transactions/{row.GetProperty("id").GetGuid()}", Json);
+            var fieldEvent = detail.GetProperty("fieldEvent");
+            Assert.Equal("alarm", fieldEvent.GetProperty("category").GetString());
+            Assert.Equal(summary, fieldEvent.GetProperty("summary").GetString());
+            Assert.Equal(number, fieldEvent.GetProperty("alarmNumber").GetInt32());
+            Assert.Equal(phoneTime, fieldEvent.GetProperty("phoneTime").GetString());
+        }
         Assert.Contains(rows, row => row.GetProperty("summary").GetString() == "Access cover open");
         Assert.Contains(rows, row => row.GetProperty("category").GetString() == "cash");
     }
