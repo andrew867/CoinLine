@@ -9,7 +9,7 @@ public enum TableFieldEncoding
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
     KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes,
     TerminatedDisplayText, CardStandard, CardServiceCode, CredentialHex, BigEndianWord, BigEndianBits, SignedByte,
-    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd, TerminalCalendar, TerminalTime, RatePeriod
+    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd, TerminalCalendar, TerminalTime, RatePeriod, LocalDialingArea
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -37,7 +37,8 @@ public sealed record NativeTableField(
         TableFieldEncoding.CardStandard => "card-standard",
         TableFieldEncoding.SmartDiscountMethod => "discount-method",
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial
-            or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes or TableFieldEncoding.CardServiceCode => "text",
+            or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes or TableFieldEncoding.CardServiceCode
+            or TableFieldEncoding.LocalDialingArea => "text",
         _ when Choices != null || TariffIndexOffset.HasValue => "select",
         _ => "number"
     };
@@ -49,6 +50,7 @@ public sealed record NativeTableField(
         TableFieldEncoding.SignedLong or TableFieldEncoding.UnsignedLong => 4,
         TableFieldEncoding.TerminalCalendar => 6,
         TableFieldEncoding.TerminalTime => 3,
+        TableFieldEncoding.LocalDialingArea => 2,
         _ => Size
     };
 
@@ -58,6 +60,7 @@ public sealed record NativeTableField(
         TableFieldEncoding.Bcd or TableFieldEncoding.CredentialBcd => Maximum ?? Size * 2,
         TableFieldEncoding.PaddedCredentialBcd => Size * 2,
         TableFieldEncoding.CardServiceCode => 3,
+        TableFieldEncoding.LocalDialingArea => 3,
         TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes or TableFieldEncoding.CredentialHex => Size * 2,
         _ => null
     };
@@ -108,6 +111,7 @@ public sealed record NativeTableField(
             TableFieldEncoding.TerminatedDisplayText => ReadTerminatedDisplayText(data),
             TableFieldEncoding.GraphicalText => GraphicalScreenText.Read(data),
             TableFieldEncoding.Bcd => ReadDigits(data, isDial: false, TextLimit ?? 0),
+            TableFieldEncoding.LocalDialingArea => ReadLocalDialingArea(data),
             TableFieldEncoding.CardServiceCode => data.IndexOfAnyExcept((byte)0) < 0 ? "" : (data[^1] & 15) == 14
                 ? ReadDigits(data, isDial: false, 3) : null,
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
@@ -123,6 +127,8 @@ public sealed record NativeTableField(
     {
         if (Encoding == TableFieldEncoding.RatePeriod && value == "65535")
             value = "-1";
+        if (Encoding == TableFieldEncoding.LocalDialingArea && value == "000")
+            value = "";
         if (value == Read(record))
             return;
 
@@ -161,6 +167,17 @@ public sealed record NativeTableField(
             case TableFieldEncoding.Dial:
             case TableFieldEncoding.KeypadDial:
                 WriteDigits(data, value, Encoding != TableFieldEncoding.Bcd, Encoding == TableFieldEncoding.KeypadDial);
+                return;
+            case TableFieldEncoding.LocalDialingArea:
+                if (value.Length == 0)
+                {
+                    data.Clear();
+                    return;
+                }
+                if (value.Length != 3 || value[0] < '2' || value.Any(digit => !char.IsAsciiDigit(digit)))
+                    throw Invalid("enter an area code from 200 through 999 or leave it blank");
+                WriteDigits(data, value, isDial: false, allowKeypad: false);
+                data[1] = (byte)((data[1] & 0xF0) | 0x0E);
                 return;
             case TableFieldEncoding.CredentialBcd:
                 WriteDigits(data, value, isDial: false, allowKeypad: false);
@@ -295,6 +312,13 @@ public sealed record NativeTableField(
             output[i] = (char)('0' + digit);
         }
         return new string(output);
+    }
+
+    private static string? ReadLocalDialingArea(ReadOnlySpan<byte> data)
+    {
+        if (data[0] == 0 && (data[1] & 0xF0) == 0)
+            return "";
+        return data[0] >= 0x20 && (data[1] & 0x0F) == 0x0E ? ReadDigits(data, isDial: false, 3) : null;
     }
 
     private static string? ReadText(ReadOnlySpan<byte> data)

@@ -144,6 +144,41 @@ public sealed class NativeTableLayoutTests
             new Dictionary<string, string> { ["country-199.rate"] = "100" }));
     }
 
+    [Theory]
+    [InlineData(74, 819, 19, "exchange-0.rate", "exchange-799.rate", 0x03)]
+    [InlineData(101, 403, 3, "pair-0.even", "pair-399.odd", 0x31)]
+    [InlineData(155, 203, 3, "exchange-0.0", "exchange-199.3", 0xC1)]
+    public void Local_dialing_records_match_the_firmware_area_code_and_exchange_boundaries(
+        int type, int length, int firstExchangeOffset, string first, string last, int firstPackedRate)
+    {
+        var template = Assert.Single(NativeTableLayouts.DraftTemplates(type));
+        var record = NativeTableLayouts.CreateDraftTemplate(template);
+        Assert.Equal(length, record.Length);
+        var layout = NativeTableLayouts.Find(type, record)!;
+        var areaCode = layout.Sections[0].Fields[0];
+        Assert.Equal("", areaCode.Read(record));
+        record[1] = 0x20;
+        record[2] = 0x5F;
+        record[firstExchangeOffset] = 1;
+        if (length == 819)
+            record[18] = 0xA7;
+
+        Assert.Null(areaCode.Read(record));
+        var result = layout.Apply(record, new Dictionary<string, string> { ["areaCode"] = "205", [first] = "3", [last] = "2" });
+        Assert.Equal(new byte[] { (byte)type, 0x20, 0x5E }, result[..3]);
+        Assert.Equal("205", areaCode.Read(result));
+        Assert.Equal(record[3..firstExchangeOffset], result[3..firstExchangeOffset]);
+        Assert.Equal(firstPackedRate, result[firstExchangeOffset]);
+        Assert.Equal(2, result[^1]);
+        Assert.Equal(record[(firstExchangeOffset + 1)..^1], result[(firstExchangeOffset + 1)..^1]);
+        var removed = layout.Apply(result, new Dictionary<string, string> { ["areaCode"] = "" });
+        Assert.Equal(new byte[] { 0, 0 }, removed[1..3]);
+        Assert.Equal(result[3..], removed[3..]);
+        Assert.Equal(removed, layout.Apply(removed, new Dictionary<string, string> { ["areaCode"] = "000" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(result, new Dictionary<string, string> { ["areaCode"] = "199" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(result, new Dictionary<string, string> { [last] = "128" }));
+    }
+
     [Fact]
     public void Older_card_service_codes_use_bcd_and_preserve_other_entries()
     {

@@ -52,11 +52,14 @@ public static partial class NativeTableLayouts
     {
         if (number == AnswerSupervisionRecord)
             return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
-        return number is 22 or 23 or CallInRecord or 55 or 58 or MessagingRecord
+        return IsLocalDialingRecord(number) || number is 22 or 23 or CallInRecord or 55 or 58 or MessagingRecord
             or SpareTableWire.MessageType or 73 or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or >= 150 and <= 152
             ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
             : [];
     }
+
+    public static bool IsLocalDialingRecord(int number) =>
+        number is >= 74 and <= 81 or 90 or 91 or >= 101 and <= 115 or >= 136 and <= 149 or 154 or 155;
 
     public static byte[] CreateDraftTemplate(NativeTableLayout template)
     {
@@ -296,7 +299,7 @@ public static partial class NativeTableLayouts
 
         foreach (var type in Enumerable.Range(74, 8).Concat([90, 91]))
             yield return Layout((byte)type, 819, [AreaCode(), .. Rows("exchange", 800, i => $"Exchange {200 + i}", (i, key) =>
-                [Field($"{key}.rate", "Rate index", 19 + i)])]);
+                [Field($"{key}.rate", "Rate index", 19 + i, max: 127)])]);
 
         yield return new NativeTableLayout(AnswerSupervisionRecord, 199, Later, [Section("supervision", "Answer supervision timing",
             Field("delay", "Delay before answer supervision (10 ms ticks)", 3, SignedWord, min: 0),
@@ -484,7 +487,9 @@ public static partial class NativeTableLayouts
         return layout with { Sections = sections };
     }
 
-    private static NativeTableSection AreaCode() => Section("region", "Local dialing region", Digits("areaCode", "Area code", 1, 2, 3));
+    private static NativeTableSection AreaCode() => Section("region", "Local dialing region",
+        new NativeTableField("areaCode", "Area code", 1, LocalDialingArea,
+            Help: "Enter a three-digit area code. Leave it blank to disable lookups in this segment."));
 
     private static NativeTableSection[] PairedRates(int offset, string label, int? tariffOffset = null) => Rows("pair", 400,
         i => $"{label} {200 + i * 2} and {201 + i * 2}", (i, key) =>

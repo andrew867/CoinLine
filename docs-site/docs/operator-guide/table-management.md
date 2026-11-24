@@ -49,6 +49,8 @@ Under **Rates and local dialing**, use **Rate table** to edit the phone's MT73 c
 
 For compatible firmware, **NPA set-based rating** sets a fallback by area code. **International set-based rating** sets rates by destination prefix and the action when no prefix matches. The rate pickers show the corresponding MT73 row numbers. Enable the matching set-based rating switches in the later MT26 feature record. Deliver the matching records together, or confirm the phone already has the referenced tariffs.
 
+Under **Rates and local dialing**, choose the local-dialing segment for the phone's table format. Start with a blank segment or import a complete record. Enter its three-digit area code, then use **Find entry** to locate the exchanges you want to rate. Uncompressed segments can reference MT73 rows 0 through 127. Compressed segments can use rows 0 through 15, and double-compressed segments can use rows 0 through 3. Clearing the area code disables lookups in that segment while retaining its exchange values.
+
 In **Phones**, open a phone and expand **Phone groups** to choose its memberships. A phone can belong to up to 40 groups. Its primary group appears in the phone list. Every saved membership is included in that group's assignment preview.
 
 The console also exposes **Terminal status**, where decoded alarms, maintenance reports and status flags can be filtered by phone or report type.

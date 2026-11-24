@@ -209,6 +209,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
         95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}",
         150 => "NPA set-based rating", 151 => "International set-based rating", 152 => "Holiday and time-of-day discounts",
+        _ when NativeTableLayouts.IsLocalDialingRecord(number) => $"Local dialing segment MT{number}",
         _ => $"MT{number}"
     };
 }
