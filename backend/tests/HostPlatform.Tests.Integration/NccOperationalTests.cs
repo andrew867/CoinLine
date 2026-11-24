@@ -562,6 +562,57 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Edited_call_in_parameters_are_sent_in_the_phone_data_set()
+    {
+        var terminals = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json);
+        var terminalId = terminals.EnumerateArray().Single(item => item.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId))
+            .GetProperty("id").GetGuid();
+        using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Call-in parameters test" }, Json);
+        created.EnsureSuccessStatusCode();
+        var setId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var setPath = $"/api/tables/sets/{setId}";
+        var fieldsPath = $"{setPath}/records/35/fields";
+        var missing = await fx.Client.GetFromJsonAsync<JsonElement>(fieldsPath, Json);
+        using var initialized = await fx.Client.PostAsJsonAsync(fieldsPath, missing.GetProperty("templates")[0], Json);
+        Assert.Equal(HttpStatusCode.NoContent, initialized.StatusCode);
+        var fields = await fx.Client.GetFromJsonAsync<JsonElement>(fieldsPath, Json);
+        using var saved = await fx.Client.PutAsJsonAsync(fieldsPath, new
+        {
+            profile = fields.GetProperty("profile"), revision = fields.GetProperty("revision"), sha256 = fields.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["startTime"] = "21:03", ["retryMinutes"] = "7", ["adjustAt"] = "2028-02-29T03:05", ["adjustment"] = "-3600" }
+        }, Json);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        using var published = await fx.Client.PostAsync($"{setPath}/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+
+        try
+        {
+            using var assigned = await fx.Client.PostAsJsonAsync($"/api/terminals/{terminalId}/table-assignment", new { tableSetId = setId }, Json);
+            assigned.EnsureSuccessStatusCode();
+            var before = await BatchIdsAsync();
+            await using var install = await OpenAsync();
+            await install.Stream.WriteAsync(Message(KnownId, [44, 2]));
+            AssertAck(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+            var header = Decode(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await install.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+            var parameters = Decode(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 35, 0, 0, 0, 21, 3, 0, 1, 0, 0, 7, 0, 30, 128, 2, 29, 3, 5, 0, 0xF0, 0xF1 }, parameters.Data);
+            await install.Stream.WriteAsync(Control((byte)(NccControl.Ack | parameters.Control)));
+            await install.Stream.WriteAsync(Message(KnownId, [14, 35]));
+            AssertAck(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+            var end = Decode(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await install.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+            await WaitNewBatchAsync(before, 2);
+        }
+        finally
+        {
+            await AssignLabSetAsync();
+        }
+    }
+
+    [Fact]
     public async Task Firmware_parameters_schedule_delivers_mt94_on_call_in_and_keeps_the_table_assignment()
     {
         await AssignRateTableSetAsync("Firmware parameter baseline data set");

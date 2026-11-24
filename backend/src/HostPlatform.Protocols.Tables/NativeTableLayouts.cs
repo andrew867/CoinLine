@@ -6,6 +6,7 @@ namespace HostPlatform.Protocols.Tables;
 public static partial class NativeTableLayouts
 {
     public const string MultiPay = "MTR 1.9 packed";
+    public const byte CallInRecord = 35;
     public const byte MessagingRecord = 68;
     private const string Later = "Later packed profile";
     private static readonly (int, string)[] PaymentKinds =
@@ -45,7 +46,7 @@ public static partial class NativeTableLayouts
         };
     }
 
-    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or CallInRecord or 55 or 58 or MessagingRecord
         or SpareTableWire.MessageType or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or 152
         ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
         : [];
@@ -62,6 +63,13 @@ public static partial class NativeTableLayouts
             InitializeStoredValueRecord(bytes);
         if (template.Number == CodeDownloadWire.MessageType)
             InitializeCodeDownloadRecord(bytes);
+        if (template.Number == CallInRecord)
+        {
+            bytes[4] = 2;
+            bytes[7] = 1;
+            bytes[10] = 5;
+            bytes[12] = 30;
+        }
         return bytes;
     }
 
@@ -119,12 +127,19 @@ public static partial class NativeTableLayouts
                 Minute("detailMinute", "Start minute", 16), Field("detailDays", "Duration days", 17),
                 Hour("detailHours", "Duration hours", 18)), .. ReportTimes(5)]);
 
-        yield return Layout(35, 21,
-            Section("callIn", "Scheduled call-in", [.. DateTimeFields("start", 1),
-                Field("intervalDays", "Repeat interval days", 7), Hour("intervalHours", "Repeat interval hours", 8),
+        yield return Layout(CallInRecord, 21,
+            Section("callIn", "Scheduled call-in",
+                [new NativeTableField("startTime", "Routine call-in time (terminal clock)", 4, TerminalTime,
+                    Help: "The phone uses this time of day with the repeat interval."),
+                .. DateTimeFields("start", 1),
+                Field("intervalDays", "Repeat interval days", 7, help: "An all-zero repeat interval means once a day."),
+                Hour("intervalHours", "Repeat interval hours", 8),
                 Minute("intervalMinutes", "Repeat interval minutes", 9), Field("retryMinutes", "Retry delay minutes", 10),
                 Minute("retrySeconds", "Retry delay seconds", 11), Field("recordThreshold", "Call-record upload threshold", 12)]),
-            Section("clock", "Clock adjustment", [.. DateTimeFields("adjust", 13),
+            Section("clock", "Clock adjustment",
+                [new NativeTableField("adjustAt", "Apply clock adjustment at (terminal clock)", 13, TerminalCalendar,
+                    Help: "Clear the date and time to disable the scheduled adjustment."),
+                Field("adjust.year", "Calendar year offset from 1900", 13), .. DateTimeFields("adjust", 13).Skip(1),
                 Field("adjustment", "Time adjustment (signed seconds)", 19, SignedWord)]));
 
         yield return Layout(50, 105, [Section("cash", "Cash box and escrow",

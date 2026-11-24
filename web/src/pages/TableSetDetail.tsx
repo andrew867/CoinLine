@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { TableSetAssignment } from './TableSetAssignment'
 import { TableSetConfiguration } from './TableSetConfiguration'
@@ -48,6 +48,8 @@ type Detail = {
 export function TableSetDetail() {
   const { id } = useParams()
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const initialRecord = Number(searchParams.get('record') ?? 29)
   const [d, setD] = useState<Detail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -133,7 +135,7 @@ export function TableSetDetail() {
     try {
       const copy = await apiPost<{ id: string }>(`/api/tables/sets/${id}/clone`, { name })
       setD(null)
-      void navigate(`/table-sets/${copy.id}`)
+      void navigate(`/table-sets/${copy.id}${initialRecord === 29 ? '' : `?record=${initialRecord}`}`)
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not make a draft copy.')
     } finally {
@@ -214,7 +216,7 @@ export function TableSetDetail() {
           ))}</ul>}
         </section>
       )}
-      <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}`} setId={id} draft={draft}
+      <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
         versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />
       {!draft && <TableSetAssignment key={id} setId={id} codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} />}
       <p>

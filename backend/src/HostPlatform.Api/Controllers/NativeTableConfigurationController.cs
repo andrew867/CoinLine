@@ -28,7 +28,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                         || (layout.Length == expectedLength && layout.Profile == firmware.NativeLayout))
                     .Select(layout => new { layout.Profile, layout.Length }).ToArray() : [];
             return Ok(new { supported = false, templates, reason = templates.Length == 0
-                ? "Import a complete record to open its editor." : "Start a record from the default inactive configuration." });
+                ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
         }
         if (versions.Count != 1)
             return Ok(new { supported = false, reason = "This set has more than one record with the same message type." });
@@ -199,6 +199,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     {
         22 or 134 => "Card acceptance",
         23 or 135 => "Carrier screens",
+        NativeTableLayouts.CallInRecord => "Time and call-in settings",
         SpareTableWire.MessageType => "Spare table",
         93 => "Stored-value parameters",
         CodeDownloadWire.MessageType => "Code download schedule",

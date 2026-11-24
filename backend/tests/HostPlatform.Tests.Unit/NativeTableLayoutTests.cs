@@ -29,6 +29,40 @@ public sealed class NativeTableLayoutTests
     }
 
     [Fact]
+    public void Call_in_time_and_clock_adjustment_preserve_their_distinct_wire_fields()
+    {
+        var template = Assert.Single(NativeTableLayouts.DraftTemplates(35));
+        var original = NativeTableLayouts.CreateDraftTemplate(template);
+        Assert.Equal(new byte[] { 35, 0, 0, 0, 2, 0, 0, 1, 0, 0, 5, 0, 30 }, original[..13]);
+        Assert.All(original[13..], value => Assert.Equal(0, value));
+        original[1] = 0xA5;
+        original[2] = 0x7F;
+        original[3] = 0xFE;
+        var layout = NativeTableLayouts.Find(35, original)!;
+        var fields = layout.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key);
+        var updated = layout.Apply(original, new Dictionary<string, string>
+        {
+            ["startTime"] = "21:03:04", ["adjustAt"] = "2028-02-29T03:05:06", ["adjustment"] = "-3600"
+        });
+        Assert.Equal(original[..4], updated[..4]);
+        Assert.Equal(new byte[] { 21, 3, 4 }, updated[4..7]);
+        Assert.Equal(original[7..13], updated[7..13]);
+        Assert.Equal(new byte[] { 128, 2, 29, 3, 5, 6, 0xF0, 0xF1 }, updated[13..]);
+        Assert.Equal("21:03:04", fields["startTime"].Read(updated));
+        Assert.Equal("2028-02-29T03:05:06", fields["adjustAt"].Read(updated));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(updated, new Dictionary<string, string> { ["startTime"] = "24:00:00" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(updated, new Dictionary<string, string> { ["adjustAt"] = "2027-02-29T00:00:00" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(updated, new Dictionary<string, string>
+        {
+            ["adjustAt"] = "2028-02-29T03:05:06", ["adjust.year"] = "129"
+        }));
+        var cleared = layout.Apply(updated, new Dictionary<string, string> { ["adjustAt"] = "" });
+        Assert.All(cleared[13..19], value => Assert.Equal(0, value));
+        Assert.Equal(updated[19..], cleared[19..]);
+        Assert.Equal(129, layout.Apply(updated, new Dictionary<string, string> { ["adjust.year"] = "129" })[13]);
+    }
+
+    [Fact]
     public void Older_card_service_codes_use_bcd_and_preserve_other_entries()
     {
         var record = new byte[661];

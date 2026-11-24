@@ -9,7 +9,7 @@ public static partial class NativeTableLayouts
         Section("schedule", "Code download schedule",
             [Toggle("enabled", "Enable the scheduled firmware download", 1, 1),
              new NativeTableField("startAt", "Terminal start time (UTC)", CodeDownloadWire.CalendarOffset, TerminalCalendar,
-                 CodeDownloadWire.CalendarLength, Help: "Set a time after the phone can pick up these parameters at a call-in."),
+                 Help: "Set a time after the phone can pick up these parameters at a call-in."),
              Field("start.year", "Calendar year offset from 1900", 2), .. DateTimeFields("start", 2).Skip(1),
              CodeDownloadWire.CodeServer,
              Select("modemSpeed", "Code server modem speed", 18, (1, "1200 baud"), (2, "2400 baud")),

@@ -32,12 +32,14 @@ function segments(start: number, count: number, label: string): [number, string]
 
 type Props = { setId: string; draft: boolean; versions: Version[]; onSaved: () => void }
 
-export function TableSetConfiguration({ setId, draft, versions, onSaved, recordDirty, onRecordDirty }: Props & {
+export function TableSetConfiguration({ setId, draft, versions, onSaved, initialRecord, recordDirty, onRecordDirty }: Props & {
+  initialRecord: number
   recordDirty: boolean
   onRecordDirty: (dirty: boolean) => void
 }) {
-  const [panelIndex, setPanelIndex] = useState(0)
-  const [tableNumber, setTableNumber] = useState(29)
+  const initialPanel = panels.findIndex(({ records }) => records.some(([number]) => number === initialRecord))
+  const [panelIndex, setPanelIndex] = useState(Math.max(0, initialPanel))
+  const [tableNumber, setTableNumber] = useState(initialPanel < 0 ? 29 : initialRecord)
   const panel = panels[panelIndex]
   const record = panel.records.find(([number]) => number === tableNumber)!
   const version = versions.find((item) => item.tableNumber === tableNumber)

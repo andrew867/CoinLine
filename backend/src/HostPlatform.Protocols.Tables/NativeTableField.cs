@@ -9,7 +9,7 @@ public enum TableFieldEncoding
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
     KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes,
     TerminatedDisplayText, CardStandard, CardServiceCode, CredentialHex, BigEndianWord, BigEndianBits, SignedByte,
-    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd, TerminalCalendar
+    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd, TerminalCalendar, TerminalTime
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -27,6 +27,7 @@ public sealed record NativeTableField(
         TableFieldEncoding.CredentialHex => "password-hex",
         TableFieldEncoding.PaddedCredentialBcd => "password-pin",
         TableFieldEncoding.TerminalCalendar => "datetime",
+        TableFieldEncoding.TerminalTime => "time",
         TableFieldEncoding.GraphicalKind => "screen-kind",
         TableFieldEncoding.GraphicalText => "screen-text",
         TableFieldEncoding.GraphicalLink => "screen-link",
@@ -44,6 +45,8 @@ public sealed record NativeTableField(
     {
         TableFieldEncoding.Word or TableFieldEncoding.SignedWord or TableFieldEncoding.BigEndianWord or TableFieldEncoding.BigEndianBits => 2,
         TableFieldEncoding.SignedLong or TableFieldEncoding.UnsignedLong => 4,
+        TableFieldEncoding.TerminalCalendar => 6,
+        TableFieldEncoding.TerminalTime => 3,
         _ => Size
     };
 
@@ -96,7 +99,8 @@ public sealed record NativeTableField(
             TableFieldEncoding.SignedLong => Format(BinaryPrimitives.ReadInt32LittleEndian(data)),
             TableFieldEncoding.UnsignedLong => Format(BinaryPrimitives.ReadUInt32LittleEndian(data)),
             TableFieldEncoding.Text => ReadText(data),
-            TableFieldEncoding.TerminalCalendar => CodeDownloadWire.ReadCalendar(data),
+            TableFieldEncoding.TerminalCalendar => TerminalClockWire.ReadCalendar(data),
+            TableFieldEncoding.TerminalTime => TerminalClockWire.ReadTime(data),
             TableFieldEncoding.DisplayText => VisualPromptText.Read(data),
             TableFieldEncoding.TerminatedDisplayText => ReadTerminatedDisplayText(data),
             TableFieldEncoding.GraphicalText => GraphicalScreenText.Read(data),
@@ -132,8 +136,12 @@ public sealed record NativeTableField(
                 System.Text.Encoding.ASCII.GetBytes(value, data);
                 return;
             case TableFieldEncoding.TerminalCalendar:
-                if (!CodeDownloadWire.TryWriteCalendar(value, data))
+                if (!TerminalClockWire.TryWriteCalendar(value, data))
                     throw Invalid("enter a date and time within the terminal clock range");
+                return;
+            case TableFieldEncoding.TerminalTime:
+                if (!TerminalClockWire.TryWriteTime(value, data))
+                    throw Invalid("enter a time of day from 00:00:00 through 23:59:59");
                 return;
             case TableFieldEncoding.DisplayText:
             case TableFieldEncoding.TerminatedDisplayText:
@@ -324,12 +332,7 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             _ => Sections
         };
         var fields = sections.SelectMany(s => s.Fields).ToDictionary(f => f.Key, StringComparer.Ordinal);
-        if (Number == CodeDownloadWire.MessageType && changes.ContainsKey("startAt"))
-        {
-            var parts = changes.Keys.Where(key => key.StartsWith("start.", StringComparison.Ordinal)).ToArray();
-            if (parts.Length != 0 && DateFieldsChanged(original, fields, changes, parts))
-                throw new InvalidOperationException("Change either the terminal start time or its individual fields in this save.");
-        }
+        ValidateClockChanges(original, fields, changes);
         foreach (var (key, value) in changes)
         {
             if (!fields.TryGetValue(key, out var field) || value == null)
@@ -347,14 +350,22 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
         return edited;
     }
 
-    private static bool DateFieldsChanged(ReadOnlySpan<byte> original, Dictionary<string, NativeTableField> fields,
-        IReadOnlyDictionary<string, string> changes, string[] parts)
+    private static void ValidateClockChanges(ReadOnlySpan<byte> original, Dictionary<string, NativeTableField> fields,
+        IReadOnlyDictionary<string, string> changes)
     {
-        if (fields["startAt"].Read(original) != changes["startAt"])
-            return true;
-        foreach (var part in parts)
-            if (!fields.TryGetValue(part, out var field) || field.Read(original) != changes[part])
-                return true;
-        return false;
+        foreach (var clock in fields.Values)
+        {
+            if (clock.Encoding is not (TableFieldEncoding.TerminalCalendar or TableFieldEncoding.TerminalTime)
+                || !changes.TryGetValue(clock.Key, out var time))
+                continue;
+            foreach (var (key, value) in changes)
+            {
+                if (key == clock.Key || !fields.TryGetValue(key, out var part)
+                    || part.Offset >= clock.Offset + clock.Width || part.Offset + part.Width <= clock.Offset)
+                    continue;
+                if (clock.Read(original) != time || part.Read(original) != value)
+                    throw new InvalidOperationException($"Change either {clock.Label} or its individual fields in this save.");
+            }
+        }
     }
 }
