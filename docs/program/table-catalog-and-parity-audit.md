@@ -77,7 +77,8 @@ Inmate and electronic purse validation remain outside the first-release acceptan
 ### Fleet rollout checks
 
 - Verify the phone's 40-group limit and targeting across primary and additional memberships. Check the affected count, Configuration ID selection, partial family changes, and the difference between retaining and clearing an optional assignment.
-- Check both the scheduled preparation time and the terminal's actual pickup. Verify a failed operation can resume at its first failed phone or skip that phone without repeating completed work.
+- Check both the scheduled preparation time and the terminal's actual pickup on matching firmware.
+- **Ordered recovery verified with Playwright and isolated PostgreSQL.** The browser started a selected-record rollout from a specified terminal ID. It paused after the first assignment, and the same run and assignment survived an API restart. Retry applied the repaired phone and stopped at the next blocker. Skip advanced to the last phone. All three updated assignments used the new MT29 and retained MT50. The skipped phone and the phone before the starting ID kept their original state. The backend regression also verified replay, stale controls, exclusion of phones added after confirmation, and stopping with saved changes in place.
 - **Selected downloads verified with PostgreSQL and TCP.** An upgrade preserved the ID of an older operator batch with queued items. A routine MT8 call picked up that batch. An operator then used the browser to queue MT26 from a set that also contained MT73. MT44 delivered MT26 alone, and MT14 updated the same batch the browser had opened. Both cases retained the assigned set and rejected a competing transfer. After an abrupt test API exit, startup recorded the interrupted batch and session as failed and closed respectively. Retrying queued the original selection. Physical terminal validation remains pending.
 
 ### Backend and bench queue

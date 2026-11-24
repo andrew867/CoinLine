@@ -39,6 +39,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<TerminalTableOverride> TerminalTableOverrides => Set<TerminalTableOverride>();
     public DbSet<TerminalTableAssignment> TerminalTableAssignments => Set<TerminalTableAssignment>();
     public DbSet<ScheduledTableDownload> ScheduledTableDownloads => Set<ScheduledTableDownload>();
+    public DbSet<TableRecordUpdateRun> TableRecordUpdateRuns => Set<TableRecordUpdateRun>();
     public DbSet<DownloadBatch> DownloadBatches => Set<DownloadBatch>();
     public DbSet<DownloadBatchItem> DownloadBatchItems => Set<DownloadBatchItem>();
     public DbSet<RatePlan> RatePlans => Set<RatePlan>();
@@ -191,6 +192,13 @@ public class HostPlatformDbContext : DbContext
             b.Property(request => request.Version).IsConcurrencyToken();
             b.HasOne(request => request.Terminal).WithMany().HasForeignKey(request => request.TerminalId);
             b.HasIndex(request => request.TerminalId).IsUnique();
+        });
+
+        modelBuilder.Entity<TableRecordUpdateRun>(b =>
+        {
+            b.Property(run => run.Version).IsConcurrencyToken();
+            b.HasOne<TableSet>().WithMany().HasForeignKey(run => run.SourceSetId);
+            b.HasIndex(run => new { run.SourceSetId, run.EndedAtUtc });
         });
 
         modelBuilder.Entity<ScheduledTableDownload>(b =>

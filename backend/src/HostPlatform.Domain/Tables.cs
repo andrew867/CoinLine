@@ -96,6 +96,20 @@ public class ScheduledTableDownload : AuditableEntity
     public DateTime? CancelledAtUtc { get; set; }
 }
 
+public class TableRecordUpdateRun : AuditableEntity
+{
+    public Guid SourceSetId { get; set; }
+    public string RequestJson { get; set; } = string.Empty;
+    public string TargetsJson { get; set; } = string.Empty;
+    public string PreviewToken { get; set; } = string.Empty;
+    public int NextTarget { get; set; }
+    public int ChangedCount { get; set; }
+    public int SkippedCount { get; set; }
+    public string? FailureReason { get; set; }
+    public DateTime? EndedAtUtc { get; set; }
+    public bool Stopped { get; set; }
+}
+
 /// <summary>Customer-scoped pin of a specific table version for a definition (MVP — optional layer).</summary>
 public class CustomerTableOverride : AuditableEntity
 {

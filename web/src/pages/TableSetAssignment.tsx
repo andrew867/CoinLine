@@ -1,7 +1,9 @@
-import { useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiGetRaw, apiPostRaw } from '../api/client'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
+
+const RecordUpdateRollouts = lazy(async () => ({ default: (await import('./RecordUpdateRollouts')).RecordUpdateRollouts }))
 
 const scopes = {
   terminal: { label: 'Phone', path: '/api/terminals' },
@@ -26,7 +28,10 @@ type UpdateTarget = Omit<Target, 'eligible'> & {
   baseSetName: string | null
   changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean }[]
 }
-type UpdatePreview = { changeCount: number; setCount: number; previewToken: string; targets: UpdateTarget[] }
+type UpdatePreview = {
+  changeCount: number; setCount: number; previewToken: string; targets: UpdateTarget[]
+  rolloutId: string | null; pendingCount: number
+}
 type UpdatedSet = { id: string; name: string }
 const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
 const callInParameters = 35
@@ -55,6 +60,9 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [deliveryRecords, setDeliveryRecords] = useState<number[]>([])
   const [wireSelection, setWireSelection] = useState<number[] | null>(null)
   const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null)
+  const [stopOnIssue, setStopOnIssue] = useState(false)
+  const [beginWithTerminalId, setBeginWithTerminalId] = useState('')
+  const [rolloutRefresh, setRolloutRefresh] = useState(0)
   const [resultSets, setResultSets] = useState<UpdatedSet[]>([])
   const choices = new Map((optionalRecords ?? []).map((record) => [record.tableNumber, { name: record.name, removable: true, copyable: false }]))
   for (const record of versions) {
@@ -165,8 +173,9 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     if (!apply) setUpdatePreview(null)
     try {
       const response = await apiPostRaw(`/api/tables/sets/${setId}/record-updates${apply ? '' : '/preview'}`, {
-        ...scopeSelection, sourceRevision: revision, copyRecords, removeRecords,
-        ...(apply ? { previewToken: updatePreview?.previewToken } : {}),
+        ...scopeSelection, sourceRevision: revision, copyRecords, removeRecords, stopOnIssue,
+        beginWithTerminalId: stopOnIssue ? beginWithTerminalId.trim() || undefined : undefined,
+        ...(apply ? { previewToken: updatePreview?.previewToken, rolloutId: updatePreview?.rolloutId } : {}),
       })
       const result = await response.json().catch(() => null)
       if (!response.ok) {
@@ -174,7 +183,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         throw new Error(result?.error ?? 'Could not update the selected records.')
       }
       if (apply) {
-        setFeedback(`Updated ${result.changed} ${result.changed === 1 ? 'phone assignment' : 'phone assignments'}.`)
+        if (result.run) {
+          setFeedback(`Rollout ${String(result.run.status).toLowerCase()}. ${result.run.changedCount} phone assignments updated.`)
+          setRolloutRefresh(value => value + 1)
+        } else setFeedback(`Updated ${result.changed} ${result.changed === 1 ? 'phone assignment' : 'phone assignments'}.`)
         setResultSets(result.sets)
         setUpdatePreview(null)
       } else setUpdatePreview(result)
@@ -317,6 +329,14 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               </select>
             </label>)}
           {removeRecords.length > 0 && <p>Removal affects future data sets. A phone can retain the already installed record.</p>}
+          <label className="native-table-toggle">
+            <input type="checkbox" checked={stopOnIssue} onChange={event => { setStopOnIssue(event.target.checked); clearReview() }} />
+            Pause rollout at the first blocked phone
+          </label>
+          {stopOnIssue && <label>Begin with terminal ID
+            <input value={beginWithTerminalId} pattern="[0-9A-Fa-f]{10}" maxLength={10}
+              onChange={event => { setBeginWithTerminalId(event.target.value); clearReview() }} />
+          </label>}
         </fieldset>}
         {partialSchedule && <fieldset className="scope-record-choices" disabled={busy}>
           <legend>Records to download</legend>
@@ -339,14 +359,17 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       {updatePreview && <section className="table-config-preview" aria-labelledby="scope-record-review">
         <h3 id="scope-record-review">Record update review</h3>
         <p>{updatePreview.changeCount} phone assignments will change across {updatePreview.setCount} resulting sets.</p>
+        {updatePreview.pendingCount > 0 && <p>{updatePreview.pendingCount} phones will wait for rollout recovery.</p>}
         <ul>{updatePreview.targets.map((phone) => <li key={phone.id}>
           <strong>{phone.displayName}</strong>{phone.terminalFamilyLabel && ` · ${phone.terminalFamilyLabel}`}
+          {phone.terminalIdHex && ` · ${phone.terminalIdHex}`}
           {phone.baseSetName && ` · ${phone.baseSetName}`}
           {phone.reason ? <p>{phone.reason}</p> : <p>{phone.changes.map(({ tableNumber, action, required }) =>
             `${changeLabels[action]} MT${tableNumber}${required ? ' (required)' : ''}`).join(', ')}</p>}
         </li>)}</ul>
-        {updatePreview.changeCount > 0 && <button type="button" disabled={busy} onClick={() => void updateRecords(true)}>
-          Update {updatePreview.changeCount} {updatePreview.changeCount === 1 ? 'phone' : 'phones'}
+        {(updatePreview.changeCount > 0 || (updatePreview.rolloutId && updatePreview.targets.length > 0)) &&
+          <button type="button" disabled={busy} onClick={() => void updateRecords(true)}>
+            {updatePreview.rolloutId ? 'Start rollout' : `Update ${updatePreview.changeCount} ${updatePreview.changeCount === 1 ? 'phone' : 'phones'}`}
         </button>}
       </section>}
       {targets && (
@@ -378,6 +401,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       {resultSets.length > 0 && <ul aria-label="Resulting table sets">{resultSets.map((set) => <li key={set.id}>
         <Link to={`/table-sets/${set.id}`}>{set.name}</Link>
       </li>)}</ul>}
+      {!codeOnly && <Suspense fallback={null}><RecordUpdateRollouts setId={setId} refresh={rolloutRefresh} /></Suspense>}
       <TableDownloadScheduleList setId={setId} refresh={scheduleRefresh} />
     </section>
   )

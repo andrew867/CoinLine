@@ -14,6 +14,8 @@
 | POST | `/api/tables/sets/{id}/record-copy` | Copy the reviewed records and their dependencies into a draft |
 | POST | `/api/tables/sets/{id}/record-updates/preview` | Review selected-record changes to existing phone assignments |
 | POST | `/api/tables/sets/{id}/record-updates` | Confirm the reviewed assignment changes |
+| GET | `/api/tables/sets/{id}/record-updates/runs` | List paused record rollouts for a source set |
+| POST | `/api/tables/sets/{id}/record-updates/runs/{runId}` | Retry or skip the blocked phone, or stop the rollout |
 | GET | `/api/tables/sets/{id}/advertising` | Read the 20 MT29 slots, record revision, SHA-256 and supported MT26 and MT30 playback settings |
 | PUT | `/api/tables/sets/{id}/advertising` | Encode and save slots on a draft. Send the retrieved revision and SHA-256 to detect concurrent edits. |
 | GET | `/api/tables/sets/{id}/records/{number}/fields` | Read editable fields for a known wire profile |
@@ -34,6 +36,10 @@ A new set accepts an optional `targetFirmwareVersionId`. A draft copy inherits t
 The record-copy request takes `sourceSetId`, `sourceRevision`, `destinationRevision` and a `recordNumbers` array of decimal message types. Read each revision from the table set detail response. Submit the same request to the preview and apply endpoints. The response lists each planned record as `add`, `replace` or `keep` and marks automatically included dependencies with `required`. Copies write to drafts and require a global source set or one belonging to the same customer. A changed source or destination revision returns HTTP 409 and requires a new review.
 
 For selected-record assignment updates, the route identifies the published source set. Send `targetType`, `targetId`, `sourceRevision`, `copyRecords` and `removeRecords`. The two arrays contain decimal message types and can each be empty. The preview reports each phone's current set, planned actions, skipped reasons, and the count of assignments and resulting sets. Add its `previewToken` to the same request on confirmation. Changed scope membership, assignments or configuration require another preview. The update saves the resulting published sets and assignments together and retains the previous sets for rollback.
+
+Set `stopOnIssue` to `true` to process a recoverable rollout in terminal ID order. An optional `beginWithTerminalId` starts at the specified terminal in the reviewed scope. The preview returns the changes that can be saved before the first issue and the count waiting for recovery. Include its `rolloutId` with `previewToken` when applying. The response includes the saved rollout status, counts, and the blocked phone and reason when paused. Repeating the same confirmation returns the saved status.
+
+To continue a paused rollout, send its current `revision` and `decision` of `retry`, `skip`, or `stop`. Retry reevaluates the blocked phone and the remaining reviewed phones. Skip records that phone as skipped and continues from the next one. Stop closes the rollout with its completed changes in place. Newly matching phones require their own preview. A stale control revision returns HTTP 409. Assignment changes and the cursor are saved together on each attempt.
 
 The recognized Multi-pay profile permits removing records documented as optional. The preview reports any dependency that prevents removal. Removal changes the assignment for future downloads. Delivery of a set without the record can leave previously installed terminal data in place.
 

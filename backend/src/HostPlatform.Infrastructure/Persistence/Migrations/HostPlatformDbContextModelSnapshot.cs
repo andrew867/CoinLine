@@ -2998,6 +2998,70 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("TablePayloads");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TableRecordUpdateRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ChangedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("EndedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureReason")
+                        .HasColumnType("text");
+
+                    b.Property<int>("NextTarget")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PreviewToken")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SkippedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Stopped")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("TargetsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceSetId", "EndedAtUtc");
+
+                    b.ToTable("TableRecordUpdateRuns");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TableSet", b =>
                 {
                     b.Property<Guid>("Id")
@@ -4487,6 +4551,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("CardAccount");
 
                     b.Navigation("SmartcardType");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TableRecordUpdateRun", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.TableSet", null)
+                        .WithMany()
+                        .HasForeignKey("SourceSetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TableSet", b =>

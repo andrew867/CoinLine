@@ -22,24 +22,76 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
     [HttpPost]
     public Task<ActionResult> Apply(Guid id, RecordUpdateRequest request, CancellationToken ct) => UpdateAsync(id, request, true, ct);
 
-    private async Task<ActionResult> UpdateAsync(Guid id, RecordUpdateRequest request, bool apply, CancellationToken ct)
+    [HttpGet("runs")]
+    public async Task<ActionResult> PausedRuns(Guid id, CancellationToken ct)
     {
-        var requested = request.CopyRecords.Concat(request.RemoveRecords).ToArray();
-        if (requested.Length is < 1 or > 255 || requested.Distinct().Count() != requested.Length
-            || requested.Any(number => number is < 1 or > 255 or CodeDownloadWire.MessageType))
-            return BadRequest(new { error = "Choose one action per data record. Firmware schedules are handled separately." });
+        var runs = await db.TableRecordUpdateRuns.AsNoTracking()
+            .Where(run => run.SourceSetId == id && run.EndedAtUtc == null)
+            .OrderByDescending(run => run.UpdatedAtUtc).ToListAsync(ct);
+        return Ok(runs.Select(RunView));
+    }
 
-        if (request.TargetType == "time-area")
-            return BadRequest(new { error = "Use scheduled delivery to target a time area." });
+    [HttpPost("runs/{runId:guid}")]
+    public Task<ActionResult> Continue(Guid id, Guid runId, RunControl control, CancellationToken ct) =>
+        UpdateAsync(id, null, true, ct, runId, control);
 
-        IQueryable<Terminal> scope;
-        try { scope = tables.PhonesInScope(request); }
-        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
-
+    private async Task<ActionResult> UpdateAsync(Guid id, RecordUpdateRequest? request, bool apply, CancellationToken ct,
+        Guid? runId = null, RunControl? control = null)
+    {
         try
         {
             await using var transaction = apply && db.Database.IsRelational()
                 ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            TableRecordUpdateRun? run = null;
+            RolloutPhone[]? reviewedPhones = null;
+            var skipped = control?.Decision == "skip" ? 1 : 0;
+            if (control != null)
+            {
+                if (control.Decision is not ("retry" or "skip" or "stop"))
+                    return BadRequest(new { error = "Choose Retry phone, Skip phone or Stop rollout." });
+                run = await db.TableRecordUpdateRuns.SingleOrDefaultAsync(row => row.SourceSetId == id && row.Id == runId, ct);
+                if (run == null)
+                    return NotFound();
+                if (run.Version != control.Revision || run.EndedAtUtc != null)
+                    return Conflict(new { error = "This rollout has changed. Review its current status." });
+
+                request = JsonSerializer.Deserialize<RecordUpdateRequest>(run.RequestJson)!;
+                reviewedPhones = ReadPhones(run);
+                if (control.Decision == "stop")
+                {
+                    run.Stopped = true;
+                    run.EndedAtUtc = clock.GetUtcNow().UtcDateTime;
+                    run.Version++;
+                    AuditRun(run, control.Decision, reviewedPhones[run.NextTarget].Id);
+                    await db.SaveChangesAsync(ct);
+                    if (transaction != null)
+                        await transaction.CommitAsync(ct);
+                    return Ok(new { changed = 0, sets = Array.Empty<object>(), run = RunView(run) });
+                }
+            }
+            if (request == null)
+                return BadRequest(new { error = "Choose a record update to apply." });
+            var requested = request.CopyRecords.Concat(request.RemoveRecords).ToArray();
+            if (requested.Length is < 1 or > 255 || requested.Distinct().Count() != requested.Length
+                || requested.Any(number => number is < 1 or > 255 or CodeDownloadWire.MessageType))
+                return BadRequest(new { error = "Choose one action per data record. Firmware schedules are handled separately." });
+            if (request.TargetType == "time-area")
+                return BadRequest(new { error = "Use scheduled delivery to target a time area." });
+
+            IQueryable<Terminal> scope;
+            try { scope = tables.PhonesInScope(request); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+
+            if (apply && run == null && request.StopOnIssue)
+            {
+                if (request.RolloutId is not { } key || key == Guid.Empty)
+                    return BadRequest(new { error = "Preview the rollout before starting it." });
+                var previousRun = await db.TableRecordUpdateRuns.AsNoTracking().SingleOrDefaultAsync(row => row.Id == key, ct);
+                if (previousRun != null)
+                    return previousRun.SourceSetId == id && previousRun.PreviewToken == request.PreviewToken
+                        ? Ok(new { changed = 0, sets = Array.Empty<object>(), run = RunView(previousRun) })
+                        : Conflict(new { error = "That rollout ID is already in use. Preview a new rollout." });
+            }
             var sets = db.TableSets.AsNoTracking().Include(set => set.TargetFirmwareVersion)
                 .Include(set => set.Versions).ThenInclude(version => version.TableDefinition)
                 .Include(set => set.Versions).ThenInclude(version => version.TablePayload);
@@ -51,8 +103,23 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
             if (source.Version != request.SourceRevision)
                 return Conflict(new { error = "The source set changed. Reload it and preview the update again." });
 
-            var phones = await scope.Include(phone => phone.Site)
-                .Include(phone => phone.FirmwareVersion).OrderBy(phone => phone.DisplayName).ThenBy(phone => phone.Id).ToListAsync(ct);
+            var pending = run == null ? null : reviewedPhones!.Skip(run.NextTarget + skipped).ToArray();
+            if (pending != null)
+            {
+                var pendingIds = pending.Select(phone => phone.Id).ToArray();
+                scope = scope.Where(phone => pendingIds.Contains(phone.Id));
+            }
+            var query = scope.Include(phone => phone.Site).Include(phone => phone.FirmwareVersion);
+            var phones = await (request.StopOnIssue ? query.OrderBy(phone => phone.TerminalIdHex) : query.OrderBy(phone => phone.DisplayName))
+                .ThenBy(phone => phone.Id).ToListAsync(ct);
+            var begin = request.BeginWithTerminalId?.Trim();
+            if (run == null && !string.IsNullOrEmpty(begin))
+            {
+                var first = phones.FindIndex(phone => string.Equals(phone.TerminalIdHex, begin, StringComparison.OrdinalIgnoreCase));
+                if (!request.StopOnIssue || first < 0)
+                    return BadRequest(new { error = "Choose a starting terminal ID in the rollout scope." });
+                phones = phones.Skip(first).ToList();
+            }
             var phoneIds = phones.Select(phone => phone.Id).ToArray();
             var assignments = await db.TerminalTableAssignments.Where(assignment => phoneIds.Contains(assignment.TerminalId))
                 .ToDictionaryAsync(assignment => assignment.TerminalId, ct);
@@ -99,28 +166,47 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
                     }
                 }
 
-                targets.Add(new(phone.Id, phone.DisplayName, TerminalFamilies.Find(phone.TerminalFamilyId)?.Label,
+                targets.Add(new(phone.Id, phone.DisplayName, phone.TerminalIdHex, TerminalFamilies.Find(phone.TerminalFamilyId)?.Label,
                     basis?.Id, basis?.Name, changes, reason));
             }
+            if (pending != null)
+            {
+                var available = targets.ToDictionary(target => target.Id);
+                targets = pending.Select(phone => available.GetValueOrDefault(phone.Id)
+                    ?? new UpdateTarget(phone.Id, phone.Name, phone.WireId, null, null, null, [],
+                        "This phone is no longer in the reviewed scope.")).ToList();
+            }
 
-            var previewToken = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
+            var previewToken = run == null ? Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
             {
                 id, source.Version, request.TargetType, request.TargetId, regionCode = request.RegionCode?.Trim().ToLowerInvariant(),
                 groupPattern = request.GroupPattern?.Trim().ToUpperInvariant(),
+                request.StopOnIssue, begin,
                 copies, removals, targets,
                 phones = phones.Select(phone => new { phone.Id, phone.Version, phone.SiteId, phone.Site!.CustomerId, phone.FirmwareVersionId, phone.TerminalIdHex }),
                 assignments = assignments.Values.OrderBy(row => row.TerminalId).Select(row => new { row.Id, row.Version, row.TableSetId }),
                 bases = existing.Values.OrderBy(set => set.Id).Select(set => new { set.Id, set.Version })
-            }))).ToLowerInvariant();
+            }))).ToLowerInvariant() : run.PreviewToken;
+            var prefixLength = targets.Count;
+            var blocked = request.StopOnIssue ? targets.FindIndex(target => target.Reason != null) : -1;
+            if (blocked >= 0)
+            {
+                prefixLength = blocked;
+                var processed = targets.Take(prefixLength).Select(phone => phone.Id).ToHashSet();
+                changed.RemoveAll(update => !processed.Contains(update.Phone.Id));
+            }
             var updatedSets = changed.Select(update => update.Set).Distinct().ToArray();
             if (!apply)
-                return Ok(new { previewToken, targets, changeCount = changed.Count, setCount = updatedSets.Length });
-            if (previewToken != request.PreviewToken)
+                return Ok(new { previewToken, targets, changeCount = changed.Count, setCount = updatedSets.Length,
+                    rolloutId = request.StopOnIssue ? (Guid?)Guid.NewGuid() : null, pendingCount = targets.Count - prefixLength });
+            if (run == null && previewToken != request.PreviewToken)
                 return Conflict(new { error = "The phones, assignments or configuration changed. Preview the update again." });
+            if (request.StopOnIssue && run == null && targets.Count == 0)
+                return BadRequest(new { error = "There are no phones in the reviewed rollout." });
 
+            var now = clock.GetUtcNow().UtcDateTime;
             if (changed.Count != 0)
             {
-                var now = clock.GetUtcNow().UtcDateTime;
                 foreach (var set in updatedSets)
                 {
                     TableDistributionService.MarkPublished(set, now);
@@ -146,16 +232,62 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
                     request.TargetType, request.TargetId, request.RegionCode, request.GroupPattern,
                     copies, removals, changed = changed.Count, sets = updatedSets.Select(set => set.Id)
                 });
-                await db.SaveChangesAsync(ct);
             }
+            if (request.StopOnIssue)
+            {
+                if (run == null)
+                {
+                    reviewedPhones = targets.Select(phone => new RolloutPhone(phone.Id, phone.DisplayName, phone.TerminalIdHex)).ToArray();
+                    run = new TableRecordUpdateRun
+                    {
+                        Id = request.RolloutId!.Value, SourceSetId = id, PreviewToken = previewToken,
+                        RequestJson = JsonSerializer.Serialize(request with { PreviewToken = null, RolloutId = null }),
+                        TargetsJson = JsonSerializer.Serialize(reviewedPhones)
+                    };
+                    db.TableRecordUpdateRuns.Add(run);
+                }
+                var previousPhone = control == null ? (Guid?)null : reviewedPhones![run.NextTarget].Id;
+                run.NextTarget += skipped + prefixLength;
+                run.SkippedCount += skipped;
+                run.ChangedCount += changed.Count;
+                run.FailureReason = targets.ElementAtOrDefault(prefixLength)?.Reason;
+                run.EndedAtUtc = run.NextTarget == reviewedPhones!.Length ? now : null;
+                run.Version++;
+                AuditRun(run, control?.Decision ?? "start", previousPhone);
+            }
+            if (changed.Count != 0 || run != null)
+                await db.SaveChangesAsync(ct);
             if (transaction != null)
                 await transaction.CommitAsync(ct);
-            return Ok(new { changed = changed.Count, sets = updatedSets.Select(set => new { set.Id, set.Name }) });
+            return Ok(new { changed = changed.Count, sets = updatedSets.Select(set => new { set.Id, set.Name }),
+                run = run == null ? null : RunView(run) });
         }
-        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsSerializationConflict(ex.GetBaseException()))
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsWriteConflict(ex.GetBaseException()))
         {
-            return Conflict(new { error = "The assignments changed while saving. Preview the update again." });
+            return Conflict(new { error = control == null ? "The assignments changed while saving. Preview the update again."
+                : "The rollout or assignments changed while saving. Review the current status." });
         }
+    }
+
+    private void AuditRun(TableRecordUpdateRun run, string decision, Guid? fromPhone) =>
+        ApiAudit.Write(db, HttpContext, "tables.set", "record_update_rollout", run.Id.ToString(), new
+        {
+            run.SourceSetId, decision, fromPhone, run.NextTarget, run.ChangedCount, run.SkippedCount, run.EndedAtUtc
+        });
+
+    private static RolloutPhone[] ReadPhones(TableRecordUpdateRun run) =>
+        JsonSerializer.Deserialize<RolloutPhone[]>(run.TargetsJson)!;
+
+    private static object RunView(TableRecordUpdateRun run)
+    {
+        var phones = ReadPhones(run);
+        return new
+        {
+            run.Id, revision = run.Version, status = run.Stopped ? "Stopped" : run.EndedAtUtc == null ? "Paused" : "Completed",
+            total = phones.Length, processed = run.NextTarget, run.ChangedCount, run.SkippedCount,
+            blockedPhone = run.EndedAtUtc == null ? phones.ElementAtOrDefault(run.NextTarget) : null,
+            run.FailureReason
+        };
     }
 
     private static string? EligibilityIssue(TableSet source, TableSet? basis, Terminal phone, bool copy, bool scheduled)
@@ -173,13 +305,17 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
             ?? (copy ? TableSetFirmwareCompatibility.Mismatch(source, phone.FirmwareVersionId) : null);
     }
 
-    private static bool IsSerializationConflict(Exception? exception) =>
-        exception is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected };
+    private static bool IsWriteConflict(Exception? exception) =>
+        exception is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected }
+            or PostgresException { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "PK_TableRecordUpdateRuns" };
 
-    private sealed record UpdateTarget(Guid Id, string DisplayName, string? TerminalFamilyLabel,
+    private sealed record RolloutPhone(Guid Id, string Name, string WireId);
+    private sealed record UpdateTarget(Guid Id, string DisplayName, string TerminalIdHex, string? TerminalFamilyLabel,
         Guid? BaseSetId, string? BaseSetName, IReadOnlyList<TableRecordUpdateChange> Changes, string? Reason);
 
+    public sealed record RunControl(int Revision, string Decision);
     public sealed record RecordUpdateRequest(string TargetType, Guid? TargetId, int SourceRevision, int[] CopyRecords, int[] RemoveRecords,
-        string? PreviewToken = null, string? RegionCode = null, string? GroupPattern = null, string? TimeAreaCode = null)
+        string? PreviewToken = null, string? RegionCode = null, string? GroupPattern = null, string? TimeAreaCode = null,
+        bool StopOnIssue = false, string? BeginWithTerminalId = null, Guid? RolloutId = null)
         : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
 }
