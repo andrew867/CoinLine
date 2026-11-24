@@ -13,7 +13,7 @@ type Field = {
   help: string | null
 }
 
-type Section = { key: string; label: string; fields: Field[] }
+type Section = { key: string; label: string; fields: Field[]; showDisplayPreview?: boolean }
 type Layout = {
   supported: true
   editable: boolean
@@ -129,7 +129,9 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
 
   const needle = search.trim().toLowerCase()
   const sections = layout.sections.filter((section) => !needle || section.label.toLowerCase().includes(needle)
-    || section.fields.some((field) => field.editor !== 'bitmap' && field.value?.toLowerCase().includes(needle)))
+    || section.fields.some((field) => field.label.toLowerCase().includes(needle) || field.help?.toLowerCase().includes(needle)
+      || (field.editor !== 'bitmap' && field.editor !== 'password'
+        && (field.value?.toLowerCase().includes(needle) || edits[field.key]?.toLowerCase().includes(needle)))))
   const current = sections.find((section) => section.key === sectionKey) ?? sections[0]
   const changed = Object.keys(edits).length
 
@@ -153,6 +155,21 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
       {current && (
         <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
           <legend>{current.label}</legend>
+          {current.showDisplayPreview && (
+            <figure className="native-table-prompt-preview">
+              <figcaption>Terminal display preview</figcaption>
+              <div className="table-config-vfd" role="img" aria-label={current.fields.map((field) => {
+                const text = edits[field.key] ?? field.value
+                return `${field.label}, ${text === null ? 'unmapped glyphs' : text.trim() || 'blank'}`
+              }).join('. ')}>
+                {current.fields.map((field) => (
+                  <div key={field.key} aria-hidden="true">
+                    {(edits[field.key] ?? field.value ?? 'Unmapped glyphs').padEnd(20)}
+                  </div>
+                ))}
+              </div>
+            </figure>
+          )}
           {current.fields.map((field) => (
             <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />

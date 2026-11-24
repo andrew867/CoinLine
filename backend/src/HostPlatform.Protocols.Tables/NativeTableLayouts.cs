@@ -300,9 +300,9 @@ public static class NativeTableLayouts
         }));
 
         foreach (var type in new byte[] { 27, 28 })
-            yield return Layout(type, 2801, VisualPrompts(140));
+            yield return Layout(type, 2801, VisualPromptCatalog.Build(expanded: false));
         foreach (var type in new byte[] { 85, 86, 98, 99 })
-            yield return new NativeTableLayout(type, 8001, Later, VisualPrompts(400));
+            yield return new NativeTableLayout(type, 8001, Later, VisualPromptCatalog.Build(expanded: true));
 
         foreach (var type in new byte[] { 131, 132, 133 })
             yield return new NativeTableLayout(type, 9224, Later, GraphicScreens());
@@ -480,9 +480,6 @@ public static class NativeTableLayouts
         i => $"{label} {200 + i * 2} and {201 + i * 2}", (i, key) =>
             [Bits($"{key}.even", $"Rate index for {200 + i * 2}", offset + i, 240),
              Bits($"{key}.odd", $"Rate index for {201 + i * 2}", offset + i, 15)]);
-
-    private static NativeTableSection[] VisualPrompts(int count) => Rows("prompt", count, i => $"Prompt {i}", (i, key) =>
-        [TextField($"{key}.text", "Display text", 1 + i * 20, 20)]);
 
     private static NativeTableSection[] GraphicScreens() => [Section("rotation", "Graphical screens and rotation",
         Field("statDuration", "Statistics collection duration", 1, Word), Field("offHookScreen", "Off-hook entry screen", 4),

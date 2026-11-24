@@ -64,6 +64,42 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Visual_prompt_record_exposes_paired_preview_and_saves_accents_with_existing_field_keys()
+    {
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Language record test", tableNumber = 86 });
+        definition.EnsureSuccessStatusCode();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Language editor test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var data = new byte[8001];
+        data[0] = 86;
+        data[1 + 20 * 33] = 0xD6;
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            tableRevision = 1, payloadBase64 = Convert.ToBase64String(data), sortOrder = 0
+        });
+        imported.EnsureSuccessStatusCode();
+        var path = $"/api/tables/sets/{id}/records/86/fields";
+        var initial = await _client.GetFromJsonAsync<JsonElement>(path);
+        var calling = initial.GetProperty("sections").EnumerateArray().Single(section => section.GetProperty("key").GetString() == "message-16");
+        Assert.True(calling.GetProperty("showDisplayPreview").GetBoolean());
+        Assert.Equal("prompt-32.text", calling.GetProperty("fields")[0].GetProperty("key").GetString());
+        Assert.Equal(JsonValueKind.Null, calling.GetProperty("fields")[1].GetProperty("value").ValueKind);
+        using var saved = await _client.PutAsJsonAsync(path, new
+        {
+            profile = initial.GetProperty("profile"), revision = initial.GetProperty("revision"), sha256 = initial.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["prompt-32.text"] = "Appel préparé" }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var result = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.Equal(2, result.GetProperty("revision").GetInt32());
+        var fields = result.GetProperty("sections").EnumerateArray().Single(section => section.GetProperty("key").GetString() == "message-16").GetProperty("fields");
+        Assert.Equal("Appel préparé", fields[0].GetProperty("value").GetString());
+        Assert.Equal(JsonValueKind.Null, fields[1].GetProperty("value").ValueKind);
+    }
+
+    [Fact]
     public async Task Draft_clone_retains_original_records_and_can_publish_advertising()
     {
         var sets = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets"))!;

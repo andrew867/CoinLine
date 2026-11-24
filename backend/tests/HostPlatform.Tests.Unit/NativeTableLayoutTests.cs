@@ -118,6 +118,57 @@ public sealed class NativeTableLayoutTests
         Assert.Equal(data.AsSpan(7).ToArray(), changed[7..]);
     }
 
+    [Theory]
+    [InlineData(27, 2801, 70)] [InlineData(28, 2801, 70)]
+    [InlineData(85, 8001, 98)] [InlineData(86, 8001, 98)] [InlineData(98, 8001, 98)] [InlineData(99, 8001, 98)]
+    public void Visual_prompt_sections_keep_every_wire_row_and_name_compatible_pairs(int type, int length, int pairs)
+    {
+        var record = new byte[length];
+        record[0] = (byte)type;
+        var layout = NativeTableLayouts.Find(type, record)!;
+        var fields = layout.Sections.SelectMany(section => section.Fields).ToArray();
+        Assert.Equal((length - 1) / 20, fields.Length);
+        Assert.Equal(Enumerable.Range(0, fields.Length).Select(row => 1 + row * 20), fields.Select(field => field.Offset));
+        Assert.Equal(pairs, layout.Sections.Count(section => section.ShowDisplayPreview));
+        var calling = layout.Sections.Single(section => section.Key == "message-16");
+        Assert.Contains("Calling", calling.Label);
+        Assert.Equal(new[] { "prompt-32.text", "prompt-33.text" }, calling.Fields.Select(field => field.Key));
+        Assert.Equal(new[] { "Upper line", "Lower line" }, calling.Fields.Select(field => field.Label));
+
+        var initial = layout.Sections[0].Label;
+        Assert.Contains(length == 2801 ? "Messaging offer" : "Lift receiver", initial);
+        if (length == 8001)
+        {
+            Assert.All(layout.Sections.Where(section => section.Key is "prompt-397" or "prompt-398" or "prompt-399"),
+                section => Assert.False(section.ShowDisplayPreview));
+            Assert.Contains("Card balance", layout.Sections.Single(section => section.Key == "prompt-397").Label);
+            Assert.Contains("January", layout.Sections.Single(section => section.Key == "prompt-398").Label);
+        }
+    }
+
+    [Fact]
+    public void Visual_prompt_edits_encode_supported_accents_and_keep_an_unmapped_row_intact()
+    {
+        var record = new byte[2801];
+        record[0] = 28;
+        var layout = NativeTableLayouts.Find(28, record)!;
+        var pair = layout.Sections.Single(section => section.Key == "message-16");
+        var upper = pair.Fields[0];
+        var lower = pair.Fields[1];
+        record[upper.Offset] = 0xA6;
+        record[lower.Offset] = 0xD6;
+        Assert.Equal("é", upper.Read(record));
+        Assert.Null(lower.Read(record));
+        Assert.Equal(record, layout.Apply(record, new Dictionary<string, string> { [upper.Key] = "é" }));
+
+        var edited = layout.Apply(record, new Dictionary<string, string> { [upper.Key] = "Cafe\u0301" });
+        Assert.Equal(new byte[] { (byte)'C', (byte)'a', (byte)'f', 0xA6 }, edited.AsSpan(upper.Offset, 4).ToArray());
+        Assert.Equal("Café", upper.Read(edited));
+        Assert.Equal(record[lower.Offset..], edited[lower.Offset..]);
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(record, new Dictionary<string, string> { [upper.Key] = "字" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(record, new Dictionary<string, string> { [upper.Key] = new string('a', 21) }));
+    }
+
     [Fact]
     public void Numbering_rule_edits_keep_the_rule_graph_and_formatting_table()
     {

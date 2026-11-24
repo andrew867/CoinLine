@@ -33,6 +33,8 @@ The schedule request takes the same selection plus `availableAtUtc`, either an I
 
 Field updates include the `revision`, `sha256`, `profile` and a `changes` object keyed by field ID. The API rejects stale revisions and leaves bytes outside the changed fields intact. For matching layouts with the same size, pass `profile` in the read query.
 
+Visual prompt sections with `showDisplayPreview` set contain the upper and lower fields of a known two-line message in display order. Each `prompt-{row}.text` key still addresses one zero-based, 20-byte wire row. Supported Western accents are converted to the firmware's glyph codes. An unmapped imported row returns a null value and is preserved when omitted from `changes`.
+
 The MT68 `serviceKey` field is write-only in the native field API. Omit it from `changes` to keep the stored key. The field response provides `editor: "password"` and `value: null`. Enabling messaging requires a valid service number and key.
 
 **UI:** `/table-sets`, `/table-sets/:id`

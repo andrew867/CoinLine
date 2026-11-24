@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace HostPlatform.Protocols.Tables;
 
-public enum TableFieldEncoding { UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey }
+public enum TableFieldEncoding { UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText }
 
 public sealed record TableFieldChoice(int Value, string Label);
 
@@ -18,7 +18,7 @@ public sealed record NativeTableField(
         TableFieldEncoding.Flag => "checkbox",
         TableFieldEncoding.Bitmap => "bitmap",
         TableFieldEncoding.MessagingKey => "password",
-        TableFieldEncoding.Text or TableFieldEncoding.Bcd or TableFieldEncoding.Dial => "text",
+        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial => "text",
         _ when Choices != null => "select",
         _ => "number"
     };
@@ -32,7 +32,7 @@ public sealed record NativeTableField(
 
     public int? TextLimit => Encoding switch
     {
-        TableFieldEncoding.Text or TableFieldEncoding.MessagingKey => Size,
+        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.MessagingKey => Size,
         TableFieldEncoding.Bcd => Maximum ?? Size * 2,
         TableFieldEncoding.Dial => Size * 2,
         _ => null
@@ -67,6 +67,7 @@ public sealed record NativeTableField(
             TableFieldEncoding.SignedWord => Format(BinaryPrimitives.ReadInt16LittleEndian(data)),
             TableFieldEncoding.SignedLong => Format(BinaryPrimitives.ReadInt32LittleEndian(data)),
             TableFieldEncoding.Text => ReadText(data),
+            TableFieldEncoding.DisplayText => VisualPromptText.Read(data),
             TableFieldEncoding.Bcd => ReadDigits(data, isDial: false, TextLimit ?? 0),
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
             TableFieldEncoding.Bitmap => IsBitmapScreen(record) ? Convert.ToBase64String(data) : null,
@@ -93,6 +94,10 @@ public sealed record NativeTableField(
                     throw Invalid($"enter up to {Size} printable characters");
                 data.Fill((byte)' ');
                 System.Text.Encoding.ASCII.GetBytes(value, data);
+                return;
+            case TableFieldEncoding.DisplayText:
+                if (!VisualPromptText.TryWrite(value, data))
+                    throw Invalid($"enter up to {Size} display characters using ASCII or supported accents");
                 return;
             case TableFieldEncoding.Bcd:
             case TableFieldEncoding.Dial:
@@ -190,7 +195,7 @@ public sealed record NativeTableField(
         && !value[..4].SequenceEqual("0000"u8) && value.IndexOfAnyExceptInRange((byte)'0', (byte)'9') < 0;
 }
 
-public sealed record NativeTableSection(string Key, string Label, IReadOnlyList<NativeTableField> Fields);
+public sealed record NativeTableSection(string Key, string Label, IReadOnlyList<NativeTableField> Fields, bool ShowDisplayPreview = false);
 
 public sealed record NativeTableLayout(byte Number, int Length, string Profile, IReadOnlyList<NativeTableSection> Sections)
 {

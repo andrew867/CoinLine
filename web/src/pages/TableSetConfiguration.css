@@ -60,6 +60,8 @@
 .native-table-field { display: grid; align-content: start; gap: 5px; padding: 6px 8px; border-radius: 6px; }
 .native-table-field span { color: #2e493e; font-weight: 600; }
 .native-table-field :is(input, select) { width: 100%; min-width: 0; }
+.native-table-prompt-preview { grid-column: 1 / -1; margin: 0 0 3px; padding: 6px 8px; }
+.native-table-prompt-preview figcaption { margin-bottom: 6px; color: #2e493e; font-weight: 600; }
 .native-table-toggle { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 6px; color: #2e493e; }
 .native-table-fields [data-dirty='true'] { background: #e8f4ec; }
 .native-table-feedback { margin-top: 9px; }

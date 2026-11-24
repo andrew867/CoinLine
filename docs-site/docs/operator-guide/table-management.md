@@ -15,6 +15,8 @@ To queue the set for a routine call-in, choose **Prepare now for the next call-i
 
 For an existing bitmap screen in a supported graphical record, open **Text and display** and select the screen. A draft accepts 112 by 72 pixel PNG, BMP and JPEG artwork and previews the resulting monochrome image. Save the record to apply the artwork. The editor preserves the remaining screen data.
 
+For **Visual prompts**, use the record that matches the terminal build and language slot. Import a complete record to start. Search by message name, ID, wire row or stored text. The editor displays known messages as two rows of up to 20 display cells each. The expanded profile also labels the softkey and calendar rows. You can enter ASCII and supported Western accents. An imported row that uses unmapped glyphs keeps its stored bytes until you edit that row. Keep related prompts consistent across the language records in the set.
+
 Under **Terminal features and call setup**, select **Audio-Gram messaging** to edit MT68 for a compatible switch-provided messaging service. Start from an inactive record or import an existing one. Set the access number and protocol version, then review the call and payment permissions, surcharges, signaling, and timers supplied by the service operator. Enter the service key to configure a new record or replace its stored key. Leave the key field blank to keep the stored value.
 
 The set summary shows the operating type, enabled coin slots and configured magnetic-card ranges for the recognized profiles. Review any provisioning findings before assigning the set.

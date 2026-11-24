@@ -54,6 +54,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             {
                 section.Key,
                 section.Label,
+                section.ShowDisplayPreview,
                 fields = section.Fields.Select(field => new
                 {
                     field.Key,
