@@ -67,4 +67,17 @@ Graphical records MT131 through MT133 expose fields based on the screen type. A 
 
 The MT68 `serviceKey` field is write-only in the native field API. Omit it from `changes` to keep the stored key. The field response provides `editor: "password"` and `value: null`. Enabling messaging requires a valid service number and key.
 
+## Inmate Feature Configurations
+
+| Method | Path | Operation |
+| --- | --- | --- |
+| GET | `/api/inmate-features/schema` | Read editor sections, field IDs, defaults, choices and limits |
+| GET | `/api/inmate-features` | List saved configurations |
+| POST | `/api/inmate-features` | Create a named configuration |
+| GET | `/api/inmate-features/{id}` | Read settings and the current revision |
+| PUT | `/api/inmate-features/{id}` | Update a configuration using the current revision |
+| DELETE | `/api/inmate-features/{id}?confirm=true&revision={revision}` | Delete the selected revision |
+
+Create and update take `name`, `description` and `settings`. The field schema supplies the defaults used on creation. Omitted settings retain their values on update. Field errors include the settings key. A stale revision or duplicate name returns HTTP 409. These configurations are saved separately from table sets until an Inmate terminal wire layout is verified.
+
 **UI:** `/table-sets`, `/table-sets/:id`

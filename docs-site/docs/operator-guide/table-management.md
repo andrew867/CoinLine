@@ -58,3 +58,9 @@ In **Phones**, open a phone and expand **Phone groups** to choose its membership
 Select **Terminal family** when adding or editing a phone. The picker lists the legacy Maximizer family names and type numbers. The **Phones** list can filter by family, and assignment previews show the family of each phone. Use **Installed firmware** to record the precise build and **Terminal operating mode** in the set's MT26 editor to choose card-only, Multi-pay or coin-only operation.
 
 Open **Terminal status** to filter decoded alarms, maintenance reports, status flags and software versions by phone or report type. An upload or table request can include status and version records in the same message. The console shows each report separately. The version report includes the operating mode stored in the phone.
+
+## Inmate Feature Configurations
+
+From **Table sets**, open **Inmate Feature Configurations**. The editor covers PIN entry, call processing, voice announcements, disconnect warnings, recording equipment, call timers and other settings. Enter a name of up to six characters and an optional description. Use **Copy as new** to reuse the current settings under a new name.
+
+The editor checks the legacy timer ranges and the minimum 10-second gap between disconnect warnings. Recorder codes accept up to two DTMF characters, and the automated operator code accepts up to three. Saved configurations are available to CoinLine operators. Terminal download awaits evidence of the Inmate firmware record layout.

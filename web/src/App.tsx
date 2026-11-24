@@ -15,6 +15,7 @@ import { TableDefinitionDetail } from './pages/TableDefinitionDetail'
 import { TableDefinitions } from './pages/TableDefinitions'
 import { TableSetDetail } from './pages/TableSetDetail'
 import { TableSets } from './pages/TableSets'
+import { InmateFeaturesPage } from './pages/InmateFeaturesPage'
 import { TableVersions } from './pages/TableVersions'
 import { FieldEventsPage } from './pages/FieldEventsPage'
 import { OperatorsPage } from './pages/OperatorsPage'
@@ -79,6 +80,7 @@ export default function App() {
           <Route path="/table-versions" element={<TableVersions />} />
           <Route path="/table-sets/:id" element={<TableSetDetail />} />
           <Route path="/table-sets" element={<TableSets />} />
+          <Route path="/inmate-features/:id?" element={<InmateFeaturesPage />} />
           <Route path="/downloads/:id" element={<DownloadDetail />} />
           <Route path="/downloads" element={<DownloadsPage />} />
           <Route path="/field-events" element={<FieldEventsPage />} />

@@ -12,6 +12,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<TerminalGroup> TerminalGroups => Set<TerminalGroup>();
     public DbSet<TerminalGroupMembership> TerminalGroupMemberships => Set<TerminalGroupMembership>();
     public DbSet<FirmwareVersion> FirmwareVersions => Set<FirmwareVersion>();
+    public DbSet<InmateFeatureConfiguration> InmateFeatureConfigurations => Set<InmateFeatureConfiguration>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalEvent> TerminalEvents => Set<TerminalEvent>();
@@ -106,6 +107,15 @@ public class HostPlatformDbContext : DbContext
         modelBuilder.Entity<TerminalGroup>(b => b.HasOne(g => g.Customer).WithMany().HasForeignKey(g => g.CustomerId));
 
         modelBuilder.Entity<FirmwareVersion>().Property(f => f.TableProfileId).HasMaxLength(48);
+        modelBuilder.Entity<InmateFeatureConfiguration>(b =>
+        {
+            b.Property(c => c.Name).HasMaxLength(6);
+            b.Property(c => c.NameKey).HasMaxLength(24);
+            b.Property(c => c.Description).HasMaxLength(80);
+            b.Property(c => c.SettingsJson).HasColumnType("jsonb");
+            b.Property(c => c.Version).IsConcurrencyToken();
+            b.HasIndex(c => c.NameKey).IsUnique();
+        });
         modelBuilder.Entity<TableSet>(b =>
         {
             b.HasOne(ts => ts.Customer).WithMany().HasForeignKey(ts => ts.CustomerId);

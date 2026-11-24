@@ -56,6 +56,7 @@ export function TableSets() {
   return (
     <div>
       <h1>Table sets</h1>
+      <p><Link to="/inmate-features">Inmate Feature Configurations</Link></p>
       <form onSubmit={(e) => void createSet(e)} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>
         <label>
           New set name

@@ -24,6 +24,7 @@ Every implemented UI route (`coinline/web/src/App.tsx`) with operator-facing pur
 | `/table-versions` | `TableVersions` | `/api/tables/versions` | |
 | `/table-sets` | `TableSets` | `/api/tables/sets` | |
 | `/table-sets/:id` | `TableSetDetail` | `/api/tables/sets/{id}`, publish | Confirm publish |
+| `/inmate-features`, `/inmate-features/:id` | `InmateFeaturesPage` | `/api/inmate-features` | Named host configurations |
 | `/downloads` | `DownloadsPage` | `/api/downloads` | |
 | `/downloads/:id` | `DownloadDetail` | `/api/downloads/{id}` | Cancel/retry confirm |
 | `/uploads` | `UploadsPage` | `/api/uploads` | |
