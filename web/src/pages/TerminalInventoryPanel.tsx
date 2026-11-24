@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { apiFetch, apiGet } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import './TerminalInventoryPanel.css'
 
 type Value = string | number | boolean | null
@@ -102,6 +103,7 @@ function InventoryInput({ field, value, onChange, disabled }: {
 
 export function TerminalInventoryPanel({ terminalId }: { terminalId: string }) {
   const endpoint = `/api/terminals/${terminalId}/inventory`
+  const canUpdate = canPerform('inventory', op.update)
   const [saved, setSaved] = useState<Inventory | null>(null)
   const [draft, setDraft] = useState<Profile>({})
   const [editing, setEditing] = useState(false)
@@ -133,7 +135,7 @@ export function TerminalInventoryPanel({ terminalId }: { terminalId: string }) {
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (!saved) return
+    if (!saved || !canUpdate) return
     setBusy(true)
     setError('')
     setNotice('')
@@ -203,7 +205,7 @@ export function TerminalInventoryPanel({ terminalId }: { terminalId: string }) {
         </details>
       })}
       <div className="phone-inventory-actions">
-        {saved && <button type="button" disabled={busy} onClick={() => {
+        {saved && <button type="button" disabled={busy || !canUpdate} onClick={() => {
           setDraft(saved.profile)
           setEditing(true)
           setNotice('')

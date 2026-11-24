@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { terminalStatusLabel } from '../components/StatusBadge'
 import { apiFetch } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 
 
@@ -21,6 +22,8 @@ type Row = {
 }
 
 export function TerminalsList() {
+  const canRead = canPerform('phones', op.read)
+  const canAdd = canPerform('phones', op.add)
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [family, setFamily] = useState('')
@@ -30,6 +33,7 @@ export function TerminalsList() {
   const [filters, setFilters] = useState({ search: '', region: '', activity: '' })
 
   useEffect(() => {
+    if (!canRead) return
     let c = false
     const query = new URLSearchParams()
     if (family) query.set('terminalFamilyId', family)
@@ -50,7 +54,7 @@ export function TerminalsList() {
     return () => {
       c = true
     }
-  }, [family, filters])
+  }, [family, filters, canRead])
 
   function filterFamily(value: string) {
     if (value === family) return
@@ -71,11 +75,13 @@ export function TerminalsList() {
   return (
     <div>
       <h1>Phones</h1>
-      <p>
+      {canAdd && <p>
         <Link to="/terminals/new" data-testid="terminals-add-link">
           Add a phone
         </Link>
-      </p>
+      </p>}
+      {!canRead && <p>Read permission for Phones is required to view existing phone records.</p>}
+      {canRead && <>
       <form className="table-config-selectors" aria-label="Find phones" onSubmit={applySearch}>
         <label>Name or terminal ID<input value={search} onChange={event => setSearch(event.target.value)} /></label>
         <label>Region code<input value={region} maxLength={32} onChange={event => setRegion(event.target.value)} /></label>
@@ -120,6 +126,7 @@ export function TerminalsList() {
           </tbody>
         </table>
       )}
+      </>}
     </div>
   )
 }

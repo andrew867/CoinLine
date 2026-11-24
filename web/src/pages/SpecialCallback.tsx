@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { apiFetch, apiGet, apiPostRaw } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 type Callback = {
   revision: number
@@ -20,7 +21,7 @@ function localInput(value: string | null | undefined) {
   return local.toISOString().slice(0, 16)
 }
 
-export function SpecialCallback({ terminalId }: { terminalId: string }) {
+export function SpecialCallback({ terminalId, terminalActive = true }: { terminalId: string; terminalActive?: boolean }) {
   const endpoint = `/api/terminals/${terminalId}/special-callback`
   const [callback, setCallback] = useState<Callback | null | undefined>(undefined)
   const [specific, setSpecific] = useState(false)
@@ -30,6 +31,8 @@ export function SpecialCallback({ terminalId }: { terminalId: string }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const canUpdate = canPerform('callbacks', op.update)
+  const canRequest = canUpdate && terminalActive
 
   useEffect(() => {
     let current = true
@@ -56,7 +59,7 @@ export function SpecialCallback({ terminalId }: { terminalId: string }) {
   async function update(event?: FormEvent) {
     event?.preventDefault()
     const cancel = event == null
-    if (cancel && !callback) return
+    if (!canUpdate || (cancel ? !callback : !canRequest)) return
     const moment = specific && !cancel ? new Date(due) : null
     if (moment && (!Number.isFinite(moment.getTime()) || moment.getTime() <= Date.now())) {
       setError('Choose a future date and time.')
@@ -95,26 +98,27 @@ export function SpecialCallback({ terminalId }: { terminalId: string }) {
       {callback?.programmedForUtc && <div><dt>Programmed for</dt><dd>{new Date(callback.programmedForUtc).toLocaleString()}</dd></div>}
       {callback?.returnedAtUtc && <div><dt>Received</dt><dd>{new Date(callback.returnedAtUtc).toLocaleString()}</dd></div>}
     </dl>}
+    {!terminalActive && <p>Reactivate this phone before requesting another callback. Existing requests may still be cancelled.</p>}
     <form className="table-config-selectors" onSubmit={(event) => void update(event)}>
       <label>Callback timing
-        <select value={specific ? 'time' : 'asap'} disabled={busy} onChange={(event) => setSpecific(event.target.value === 'time')}>
+        <select value={specific ? 'time' : 'asap'} disabled={busy || !canRequest} onChange={(event) => setSpecific(event.target.value === 'time')}>
           <option value="asap">As soon as possible</option>
           <option value="time">At a specific time</option>
         </select>
       </label>
       {specific && <label>Date and time (your local time)
-        <input type="datetime-local" value={due} required disabled={busy} onChange={(event) => setDue(event.target.value)} />
+        <input type="datetime-local" value={due} required disabled={busy || !canRequest} onChange={(event) => setDue(event.target.value)} />
       </label>}
       <label>Terminal clock offset from UTC (minutes)
-        <input type="number" min={-840} max={840} step={1} required value={offset} disabled={busy} onChange={(event) => setOffset(event.target.value)} />
+        <input type="number" min={-840} max={840} step={1} required value={offset} disabled={busy || !canRequest} onChange={(event) => setOffset(event.target.value)} />
       </label>
       <label className="native-table-toggle">
-        <input type="checkbox" checked={tables} disabled={busy} onChange={(event) => setTables(event.target.checked)} />
+        <input type="checkbox" checked={tables} disabled={busy || !canRequest} onChange={(event) => setTables(event.target.checked)} />
         Deliver assigned tables on callback
       </label>
-      <button type="submit" disabled={busy || callback === undefined}>{active ? 'Replace callback' : 'Request callback'}</button>
+      <button type="submit" disabled={busy || !canRequest || callback === undefined}>{active ? 'Replace callback' : 'Request callback'}</button>
       <button type="button" className="quiet" disabled={busy} onClick={() => void refresh()}>Refresh status</button>
-      {active && <button type="button" className="quiet" disabled={busy} onClick={() => void update()}>Cancel callback</button>}
+      {active && <button type="button" className="quiet" disabled={busy || !canUpdate} onClick={() => void update()}>Cancel callback</button>}
     </form>
     {active && callback.acknowledgedAtUtc && <p>A phone that has already acknowledged the request can still call after cancellation.</p>}
     {error && <p role="alert">{error}</p>}

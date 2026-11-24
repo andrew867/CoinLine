@@ -7,6 +7,8 @@
 | GET | `/api/terminals` | List |
 | POST | `/api/terminals` | Create |
 | GET | `/api/terminals/{id}` | Detail |
+| GET | `/api/terminals/firmware-options` | Minimal installed-version choices for phone inventory |
+| GET | `/api/terminals/{id}/table-assignment-options` | Minimal table-set choices for phone assignments, excluding firmware-scheduler-only sets |
 | GET | `/api/terminals/{id}/lifecycle` | Manager activity, lifecycle dates and current revision |
 | PUT | `/api/terminals/{id}/lifecycle` | Deactivate, amend deletion review date, or reactivate |
 | PUT | `/api/terminals/{id}` | Update |
@@ -56,6 +58,8 @@ For a special callback, supply the current `revision` or null when creating the 
 **Confirm flags:** several POST routes require `?confirm=true` — see Swagger.
 
 **Manager lifecycle:** use `active=true` or `active=false` on the terminal list to filter activity independently of reported operational status. To deactivate, PUT `active: false` and the observed `revision`; optionally supply a `deletionReviewDate` (YYYY-MM-DD), otherwise the initial date is 45 days from current UTC date. To reactivate, PUT `active: true` and the observed revision; this clears both dates. An open local NCC link or stale revision returns HTTP 409. An inactive terminal is excluded from new table deliveries and field request creation. The review date does not trigger record deletion.
+
+The firmware and table assignment choices are separately permissioned under Phones Read and Table assignments Read. They do not grant access to firmware registry or table authoring endpoints. The current assignment response includes the set name and target firmware label and ID, so a read-only assignment operator need not retrieve the whole table catalogue.
 
 **UI:** `/terminals`, `/terminals/:id`
 

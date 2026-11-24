@@ -99,6 +99,9 @@ type Assign = {
   siteId: string | null
   customerId: string | null
   assignedAtUtc: string
+  tableSetName?: string
+  targetFirmwareVersionId?: string | null
+  targetFirmware?: string | null
 }
 
 type SetRow = { id: string; name: string; status: number; targetFirmwareVersionId: string | null; targetFirmware: string | null }
@@ -293,6 +296,19 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
 
 export function TerminalDetail() {
   const { id } = useParams()
+  const canReadPhone = canPerform('phones', op.read)
+  const canUpdatePhone = canPerform('phones', op.update)
+  const canReadAssignment = canPerform('table-assignments', op.read)
+  const canAssign = canReadAssignment && canPerform('table-assignments', op.update)
+  const canReadDiagnostics = canPerform('diagnostics', op.read)
+  const canSaveSnapshot = canPerform('diagnostics', op.add)
+  const canRequestCdr = canPerform('uploads', op.add)
+  const canRequestReload = canPerform('downloads', op.add)
+  const canReadStatus = canPerform('phone-status', op.read)
+  const canReadSessions = canPerform('ncc-sessions', op.read)
+  const canReadCalls = canPerform('calls', op.read)
+  const canReadDownloads = canPerform('downloads', op.read)
+  const canReadTableSets = canPerform('table-sets', op.read)
   const [term, setTerm] = useState<Term | null>(null)
   const [firmwareEdit, setFirmwareEdit] = useState<string | null>(null)
   const [familyEdit, setFamilyEdit] = useState<string | null>(null)
@@ -306,19 +322,34 @@ export function TerminalDetail() {
   const [err, setErr] = useState<string | null>(null)
   const [diag, setDiag] = useState<DiagnosticsPayload | null>(null)
   const [diagErr, setDiagErr] = useState<string | null>(null)
+  const [diagNotice, setDiagNotice] = useState('')
   const [snapJson, setSnapJson] = useState('{}')
   const [timeline, setTimeline] = useState<TimelineResp | null>(null)
   const [tlErr, setTlErr] = useState<string | null>(null)
   const [sessions, setSessions] = useState<SessionRow[] | null>(null)
-  const [lastCall, setLastCall] = useState<CallRow | null>(null)
-  const [batches, setBatches] = useState<BatchView[]>([])
+  const [lastCall, setLastCall] = useState<CallRow | null | undefined>(undefined)
+  const [batches, setBatches] = useState<BatchView[] | null>(null)
+  const [sessionErr, setSessionErr] = useState('')
+  const [callErr, setCallErr] = useState('')
+  const [batchErr, setBatchErr] = useState('')
 
   useEffect(() => {
-    if (!id) return
+    if (!id || !canReadPhone) return
     let c = false
     setErr(null)
+    setTerm(null)
+    setAssign(undefined)
+    setSets([])
+    setPick('')
+    setDiag(null)
+    setDiagErr(null)
+    setDiagNotice('')
+    setTimeline(null)
+    setTlErr(null)
     setFirmwareEdit(null)
     setFirmwareNotice('')
+    setFamilyEdit(null)
+    setFamilyNotice('')
     ;(async () => {
       try {
         const t = await apiFetch(`/api/terminals/${id}`)
@@ -326,33 +357,26 @@ export function TerminalDetail() {
         const terminal = await t.json() as Term
         if (!c) setTerm(terminal)
 
-        const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
-        if (a.status === 404) {
-          if (!c) setAssign(null)
-        } else if (a.ok) {
-          if (!c) setAssign((await a.json()) as Assign)
-        } else if (!c) {
-          setErr(`Assignment ${a.status}`)
-        }
+        if (c) return
+        if (canReadAssignment) void apiFetch(`/api/terminals/${id}/table-assignment`).then(async response => {
+          if (response.status === 404) { if (!c) setAssign(null); return }
+          if (!response.ok) throw new Error(`Could not read assignment (HTTP ${response.status}).`)
+          const value = await response.json() as Assign
+          if (!c) setAssign(value)
+        }).catch(error => { if (!c) setErr(error.message) })
 
-        const s = await apiFetch('/api/tables/sets')
-        if (s.ok) {
-          const list = (await s.json()) as SetRow[]
-          if (!c) {
-            setSets(list)
-            const pub = list.find((x) => x.status === 1 &&
-              (!x.targetFirmwareVersionId || x.targetFirmwareVersionId === terminal.firmwareVersionId))
-            if (pub) setPick(pub.id)
-          }
-        }
+        if (canAssign) void apiGet<SetRow[]>(`/api/terminals/${id}/table-assignment-options`).then(list => {
+          if (c) return
+          setSets(list)
+          const published = list.find(set => set.status === 1 &&
+            (!set.targetFirmwareVersionId || set.targetFirmwareVersionId === terminal.firmwareVersionId))
+          if (published) setPick(published.id)
+        }).catch(() => { if (!c) setErr('Could not load table assignment choices.') })
 
-        const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
-        if (dg.ok && !c) setDiag((await dg.json()) as DiagnosticsPayload)
-        else if (!dg.ok && !c) setDiagErr(`diagnostics ${dg.status}`)
-
-        const tl = await apiFetch(`/api/operator/terminals/${id}/timeline?take=60`)
-        if (tl.ok && !c) setTimeline((await tl.json()) as TimelineResp)
-        else if (!tl.ok && !c) setTlErr(`timeline ${tl.status}`)
+        if (canReadDiagnostics) void apiGet<DiagnosticsPayload>(`/api/terminals/${id}/diagnostics`)
+          .then(value => { if (!c) setDiag(value) }).catch(() => { if (!c) setDiagErr('Could not read phone diagnostics.') })
+        if (canReadStatus) void apiGet<TimelineResp>(`/api/operator/terminals/${id}/timeline?take=60`)
+          .then(value => { if (!c) setTimeline(value) }).catch(() => { if (!c) setTlErr('Could not read operator timeline.') })
       } catch (e) {
         if (!c) setErr(e instanceof Error ? e.message : 'error')
       }
@@ -360,11 +384,11 @@ export function TerminalDetail() {
     return () => {
       c = true
     }
-  }, [id])
+  }, [id, canReadPhone, canReadAssignment, canAssign, canReadDiagnostics, canReadStatus])
 
   async function applyAssignment(e: React.FormEvent) {
     e.preventDefault()
-    if (!id || !pick) return
+    if (!id || !pick || !canAssign || term?.deactivatedAtUtc) return
     setErr(null)
     try {
       await apiPost<unknown>('/api/terminals/' + id + '/table-assignment', {
@@ -381,52 +405,55 @@ export function TerminalDetail() {
 
   async function pushSnapshot(e: React.FormEvent) {
     e.preventDefault()
-    if (!id) return
+    if (!id || !canSaveSnapshot) return
     setDiagErr(null)
+    setDiagNotice('')
     try {
       await apiPost(`/api/terminals/${id}/diagnostics/snapshots`, {
         snapshotJson: snapJson,
         source: 'operator_ui',
       })
-      const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
-      if (dg.ok) setDiag((await dg.json()) as DiagnosticsPayload)
+      setDiagNotice('Diagnostic snapshot saved.')
+      if (canReadDiagnostics) setDiag(await apiGet<DiagnosticsPayload>(`/api/terminals/${id}/diagnostics`))
     } catch (ex) {
       setDiagErr(ex instanceof Error ? ex.message : 'error')
     }
   }
 
   async function requestCdr() {
-    if (!id) return
+    if (!id || !canRequestCdr || term?.deactivatedAtUtc) return
     setDiagErr(null)
+    setDiagNotice('')
     try {
       await apiPost(`/api/terminals/${id}/request-cdr-upload`, {
         detailJson: '{"intent":"cdr_upload"}',
         simulationMode: true,
       })
-      const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
-      if (dg.ok) setDiag((await dg.json()) as DiagnosticsPayload)
+      setDiagNotice('CDR upload intent recorded.')
+      if (canReadDiagnostics) setDiag(await apiGet<DiagnosticsPayload>(`/api/terminals/${id}/diagnostics`))
     } catch (ex) {
       setDiagErr(ex instanceof Error ? ex.message : 'error')
     }
   }
 
   async function requestTableReload() {
-    if (!id) return
+    if (!id || !canRequestReload || term?.deactivatedAtUtc) return
     setDiagErr(null)
+    setDiagNotice('')
     try {
       await apiPost(`/api/terminals/${id}/request-table-reload`, {
         detailJson: '{"intent":"table_reload"}',
         simulationMode: true,
       })
-      const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
-      if (dg.ok) setDiag((await dg.json()) as DiagnosticsPayload)
+      setDiagNotice('Table reload intent recorded.')
+      if (canReadDiagnostics) setDiag(await apiGet<DiagnosticsPayload>(`/api/terminals/${id}/diagnostics`))
     } catch (ex) {
       setDiagErr(ex instanceof Error ? ex.message : 'error')
     }
   }
 
   async function rollback() {
-    if (!id) return
+    if (!id || !canAssign || term?.deactivatedAtUtc) return
     if (
       !window.confirm(
         'Rollback terminal table assignment to the previous set? Host routing only — HARDWARE_VALIDATION_REQUIRED on device.'
@@ -444,21 +471,22 @@ export function TerminalDetail() {
   }
 
   useEffect(() => {
-    if (!id) return
+    if (!id || !canReadPhone) return
     let cancel = false
-    ;(async () => {
-      const sessionsResp = await apiFetch('/api/ncc/sessions?includeArchived=true')
-      const callsResp = await apiFetch('/api/call-records')
-      const batchesResp = await apiFetch('/api/downloads')
-      if (cancel) return
-      const sessionRows = sessionsResp.ok ? ((await sessionsResp.json()) as SessionRow[]) : []
-      const mine = sessionRows.filter((s) => s.terminalId === id)
-      setSessions(mine)
-      const callRows = callsResp.ok ? ((await callsResp.json()) as CallRow[]) : []
-      setLastCall(callRows.find((c) => c.terminalId === id) ?? null)
-      const batchRows = batchesResp.ok
-        ? ((await batchesResp.json()) as { id: string; terminalId: string; status: number; lastError: string | null }[])
-        : []
+    setSessions(null)
+    setLastCall(undefined)
+    setBatches(null)
+    setSessionErr('')
+    setCallErr('')
+    setBatchErr('')
+    if (canReadSessions) void apiGet<SessionRow[]>('/api/ncc/sessions?includeArchived=true')
+      .then(rows => { if (!cancel) setSessions(rows.filter(row => row.terminalId === id)) })
+      .catch(() => { if (!cancel) setSessionErr('Could not read phone sessions.') })
+    if (canReadCalls) void apiGet<CallRow[]>('/api/call-records')
+      .then(rows => { if (!cancel) setLastCall(rows.find(row => row.terminalId === id) ?? null) })
+      .catch(() => { if (!cancel) setCallErr('Could not read the last call.') })
+    if (canReadDownloads) void (async () => {
+      const batchRows = await apiGet<{ id: string; terminalId: string; status: number; lastError: string | null }[]>('/api/downloads')
       const views: BatchView[] = []
       for (const b of batchRows.filter((x) => x.terminalId === id).slice(0, 5)) {
         const detail = await apiFetch('/api/downloads/' + b.id)
@@ -478,24 +506,28 @@ export function TerminalDetail() {
       }
       if (!cancel) setBatches(views)
     })().catch(() => {
-      if (!cancel) setSessions([])
+      if (!cancel) setBatchErr('Could not read phone downloads.')
     })
     return () => {
       cancel = true
     }
-  }, [id])
+  }, [id, canReadPhone, canReadSessions, canReadCalls, canReadDownloads])
 
   if (!id) return <p>Missing id.</p>
+  if (!canReadPhone) return <p role="alert">Read permission for Phones is required to open a phone record.</p>
   if (err && !term) return <p style={{ color: 'crimson' }}>{err}</p>
   if (!term) return <p>Loading…</p>
   const firmwareSelection = firmwareEdit ?? term.firmwareVersionId ?? ''
   const familySelection = familyEdit ?? term.terminalFamilyId ?? ''
   const pickedSet = sets.find((set) => set.id === pick)
   const assignedSet = sets.find((set) => set.id === assign?.tableSetId)
+  const terminalActive = !term.deactivatedAtUtc
+  const assignedTargetId = assign?.targetFirmwareVersionId ?? assignedSet?.targetFirmwareVersionId
+  const assignedTargetName = assign?.targetFirmware ?? assignedSet?.targetFirmware
 
   async function saveInstalledFirmware(event: React.FormEvent) {
     event.preventDefault()
-    if (!term || firmwareEdit == null) return
+    if (!term || firmwareEdit == null || !canUpdatePhone) return
     setSavingFirmware(true)
     setFirmwareNotice('')
     try {
@@ -512,7 +544,7 @@ export function TerminalDetail() {
 
   async function saveTerminalFamily(event: React.FormEvent) {
     event.preventDefault()
-    if (!term || familyEdit == null) return
+    if (!term || familyEdit == null || !canUpdatePhone) return
     setSavingFamily(true)
     setFamilyNotice('')
     try {
@@ -530,7 +562,7 @@ export function TerminalDetail() {
   return (
     <div>
       <p>
-        <Link to="/terminals">← Phones</Link> · <Link to={`/field-events?terminalId=${term.id}`}>Terminal status</Link>
+        <Link to="/terminals">← Phones</Link>{canReadStatus && <> · <Link to={`/field-events?terminalId=${term.id}`}>Terminal status</Link></>}
       </p>
       <h1>{term.displayName}</h1>
       <p>
@@ -547,29 +579,31 @@ export function TerminalDetail() {
       <form onSubmit={(event) => void saveInstalledFirmware(event)}
         style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginBottom: 12 }}>
         <FirmwareVersionSelect label="Installed firmware" value={firmwareSelection} onChange={setFirmwareEdit}
-          emptyLabel="Unknown firmware" disabled={savingFirmware} />
-        <button type="submit" disabled={savingFirmware || firmwareSelection === (term.firmwareVersionId ?? '')}>Save firmware</button>
-        <Link to="/firmware/versions">Manage versions</Link>
+          emptyLabel="Unknown firmware" optionsPath="/api/terminals/firmware-options" disabled={savingFirmware || !canUpdatePhone} />
+        <button type="submit" disabled={savingFirmware || !canUpdatePhone || firmwareSelection === (term.firmwareVersionId ?? '')}>Save firmware</button>
+        {canPerform('firmware-registry', op.read) && <Link to="/firmware/versions">Manage versions</Link>}
       </form>
       {firmwareNotice && <p role="status">{firmwareNotice}</p>}
       <form onSubmit={(event) => void saveTerminalFamily(event)}
         style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginBottom: 12 }}>
-        <TerminalFamilySelect value={familySelection} onChange={setFamilyEdit} disabled={savingFamily} />
-        <button type="submit" disabled={savingFamily || familySelection === (term.terminalFamilyId ?? '')}>Save family</button>
+        <TerminalFamilySelect value={familySelection} onChange={setFamilyEdit} disabled={savingFamily || !canUpdatePhone} />
+        <button type="submit" disabled={savingFamily || !canUpdatePhone || familySelection === (term.terminalFamilyId ?? '')}>Save family</button>
       </form>
       {familyNotice && <p role="status">{familyNotice}</p>}
       {canPerform('phone-lifecycle', op.read) && <TerminalLifecyclePanel key={`lifecycle-${term.id}`} terminalId={term.id}
         onChanged={value => setTerm(current => current?.id === term.id ? { ...current,
           deactivatedAtUtc: value.deactivatedAtUtc, deletionReviewDate: value.deletionReviewDate } : current)} />}
       <TerminalIdentityPanel key={term.id} terminalId={term.id} wireId={term.terminalIdHex} family={term.terminalFamilyId} />
-      <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />
+      {canPerform('inventory', op.read) && <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />}
       {canPerform('inmate-assignments', op.read) && <InmateAssignmentPanel key={`inmate-${term.id}-${term.terminalFamilyId}`}
         terminalId={term.id} family={term.terminalFamilyId} />}
       {canPerform('memberships', op.read) && <PhoneGroups key={`groups-${term.id}`} terminalId={term.id} />}
 
+      {canReadSessions && <>
       <h2>Phone session</h2>
       <div data-testid="ncc-sessions">
-        {sessions === null && <p>Loading sessions…</p>}
+        {sessionErr && <ErrorBanner message={sessionErr} />}
+        {sessions === null && !sessionErr && <p>Loading sessions…</p>}
         {sessions && sessions.length === 0 && <p>No session yet.</p>}
         {sessions && sessions.length > 0 && (
           <ul>
@@ -581,10 +615,14 @@ export function TerminalDetail() {
           </ul>
         )}
       </div>
+      </>}
 
+      {canReadCalls && <>
       <h2>Last rate</h2>
       <div data-testid="last-rate">
-        {lastCall == null && <p>No rated call yet.</p>}
+        {callErr && <ErrorBanner message={callErr} />}
+        {lastCall === undefined && !callErr && <p>Loading last call…</p>}
+        {lastCall === null && !callErr && <p>No rated call yet.</p>}
         {lastCall && (
           <p>
             {lastCall.dialedDigits || 'empty number'} · {dispositionWords(lastCall.disposition)} ·{' '}
@@ -592,13 +630,17 @@ export function TerminalDetail() {
           </p>
         )}
       </div>
+      </>}
 
-      <TerminalCashboxPanel key={`cashbox-${id}`} terminalId={id} />
+      {canPerform('cashbox', op.read) && <TerminalCashboxPanel key={`cashbox-${id}`} terminalId={id} />}
 
+      {canReadDownloads && <>
       <h2>Downloads</h2>
       <div data-testid="download-status">
-        {batches.length === 0 && <p>No download batch yet.</p>}
-        {batches.map((b) => (
+        {batchErr && <ErrorBanner message={batchErr} />}
+        {batches === null && !batchErr && <p>Loading downloads…</p>}
+        {batches?.length === 0 && <p>No download batch yet.</p>}
+        {batches?.map((b) => (
           <p key={b.id}>
             <Link to={`/downloads/${b.id}`}>{batchWords(b.status)}</Link>
             {b.phases.length > 0 ? ` · ${b.phases.join(', ')}` : ''}
@@ -606,22 +648,26 @@ export function TerminalDetail() {
           </p>
         ))}
       </div>
+      </>}
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
 
-      <SpecialCallback key={`callback-${id}`} terminalId={id} />
+      {canPerform('callbacks', op.read) && <SpecialCallback key={`callback-${id}`} terminalId={id} terminalActive={terminalActive} />}
+      {canReadAssignment && <>
       <h2>Table assignment</h2>
-      {assign === undefined && <p>Loading assignment…</p>}
+      {assign === undefined && !err && <p>Loading assignment…</p>}
       {assign === null && <p>No assignment yet.</p>}
       {assign && (
         <div style={{ background: '#f6f8fa', padding: 12, marginBottom: 12 }}>
           <div>
-            Active set <Link to={`/table-sets/${assign.tableSetId}`}>{assignedSet?.name ?? assign.tableSetId}</Link>
+            Active set {canReadTableSets
+              ? <Link to={`/table-sets/${assign.tableSetId}`}>{assign.tableSetName ?? assignedSet?.name ?? assign.tableSetId}</Link>
+              : <span>{assign.tableSetName ?? assignedSet?.name ?? assign.tableSetId}</span>}
           </div>
-          <div><Link to={`/table-sets/${assign.tableSetId}?record=35#config-heading`}>Review routine call-in settings</Link></div>
-          {term.terminalFamilyId && <div><Link to={`/table-sets/${assign.tableSetId}?family=${encodeURIComponent(term.terminalFamilyId)}#family-review-heading`}>
+          {canReadTableSets && canPerform('table-records', op.read) && <div><Link to={`/table-sets/${assign.tableSetId}?record=35#config-heading`}>Review routine call-in settings</Link></div>}
+          {canReadTableSets && term.terminalFamilyId && <div><Link to={`/table-sets/${assign.tableSetId}?family=${encodeURIComponent(term.terminalFamilyId)}#family-review-heading`}>
             Review table requirements for this family</Link></div>}
-          {assignedSet?.targetFirmwareVersionId && assignedSet.targetFirmwareVersionId !== term.firmwareVersionId &&
-            <p role="status">This set requires {assignedSet.targetFirmware}. Register matching firmware or assign a compatible set.</p>}
+          {assignedTargetId && assignedTargetId !== term.firmwareVersionId &&
+            <p role="status">This set requires {assignedTargetName}. Register matching firmware or assign a compatible set.</p>}
           {assign.previousTableSetId && (
             <div>
               Previous set: <code>{assign.previousTableSetId}</code>
@@ -630,10 +676,11 @@ export function TerminalDetail() {
           <div>Assigned: {new Date(assign.assignedAtUtc).toLocaleString()}</div>
         </div>
       )}
-      <form onSubmit={applyAssignment} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      {!terminalActive && <p>Reactivate the phone before assigning or rolling back a table set.</p>}
+      {canAssign && <form onSubmit={applyAssignment} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <label>
           Table set
-          <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ display: 'block', minWidth: 220 }}>
+          <select value={pick} disabled={!terminalActive} onChange={(e) => setPick(e.target.value)} style={{ display: 'block', minWidth: 220 }}>
             <option value="">Choose a table set</option>
             {sets.map((s) => {
               const mismatch = !!s.targetFirmwareVersionId && s.targetFirmwareVersionId !== term.firmwareVersionId
@@ -643,12 +690,14 @@ export function TerminalDetail() {
             })}
           </select>
         </label>
-        <button type="submit" disabled={!pickedSet || (!!pickedSet.targetFirmwareVersionId && pickedSet.targetFirmwareVersionId !== term.firmwareVersionId)}>Assign set</button>
-        <button type="button" onClick={() => void rollback()}>
+        <button type="submit" disabled={!terminalActive || !pickedSet || (!!pickedSet.targetFirmwareVersionId && pickedSet.targetFirmwareVersionId !== term.firmwareVersionId)}>Assign set</button>
+        <button type="button" disabled={!terminalActive || !assign?.previousTableSetId} onClick={() => void rollback()}>
           Rollback to previous set
         </button>
-      </form>
+      </form>}
+      </>}
 
+      {(canReadDiagnostics || canSaveSnapshot || canRequestCdr || canRequestReload) && <>
       <h2 style={{ marginTop: 24 }}>Field diagnostics</h2>
       <p style={{ color: '#555' }}>
         Snapshots, CDR-upload intents, and table-reload intents are stored here. They are not sent on the NCC socket.
@@ -659,7 +708,9 @@ export function TerminalDetail() {
         </p>
       )}
       {diagErr && <p role="alert" style={{ color: 'crimson' }}>{diagErr}</p>}
-      <form onSubmit={(e) => void pushSnapshot(e)} style={{ marginBottom: 12 }}>
+      {canReadDiagnostics && !diag && !diagErr && <p>Loading diagnostics…</p>}
+      {diagNotice && <p role="status">{diagNotice}</p>}
+      {canSaveSnapshot && <form onSubmit={(e) => void pushSnapshot(e)} style={{ marginBottom: 12 }}>
         <label>
           Snapshot JSON
           <textarea
@@ -672,15 +723,15 @@ export function TerminalDetail() {
         <button type="submit" style={{ display: 'block', marginTop: 8 }}>
           Save diagnostic snapshot
         </button>
-      </form>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
-        <button type="button" onClick={() => void requestCdr()}>
+      </form>}
+      {(canRequestCdr || canRequestReload) && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+        {canRequestCdr && <button type="button" disabled={!terminalActive} onClick={() => void requestCdr()}>
           Request CDR upload (intent)
-        </button>
-        <button type="button" onClick={() => void requestTableReload()}>
+        </button>}
+        {canRequestReload && <button type="button" disabled={!terminalActive} onClick={() => void requestTableReload()}>
           Request table reload (intent)
-        </button>
-      </div>
+        </button>}
+      </div>}
       {diag && (
         <div style={{ background: '#f6f8fa', padding: 12 }}>
           <div>
@@ -721,7 +772,9 @@ export function TerminalDetail() {
           </ul>
         </div>
       )}
+      </>}
 
+      {canReadStatus && <>
       <h2 style={{ marginTop: 24 }}>Operator timeline</h2>
       <p style={{ color: '#555', fontSize: 14 }}>
         Merged host-side signals — use links below for DLOG / downloads / firmware detail pages.
@@ -748,13 +801,13 @@ export function TerminalDetail() {
                 <td>{it.kind}</td>
                 <td>{it.title}</td>
                 <td>
-                  {it.kind === 'dlog' ? (
+                  {it.kind === 'dlog' && canPerform('message-log', op.read) ? (
                     <Link to={`/dlog/${it.refKey}`}>DLOG</Link>
-                  ) : it.kind === 'downloadBatch' ? (
+                  ) : it.kind === 'downloadBatch' && canReadDownloads ? (
                     <Link to={`/downloads/${it.refKey}`}>Batch</Link>
-                  ) : it.kind === 'firmwareJob' ? (
+                  ) : it.kind === 'firmwareJob' && canPerform('firmware-jobs', op.read) ? (
                     <Link to={`/firmware/jobs/${it.refKey}`}>Job</Link>
-                  ) : it.kind === 'craftSession' ? (
+                  ) : it.kind === 'craftSession' && canPerform('craft', op.read) ? (
                     <Link to={`/craft/${it.refKey}`}>Craft</Link>
                   ) : (
                     '—'
@@ -765,14 +818,17 @@ export function TerminalDetail() {
           </tbody>
         </table>
       )}
+      </>}
 
+      {(canReadDownloads || canPerform('message-log', op.read)) && <>
       <h2 style={{ marginTop: 24 }}>Downloads</h2>
-      <p>
+      {canReadDownloads && <p>
         <Link to={`/downloads?terminal=${encodeURIComponent(id)}`}>Open downloads for this terminal</Link>
-      </p>
-      <p>
+      </p>}
+      {canPerform('message-log', op.read) && <p>
         <Link to={`/dlog?terminal=${encodeURIComponent(id)}`}>Messages from this phone</Link>
-      </p>
+      </p>}
+      </>}
     </div>
   )
 }

@@ -28,6 +28,8 @@ Phone group administration and membership are separate permissions. Membership R
 
 The Terminal deactivation and reactivation profile has Read and Update operations. It is separate from the reported status and phone inventory permissions.
 
+The phone detail page uses its own screen permissions for inventory, membership, lifecycle, inmate references, sessions, calls, cashbox, downloads, callbacks, assignments, diagnostics and timeline. Restricted users see only the data available to their profile. Field request creation is independent of diagnostics read access. Firmware and table-assignment lookups use minimal data without granting the full registry or authoring screens. Inactive phones cannot request a new callback or change table assignments; cancelling an existing callback remains available to operators with callback Update permission.
+
 Older API builds could return `500` for People when authorization had to challenge the caller without a registered default authentication scheme. The console displays the API status and offers a retry when the account list fails to load.
 
 Set `Security:OperatorTokenKey` to a deployment secret if operator sessions must survive API restarts or work across instances. A production API without a configured signing key generates one at startup. All instances sharing operator sessions must use the same signing key.

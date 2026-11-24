@@ -1,23 +1,24 @@
 import { useEffect, useState } from 'react'
 import { apiGet } from '../api/client'
 
-export function FirmwareVersionSelect({ label, value, onChange, emptyLabel, disabled = false }: {
+export function FirmwareVersionSelect({ label, value, onChange, emptyLabel, disabled = false, optionsPath = '/api/firmware/versions' }: {
   label: string
   value: string
   onChange: (value: string) => void
   emptyLabel: string
   disabled?: boolean
+  optionsPath?: string
 }) {
   const [versions, setVersions] = useState<{ id: string; label: string; buildId: string | null }[] | null>(null)
   const [error, setError] = useState(false)
 
   useEffect(() => {
     let current = true
-    void apiGet<{ id: string; label: string; buildId: string | null }[]>('/api/firmware/versions')
+    void apiGet<{ id: string; label: string; buildId: string | null }[]>(optionsPath)
       .then((result) => { if (current) setVersions(result) })
       .catch(() => { if (current) setError(true) })
     return () => { current = false }
-  }, [])
+  }, [optionsPath])
 
   return (
     <label>

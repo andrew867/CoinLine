@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { apiFetch, apiGet } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import './TerminalInventoryPanel.css'
 
 type PreviousValue = { value: string | null; changedAtUtc: string }
@@ -18,6 +19,7 @@ export function TerminalIdentityPanel({ terminalId, wireId, family }: {
   terminalId: string; wireId: string; family: string | null
 }) {
   const endpoint = `/api/terminals/${terminalId}/identity`
+  const canUpdate = canPerform('phones', op.update)
   const [identity, setIdentity] = useState<Identity | null>(null)
   const [edit, setEdit] = useState<{ expected: string; value: string } | null>(null)
   const [refresh, setRefresh] = useState(0)
@@ -34,7 +36,7 @@ export function TerminalIdentityPanel({ terminalId, wireId, family }: {
 
   async function save(event: FormEvent) {
     event.preventDefault()
-    if (!edit) return
+    if (!edit || !canUpdate) return
     setSaving(true)
     setError('')
     setNotice('')
@@ -87,7 +89,7 @@ export function TerminalIdentityPanel({ terminalId, wireId, family }: {
         <button type="button" className="quiet" disabled={saving} onClick={() => { setEdit(null); setError('') }}>Cancel</button>
       </div>
     </form> : <div className="phone-inventory-actions">
-      {identity && <button type="button" onClick={() => {
+      {identity && <button type="button" disabled={!canUpdate} onClick={() => {
         setError('')
         setNotice('')
         setEdit({ expected: identity.terminalIdHex, value: identity.terminalIdHex })

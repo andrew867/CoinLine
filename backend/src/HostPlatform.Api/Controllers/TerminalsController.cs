@@ -6,6 +6,7 @@ using HostPlatform.Api.Services;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
@@ -584,12 +585,33 @@ public sealed class TerminalsController(
             {
                 x.TerminalId,
                 x.TableSetId,
+                tableSetName = x.TableSet!.Name,
+                targetFirmwareVersionId = x.TableSet.TargetFirmwareVersionId,
+                targetFirmware = x.TableSet.TargetFirmwareVersion != null ? x.TableSet.TargetFirmwareVersion.Label : null,
                 x.PreviousTableSetId,
                 x.SiteId,
                 x.CustomerId,
                 x.AssignedAtUtc
             }).FirstOrDefaultAsync(ct);
         return a == null ? NotFound() : Ok(a);
+    }
+
+    [HttpGet("firmware-options")]
+    public async Task<ActionResult<object>> FirmwareOptions(CancellationToken ct) =>
+        Ok(await db.FirmwareVersions.AsNoTracking().OrderBy(version => version.Label)
+            .Select(version => new { version.Id, version.Label, version.BuildId }).ToListAsync(ct));
+
+    [HttpGet("{id:guid}/table-assignment-options")]
+    public async Task<ActionResult<object>> TableAssignmentOptions(Guid id, CancellationToken ct)
+    {
+        if (!await db.Terminals.AnyAsync(phone => phone.Id == id, ct))
+            return NotFound();
+        return Ok(await db.TableSets.AsNoTracking()
+            .Where(set => !(set.Versions.Count == 1 && set.Versions.Any(version => version.TableDefinition!.TableNumber == CodeDownloadWire.MessageType)))
+            .OrderByDescending(set => set.IsDefault).ThenBy(set => set.Name)
+            .Select(set => new { set.Id, set.Name, set.Status, set.TargetFirmwareVersionId,
+                targetFirmware = set.TargetFirmwareVersion != null ? set.TargetFirmwareVersion.Label : null })
+            .ToListAsync(ct));
     }
 
     /// <summary>Assigns a table set to the terminal. Writes an audit event.</summary>

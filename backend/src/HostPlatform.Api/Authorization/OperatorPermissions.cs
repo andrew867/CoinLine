@@ -33,7 +33,7 @@ public static class OperatorPermissions
 
         Screen("overview", "Home and search", ("Operator", R, "Dashboard Search"));
         Screen("phones", "Phones",
-            ("Terminals", R, "GetAll GetById Families Regions TimeAreas Identity"),
+            ("Terminals", R, "GetAll GetById Families Regions TimeAreas Identity FirmwareOptions"),
             ("Terminals", A, "Create"), ("Terminals", U, "SetFamily SetFirmware Update SetWireId"));
         Screen("inventory", "Phone inventory", ("TerminalInventory", R, "Get"), ("TerminalInventory", U, "Save"));
         Screen("memberships", "Phone group membership",
@@ -61,7 +61,7 @@ public static class OperatorPermissions
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Apply Continue"));
         Screen("table-assignments", "Table assignments",
             ("Tables", R, "PreviewAssignments"), ("Tables", U, "AssignToScope"),
-            ("Terminals", R, "GetTableAssignment"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
+            ("Terminals", R, "GetTableAssignment TableAssignmentOptions"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
         Screen("downloads", "Downloads",
             ("Downloads", R, "List Get"), ("Downloads", U, "Cancel Retry"),
             ("Tables", R, "ListSchedules"), ("Tables", A, "ScheduleForScope"), ("Tables", U, "CancelSchedule"),
