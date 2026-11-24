@@ -55,4 +55,6 @@ For compatible firmware, edit the ten **Discount rate** entries in the later **S
 
 In **Phones**, open a phone and expand **Phone groups** to choose its memberships. A phone can belong to up to 40 groups. Its primary group appears in the phone list. Every saved membership is included in that group's assignment preview.
 
-Open **Terminal status** to filter decoded alarms, maintenance reports, status flags and software versions by phone or report type. An upload or table request can include status and version records in the same message. The console lists each report separately and shows the type number the phone reported.
+Select **Terminal family** when adding or editing a phone. The picker lists the legacy Maximizer family names and type numbers. The **Phones** list can filter by family, and assignment previews show the family of each phone. Use **Installed firmware** to record the precise build and **Terminal operating mode** in the set's MT26 editor to choose card-only, Multi-pay or coin-only operation.
+
+Open **Terminal status** to filter decoded alarms, maintenance reports, status flags and software versions by phone or report type. An upload or table request can include status and version records in the same message. The console shows each report separately. The version report includes the operating mode stored in the phone.

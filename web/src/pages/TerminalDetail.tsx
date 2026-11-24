@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
+import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
 import { StatusBadge, terminalStatusLabel, terminalStatusVariant } from '../components/StatusBadge'
 
@@ -80,6 +81,7 @@ type Term = {
   terminalIdHex: string
   status: number
   firmwareVersionId: string | null
+  terminalFamilyId: string | null
 }
 
 type Assign = {
@@ -216,6 +218,9 @@ export function TerminalDetail() {
   const { id } = useParams()
   const [term, setTerm] = useState<Term | null>(null)
   const [firmwareEdit, setFirmwareEdit] = useState<string | null>(null)
+  const [familyEdit, setFamilyEdit] = useState<string | null>(null)
+  const [savingFamily, setSavingFamily] = useState(false)
+  const [familyNotice, setFamilyNotice] = useState('')
   const [savingFirmware, setSavingFirmware] = useState(false)
   const [firmwareNotice, setFirmwareNotice] = useState('')
   const [assign, setAssign] = useState<Assign | null | undefined>(undefined)
@@ -407,6 +412,7 @@ export function TerminalDetail() {
   if (err && !term) return <p style={{ color: 'crimson' }}>{err}</p>
   if (!term) return <p>Loading…</p>
   const firmwareSelection = firmwareEdit ?? term.firmwareVersionId ?? ''
+  const familySelection = familyEdit ?? term.terminalFamilyId ?? ''
   const pickedSet = sets.find((set) => set.id === pick)
   const assignedSet = sets.find((set) => set.id === assign?.tableSetId)
 
@@ -417,13 +423,30 @@ export function TerminalDetail() {
     setFirmwareNotice('')
     try {
       await apiPut(`/api/terminals/${term.id}/firmware`, { firmwareVersionId: firmwareEdit || null })
-      setTerm({ ...term, firmwareVersionId: firmwareEdit || null })
+      setTerm((current) => current?.id === term.id ? { ...current, firmwareVersionId: firmwareEdit || null } : current)
       setFirmwareEdit(null)
       setFirmwareNotice('Installed firmware saved.')
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not save installed firmware.')
     } finally {
       setSavingFirmware(false)
+    }
+  }
+
+  async function saveTerminalFamily(event: React.FormEvent) {
+    event.preventDefault()
+    if (!term || familyEdit == null) return
+    setSavingFamily(true)
+    setFamilyNotice('')
+    try {
+      await apiPut(`/api/terminals/${term.id}/family`, { terminalFamilyId: familyEdit || null })
+      setTerm((current) => current?.id === term.id ? { ...current, terminalFamilyId: familyEdit || null } : current)
+      setFamilyEdit(null)
+      setFamilyNotice('Terminal family saved.')
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not save terminal family.')
+    } finally {
+      setSavingFamily(false)
     }
   }
 
@@ -453,6 +476,12 @@ export function TerminalDetail() {
         <Link to="/firmware/versions">Manage versions</Link>
       </form>
       {firmwareNotice && <p role="status">{firmwareNotice}</p>}
+      <form onSubmit={(event) => void saveTerminalFamily(event)}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginBottom: 12 }}>
+        <TerminalFamilySelect value={familySelection} onChange={setFamilyEdit} disabled={savingFamily} />
+        <button type="submit" disabled={savingFamily || familySelection === (term.terminalFamilyId ?? '')}>Save family</button>
+      </form>
+      {familyNotice && <p role="status">{familyNotice}</p>}
       <PhoneGroups key={term.id} terminalId={term.id} />
 
       <h2>Phone session</h2>

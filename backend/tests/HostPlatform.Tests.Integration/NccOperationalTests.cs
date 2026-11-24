@@ -478,7 +478,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         "V100001"u8.CopyTo(version.AsSpan(1));
         "90A "u8.CopyTo(version.AsSpan(8));
         "20B "u8.CopyTo(version.AsSpan(19));
-        version[23] = 28;
+        version[23] = 2;
         var cash = new byte[57];
         cash[0] = 38;
 
@@ -493,7 +493,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             var events = ledger.GetProperty("items").EnumerateArray().ToList();
             Assert.Contains(events, row => row.GetProperty("summary").GetString() == "Statistics checksum fault");
             Assert.Contains(events, row => row.GetProperty("summary").GetString() ==
-                "Controller ROM V100001, Controller software 90A, Telephony software 20B, Terminal type 28");
+                "Controller ROM V100001, Controller software 90A, Telephony software 20B, Operating mode Multi-pay (cards and coins)");
 
             await link.Stream.WriteAsync(Message(KnownId, [.. TerminalCallDetail(61, 0x7675, 0x33), .. status, .. version, .. cash, .. calls]));
             AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));

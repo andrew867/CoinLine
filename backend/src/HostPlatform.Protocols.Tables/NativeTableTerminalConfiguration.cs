@@ -49,7 +49,7 @@ public static partial class NativeTableLayouts
     private static NativeTableSection[] FeatureSections(bool later) =>
     [
         Section("payment", "Terminal and payment",
-            Select("terminalType", "Terminal operating type", 1, (1, "Card only"), (2, "Multi-pay (cards and coins)"), (3, "Coin only")),
+            Select("terminalType", "Terminal operating mode", 1, (1, "Card only"), (2, "Multi-pay (cards and coins)"), (3, "Coin only")),
             Field("followOn", "Maximum follow-on calls", 3),
             Toggle("localAuthorization", "Require host authorization for local card calls", 4, 1),
             Toggle("delayAuthorization", "Defer card authorization", 4, 2),

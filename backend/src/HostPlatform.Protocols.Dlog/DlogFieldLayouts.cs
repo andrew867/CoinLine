@@ -118,7 +118,7 @@ internal static class DlogFieldLayouts
 
     private static bool TryDecodeSoftwareVersion(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
     {
-        note = "Reported controller and telephony versions and terminal type.";
+        note = "Reported controller and telephony versions and terminal operating mode.";
         if (raw.Length < SoftwareVersionLength)
         {
             note = "Software version requires a 28-byte report.";
@@ -130,6 +130,13 @@ internal static class DlogFieldLayouts
         fields["telephonyRom"] = ReadVersionLabel(raw.Slice(12, 7));
         fields["telephonySoftware"] = ReadVersionLabel(raw.Slice(19, 4));
         fields["terminalType"] = (int)raw[23];
+        fields["operatingMode"] = raw[23] switch
+        {
+            1 => "Card only",
+            2 => "Multi-pay (cards and coins)",
+            3 => "Coin only",
+            _ => null
+        };
         return true;
     }
 

@@ -91,6 +91,7 @@ public class HostPlatformDbContext : DbContext
             b.HasOne(t => t.Site).WithMany(s => s.Terminals).HasForeignKey(t => t.SiteId);
             b.HasOne(t => t.TerminalGroup).WithMany(g => g.Terminals).HasForeignKey(t => t.TerminalGroupId);
             b.Property(t => t.Version).IsConcurrencyToken();
+            b.Property(t => t.TerminalFamilyId).HasMaxLength(48);
             b.HasOne(t => t.TransportEndpoint).WithMany().HasForeignKey(t => t.TransportEndpointId);
             b.HasOne(t => t.FirmwareVersion).WithMany().HasForeignKey(t => t.FirmwareVersionId);
         });

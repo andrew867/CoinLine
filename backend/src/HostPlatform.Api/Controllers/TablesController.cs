@@ -483,7 +483,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         var wireId = accessBytes.Length >= 18 && accessBytes[0] == 21 ? Convert.ToHexString(accessBytes.AsSpan(1, 5)) : null;
 
         var phones = await selected.OrderBy(t => t.DisplayName)
-            .Select(t => new { t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId })
+            .Select(t => new { t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId })
             .ToListAsync(ct);
         return phones.Select(t =>
         {
@@ -492,7 +492,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 : wireId != null && !string.Equals(wireId, t.TerminalIdHex, StringComparison.OrdinalIgnoreCase)
                     ? "The terminal access record carries another phone’s wire ID."
                     : TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId);
-            return new AssignmentTarget(t.Id, t.DisplayName, t.SiteId, t.CustomerId, reason == null, reason);
+            return new AssignmentTarget(t.Id, t.DisplayName, t.SiteId, t.CustomerId, TerminalFamilies.Find(t.TerminalFamilyId)?.Label,
+                reason == null, reason);
         }).ToList();
     }
 
@@ -629,7 +630,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     public sealed record AdvertisingDto(AdvertisingSlot[] Slots, int? Revision = null, string? Sha256 = null);
     public sealed record TableScopeDto(string TargetType, Guid TargetId, Guid[] TerminalIds);
     public sealed record TableScopeScheduleDto(string TargetType, Guid TargetId, Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc);
-    private sealed record AssignmentTarget(Guid Id, string DisplayName, Guid SiteId, Guid CustomerId, bool Eligible, string? Reason);
+    private sealed record AssignmentTarget(Guid Id, string DisplayName, Guid SiteId, Guid CustomerId, string? TerminalFamilyLabel,
+        bool Eligible, string? Reason);
 
     public sealed record TableSetDto(string Name, Guid? CustomerId, bool IsDefault, Guid? TargetFirmwareVersionId = null);
     public sealed record TableSetFirmwareDto(Guid? FirmwareVersionId);

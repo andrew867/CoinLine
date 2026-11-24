@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { terminalStatusLabel } from '../components/StatusBadge'
+import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
@@ -11,6 +12,7 @@ type Row = {
   terminalIdHex: string
   status: number
   groupName: string | null
+  terminalFamilyLabel: string | null
   onCall: boolean
   lastSessionAtUtc: string | null
 }
@@ -18,10 +20,12 @@ type Row = {
 export function TerminalsList() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [family, setFamily] = useState('')
 
   useEffect(() => {
     let c = false
-    fetch('/api/terminals', { headers })
+    const query = family ? '?' + new URLSearchParams({ terminalFamilyId: family }) : ''
+    fetch('/api/terminals' + query, { headers })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>
@@ -35,7 +39,13 @@ export function TerminalsList() {
     return () => {
       c = true
     }
-  }, [])
+  }, [family])
+
+  function filterFamily(value: string) {
+    setFamily(value)
+    setRows(null)
+    setErr(null)
+  }
 
   return (
     <div>
@@ -45,9 +55,10 @@ export function TerminalsList() {
           Add a phone
         </Link>
       </p>
+      <TerminalFamilySelect value={family} onChange={filterFamily} emptyLabel="All families" />
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!rows && <p>Loading…</p>}
-      {rows && rows.length === 0 && <p style={{ color: '#666' }}>No terminals yet.</p>}
+      {rows && rows.length === 0 && <p style={{ color: '#666' }}>{family ? 'No terminals in this family.' : 'No terminals yet.'}</p>}
       {rows && rows.length > 0 && (
         <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
           <thead>
@@ -55,6 +66,7 @@ export function TerminalsList() {
               <th>Name</th>
               <th>Hex id</th>
               <th>Group</th>
+              <th>Family</th>
               <th>Status</th>
               <th>Last call</th>
             </tr>
@@ -69,6 +81,7 @@ export function TerminalsList() {
                   <code>{r.terminalIdHex}</code>
                 </td>
                 <td>{r.groupName ?? '—'}</td>
+                <td>{r.terminalFamilyLabel ?? 'Unknown'}</td>
                 <td>{terminalStatusLabel(r.status)}</td>
                 <td>{r.onCall ? 'On a call' : r.lastSessionAtUtc ? new Date(r.lastSessionAtUtc).toLocaleString() : '—'}</td>
               </tr>

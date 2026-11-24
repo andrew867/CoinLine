@@ -28,6 +28,7 @@ public sealed class TerminalsController(
         [FromQuery] int? pageSize,
         [FromQuery] string? sortBy,
         [FromQuery] string? sortDir,
+        [FromQuery] string? terminalFamilyId,
         CancellationToken ct)
     {
         var query = db.Terminals.AsNoTracking().AsQueryable();
@@ -37,6 +38,8 @@ public sealed class TerminalsController(
             query = query.Where(t => db.Sites.Any(s => s.Id == t.SiteId && s.CustomerId == customerId.Value));
         if (status.HasValue)
             query = query.Where(t => (int)t.Status == status.Value);
+        if (!string.IsNullOrEmpty(terminalFamilyId))
+            query = query.Where(t => t.TerminalFamilyId == terminalFamilyId);
         if (!string.IsNullOrWhiteSpace(q))
         {
             var s = q.Trim().ToLowerInvariant();
@@ -62,6 +65,7 @@ public sealed class TerminalsController(
             t.TerminalIdHex,
             t.Status,
             t.FirmwareVersionId,
+            t.TerminalFamilyId,
             t.TransportEndpointId,
             t.TerminalGroupId,
             t.TerminalGroup != null ? t.TerminalGroup.Name : null));
@@ -117,6 +121,8 @@ public sealed class TerminalsController(
                 t.TerminalIdHex,
                 status = t.Status,
                 t.FirmwareVersionId,
+                t.TerminalFamilyId,
+                terminalFamilyLabel = TerminalFamilies.Find(t.TerminalFamilyId)?.Label,
                 t.TransportEndpointId,
                 t.TerminalGroupId,
                 groupName = t.GroupName,
@@ -133,6 +139,7 @@ public sealed class TerminalsController(
         string TerminalIdHex,
         TerminalOperationalStatus Status,
         Guid? FirmwareVersionId,
+        string? TerminalFamilyId,
         Guid? TransportEndpointId,
         Guid? TerminalGroupId,
         string? GroupName);
@@ -142,12 +149,15 @@ public sealed class TerminalsController(
     {
         if (body.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
             return BadRequest(new { error = "Choose a registered firmware version." });
+        if (body.TerminalFamilyId != null && TerminalFamilies.Find(body.TerminalFamilyId) == null)
+            return BadRequest(new { error = "Choose a terminal family from the catalogue." });
         var e = new Terminal
         {
             SiteId = body.SiteId,
             TerminalGroupId = body.TerminalGroupId,
             TransportEndpointId = body.TransportEndpointId,
             FirmwareVersionId = body.FirmwareVersionId,
+            TerminalFamilyId = body.TerminalFamilyId,
             TerminalIdHex = body.TerminalIdHex,
             DisplayName = body.DisplayName,
             Status = body.Status
@@ -160,12 +170,35 @@ public sealed class TerminalsController(
                 e.SiteId,
                 e.DisplayName,
                 e.TerminalIdHex,
+                e.TerminalFamilyId,
                 status = e.Status,
                 HARDWARE_VALIDATION_REQUIRED =
                     "Host-provisioned terminal row only — modem/NCC enrollment and field identity checks not asserted."
             }, e.Id);
         await db.SaveChangesAsync(ct);
         return Created($"/api/terminals/{e.Id}", new { e.Id });
+    }
+
+    [HttpGet("families")]
+    public ActionResult<IReadOnlyList<TerminalFamily>> Families() => Ok(TerminalFamilies.Catalog);
+
+    [HttpPut("{id:guid}/family")]
+    public async Task<ActionResult> SetFamily(Guid id, [FromBody] TerminalFamilyDto body, CancellationToken ct)
+    {
+        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (terminal == null)
+            return NotFound();
+        if (body.TerminalFamilyId != null && TerminalFamilies.Find(body.TerminalFamilyId) == null)
+            return BadRequest(new { error = "Choose a terminal family from the catalogue." });
+        if (terminal.TerminalFamilyId == body.TerminalFamilyId)
+            return NoContent();
+
+        terminal.TerminalFamilyId = body.TerminalFamilyId;
+        terminal.Version++;
+        ApiAudit.Write(db, HttpContext, "terminals", "set_family", $"Terminal:{id}", new { body.TerminalFamilyId }, id);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The phone record changed. Reload and try again." }); }
+        return NoContent();
     }
 
     [HttpPut("{id:guid}/group")]
@@ -524,6 +557,7 @@ public sealed class TerminalsController(
 
     public sealed record AssignGroupDto(Guid? TerminalGroupId);
     public sealed record TerminalFirmwareDto(Guid? FirmwareVersionId);
+    public sealed record TerminalFamilyDto(string? TerminalFamilyId);
     public sealed record AssignGroupsDto(Guid[] GroupIds, int Revision);
 
     public sealed record TerminalCreateDto(
@@ -533,7 +567,8 @@ public sealed class TerminalsController(
         Guid? FirmwareVersionId,
         string TerminalIdHex,
         string DisplayName,
-        TerminalOperationalStatus Status);
+        TerminalOperationalStatus Status,
+        string? TerminalFamilyId = null);
 
     public sealed record TerminalUpdateDto(
         string DisplayName,

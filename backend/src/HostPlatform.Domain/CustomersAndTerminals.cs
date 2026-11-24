@@ -50,6 +50,7 @@ public class Terminal : AuditableEntity
     public TransportEndpoint? TransportEndpoint { get; set; }
     public Guid? FirmwareVersionId { get; set; }
     public FirmwareVersion? FirmwareVersion { get; set; }
+    public string? TerminalFamilyId { get; set; }
     /// <summary>5-byte terminal id on wire (NCC termid); stored as hex for UI.</summary>
     public string TerminalIdHex { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;

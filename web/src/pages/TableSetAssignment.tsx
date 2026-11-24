@@ -11,7 +11,7 @@ const scopes = {
 
 type Scope = keyof typeof scopes
 type Option = { id: string; name?: string; displayName?: string }
-type Target = { id: string; displayName: string; eligible: boolean; reason: string | null }
+type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null }
 
 export function TableSetAssignment({ setId, codeOnly = false }: { setId: string; codeOnly?: boolean }) {
   const [scope, setScope] = useState<Scope>('terminal')
@@ -110,7 +110,9 @@ export function TableSetAssignment({ setId, codeOnly = false }: { setId: string;
       {targets && (
         <div className="table-config-preview">
           <strong>{eligible} eligible phones</strong>
-          {targets.length > 0 && <ul>{targets.map((item) => <li key={item.id}>{item.displayName}{item.reason && ` · ${item.reason}`}</li>)}</ul>}
+          {targets.length > 0 && <ul>{targets.map((item) => <li key={item.id}>
+            {item.displayName}{item.terminalFamilyLabel && ` · ${item.terminalFamilyLabel}`}{item.reason && ` · ${item.reason}`}
+          </li>)}</ul>}
           <div className="table-config-selectors">
             <label>Delivery
               <select value={mode} disabled={busy} onChange={(event) => setMode(event.target.value)}>

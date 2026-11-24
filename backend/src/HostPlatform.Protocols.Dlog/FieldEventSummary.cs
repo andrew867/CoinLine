@@ -109,8 +109,10 @@ public static class FieldEventSummary
             parts.Add($"Controller software {software}");
         if (fields["telephonySoftware"]?.GetValue<string>() is { } telephony)
             parts.Add($"Telephony software {telephony}");
-        if (TryInt(fields["terminalType"], out var terminalType) && terminalType != 0)
-            parts.Add($"Terminal type {terminalType}");
+        if (fields["operatingMode"]?.GetValue<string>() is { } operatingMode)
+            parts.Add($"Operating mode {operatingMode}");
+        else if (TryInt(fields["terminalType"], out var terminalType) && terminalType != 0)
+            parts.Add($"Operating mode code {terminalType}");
         return parts.Count == 0 ? null : string.Join(", ", parts);
     }
 

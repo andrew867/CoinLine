@@ -3120,6 +3120,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<string>("TerminalFamilyId")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
                     b.Property<Guid?>("TerminalGroupId")
                         .HasColumnType("uuid");
 
