@@ -8,6 +8,9 @@
 | POST | `/api/terminals` | Create |
 | GET | `/api/terminals/{id}` | Detail |
 | PUT | `/api/terminals/{id}` | Update |
+| PUT | `/api/terminals/{id}/firmware` | Register `firmwareVersionId` for the installed build or use null for unknown |
+| GET | `/api/terminals/{id}/groups` | Read current memberships and groups available to this phone |
+| PUT | `/api/terminals/{id}/groups` | Save up to 40 group IDs with the retrieved revision. The first ID is the primary group. |
 | GET | `/api/terminals/{id}/events` | Events |
 | POST | `/api/terminals/{id}/status` | Status |
 | GET | `/api/terminals/{id}/table-assignment` | Assignment |

@@ -8,6 +8,31 @@
 | POST | `/api/tables/sets` | Create |
 | GET | `/api/tables/sets/{id}` | Detail |
 | PUT | `/api/tables/sets/{id}` | Update |
+| PUT | `/api/tables/sets/{id}/firmware-target` | Set or clear a draft's target version using `firmwareVersionId` |
+| POST | `/api/tables/sets/{id}/clone` | Create a draft copy with the same records |
+| GET | `/api/tables/sets/{id}/advertising` | Read the 20 MT29 slots, record revision, SHA-256 and supported MT26 and MT30 playback settings |
+| PUT | `/api/tables/sets/{id}/advertising` | Encode and save slots on a draft. Send the retrieved revision and SHA-256 to detect concurrent edits. |
+| GET | `/api/tables/sets/{id}/records/{number}/fields` | Read editable fields for a known wire profile |
+| POST | `/api/tables/sets/{id}/records/{number}/fields` | Start an optional record from a supported inactive template |
+| PUT | `/api/tables/sets/{id}/records/{number}/fields` | Update selected fields on a draft |
 | POST | `/api/tables/sets/{id}/publish` | Publish (**confirm**) |
+| GET | `/api/tables/sets/{id}/assignment-preview` | Preview eligible phones for `targetType` and `targetId` |
+| POST | `/api/tables/sets/{id}/assignments` | Apply a published set to the eligible phones confirmed by the preview |
+| POST | `/api/tables/sets/{id}/schedules` | Schedule pickup by the eligible phones confirmed by the preview |
+| GET | `/api/tables/sets/{id}/schedules` | View schedules and their most recent delivery attempts |
+| GET | `/api/tables/schedules` | View schedules across sets. Filter by `terminalId` when needed. |
+| POST | `/api/tables/sets/{id}/schedules/{scheduleId}/cancel` | Cancel a schedule before delivery starts or between attempts |
+
+The assignment API supports `terminal`, `group`, `site` and `customer`. Apply the same `targetType` and `targetId` with the preview's eligible phone IDs in `terminalIds`. A changed eligible list requires another preview.
+
+A new set accepts an optional `targetFirmwareVersionId`. A draft copy inherits the target. Published targeted sets can be assigned and downloaded by phones with the same registered firmware version. Detail responses expose `firmwareFindings`. Blocking findings prevent publishing. Other findings identify records whose format still needs verification.
+
+Each advertising slot has `text`, `durationTicks`, `mode`, `blankBefore` and `endSequence`. Set `endSequence` to write a leading zero that ends the current rotation. To show a timed blank, send empty `text` with `endSequence` false and a positive duration. The response includes `onHookEnabled`, `quickAccessEnabled`, `callEstablishedEnabled` and `scrollTicks`. The settings are null when the respective record has no recognized layout. Durations and scroll values use 10 ms ticks.
+
+The schedule request takes the same selection plus `availableAtUtc`, either an ISO 8601 date and time with its offset or null for immediate availability. Each phone can have one open scheduled download. A call-in can pick up the set once it is available. Failed attempts remain ready for the next call. The existing assignment stays effective until the terminal acknowledges the scheduled download. An operator assignment made during delivery takes precedence.
+
+Field updates include the `revision`, `sha256`, `profile` and a `changes` object keyed by field ID. The API rejects stale revisions and leaves bytes outside the changed fields intact. For matching layouts with the same size, pass `profile` in the read query.
+
+The MT68 `serviceKey` field is write-only in the native field API. Omit it from `changes` to keep the stored key. The field response provides `editor: "password"` and `value: null`. Enabling messaging requires a valid service number and key.
 
 **UI:** `/table-sets`, `/table-sets/:id`

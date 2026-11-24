@@ -1,20 +1,16 @@
 # Routes
 
-The routes are defined in `web/src/App.tsx`.
+Defined in `coinline/web/src/App.tsx`:
 
 | Path | Page |
 |------|------|
 | `/` | Dashboard |
-| `/login` | Operator sign-in |
 | `/customers`, `/customers/:id` | Customers |
 | `/sites` | Sites |
 | `/terminals`, `/terminals/new`, `/terminals/:id` | Terminals |
-| `/terminal-groups` | Terminal groups |
-| `/operators` | Operator accounts |
-| `/ncc-sessions` | NCC sessions and live socket binding |
+| `/ncc-sessions` | JsonPanel wrapper |
 | `/ncc-frame-captures` | NCC uploads |
 | `/dlog`, `/dlog/:id`, `/dlog/replay-debug` | DLOG |
-| `/field-events` | Alarms and field events |
 | `/table-definitions`, `/table-definitions/:id` | Table defs |
 | `/table-versions` | Versions |
 | `/table-sets`, `/table-sets/:id` | Sets |
@@ -33,5 +29,5 @@ The routes are defined in `web/src/App.tsx`.
 | `/firmware/packages`, `/firmware/packages/:id`, `/firmware/jobs`, `/firmware/jobs/:id`, `/firmware/versions`, `/firmware/targets` | Firmware |
 | `/audit` | Audit |
 | `/status` | Status / readiness |
-| `/settings` | Operator settings and execution policy |
+| `/settings` | Static help |
 | `*` | NotFound |

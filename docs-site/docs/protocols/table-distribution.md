@@ -1,7 +1,9 @@
 # Table distribution
 
-The host stores table payloads with their length and SHA-256 digest. Payloads for the firmware download path must contain complete records whose leading message type matches their table definition. The catalog validator reports `EMPTY_PAYLOAD` for a zero-byte payload.
+CoinLine stores externally produced table records as versioned binary payloads with SHA-256 hashes and lengths. The API can import payloads, publish sets and assign them to terminals. Profile-specific field editing and semantic validation remain open.
 
-After the terminal's type 44 request, the listener prepares a batch from its assigned published set and sends a type 18 update message. It fragments records into NCC frames and waits for link acknowledgements between fragments. A type 14 application acknowledgement advances each complete record. The batch completes after the terminal link-acknowledges the final type 13 end marker.
+A matched MT44 starts transfer of the assigned published set. The host sends the MT18 header, paces fragments with link acknowledgments and records the terminal's MT14 result per table. The final MT13 acknowledgment completes the batch. Ten records completed this exchange in the firmware lab.
 
-The local firmware lab verified cold and warm ten-record sets. For other sets, check the actual terminal's acknowledgements and use the batch timeline to investigate missing or rejected frames. See [Downloads API](../api/endpoints/downloads.md).
+An available scheduled set is eligible on a matched MT8 call-in, MT9 callback or MT44 table request. A matched MT8 or MT9 without a due set receives MT13. The host retains the latest attempt and makes an interrupted schedule available for another call. Card authorization and real-time rating have their own dialogues and never pick up a schedule. Scripted NCC tests cover MT8 and MT9 pickup, including recovery across an abrupt API restart on PostgreSQL.
+
+Card authorization and real-time rating use their own request and reply sequences. They do not start an install transfer.
