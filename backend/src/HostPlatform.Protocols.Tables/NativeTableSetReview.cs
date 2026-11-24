@@ -40,12 +40,14 @@ public static class NativeTableSetReview
         foreach (var later in new[] { false, true })
         {
             var cardNumber = later ? 134 : 22;
+            var carrierNumber = later ? 135 : 23;
             var cards = Get(records, cardNumber, later ? 1153 : 661);
-            var carriers = Get(records, later ? 135 : 23, later ? 1109 : 678);
+            var carriers = Get(records, carrierNumber, later ? 1109 : 678);
             var cardStride = later ? 36 : 33;
             if (cards != null)
             {
                 cardRanges ??= 0;
+                var usesCarrierReference = false;
                 for (var index = 0; index < (cards.Length - 1) / cardStride; index++)
                 {
                     var row = cards.AsSpan(1 + cardStride * index, cardStride);
@@ -54,7 +56,11 @@ public static class NativeTableSetReview
                     cardRanges++;
                     if (row[..3].SequenceCompareTo(row.Slice(3, 3)) > 0)
                         findings.Add(new(cardNumber, $"Card range {index + 1} starts after its ending prefix."));
-                    if (carriers == null || row[32] == byte.MaxValue)
+                    if (row[32] == byte.MaxValue)
+                        continue;
+
+                    usesCarrierReference = true;
+                    if (carriers == null)
                         continue;
 
                     var offset = FindCarrier(carriers, row[32], later);
@@ -63,6 +69,9 @@ public static class NativeTableSetReview
                     else if ((carriers[offset + 3 + index / 8] & (1 << (index % 8))) == 0)
                         findings.Add(new(cardNumber, $"Card range {index + 1} selects carrier reference {row[32]}. Enable this range in that carrier’s acceptance list."));
                 }
+
+                if (carriers == null && usesCarrierReference)
+                    findings.Add(new(cardNumber, $"Card ranges select a carrier. Include MT{carrierNumber} or verify that the phone’s installed carrier record accepts those ranges."));
             }
 
             if (carriers != null && features?[1] is 2 or 3)

@@ -346,6 +346,21 @@ public sealed class NativeTableLayoutTests
     }
 
     [Fact]
+    public void Card_ranges_with_carrier_references_review_a_missing_carrier_record()
+    {
+        var cards = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(22)));
+        var layout = NativeTableLayouts.Find(22, cards)!;
+        var configured = layout.Apply(cards, new Dictionary<string, string> { ["card-0.format"] = "2" });
+        var records = new Dictionary<int, byte[]> { [22] = configured };
+        Assert.Empty(NativeTableSetReview.Build(records).Findings);
+
+        records[22] = layout.Apply(configured, new Dictionary<string, string> { ["card-0.carrier"] = "0" });
+        var missing = Assert.Single(NativeTableSetReview.Build(records).Findings);
+        Assert.Equal(22, missing.TableNumber);
+        Assert.Contains("Include MT23", missing.Message);
+    }
+
+    [Fact]
     public void Payment_and_advertising_edits_only_change_their_bytes_and_bits()
     {
         var data = new byte[72];
