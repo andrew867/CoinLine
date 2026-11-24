@@ -123,7 +123,7 @@ builder.Services.AddScoped<IFirmwareExecutionPolicy, FirmwareExecutionPolicy>();
 builder.Services.AddScoped<FirmwareJobOrchestrator>();
 builder.Services.AddScoped<CapturedSessionReplayService>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options => options.Filters.Add<OperatorPermissionFilter>());
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
 {

@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Authorization;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -138,6 +139,10 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
             var membership = phone.AdditionalGroups.SingleOrDefault(row => row.TerminalGroupId == id);
             if (edit.Member == (primary || membership != null))
                 continue;
+
+            if (!OperatorPermissions.Allows(HttpContext, "memberships",
+                    edit.Member ? PermissionOperation.Add : PermissionOperation.Delete))
+                return Forbid();
 
             if (edit.Member)
             {

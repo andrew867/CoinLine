@@ -2294,6 +2294,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("PermissionProfileJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<int>("Role")
                         .HasColumnType("integer");
 

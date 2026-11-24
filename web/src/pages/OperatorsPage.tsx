@@ -1,6 +1,7 @@
 import type { FormEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { ErrorBanner } from '../components/AppStates'
+import { OperatorPermissionsPanel } from '../components/OperatorPermissionsPanel'
 import { apiFetch, apiPostRaw } from '../api/client'
 
 type Account = {
@@ -21,6 +22,7 @@ export function OperatorsPage() {
   const [role, setRole] = useState('Operator')
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [profileId, setProfileId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     setErr(null)
@@ -143,11 +145,16 @@ export function OperatorsPage() {
                   <button type="button" className="quiet" onClick={() => void setEnabled(row, !row.enabled)}>
                     {row.enabled ? 'Disable' : 'Enable'}
                   </button>
+                  <button type="button" className="quiet" onClick={() => setProfileId(row.id)}>Permissions</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+      {rows && profileId && rows.find((row) => row.id === profileId) && (
+        <OperatorPermissionsPanel key={profileId} person={rows.find((row) => row.id === profileId)!}
+          people={rows} onClose={() => setProfileId(null)} />
       )}
     </div>
   )

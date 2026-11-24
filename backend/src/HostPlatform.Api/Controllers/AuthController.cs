@@ -1,4 +1,7 @@
 using System.Data;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using HostPlatform.Api.Audit;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Security;
 using HostPlatform.Domain;
@@ -31,6 +34,7 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
             username = user.Username,
             displayName = user.DisplayName,
             role = user.Role.ToString(),
+            permissions = EffectiveProfile(user),
             expiresAtUtc = expires
         });
     }
@@ -43,7 +47,11 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
             .FirstOrDefaultAsync(u => u.Username == username && u.Enabled, ct);
         if (user == null)
             return Unauthorized(new { error = "Sign in again." });
-        return Ok(AccountView(user));
+        return Ok(new
+        {
+            user.Id, user.Username, user.DisplayName, role = user.Role.ToString(), user.Enabled,
+            permissions = EffectiveProfile(user)
+        });
     }
 
     [HttpGet("accounts")]
@@ -92,6 +100,48 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
         return Created($"/api/auth/accounts/{user.Id}", AccountView(user));
     }
 
+    [HttpGet("permission-catalog")]
+    [Authorize(Policy = Policies.RequireAdmin)]
+    public ActionResult PermissionCatalog() => Ok(OperatorPermissions.Catalog);
+
+    [HttpGet("accounts/{id:guid}/permissions")]
+    [Authorize(Policy = Policies.RequireAdmin)]
+    public async Task<ActionResult<object>> GetPermissions(Guid id, CancellationToken ct)
+    {
+        var user = await db.OperatorAccounts.AsNoTracking().SingleOrDefaultAsync(u => u.Id == id, ct);
+        if (user == null)
+            return NotFound();
+        return Ok(ProfileView(user));
+    }
+
+    [HttpPut("accounts/{id:guid}/permissions")]
+    [Authorize(Policy = Policies.RequireAdmin)]
+    public async Task<ActionResult<object>> SetPermissions(Guid id, [FromBody] PermissionProfileDto body, CancellationToken ct)
+    {
+        if (!OperatorPermissions.TryNormalize(body.Permissions, out var profile))
+            return BadRequest(new { error = "Select only supported operations from the permission catalogue." });
+        var user = await db.OperatorAccounts.SingleOrDefaultAsync(u => u.Id == id, ct);
+        if (user == null)
+            return NotFound();
+        if (user.Role == OperatorRole.Admin)
+            return BadRequest(new { error = "Administrator accounts use their full role privileges." });
+        if (user.SessionGeneration != body.Revision)
+            return Conflict(new { error = "The profile changed. Reload it before saving." });
+        var json = profile == null ? null : JsonSerializer.Serialize(profile);
+        var current = EffectiveProfile(user);
+        if (json == (current == null ? null : JsonSerializer.Serialize(current)))
+            return Ok(ProfileView(user));
+        user.PermissionProfileJson = json;
+        user.SessionGeneration++;
+        ApiAudit.Write(db, HttpContext, "people", "update_profile", $"OperatorAccount:{id}", new { permissions = profile });
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "The profile changed. Reload it before saving." });
+        }
+        return Ok(ProfileView(user));
+    }
+
     [HttpPut("accounts/{id:guid}")]
     [Authorize(Policy = Policies.RequireAdmin)]
     public async Task<ActionResult<object>> Update(Guid id, [FromBody] UpdateAccountDto body, CancellationToken ct)
@@ -134,6 +184,8 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
             if (user.Role == OperatorRole.Admin && role != OperatorRole.Admin && await EnabledAdminCount(user.Id, ct) == 0)
                 return Conflict(new { error = "Keep at least one enabled administrator." });
             user.Role = role;
+            if (role == OperatorRole.Admin)
+                user.PermissionProfileJson = null;
         }
         if (body.Enabled is { } enabled)
         {
@@ -181,8 +233,20 @@ public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSignin
         user.Enabled
     };
 
+    private static Dictionary<string, int>? EffectiveProfile(OperatorAccount user) =>
+        user.Role == OperatorRole.Admin ? null : OperatorPermissions.ReadProfile(user.PermissionProfileJson);
+
+    private static object ProfileView(OperatorAccount user) => new
+    {
+        role = user.Role.ToString(),
+        revision = user.SessionGeneration,
+        permissions = EffectiveProfile(user)
+    };
+
     public sealed record LoginDto(string? Username, string? Password);
     public sealed record CreateAccountDto(string? Username, string? DisplayName, string? Password, string? Role);
     public sealed record UpdateAccountDto(string? DisplayName, string? Role, bool? Enabled);
     public sealed record PasswordDto(string? CurrentPassword, string? NewPassword);
+    public sealed record PermissionProfileDto([property: JsonRequired] int Revision,
+        [property: JsonRequired] Dictionary<string, int>? Permissions);
 }

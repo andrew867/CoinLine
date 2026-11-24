@@ -2,7 +2,48 @@ import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { FirmwareLiveFlashBanner } from './FirmwareLiveFlashBanner'
 import { GlobalSearch } from './GlobalSearch'
-import { consoleSession } from '../api/consoleSession'
+import { consoleSession, type ScreenPermissions } from '../api/consoleSession'
+
+const screenByPath: Record<string, string> = {
+  '/': 'overview',
+  '/terminals': 'phones',
+  '/call-records': 'calls',
+  '/downloads': 'downloads',
+  '/field-events': 'phone-status',
+  '/rate-plans': 'rate-plans',
+  '/rating-quote': 'rating',
+  '/card-accounts': 'card-accounts',
+  '/card-reconciliation': 'reconciliation',
+  '/payment-transactions': 'card-transactions',
+  '/customers': 'customers',
+  '/sites': 'sites',
+  '/terminal-groups': 'groups',
+  '/table-sets': 'table-sets',
+  '/card-products': 'card-products',
+  '/ncc-sessions': 'ncc-sessions',
+  '/dlog': 'message-log',
+  '/uploads': 'uploads',
+  '/audit': 'audit',
+  '/craft': 'craft',
+  '/firmware/packages': 'firmware-registry',
+  '/firmware/targets': 'firmware-registry',
+  '/firmware/versions': 'firmware-registry',
+  '/firmware/jobs': 'firmware-jobs',
+  '/table-definitions': 'table-definitions',
+  '/table-versions': 'table-records',
+  '/number-classes': 'number-classes',
+  '/ncc-frame-captures': 'frame-captures',
+  '/status': 'transport',
+  '/smartcard-types': 'smartcards',
+  '/inmate-features': 'inmate-features',
+}
+
+export function mayOpenScreen(path: string, role: string | null, permissions: ScreenPermissions | null) {
+  if (path === '/operators') return role === null || role === 'Admin'
+  if (role === 'Admin' || permissions === null) return true
+  const root = Object.keys(screenByPath).find((base) => path === base || (base !== '/' && path.startsWith(base + '/')))
+  return root === undefined || (permissions[screenByPath[root]] ?? 0) !== 0
+}
 
 const groups = [
   {
@@ -63,6 +104,9 @@ const groups = [
 export function Layout() {
   const location = useLocation()
   const [navOpen, setNavOpen] = useState(false)
+  const role = consoleSession.role()
+  const permissions = consoleSession.permissions()
+  const allow = (path: string) => mayOpenScreen(path, role, permissions)
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -75,7 +119,8 @@ export function Layout() {
             onClick={() => setNavOpen((value) => !value)}>Menu</button>
         </div>
         <nav id="primary-navigation" aria-label="Main" data-open={navOpen} className="sidebar-navigation">
-          {groups.map((group) => (
+          {groups.map((group) => ({ ...group, links: group.links.filter(([to]) => allow(to)) }))
+            .filter((group) => group.links.length > 0).map((group) => (
             <div className="nav-group" key={group.title}>
               <p className="nav-label">{group.title}</p>
               {group.links.map(([to, label]) => (
@@ -92,9 +137,14 @@ export function Layout() {
         </nav>
       </aside>
       <main className="content">
-        {location.pathname.startsWith('/firmware') && <FirmwareLiveFlashBanner />}
-        <GlobalSearch />
-        <Outlet />
+        {allow(location.pathname) && location.pathname.startsWith('/firmware') && <FirmwareLiveFlashBanner />}
+        {(permissions === null || role === 'Admin' || ((permissions.overview ?? 0) & 1) !== 0) && <GlobalSearch />}
+        {allow(location.pathname) ? <Outlet /> : (
+          <section>
+            <h1>Screen unavailable</h1>
+            <p>Your account does not have permission for this screen. Choose another page from the menu, or contact an administrator.</p>
+          </section>
+        )}
       </main>
     </div>
   )

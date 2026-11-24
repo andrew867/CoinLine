@@ -8,7 +8,7 @@ describe('console API credentials', () => {
   beforeEach(() => {
     fetchStub.mockReset().mockResolvedValue(new Response('{}'))
     vi.stubGlobal('fetch', fetchStub)
-    consoleSession.save('operator-token', 'deployment-key', 'Signed-in operator')
+    consoleSession.save('operator-token', 'deployment-key', 'Signed-in operator', 'Operator', { phones: 1 })
   })
 
   afterEach(() => {
@@ -49,6 +49,8 @@ describe('console API credentials', () => {
     expect(consoleSession.token()).toBeNull()
     expect(consoleSession.apiKey()).toBeNull()
     expect(localStorage.getItem('coinline.displayName')).toBeNull()
+    expect(consoleSession.role()).toBeNull()
+    expect(consoleSession.permissions()).toBeNull()
     await apiFetch('/api/terminals')
     const signedOut = new Headers(fetchStub.mock.calls[2][1]?.headers)
     expect(signedOut.has('Authorization')).toBe(false)

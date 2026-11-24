@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
 import { apiSignIn } from '../api/client'
-import { consoleSession } from '../api/consoleSession'
+import { consoleSession, type ScreenPermissions } from '../api/consoleSession'
 
 export function LoginPage() {
   const [username, setUsername] = useState('operator')
@@ -16,10 +16,12 @@ export function LoginPage() {
     setErr(null)
     try {
       const r = await apiSignIn(username, password, apiKey)
-      const body = (await r.json().catch(() => null)) as { token?: string; displayName?: string; error?: string } | null
+      const body = (await r.json().catch(() => null)) as {
+        token?: string; displayName?: string; role?: string; permissions?: ScreenPermissions | null; error?: string
+      } | null
       if (!r.ok) throw new Error(body?.error ?? `Could not sign in (HTTP ${r.status}).`)
       if (!body?.token) throw new Error('The server did not return a sign-in token.')
-      consoleSession.save(body.token, apiKey, body.displayName)
+      consoleSession.save(body.token, apiKey, body.displayName, body.role, body.permissions)
       window.location.assign('/')
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'Could not sign in')

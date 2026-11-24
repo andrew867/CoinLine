@@ -9,4 +9,5 @@ public class OperatorAccount : AuditableEntity
     public OperatorRole Role { get; set; } = OperatorRole.Operator;
     public bool Enabled { get; set; } = true;
     public int SessionGeneration { get; set; }
+    public string? PermissionProfileJson { get; set; }
 }

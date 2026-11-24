@@ -388,6 +388,7 @@ public class HostPlatformDbContext : DbContext
             b.Property(a => a.Username).HasMaxLength(64);
             b.Property(a => a.DisplayName).HasMaxLength(120);
             b.Property(a => a.SessionGeneration).IsConcurrencyToken();
+            b.Property(a => a.PermissionProfileJson).HasColumnType("jsonb");
         });
 
         modelBuilder.Entity<SubsystemHeartbeat>(b =>

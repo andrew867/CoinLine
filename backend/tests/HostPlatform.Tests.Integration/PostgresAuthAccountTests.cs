@@ -4,11 +4,14 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using HostPlatform.Api.Authorization;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure;
 using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.Mvc.Controllers;
+using Microsoft.AspNetCore.Mvc.Infrastructure;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -17,6 +20,138 @@ namespace HostPlatform.Tests.Integration;
 [Collection("PostgreSQL integration")]
 public sealed class PostgresAuthAccountTests
 {
+    [PostgresIntegrationFact]
+    public async Task Named_profiles_restrict_actions_without_altering_role_or_machine_access()
+    {
+        var key = Guid.NewGuid().ToString("N");
+        var password = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production")
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey")
+            .UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false")
+            .UseSetting("Platform:Seed:EnableDemoData", "false"));
+        using var adminClient = factory.CreateClient();
+        using var userClient = factory.CreateClient();
+        using var machine = factory.CreateClient();
+        foreach (var client in new[] { adminClient, userClient, machine })
+            client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var admin = new OperatorAccount
+        {
+            Username = "fixture-admin-" + Guid.NewGuid().ToString("N"), DisplayName = "Fixture admin",
+            Role = OperatorRole.Admin, PasswordHash = OperatorPassword.Hash(password)
+        };
+        var user = new OperatorAccount
+        {
+            Username = "fixture-user-" + Guid.NewGuid().ToString("N"), DisplayName = "Fixture user",
+            Role = OperatorRole.Operator, PasswordHash = OperatorPassword.Hash(password)
+        };
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.OperatorAccounts.AddRange(admin, user);
+            await db.SaveChangesAsync();
+        }
+        var actions = factory.Services.GetRequiredService<IActionDescriptorCollectionProvider>().ActionDescriptors.Items
+            .OfType<ControllerActionDescriptor>();
+        Assert.All(actions, action => Assert.True(OperatorPermissions.IsMapped(action.ControllerName, action.ActionName),
+            $"Missing permission rule: {action.ControllerName}.{action.ActionName}"));
+
+        var login = await SignIn(userClient, user);
+        Assert.Equal(JsonValueKind.Null, login.GetProperty("permissions").ValueKind);
+        await SignIn(adminClient, admin);
+        using (var catalog = await adminClient.GetAsync("/api/auth/permission-catalog"))
+            catalog.EnsureSuccessStatusCode();
+        const string groups = "/api/terminal-groups";
+        const string phones = "/api/terminals";
+        var profilePath = $"/api/auth/accounts/{user.Id}/permissions";
+        var profile = await adminClient.GetFromJsonAsync<JsonElement>(profilePath);
+        Assert.Equal(0, profile.GetProperty("revision").GetInt32());
+        using (var denied = await userClient.GetAsync(profilePath))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var invalid = await adminClient.PutAsJsonAsync(profilePath, new { revision = 0, permissions = new Dictionary<string, int> { ["overview"] = 8 } }))
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        var grants = new Dictionary<string, int> { ["phones"] = 1, ["groups"] = 1 | 4, ["memberships"] = 1 | 4 };
+        using (var saved = await adminClient.PutAsJsonAsync(profilePath, new { revision = 0, permissions = grants }))
+            saved.EnsureSuccessStatusCode();
+        using (var stale = await adminClient.PutAsJsonAsync(profilePath, new { revision = 0, permissions = grants }))
+            Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        using (var revoked = await userClient.GetAsync(phones))
+            Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
+        login = await SignIn(userClient, user);
+        Assert.Equal("Operator", login.GetProperty("role").GetString());
+        Assert.Equal(5, login.GetProperty("permissions").GetProperty("groups").GetInt32());
+        using (var allowed = await userClient.GetAsync(phones))
+            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        using (var denied = await userClient.GetAsync("/api/field-events"))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.GetAsync("/api/auth/accounts"))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using var created = await userClient.PostAsJsonAsync(groups, new { name = "Fixture profile group" });
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var groupId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using (var denied = await userClient.DeleteAsync($"{groups}/{groupId}"))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.PutAsJsonAsync($"{groups}/{groupId}", new { name = "Fixture renamed group" }))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+        var customer = new Customer { Name = "Fixture customer", Code = Guid.NewGuid().ToString("N")[..8] };
+        var site = new Site { CustomerId = customer.Id, Name = "Fixture site", Code = Guid.NewGuid().ToString("N")[..8] };
+        var phone = new Terminal { SiteId = site.Id, DisplayName = "Fixture phone", TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() };
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.AddRange(customer, site, phone);
+            await db.SaveChangesAsync();
+        }
+        var membershipPath = $"{phones}/{phone.Id}/groups";
+        var membership = await userClient.GetFromJsonAsync<JsonElement>(membershipPath);
+        using (var added = await userClient.PutAsJsonAsync(membershipPath,
+            new { groupIds = new[] { groupId }, revision = membership.GetProperty("revision").GetInt32() }))
+            added.EnsureSuccessStatusCode();
+        membership = await userClient.GetFromJsonAsync<JsonElement>(membershipPath);
+        Assert.Equal(groupId, Assert.Single(membership.GetProperty("groupIds").EnumerateArray()).GetGuid());
+        var membershipRevision = membership.GetProperty("revision").GetInt32();
+        using (var denied = await userClient.PutAsJsonAsync(membershipPath,
+            new { groupIds = Array.Empty<Guid>(), revision = membershipRevision }))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.PutAsJsonAsync($"{phones}/{phone.Id}/group", new { terminalGroupId = (Guid?)null }))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.PutAsJsonAsync($"{groups}/{groupId}/phones",
+            new[] { new { terminalId = phone.Id, revision = membershipRevision, member = false } }))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var removed = await adminClient.PutAsJsonAsync(membershipPath,
+            new { groupIds = Array.Empty<Guid>(), revision = membershipRevision }))
+            removed.EnsureSuccessStatusCode();
+        using (var changed = await adminClient.PutAsJsonAsync(profilePath, new { revision = 1, permissions = new Dictionary<string, int>() }))
+            changed.EnsureSuccessStatusCode();
+        await SignIn(userClient, user);
+        using (var denied = await userClient.GetAsync(phones))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var self = await userClient.GetAsync("/api/auth/me"))
+            self.EnsureSuccessStatusCode();
+        using (var reset = await adminClient.PutAsJsonAsync(profilePath, new { revision = 2, permissions = (object?)null }))
+            reset.EnsureSuccessStatusCode();
+        await SignIn(userClient, user);
+        using (var allowed = await userClient.GetAsync(phones))
+            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        using (var allowed = await machine.GetAsync(phones))
+            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        using (var clean = await adminClient.DeleteAsync($"{groups}/{groupId}"))
+            Assert.Equal(HttpStatusCode.NoContent, clean.StatusCode);
+
+        async Task<JsonElement> SignIn(HttpClient client, OperatorAccount account)
+        {
+            client.DefaultRequestHeaders.Authorization = null;
+            using var response = await client.PostAsJsonAsync("/api/auth/login", new { username = account.Username, password });
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>();
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", body.GetProperty("token").GetString());
+            return body;
+        }
+    }
+
     [PostgresIntegrationFact]
     public async Task Production_accounts_require_an_admin_operator_and_return_safe_fields()
     {

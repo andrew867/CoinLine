@@ -1,6 +1,7 @@
 using System.Data;
 using System.Text.Json;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Services;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
@@ -158,6 +159,8 @@ public sealed class TerminalsController(
     [HttpPost]
     public async Task<ActionResult<object>> Create([FromBody] TerminalCreateDto body, CancellationToken ct)
     {
+        if (body.TerminalGroupId != null && !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Add))
+            return Forbid();
         if (body.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
             return BadRequest(new { error = "Choose a registered firmware version." });
         if (body.TerminalFamilyId != null && TerminalFamilies.Find(body.TerminalFamilyId) == null)
@@ -257,6 +260,14 @@ public sealed class TerminalsController(
                 (g.CustomerId == null || g.CustomerId == terminal.Site!.CustomerId), ct))
             return NotFound(new { error = "Unknown phone group for this customer." });
         var additional = terminal.AdditionalGroups.FirstOrDefault(m => m.TerminalGroupId == body.TerminalGroupId);
+        if (terminal.TerminalGroupId != body.TerminalGroupId)
+        {
+            if (terminal.TerminalGroupId != null && !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Delete))
+                return Forbid();
+            if (body.TerminalGroupId != null && additional == null &&
+                !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Add))
+                return Forbid();
+        }
         if (additional != null)
             db.TerminalGroupMemberships.Remove(additional);
         terminal.TerminalGroupId = body.TerminalGroupId;
@@ -305,12 +316,19 @@ public sealed class TerminalsController(
         if (terminal.TerminalGroupId is { } currentPrimary)
             current.Add(currentPrimary);
         var additions = groupIds.Where(group => !current.Contains(group)).ToList();
+        if (additions.Count > 0 && !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Add))
+            return Forbid();
+        if (current.Except(groupIds).Any() && !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Delete))
+            return Forbid();
         var customerId = terminal.Site!.CustomerId;
         if (await db.TerminalGroups.CountAsync(g => additions.Contains(g.Id) &&
                 (g.CustomerId == null || g.CustomerId == customerId), ct) != additions.Count)
             return BadRequest(new { error = "A selected group is unavailable to this phone's customer." });
 
         Guid? primary = groupIds.Length == 0 ? null : groupIds[0];
+        if (primary != terminal.TerminalGroupId && terminal.TerminalGroupId != null &&
+            current.SetEquals(groupIds) && !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Add | PermissionOperation.Delete))
+            return Forbid();
         var additionalIds = groupIds.Skip(1).ToHashSet();
         var existing = terminal.AdditionalGroups.ToDictionary(m => m.TerminalGroupId);
         if (terminal.TerminalGroupId != primary || !additionalIds.SetEquals(existing.Keys))

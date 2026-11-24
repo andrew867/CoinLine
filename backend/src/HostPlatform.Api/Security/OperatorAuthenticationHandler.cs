@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text.Encodings.Web;
+using HostPlatform.Api.Authorization;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Authentication;
@@ -30,9 +31,11 @@ public sealed class OperatorAuthenticationHandler(
             if (!OperatorToken.TryRead(token, signingKey.Value, out var username, out var role, out var generation))
                 return AuthenticateResult.Fail("Invalid operator token.");
             var account = await db.OperatorAccounts.AsNoTracking().Where(user => user.Username == username && user.Enabled)
-                .Select(user => new { user.Role, user.SessionGeneration }).SingleOrDefaultAsync(Context.RequestAborted);
+                .Select(user => new { user.Role, user.SessionGeneration, user.PermissionProfileJson }).SingleOrDefaultAsync(Context.RequestAborted);
             if (account == null || account.Role != role || account.SessionGeneration != generation)
                 return AuthenticateResult.Fail("The operator session is no longer current.");
+            if (account.Role != OperatorRole.Admin)
+                OperatorPermissions.SetRequestProfile(Context, account.PermissionProfileJson);
             return AuthenticateOperator(username, account.Role, namedAccount: true);
         }
 
