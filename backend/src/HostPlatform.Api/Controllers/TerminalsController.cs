@@ -42,11 +42,7 @@ public sealed class TerminalsController(
         if (!string.IsNullOrEmpty(terminalFamilyId))
             query = query.Where(t => t.TerminalFamilyId == terminalFamilyId);
         if (!string.IsNullOrWhiteSpace(regionCode))
-        {
-            var region = regionCode.Trim().ToLowerInvariant();
-            query = query.Where(t => db.TerminalInventories.Any(inventory => inventory.TerminalId == t.Id
-                && inventory.Details.RegionCode != null && inventory.Details.RegionCode.ToLower() == region));
-        }
+            query = tables.FilterByRegion(query, regionCode);
         if (!string.IsNullOrWhiteSpace(q))
         {
             var s = q.Trim().ToLowerInvariant();
@@ -192,6 +188,18 @@ public sealed class TerminalsController(
 
     [HttpGet("families")]
     public ActionResult<IReadOnlyList<TerminalFamily>> Families() => Ok(TerminalFamilies.Catalog);
+
+    [HttpGet("regions")]
+    public async Task<ActionResult<object>> Regions(CancellationToken ct)
+    {
+        var regions = await db.TerminalInventories.AsNoTracking()
+            .Where(row => row.Details.RegionCode != null && row.Details.RegionCode != "")
+            .GroupBy(row => row.Details.RegionCode!.ToLower())
+            .OrderBy(group => group.Key)
+            .Select(group => new { id = group.Key, name = group.Min(row => row.Details.RegionCode), phoneCount = group.Count() })
+            .ToListAsync(ct);
+        return Ok(regions);
+    }
 
     [HttpPut("{id:guid}/family")]
     public async Task<ActionResult> SetFamily(Guid id, [FromBody] TerminalFamilyDto body, CancellationToken ct)

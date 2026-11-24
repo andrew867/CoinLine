@@ -55,6 +55,17 @@ public sealed class TableRecordUpdateTests(ApiFixture factory)
         var revision = donor.GetProperty("revision").GetInt32();
         var endpoint = $"tables/sets/{source}/record-updates";
 
+        using var region = await client.PutAsJsonAsync($"/api/terminals/{first}/inventory",
+            new { profile = new { regionCode = "Update-East" } });
+        region.EnsureSuccessStatusCode();
+        var regional = await Post($"{endpoint}/preview", new
+        {
+            targetType = "group", targetId = group, regionCode = "update-east", sourceRevision = revision,
+            copyRecords = new[] { 29 }, removeRecords = Array.Empty<int>()
+        });
+        Assert.Equal(1, regional.GetProperty("changeCount").GetInt32());
+        Assert.Equal(first, Assert.Single(regional.GetProperty("targets").EnumerateArray()).GetProperty("id").GetGuid());
+
         var protectedPreview = await Post($"{endpoint}/preview", Request([], [50]));
         Assert.Equal(0, protectedPreview.GetProperty("changeCount").GetInt32());
         Assert.Contains("not confirmed optional", Target(protectedPreview, first).GetProperty("reason").GetString());

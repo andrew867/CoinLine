@@ -1427,6 +1427,148 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal("Lab-New", matches.GetProperty("items")[0].GetProperty("regionCode").GetString());
     }
 
+    [Fact]
+    public async Task Scheduled_region_group_records_send_only_the_selection_and_dependencies_on_call_in()
+    {
+        var seed = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
+            .Single(t => t.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        var siteId = seed.GetProperty("siteId").GetGuid();
+        using var groupResponse = await fx.Client.PostAsJsonAsync("/api/terminal-groups", new { name = "Regional transfer group" }, Json);
+        groupResponse.EnsureSuccessStatusCode();
+        var group = (await groupResponse.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        const string wire = "0000000451";
+        var phone = await CreatePhoneAsync(wire, group, "Lab-East");
+        var otherRegion = await CreatePhoneAsync("0000000452", group, "Lab-West");
+        var sameRegion = await CreatePhoneAsync("0000000453", null, "LAB-EAST");
+        var regions = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals/regions", Json);
+        Assert.Equal(2, regions.EnumerateArray().Single(row => row.GetProperty("id").GetString() == "lab-east")
+            .GetProperty("phoneCount").GetInt32());
+
+        var basisPayload = new byte[1192];
+        basisPayload[^1] = 0x22;
+        var basis = await CreateRateTableSetAsync("Regional schedule retained base", basisPayload);
+        using var assigned = await fx.Client.PostAsJsonAsync($"/api/terminals/{phone}/table-assignment",
+            new { tableSetId = basis }, Json);
+        assigned.EnsureSuccessStatusCode();
+
+        using var create = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Regional partial schedule source" }, Json);
+        create.EnsureSuccessStatusCode();
+        var setId = (await create.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var definitions = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/definitions", Json)).EnumerateArray()
+            .Where(row => row.GetProperty("tableNumber").GetInt32() is 21 or 26 or 73)
+            .ToDictionary(row => row.GetProperty("tableNumber").GetInt32(), row => row.GetProperty("id").GetGuid());
+        byte[] features = new byte[72];
+        features[0] = 26;
+        byte[] rates = new byte[1192];
+        rates[0] = 73;
+        rates[^1] = 0x33;
+        byte[] access = new byte[18];
+        access[0] = 21;
+        Convert.FromHexString("0000000499").CopyTo(access, 1);
+        await AddRecordAsync(access, 0);
+        await AddRecordAsync(features, 1);
+        await AddRecordAsync(rates, 2, definitions[26]);
+        var endpoint = $"/api/tables/sets/{setId}";
+        using var publish = await fx.Client.PostAsync($"{endpoint}/publish?confirm=true", null);
+        publish.EnsureSuccessStatusCode();
+
+        var preview = await fx.Client.GetFromJsonAsync<JsonElement>($"{endpoint}/assignment-preview?targetType=region&regionCode=lab-east", Json);
+        Assert.Equal(new[] { phone, sameRegion }.Order(), preview.GetProperty("targets").EnumerateArray()
+            .Select(row => row.GetProperty("id").GetGuid()).Order());
+        Assert.All(preview.GetProperty("targets").EnumerateArray(), row => Assert.False(row.GetProperty("eligible").GetBoolean()));
+        var path = $"{endpoint}/assignment-preview?targetType=group&targetId={group}&regionCode=LAB-East&recordNumbers=73";
+        preview = await fx.Client.GetFromJsonAsync<JsonElement>(path, Json);
+        var target = Assert.Single(preview.GetProperty("targets").EnumerateArray());
+        Assert.Equal(phone, target.GetProperty("id").GetGuid());
+        Assert.True(target.GetProperty("eligible").GetBoolean());
+        Assert.Equal(new[] { 26, 73 }, preview.GetProperty("recordNumbers").Deserialize<int[]>());
+
+        var schedule = $"{endpoint}/schedules";
+        using var forged = await fx.Client.PostAsJsonAsync(schedule, Request([phone, otherRegion], [73]), Json);
+        Assert.Equal(HttpStatusCode.Conflict, forged.StatusCode);
+        using var queued = await fx.Client.PostAsJsonAsync(schedule, Request([phone], [73]), Json);
+        queued.EnsureSuccessStatusCode();
+        using var replay = await fx.Client.PostAsJsonAsync(schedule, Request([phone], [26, 73]), Json);
+        replay.EnsureSuccessStatusCode();
+        Assert.Equal(1, (await replay.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("alreadyScheduled").GetInt32());
+        using var different = await fx.Client.PostAsJsonAsync(schedule, Request([phone], [26]), Json);
+        Assert.Equal(HttpStatusCode.Conflict, different.StatusCode);
+
+        var before = await BatchIdsAsync();
+        await using (var install = await OpenAsync())
+        {
+            await install.Stream.WriteAsync(Message(Convert.FromHexString(wire), [44, 2]));
+            AssertAck(await ReadFrameAsync(install.Stream, TimeSpan.FromSeconds(5)));
+            var header = await ReadAsync(install);
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await AckAsync(install, header);
+            Assert.Equal(basisPayload[..NccConstants.MaxDataSize], (await ReadAsync(install)).Data);
+        }
+        await WaitNewBatchAsync(before, 3);
+        before = await BatchIdsAsync();
+        await using (var callIn = await OpenAsync())
+        {
+            await callIn.Stream.WriteAsync(Message(Convert.FromHexString(wire), [8]));
+            AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            var header = await ReadAsync(callIn);
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await AckAsync(callIn, header);
+            foreach (var payload in new[] { features, rates })
+            {
+                for (var offset = 0; offset < payload.Length; offset += NccConstants.MaxDataSize)
+                {
+                    var fragment = await ReadAsync(callIn);
+                    Assert.Equal(payload[offset..Math.Min(offset + NccConstants.MaxDataSize, payload.Length)], fragment.Data);
+                    await AckAsync(callIn, fragment);
+                }
+                await callIn.Stream.WriteAsync(Message(Convert.FromHexString(wire), [14, payload[0]]));
+                AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            }
+            var end = await ReadAsync(callIn);
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+            await WaitNewBatchAsync(before, 2);
+        }
+
+        var delivered = (await fx.Client.GetFromJsonAsync<JsonElement>(schedule, Json))[0];
+        Assert.Equal("Delivered", delivered.GetProperty("status").GetString());
+        Assert.Equal(new[] { 26, 73 }, delivered.GetProperty("recordNumbers").Deserialize<int[]>());
+        var assignment = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/terminals/{phone}/table-assignment", Json);
+        Assert.Equal(basis, assignment.GetProperty("tableSetId").GetGuid());
+
+        async Task<Guid> CreatePhoneAsync(string terminalIdHex, Guid? terminalGroupId, string regionCode)
+        {
+            using var created = await fx.Client.PostAsJsonAsync("/api/terminals", new
+            {
+                displayName = $"Regional fixture {terminalIdHex[^2..]}", siteId, terminalIdHex, terminalGroupId, status = 0
+            }, Json);
+            created.EnsureSuccessStatusCode();
+            var id = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+            using var saved = await fx.Client.PutAsJsonAsync($"/api/terminals/{id}/inventory", new { profile = new { regionCode } }, Json);
+            saved.EnsureSuccessStatusCode();
+            return id;
+        }
+
+        async Task AddRecordAsync(byte[] payload, int sortOrder, Guid? dependsOnTableDefinitionId = null)
+        {
+            using var version = await fx.Client.PostAsJsonAsync("/api/tables/versions", new
+            {
+                tableSetId = setId, tableDefinitionId = definitions[payload[0]], tableRevision = 1, sortOrder,
+                payloadBase64 = Convert.ToBase64String(payload), dependsOnTableDefinitionId
+            }, Json);
+            version.EnsureSuccessStatusCode();
+        }
+
+        object Request(Guid[] terminalIds, int[] recordNumbers) =>
+            new { targetType = "group", targetId = group, regionCode = "Lab-East", terminalIds, recordNumbers };
+
+        static async Task<NccWirePacket> ReadAsync(Link link) =>
+            Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+
+        static ValueTask AckAsync(Link link, NccWirePacket frame) =>
+            link.Stream.WriteAsync(Control((byte)(NccControl.Ack | frame.Control)));
+    }
+
     private async Task AssignLabSetAsync()
     {
         var sets = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/sets", Json))!;

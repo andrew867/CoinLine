@@ -14,28 +14,7 @@ public static class TableRecordCopy
             throw new InvalidOperationException("Choose a source set for the same customer or one without a customer.");
 
         var selected = numbers.ToHashSet();
-        var sourceByDefinition = source.Versions.ToLookup(version => version.TableDefinitionId);
-        var sourceByType = source.Versions.ToLookup(version => version.TableDefinition!.TableNumber);
-        var chosen = new Dictionary<Guid, TableVersion>();
-        foreach (var number in selected)
-        {
-            var found = sourceByType[number];
-            if (found.Count() != 1)
-                throw new InvalidOperationException($"The source set must have exactly one MT{number} record.");
-
-            var version = found.Single();
-            while (chosen.TryAdd(version.TableDefinitionId, version) && version.DependsOnTableDefinitionId is { } dependency)
-            {
-                var companions = sourceByDefinition[dependency];
-                if (companions.Count() != 1)
-                    throw new InvalidOperationException($"MT{VersionType(version)} needs exactly one copy of its required record in the source set.");
-                version = companions.Single();
-            }
-        }
-
-        var ordered = TableDistributionService.OrderVersionsForDownload(chosen.Values.ToArray());
-        if (!TableDistributionService.HasCompleteDlogRecords(ordered) || ordered.Any(version => !version.ValidationPassed))
-            throw new InvalidOperationException("The selected records and their dependencies must be complete, valid records with distinct message types.");
+        var ordered = TableDistributionService.SelectRecords(source.Versions.ToArray(), selected);
 
         var destinationByType = destination.Versions.ToLookup(version => version.TableDefinition!.TableNumber);
         var resultingTypes = destinationByType.Select(group => group.Key).Union(ordered.Select(VersionType)).ToArray();

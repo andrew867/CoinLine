@@ -6,6 +6,7 @@ import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 const scopes = {
   terminal: { label: 'Phone', path: '/api/terminals' },
   group: { label: 'Phone group', path: '/api/terminal-groups' },
+  region: { label: 'Region', path: '/api/terminals/regions' },
   site: { label: 'Location', path: '/api/sites' },
   customer: { label: 'Customer', path: '/api/customers' },
 } as const
@@ -16,6 +17,7 @@ type Target = { id: string; displayName: string; terminalFamilyLabel: string | n
 type SavedRecord = { tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean }
 type OptionalRecord = { tableNumber: number; name: string }
 type RecordAction = '' | 'copy' | 'remove'
+type AssignmentAction = 'set' | 'records' | 'schedule-records'
 type UpdateTarget = Omit<Target, 'eligible'> & {
   baseSetName: string | null
   changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean }[]
@@ -34,14 +36,18 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
   const [targetId, setTargetId] = useState('')
+  const [regions, setRegions] = useState<Option[]>([])
+  const [groupRegion, setGroupRegion] = useState('')
   const [targets, setTargets] = useState<Target[] | null>(null)
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState(codeOnly ? 'now' : 'assignment')
   const [availableAt, setAvailableAt] = useState('')
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
-  const [selectedRecords, setSelectedRecords] = useState(false)
+  const [action, setAction] = useState<AssignmentAction>('set')
   const [actions, setActions] = useState<Record<number, RecordAction>>({})
+  const [deliveryRecords, setDeliveryRecords] = useState<number[]>([])
+  const [wireSelection, setWireSelection] = useState<number[] | null>(null)
   const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null)
   const [resultSets, setResultSets] = useState<UpdatedSet[]>([])
   const choices = new Map((optionalRecords ?? []).map((record) => [record.tableNumber, { name: record.name, removable: true, copyable: false }]))
@@ -56,14 +62,37 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const actionEntries = Object.entries(actions)
   const copyRecords = actionEntries.filter(([, action]) => action === 'copy').map(([number]) => Number(number))
   const removeRecords = actionEntries.filter(([, action]) => action === 'remove').map(([number]) => Number(number))
+  const selectedRecords = action === 'records'
+  const partialSchedule = action === 'schedule-records'
+  const schedulesOnly = codeOnly || partialSchedule
+  const deliveryMode = schedulesOnly && mode === 'assignment' ? 'now' : mode
+  const scopeSelection = {
+    targetType: scope,
+    targetId: scope === 'region' ? null : targetId,
+    regionCode: (scope === 'region' ? targetId : scope === 'group' ? groupRegion : '') || undefined,
+  }
 
   useEffect(() => {
     let current = true
-    void apiGet<Option[]>(scopes[scope].path)
-      .then((choices) => { if (current) setOptions(choices) })
+    void Promise.all([
+      apiGet<Option[]>(scopes[scope].path),
+      scope === 'group' ? apiGet<Option[]>(scopes.region.path) : Promise.resolve([]),
+    ]).then(([choices, groupRegions]) => {
+      if (!current) return
+      setOptions(choices)
+      setRegions(groupRegions)
+    })
       .catch(() => { if (current) setFeedback('Could not load assignment targets.') })
     return () => { current = false }
   }, [scope])
+
+  function clearReview() {
+    setTargets(null)
+    setWireSelection(null)
+    setUpdatePreview(null)
+    setResultSets([])
+    setFeedback('')
+  }
 
   async function preview(event: React.FormEvent) {
     event.preventDefault()
@@ -72,12 +101,17 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       return
     }
     setTargets(null)
+    setWireSelection(null)
     setFeedback('')
     setBusy(true)
     try {
-      const params = new URLSearchParams({ targetType: scope, targetId })
-      const result = await apiGet<{ targets: Target[] }>(`/api/tables/sets/${setId}/assignment-preview?${params}`)
+      const params = new URLSearchParams({ targetType: scope })
+      if (scopeSelection.targetId) params.set('targetId', scopeSelection.targetId)
+      if (scopeSelection.regionCode) params.set('regionCode', scopeSelection.regionCode)
+      if (partialSchedule) deliveryRecords.forEach(number => params.append('recordNumbers', String(number)))
+      const result = await apiGet<{ targets: Target[]; recordNumbers: number[] | null }>(`/api/tables/sets/${setId}/assignment-preview?${params}`)
       setTargets(result.targets)
+      setWireSelection(result.recordNumbers)
     } catch {
       setFeedback('Could not preview this assignment.')
     } finally {
@@ -92,7 +126,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     if (!apply) setUpdatePreview(null)
     try {
       const response = await apiPostRaw(`/api/tables/sets/${setId}/record-updates${apply ? '' : '/preview'}`, {
-        targetType: scope, targetId, sourceRevision: revision, copyRecords, removeRecords,
+        ...scopeSelection, sourceRevision: revision, copyRecords, removeRecords,
         ...(apply ? { previewToken: updatePreview?.previewToken } : {}),
       })
       const result = await response.json().catch(() => null)
@@ -113,8 +147,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   }
 
   async function assign() {
-    const scheduled = mode !== 'assignment'
-    const selected = mode === 'later' ? new Date(availableAt) : null
+    const scheduled = deliveryMode !== 'assignment'
+    const selected = deliveryMode === 'later' ? new Date(availableAt) : null
     if (selected && (!Number.isFinite(selected.getTime()) || selected.getTime() <= Date.now())) {
       setFeedback('Choose a future date and time.')
       return
@@ -123,13 +157,14 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     setFeedback('')
     try {
       const response = await apiPostRaw(`/api/tables/sets/${setId}/${scheduled ? 'schedules' : 'assignments'}`, {
-        targetType: scope, targetId, terminalIds: targets?.filter((target) => target.eligible).map((target) => target.id) ?? [],
+        ...scopeSelection, terminalIds: targets?.filter((target) => target.eligible).map((target) => target.id) ?? [],
         ...(scheduled ? { availableAtUtc: selected?.toISOString() ?? null } : {}),
+        ...(partialSchedule ? { recordNumbers: deliveryRecords } : {}),
       })
       const result = await response.json().catch(() => null)
       if (!response.ok) throw new Error(result?.error ?? 'Could not save the assignment.')
       if (scheduled) {
-        setFeedback(`Scheduled for ${result.scheduled} phones. Already scheduled for ${result.alreadyScheduled}.`)
+        setFeedback(`Scheduled for ${result.scheduled} ${result.scheduled === 1 ? 'phone' : 'phones'}. Already scheduled for ${result.alreadyScheduled}.`)
         setScheduleRefresh((value) => value + 1)
       } else
         setFeedback(`Updated ${result.changed} of ${result.targetCount} eligible phone assignments.`)
@@ -146,29 +181,25 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     <section className="table-config-panel" aria-labelledby="table-assignment-heading">
       <h2 id="table-assignment-heading">{codeOnly ? 'Schedule firmware parameters' : 'Assign this set'}</h2>
       <p className="page-intro">{codeOnly ? 'The selected phones pick up these parameters on a routine call-in or callback.'
-        : 'A group, location or customer assignment updates its current phones. The phones receive the set when they request a download.'}</p>
+        : 'Preview the current phones in a scope before assigning a set or scheduling a download.'}</p>
       <form className="table-config-selectors" onSubmit={(event) => void preview(event)}>
         {!codeOnly && <label>Assignment action
-          <select value={selectedRecords ? 'records' : 'set'} disabled={busy} onChange={(event) => {
-            setSelectedRecords(event.target.value === 'records')
-            setTargets(null)
-            setUpdatePreview(null)
-            setFeedback('')
-            setResultSets([])
+          <select value={action} disabled={busy} onChange={(event) => {
+            setAction(event.target.value as AssignmentAction)
+            clearReview()
           }}>
             <option value="set">Assign full set</option>
             <option value="records">Update selected records</option>
+            <option value="schedule-records">Schedule selected records</option>
           </select>
         </label>}
-        <label>{codeOnly ? 'Schedule by' : 'Assign by'}
+        <label>{schedulesOnly ? 'Schedule by' : 'Assign by'}
           <select disabled={busy} value={scope} onChange={(event) => {
             setScope(event.target.value as Scope)
             setOptions([])
             setTargetId('')
-            setTargets(null)
-            setUpdatePreview(null)
-            setResultSets([])
-            setFeedback('')
+            setGroupRegion('')
+            clearReview()
           }}>
             {Object.entries(scopes).map(([value, { label }]) => <option value={value} key={value}>{label}</option>)}
           </select>
@@ -176,15 +207,21 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         <label>{scopes[scope].label}
           <select disabled={busy} value={targetId} onChange={(event) => {
             setTargetId(event.target.value)
-            setTargets(null)
-            setUpdatePreview(null)
-            setResultSets([])
-            setFeedback('')
+            clearReview()
           }}>
             <option value="">Choose {scopes[scope].label.toLowerCase()}</option>
             {options.map((item) => <option value={item.id} key={item.id}>{item.name ?? item.displayName}</option>)}
           </select>
         </label>
+        {scope === 'group' && <label>Within region
+          <select disabled={busy} value={groupRegion} onChange={event => {
+            setGroupRegion(event.target.value)
+            clearReview()
+          }}>
+            <option value="">All regions</option>
+            {regions.map(region => <option value={region.id} key={region.id}>{region.name}</option>)}
+          </select>
+        </label>}
         {selectedRecords && <fieldset className="scope-record-choices" disabled={busy}>
           <legend>Record actions</legend>
           {[...choices.entries()].sort(([first], [second]) => first - second).map(([number, choice]) =>
@@ -203,8 +240,20 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             </label>)}
           {removeRecords.length > 0 && <p>Removal affects future data sets. A phone can retain the already installed record.</p>}
         </fieldset>}
-        <button type="submit" disabled={!targetId || busy || (selectedRecords && !copyRecords.length && !removeRecords.length)}>
-          {selectedRecords ? 'Preview record update' : codeOnly ? 'Preview phones' : 'Preview assignment'}
+        {partialSchedule && <fieldset className="scope-record-choices" disabled={busy}>
+          <legend>Records to download</legend>
+          {[...choices].filter(([, choice]) => choice.copyable).sort(([first], [second]) => first - second).map(([number, choice]) =>
+            <label className="native-table-toggle" key={number}>
+              <input type="checkbox" checked={deliveryRecords.includes(number)} onChange={event => {
+                setDeliveryRecords(current => event.target.checked ? [...current, number] : current.filter(record => record !== number))
+                clearReview()
+              }} />
+              MT{number} · {choice.name}
+            </label>)}
+        </fieldset>}
+        <button type="submit" disabled={!targetId || busy || (selectedRecords && !copyRecords.length && !removeRecords.length)
+          || (partialSchedule && !deliveryRecords.length)}>
+          {selectedRecords ? 'Preview record update' : schedulesOnly ? 'Preview phones' : 'Preview assignment'}
         </button>
       </form>
       {updatePreview && <section className="table-config-preview" aria-labelledby="scope-record-review">
@@ -222,23 +271,24 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       </section>}
       {targets && (
         <div className="table-config-preview">
-          <strong>{eligible} eligible phones</strong>
+          <strong>{eligible} eligible {eligible === 1 ? 'phone' : 'phones'}</strong>
+          {wireSelection && <p>Records to send {wireSelection.map(number => `MT${number}`).join(', ')}</p>}
           {targets.length > 0 && <ul>{targets.map((item) => <li key={item.id}>
             {item.displayName}{item.terminalFamilyLabel && ` · ${item.terminalFamilyLabel}`}{item.reason && ` · ${item.reason}`}
           </li>)}</ul>}
           <div className="table-config-selectors">
             <label>Delivery
-              <select value={mode} disabled={busy} onChange={(event) => setMode(event.target.value)}>
-                {!codeOnly && <option value="assignment">Assign for explicit table requests</option>}
+              <select value={deliveryMode} disabled={busy} onChange={(event) => setMode(event.target.value)}>
+                {!schedulesOnly && <option value="assignment">Assign for explicit table requests</option>}
                 <option value="now">Prepare now for the next call-in</option>
                 <option value="later">Prepare at a specific time</option>
               </select>
             </label>
-            {mode === 'later' && <label>Available from (local time)
+            {deliveryMode === 'later' && <label>Available from (local time)
               <input type="datetime-local" value={availableAt} disabled={busy} onChange={(event) => setAvailableAt(event.target.value)} />
             </label>}
-            <button type="button" disabled={!eligible || busy || (mode === 'later' && !availableAt)} onClick={() => void assign()}>
-              {mode === 'assignment' ? 'Assign to' : 'Schedule for'} {eligible} {eligible === 1 ? 'phone' : 'phones'}
+            <button type="button" disabled={!eligible || busy || (deliveryMode === 'later' && !availableAt)} onClick={() => void assign()}>
+              {deliveryMode === 'assignment' ? 'Assign to' : 'Schedule for'} {eligible} {eligible === 1 ? 'phone' : 'phones'}
             </button>
           </div>
         </div>

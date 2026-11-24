@@ -10,7 +10,9 @@ public sealed class TerminalInventory : AuditableEntity
 
 public sealed record TerminalInventoryDetails
 {
-    [StringLength(32)]
+    public const int RegionCodeLength = 32;
+
+    [StringLength(RegionCodeLength)]
     public string? RegionCode { get; init; }
     [StringLength(24)]
     public string? Route { get; init; }

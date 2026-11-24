@@ -10,6 +10,7 @@ type Schedule = {
   tableSet: string
   availableAtUtc: string
   completedAtUtc: string | null
+  recordNumbers: number[] | null
   status: 'Scheduled' | 'Ready' | 'Delivering' | 'Delivered' | 'Cancelled'
   lastBatchId: string | null
   lastError: string | null
@@ -60,11 +61,12 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
       {rows && rows.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
           <table>
-            <thead><tr><th>Phone</th>{!setId && <th>Table set</th>}<th>Available from</th><th>Status</th><th>Delivery</th></tr></thead>
+            <thead><tr><th>Phone</th>{!setId && <th>Table set</th>}<th>Records</th><th>Available from</th><th>Status</th><th>Delivery</th></tr></thead>
             <tbody>{rows.map((row) => (
               <tr key={row.id}>
                 <td><Link to={`/terminals/${row.terminalId}`}>{row.phone}</Link></td>
                 {!setId && <td><Link to={`/table-sets/${row.tableSetId}`}>{row.tableSet}</Link></td>}
+                <td>{row.recordNumbers?.map(number => `MT${number}`).join(', ') ?? 'All records'}</td>
                 <td><time dateTime={row.availableAtUtc}>{new Date(row.availableAtUtc).toLocaleString()}</time></td>
                 <td>{row.status}</td>
                 <td>

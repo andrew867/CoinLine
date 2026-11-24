@@ -82,6 +82,7 @@ public class ScheduledTableDownload : AuditableEntity
     public Guid TableSetId { get; set; }
     public TableSet? TableSet { get; set; }
     public DateTime AvailableAtUtc { get; set; }
+    public int[]? RecordNumbers { get; set; }
     public Guid? NccSessionId { get; set; }
     public NccSession? NccSession { get; set; }
     public Guid? LastBatchId { get; set; }

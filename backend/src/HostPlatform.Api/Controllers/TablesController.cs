@@ -332,16 +332,22 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
     [HttpGet("sets/{id:guid}/assignment-preview")]
     public async Task<ActionResult<object>> PreviewAssignments(Guid id, [FromQuery] string targetType,
-        [FromQuery] Guid targetId, CancellationToken ct)
+        [FromQuery] Guid? targetId, [FromQuery] string? regionCode, [FromQuery] int[]? recordNumbers, CancellationToken ct)
     {
-        var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
+        var query = db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).AsQueryable();
+        if (recordNumbers is { Length: > 0 })
+            query = query.Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
+                .Include(s => s.Versions).ThenInclude(v => v.TablePayload);
+        var set = await query.FirstOrDefaultAsync(s => s.Id == id, ct);
         if (set == null)
             return NotFound();
 
         try
         {
-            var targets = await AssignmentTargetsAsync(set, targetType, targetId, ct);
-            return Ok(new { targets });
+            var records = recordNumbers is { Length: > 0 }
+                ? TableDistributionService.SelectDataDownloadRecords(set.Versions.ToArray(), recordNumbers) : null;
+            var targets = await AssignmentTargetsAsync(set, targetType, targetId, regionCode, ct, records);
+            return Ok(new { targets, recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber) });
         }
         catch (InvalidOperationException ex)
         {
@@ -363,7 +369,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         List<AssignmentTarget> targets;
         try
         {
-            targets = await AssignmentTargetsAsync(set, body.TargetType, body.TargetId, ct);
+            targets = await AssignmentTargetsAsync(set, body.TargetType, body.TargetId, body.RegionCode, ct);
         }
         catch (InvalidOperationException ex)
         {
@@ -404,9 +410,13 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         if (changed > 0)
         {
             ApiAudit.Write(db, HttpContext, "tables.set", "assign_scope", id.ToString(),
-                new { tableSetId = id, body.TargetType, body.TargetId, changed });
+                new { tableSetId = id, body.TargetType, body.TargetId, body.RegionCode, changed });
             try { await db.SaveChangesAsync(ct); }
-            catch (DbUpdateConcurrencyException) { return Conflict(new { error = "A phone assignment changed. Preview it again." }); }
+            catch (DbUpdateException ex) when (ex is DbUpdateConcurrencyException ||
+                ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            {
+                return Conflict(new { error = "A phone assignment changed. Preview it again." });
+            }
         }
         return Ok(new { changed, targetCount = ids.Count });
     }
@@ -423,7 +433,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             .Select(s => new
             {
                 s.Id, s.TerminalId, phone = s.Terminal!.DisplayName, s.TableSetId, tableSet = s.TableSet!.Name,
-                s.AvailableAtUtc, s.CompletedAtUtc,
+                s.AvailableAtUtc, s.CompletedAtUtc, s.RecordNumbers,
                 status = s.CancelledAtUtc != null ? "Cancelled"
                     : s.CompletedAtUtc != null ? "Delivered"
                     : s.NccSession != null && s.NccSession.Status == NccSessionStatus.Active ? "Delivering"
@@ -442,7 +452,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             .FirstOrDefaultAsync(s => s.Id == id, ct);
         if (set == null)
             return NotFound();
-        if (set.Status != TableSetStatus.Published || !TableDistributionService.HasCompleteDlogRecords(set.Versions))
+        if (set.Status != TableSetStatus.Published ||
+            (body.RecordNumbers == null && !TableDistributionService.HasCompleteDlogRecords(set.Versions)))
             return BadRequest(new { error = "Publish a set of complete wire records before scheduling it." });
 
         var now = clock.GetUtcNow().UtcDateTime;
@@ -455,9 +466,16 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         // PostgreSQL stores timestamps at microsecond precision.
         ready = ready.AddTicks(-(ready.Ticks % 10));
 
+        IReadOnlyList<TableVersion>? records;
         List<AssignmentTarget> targets;
-        try { targets = await AssignmentTargetsAsync(set, body.TargetType, body.TargetId, ct); }
+        try
+        {
+            records = body.RecordNumbers == null ? null
+                : TableDistributionService.SelectDataDownloadRecords(set.Versions.ToArray(), body.RecordNumbers);
+            targets = await AssignmentTargetsAsync(set, body.TargetType, body.TargetId, body.RegionCode, ct, records);
+        }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        var recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber).ToArray();
 
         var ids = targets.Where(t => t.Eligible).Select(t => t.Id).ToHashSet();
         if (ids.Count == 0 || !ids.SetEquals(body.TerminalIds))
@@ -466,7 +484,9 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         var open = await db.ScheduledTableDownloads.AsNoTracking()
             .Where(s => ids.Contains(s.TerminalId) && s.CompletedAtUtc == null && s.CancelledAtUtc == null)
             .ToListAsync(ct);
-        if (open.Any(s => s.TableSetId != id || (body.AvailableAtUtc.HasValue ? s.AvailableAtUtc != ready : s.AvailableAtUtc > now)))
+        if (open.Any(s => s.TableSetId != id || (body.AvailableAtUtc.HasValue ? s.AvailableAtUtc != ready : s.AvailableAtUtc > now)
+            || (s.RecordNumbers == null) != (recordNumbers == null)
+            || (s.RecordNumbers != null && !s.RecordNumbers.SequenceEqual(recordNumbers ?? []))))
             return Conflict(new { error = "A selected phone already has an open download. Cancel that schedule before replacing it." });
 
         ids.ExceptWith(open.Select(s => s.TerminalId));
@@ -474,10 +494,10 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         {
             db.ScheduledTableDownloads.AddRange(ids.Select(terminalId => new ScheduledTableDownload
             {
-                TerminalId = terminalId, TableSetId = id, AvailableAtUtc = ready
+                TerminalId = terminalId, TableSetId = id, AvailableAtUtc = ready, RecordNumbers = recordNumbers
             }));
             ApiAudit.Write(db, HttpContext, "tables.set", "schedule_scope", id.ToString(),
-                new { body.TargetType, body.TargetId, ready, count = ids.Count });
+                new { body.TargetType, body.TargetId, body.RegionCode, recordNumbers, ready, count = ids.Count });
             try { await db.SaveChangesAsync(ct); }
             catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
             {
@@ -507,12 +527,14 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         return NoContent();
     }
 
-    private async Task<List<AssignmentTarget>> AssignmentTargetsAsync(TableSet set, string targetType, Guid targetId,
-        CancellationToken ct)
+    private async Task<List<AssignmentTarget>> AssignmentTargetsAsync(TableSet set, string targetType, Guid? targetId,
+        string? regionCode, CancellationToken ct, IReadOnlyList<TableVersion>? records = null)
     {
-        var selected = tables.PhonesInScope(targetType, targetId);
-        var access = await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
-            .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21).Take(2).ToListAsync(ct);
+        var selected = tables.PhonesInScope(targetType, targetId, regionCode);
+        var access = records == null
+            ? await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
+                .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21).Take(2).ToListAsync(ct)
+            : records.Where(v => v.TableDefinition!.TableNumber == 21).Take(2).ToList();
         var phones = await selected.OrderBy(t => t.DisplayName)
             .Select(t => new { t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId })
             .ToListAsync(ct);
@@ -660,8 +682,9 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     public sealed record TableCloneDto(string Name);
     public sealed record TableRecordCopyRequest(Guid SourceSetId, int SourceRevision, int DestinationRevision, int[] RecordNumbers);
     public sealed record AdvertisingDto(AdvertisingSlot[] Slots, int? Revision = null, string? Sha256 = null);
-    public sealed record TableScopeDto(string TargetType, Guid TargetId, Guid[] TerminalIds);
-    public sealed record TableScopeScheduleDto(string TargetType, Guid TargetId, Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc);
+    public sealed record TableScopeDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, string? RegionCode = null);
+    public sealed record TableScopeScheduleDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc,
+        string? RegionCode = null, int[]? RecordNumbers = null);
     private sealed record AssignmentTarget(Guid Id, string DisplayName, Guid SiteId, Guid CustomerId, string? TerminalFamilyLabel,
         bool Eligible, string? Reason);
 

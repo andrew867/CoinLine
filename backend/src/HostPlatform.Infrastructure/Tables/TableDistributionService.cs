@@ -31,17 +31,34 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         ValidationDiagnosticsJson = source.ValidationDiagnosticsJson
     };
 
-    public IQueryable<Terminal> PhonesInScope(string targetType, Guid targetId)
+    public IQueryable<Terminal> PhonesInScope(string targetType, Guid? targetId, string? regionCode = null)
     {
         var phones = db.Terminals.AsNoTracking();
+        if (regionCode != null)
+        {
+            if (targetType is not ("region" or "group"))
+                throw new InvalidOperationException("A region can only be used on its own or with a phone group.");
+            if (string.IsNullOrWhiteSpace(regionCode) || regionCode.Trim().Length > TerminalInventoryDetails.RegionCodeLength)
+                throw new InvalidOperationException("Choose a valid region code.");
+            phones = FilterByRegion(phones, regionCode);
+        }
+
         return targetType switch
         {
-            "terminal" => phones.Where(phone => phone.Id == targetId),
-            "group" => phones.Where(phone => phone.TerminalGroupId == targetId || phone.AdditionalGroups.Any(m => m.TerminalGroupId == targetId)),
-            "site" => phones.Where(phone => phone.SiteId == targetId),
-            "customer" => phones.Where(phone => phone.Site!.CustomerId == targetId),
-            _ => throw new InvalidOperationException("Choose a phone, group, site or customer.")
+            "region" when targetId == null && regionCode != null => phones,
+            "terminal" when targetId != null => phones.Where(phone => phone.Id == targetId),
+            "group" when targetId != null => phones.Where(phone => phone.TerminalGroupId == targetId || phone.AdditionalGroups.Any(m => m.TerminalGroupId == targetId)),
+            "site" when targetId != null => phones.Where(phone => phone.SiteId == targetId),
+            "customer" when targetId != null => phones.Where(phone => phone.Site!.CustomerId == targetId),
+            _ => throw new InvalidOperationException("Choose a phone, group, location, customer or region.")
         };
+    }
+
+    public IQueryable<Terminal> FilterByRegion(IQueryable<Terminal> phones, string regionCode)
+    {
+        var region = regionCode.Trim().ToLowerInvariant();
+        return phones.Where(phone => db.TerminalInventories.Any(row => row.TerminalId == phone.Id
+            && row.Details.RegionCode != null && row.Details.RegionCode.ToLower() == region));
     }
 
     public static string? AccessRecordIssue(IReadOnlyList<TableVersion> accessRecords, string terminalIdHex)
@@ -78,6 +95,42 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
                 return false;
         }
         return types.Count > 0;
+    }
+
+    public static IReadOnlyList<TableVersion> SelectRecords(IReadOnlyCollection<TableVersion> versions, IEnumerable<int> numbers)
+    {
+        var byDefinition = versions.ToLookup(version => version.TableDefinitionId);
+        var byType = versions.ToLookup(version => version.TableDefinition!.TableNumber);
+        var chosen = new Dictionary<Guid, TableVersion>();
+        foreach (var number in numbers.Distinct())
+        {
+            var candidates = byType[number];
+            if (candidates.Count() != 1)
+                throw new InvalidOperationException($"The source set must have exactly one MT{number} record.");
+            var version = candidates.Single();
+            while (chosen.TryAdd(version.TableDefinitionId, version) && version.DependsOnTableDefinitionId is { } dependency)
+            {
+                var companions = byDefinition[dependency];
+                if (companions.Count() != 1)
+                    throw new InvalidOperationException($"MT{version.TableDefinition!.TableNumber} needs exactly one copy of its required record in the source set.");
+                version = companions.Single();
+            }
+        }
+
+        var ordered = OrderVersionsForDownload(chosen.Values.ToArray());
+        if (!HasCompleteDlogRecords(ordered) || ordered.Any(version => !version.ValidationPassed))
+            throw new InvalidOperationException("The selected records and their dependencies must be complete, valid records with distinct message types.");
+        return ordered;
+    }
+
+    public static IReadOnlyList<TableVersion> SelectDataDownloadRecords(IReadOnlyCollection<TableVersion> versions, int[] recordNumbers)
+    {
+        if (recordNumbers.Length is < 1 or > 255 || recordNumbers.Any(number => number is < 1 or > 255))
+            throw new InvalidOperationException("Select at least one data record from the source set.");
+        var records = SelectRecords(versions, recordNumbers);
+        if (records.Any(version => version.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
+            throw new InvalidOperationException("Use the firmware scheduler for MT94.");
+        return records;
     }
 
     /// <summary>
@@ -507,7 +560,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     public async Task StageDeliveredAssignmentAsync(ScheduledTableDownload schedule, DateTime completedAt,
         CancellationToken ct)
     {
-        if (await FindCodeOnlyVersionAsync(schedule.TableSetId, ct) != null)
+        if (schedule.RecordNumbers != null || await FindCodeOnlyVersionAsync(schedule.TableSetId, ct) != null)
             return;
         var terminal = await db.Terminals.AsNoTracking().Where(t => t.Id == schedule.TerminalId)
             .Select(t => new { t.SiteId, t.Site!.CustomerId, t.FirmwareVersionId }).SingleAsync(ct);

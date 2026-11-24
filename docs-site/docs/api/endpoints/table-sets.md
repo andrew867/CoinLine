@@ -20,7 +20,7 @@
 | POST | `/api/tables/sets/{id}/records/{number}/fields` | Start an optional record from a supported inactive template |
 | PUT | `/api/tables/sets/{id}/records/{number}/fields` | Update selected fields on a draft |
 | POST | `/api/tables/sets/{id}/publish` | Publish (**confirm**) |
-| GET | `/api/tables/sets/{id}/assignment-preview` | Preview eligible phones for `targetType` and `targetId` |
+| GET | `/api/tables/sets/{id}/assignment-preview` | Preview eligible phones for the requested scope and record selection |
 | POST | `/api/tables/sets/{id}/assignments` | Apply a published set to the eligible phones confirmed by the preview |
 | POST | `/api/tables/sets/{id}/schedules` | Schedule pickup by the eligible phones confirmed by the preview |
 | GET | `/api/tables/sets/{id}/schedules` | View schedules and their most recent delivery attempts |
@@ -68,6 +68,10 @@ Local-dialing templates are available for the 819-byte uncompressed, 403-byte co
 MT152 stores two periods per day group in weekday, Saturday, Sunday and holiday order. End hour `24` requires end minute `0`. Holiday rows accept a real month and day or two zeros. For each zone, send `period-{row}.{zone}Index` with the zero-based MT93 discount slot `0` through `9`. Send `period-{row}.{zone}Payment` with `0` for disabled, `1` for coins, `2` for cards or `3` for both. The zone keys are `local`, `intra`, `inter` and `international`. The original `period-{row}.{zone}` fields still read and write the whole packed byte. Use either the packed field or its component fields in a save.
 
 The 100-byte MT94 profile has an inactive template. Use `startAt` for the UTC time on the terminal clock, without a timezone suffix. The API also accepts the individual `start.*` fields. `start.year` counts from 1900. Use one date input method per edit. `modemSpeed` accepts `1` for 1200 baud and `2` for 2400 baud. The `sector-{index}` values select sectors `0` through `255`. To replace `serverAuthentication`, supply exactly 12 hexadecimal characters. The field returns a null value.
+
+Use `targetType=region` with `regionCode` and omit `targetId`. Use `targetType=group` with the group GUID as `targetId` and an optional `regionCode` for the intersection. The matching region codes come from `GET /api/terminals/regions`. This scope applies to assignment preview, full assignment, record update and scheduling. Region codes match case-insensitively.
+
+For a partial data schedule, pass repeated `recordNumbers` query parameters in the preview and a `recordNumbers` array in the schedule request. The preview returns the full selection including dependencies and tests the eligibility of the records that will be sent. Confirm the eligible terminal IDs from the preview. The schedule history returns the same resolved record numbers in transmission order. A completed partial schedule leaves the normal full-set assignment in place. Omitting the selection schedules the full set.
 
 Use `POST /api/tables/sets/{id}/schedules` for a published set containing only MT94. `availableAtUtc` determines when a call-in can pick up the record. When enabled, `startAt` must be later than `availableAtUtc`, or later than the current time for immediate availability. If a phone first calls after the enabled terminal start time has passed, the host cancels the pending delivery. A disabled record can be scheduled to clear the terminal’s code download schedule. A successful MT94-only delivery belongs to the firmware schedule history and is independent of the phone’s regular table assignment.
 

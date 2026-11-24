@@ -11,6 +11,7 @@
 | GET | `/api/terminals/{id}/inventory` | Read site details, administrative fields, equipment and reported hardware serial |
 | PUT | `/api/terminals/{id}/inventory` | Replace the terminal inventory profile using its current revision |
 | GET | `/api/terminals/families` | List terminal family IDs, release names, variants and Maximizer type numbers |
+| GET | `/api/terminals/regions` | List region codes currently in use and their phone counts |
 | PUT | `/api/terminals/{id}/family` | Set `terminalFamilyId` or clear it with null |
 | PUT | `/api/terminals/{id}/firmware` | Register `firmwareVersionId` for the installed build or use null for unknown |
 | GET | `/api/terminals/{id}/groups` | Read current memberships and groups available to this phone |

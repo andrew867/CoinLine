@@ -2673,6 +2673,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("NccSessionId")
                         .HasColumnType("uuid");
 
+                    b.PrimitiveCollection<int[]>("RecordNumbers")
+                        .HasColumnType("integer[]");
+
                     b.Property<DateTime?>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
 

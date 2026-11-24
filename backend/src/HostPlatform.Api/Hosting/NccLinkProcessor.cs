@@ -772,7 +772,7 @@ internal sealed class NccLinkProcessor(
             .FirstOrDefaultAsync(s => s.TerminalId == terminal.Id && s.AvailableAtUtc <= now
                 && s.CompletedAtUtc == null && s.CancelledAtUtc == null, stoppingToken);
         var codeVersion = scheduled == null ? null : await tables.FindCodeOnlyVersionAsync(scheduled.TableSetId, stoppingToken);
-        if (!callIn && codeVersion != null)
+        if (!callIn && (codeVersion != null || scheduled?.RecordNumbers != null))
         {
             scheduled = null;
             codeVersion = null;
@@ -784,8 +784,20 @@ internal sealed class NccLinkProcessor(
         }
 
         Guid? tableSetId = null;
-        var codeIssue = codeVersion == null ? null : CodeDownloadWire.DeliveryIssue(TableDistributionService.GetEffectivePayload(codeVersion), now);
-        if (scheduled != null && codeIssue == null && await IsSetEligibleAsync(scheduled.TableSet, terminal))
+        Guid[]? partialDefinitions = null;
+        var scheduleIssue = codeVersion == null ? null : CodeDownloadWire.DeliveryIssue(TableDistributionService.GetEffectivePayload(codeVersion), now);
+        if (scheduled?.RecordNumbers is { } selected)
+        {
+            var versions = await db.TableVersions.AsNoTracking().Include(version => version.TableDefinition).Include(version => version.TablePayload)
+                .Where(version => version.TableSetId == scheduled.TableSetId).ToArrayAsync(stoppingToken);
+            try
+            {
+                partialDefinitions = TableDistributionService.SelectDataDownloadRecords(versions, selected)
+                    .Select(version => version.TableDefinitionId).ToArray();
+            }
+            catch (InvalidOperationException ex) { scheduleIssue = ex.Message; }
+        }
+        if (scheduled != null && scheduleIssue == null && await IsSetEligibleAsync(scheduled.TableSet, terminal, partialDefinitions))
             tableSetId = scheduled.TableSetId;
         else
         {
@@ -793,7 +805,7 @@ internal sealed class NccLinkProcessor(
             {
                 scheduled.CancelledAtUtc = DateTime.UtcNow;
                 scheduled.Version++;
-                var audit = Audit("scheduled_download_ineligible", new { scheduleId = scheduled.Id, scheduled.TableSetId, reason = codeIssue }, terminal.Id);
+                var audit = Audit("scheduled_download_ineligible", new { scheduleId = scheduled.Id, scheduled.TableSetId, reason = scheduleIssue }, terminal.Id);
                 try { await db.SaveChangesAsync(stoppingToken); }
                 catch (DbUpdateConcurrencyException)
                 {
@@ -806,6 +818,7 @@ internal sealed class NccLinkProcessor(
                 }
             }
             scheduled = null;
+            partialDefinitions = null;
             if (!callIn)
                 tableSetId = await db.TerminalTableAssignments.AsNoTracking()
                     .Where(a => a.TerminalId == terminal.Id && a.TableSet!.Status == TableSetStatus.Published)
@@ -837,8 +850,8 @@ internal sealed class NccLinkProcessor(
             var (created, _) = await tables.CreateDownloadBatchAsync(
                 terminal.Id,
                 tableSetId.Value,
-                DownloadScope.Full,
-                null,
+                partialDefinitions == null ? DownloadScope.Full : DownloadScope.Partial,
+                partialDefinitions,
                 stoppingToken,
                 "ncc-install-" + _session.Id.ToString("N"),
                 scheduled);
@@ -864,7 +877,7 @@ internal sealed class NccLinkProcessor(
         await StartFirmwareTableTransferAsync(stream, terminalId, items);
     }
 
-    private async Task<bool> IsSetEligibleAsync(TableSet? set, Terminal terminal)
+    private async Task<bool> IsSetEligibleAsync(TableSet? set, Terminal terminal, Guid[]? partialDefinitions = null)
     {
         if (set?.Status != TableSetStatus.Published ||
             TableSetFirmwareCompatibility.Mismatch(set, terminal.FirmwareVersionId) != null)
@@ -873,14 +886,11 @@ internal sealed class NccLinkProcessor(
             !await db.Sites.AsNoTracking().AnyAsync(s => s.Id == terminal.SiteId && s.CustomerId == customerId, stoppingToken))
             return false;
 
-        var access = await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
-            .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21)
-            .Take(2).ToListAsync(stoppingToken);
-        if (access.Count > 1)
-            return false;
-        var payload = access.Count == 0 ? [] : TableDistributionService.GetEffectivePayload(access[0]);
-        return payload.Length < 18 || string.Equals(terminal.TerminalIdHex,
-            Convert.ToHexString(payload.AsSpan(1, 5)), StringComparison.OrdinalIgnoreCase);
+        var query = db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
+            .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21);
+        if (partialDefinitions != null)
+            query = query.Where(version => partialDefinitions.Contains(version.TableDefinitionId));
+        return TableDistributionService.AccessRecordIssue(await query.Take(2).ToListAsync(stoppingToken), terminal.TerminalIdHex) == null;
     }
 
     private async Task StartFirmwareTableTransferAsync(NetworkStream stream, byte[] terminalId, List<DownloadBatchItem> items)

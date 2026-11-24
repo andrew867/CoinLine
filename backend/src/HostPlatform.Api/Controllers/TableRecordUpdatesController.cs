@@ -30,7 +30,7 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
             return BadRequest(new { error = "Choose one action per data record. Firmware schedules are handled separately." });
 
         IQueryable<Terminal> scope;
-        try { scope = tables.PhonesInScope(request.TargetType, request.TargetId); }
+        try { scope = tables.PhonesInScope(request.TargetType, request.TargetId, request.RegionCode); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
 
         try
@@ -102,7 +102,8 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
 
             var previewToken = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
             {
-                id, source.Version, request.TargetType, request.TargetId, copies, removals, targets,
+                id, source.Version, request.TargetType, request.TargetId, regionCode = request.RegionCode?.Trim().ToLowerInvariant(),
+                copies, removals, targets,
                 phones = phones.Select(phone => new { phone.Id, phone.Version, phone.SiteId, phone.Site!.CustomerId, phone.FirmwareVersionId, phone.TerminalIdHex }),
                 assignments = assignments.Values.OrderBy(row => row.TerminalId).Select(row => new { row.Id, row.Version, row.TableSetId }),
                 bases = existing.Values.OrderBy(set => set.Id).Select(set => new { set.Id, set.Version })
@@ -138,7 +139,7 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
                 }
                 ApiAudit.Write(db, HttpContext, "tables.set", "update_scope_records", id.ToString(), new
                 {
-                    request.TargetType, request.TargetId, copies, removals, changed = changed.Count, sets = updatedSets.Select(set => set.Id)
+                    request.TargetType, request.TargetId, request.RegionCode, copies, removals, changed = changed.Count, sets = updatedSets.Select(set => set.Id)
                 });
                 await db.SaveChangesAsync(ct);
             }
@@ -173,6 +174,6 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
     private sealed record UpdateTarget(Guid Id, string DisplayName, string? TerminalFamilyLabel,
         Guid? BaseSetId, string? BaseSetName, IReadOnlyList<TableRecordUpdateChange> Changes, string? Reason);
 
-    public sealed record RecordUpdateRequest(string TargetType, Guid TargetId, int SourceRevision, int[] CopyRecords, int[] RemoveRecords,
-        string? PreviewToken = null);
+    public sealed record RecordUpdateRequest(string TargetType, Guid? TargetId, int SourceRevision, int[] CopyRecords, int[] RemoveRecords,
+        string? PreviewToken = null, string? RegionCode = null);
 }
