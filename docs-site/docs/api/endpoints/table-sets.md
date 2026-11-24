@@ -27,6 +27,8 @@ The assignment API supports `terminal`, `group`, `site` and `customer`. Apply th
 
 A new set accepts an optional `targetFirmwareVersionId`. A draft copy inherits the target. Published targeted sets can be assigned and downloaded by phones with the same registered firmware version. Detail responses expose `firmwareFindings`. Blocking findings prevent publishing. Other findings identify records whose format still needs verification.
 
+For the verified 200-entry Multi-pay profile, the set review checks MT92 screening rules that use a direct tariff or mark a call as free. If screening or configured MT101 exchange rules refer to tariffs without an MT73 record in the set, the review returns a warning so a partial update can rely on the phone's installed tariff record.
+
 Each advertising slot has `text`, `durationTicks`, `mode`, `blankBefore` and `endSequence`. Set `endSequence` to write a leading zero that ends the current rotation. To show a timed blank, send empty `text` with `endSequence` false and a positive duration. The response includes `onHookEnabled`, `quickAccessEnabled`, `callEstablishedEnabled` and `scrollTicks`. The settings are null when the respective record has no recognized layout. Durations and scroll values use 10 ms ticks.
 
 The schedule request takes the same selection plus `availableAtUtc`, either an ISO 8601 date and time with its offset or null for immediate availability. Each phone can have one open scheduled download. A call-in can pick up the set once it is available. Failed attempts remain ready for the next call. The existing assignment stays effective until the terminal acknowledges the scheduled download. An operator assignment made during delivery takes precedence.

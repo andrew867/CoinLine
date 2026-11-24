@@ -60,6 +60,78 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Targeted_screening_review_blocks_invalid_rates_and_warns_about_omitted_tariffs()
+    {
+        using var device = await _client.PostAsJsonAsync("/api/firmware/versions", new
+        {
+            label = "Screening reference test", tableProfileId = FirmwareTableProfiles.MultiPay200
+        });
+        device.EnsureSuccessStatusCode();
+        var targetFirmwareVersionId = (await device.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Screening reference test", targetFirmwareVersionId });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+        var screening = new byte[3401];
+        screening[0] = 92;
+        byte[] free = [1, 0x29, 0, 0, 0x70];
+        byte[] paid = [0, 0x35, 128, 0, 0x80];
+        byte[] denied = [0, 0x2B, 255, 0, 0x90];
+        free.CopyTo(screening, 1);
+        paid.CopyTo(screening, 18);
+        denied.CopyTo(screening, 35);
+
+        await ImportRecord(92, screening, 0);
+        var findings = await Findings();
+        Assert.Equal(2, findings.GetArrayLength());
+        Assert.All(findings.EnumerateArray(), finding => Assert.True(finding.GetProperty("blocking").GetBoolean()));
+        Assert.Contains("255", findings[0].GetProperty("message").GetString());
+        Assert.Contains("tariff 128", findings[1].GetProperty("message").GetString());
+        using var blocked = await _client.PostAsync($"{path}/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+
+        var fieldsPath = $"{path}/records/92/fields";
+        var original = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        using var saved = await _client.PutAsJsonAsync(fieldsPath, new
+        {
+            profile = original.GetProperty("profile"), revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["rule-0.rate"] = "255", ["rule-1.rate"] = "2", ["rule-0.wildcards"] = "15",
+                ["rule-0.pattern"] = "*8#", ["rule-0.denyDataPort"] = "true" }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var updated = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        var firstRule = updated.GetProperty("sections")[0].GetProperty("fields").EnumerateArray()
+            .ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal("*8#", firstRule["rule-0.pattern"].GetProperty("value").GetString());
+        Assert.Equal("15", firstRule["rule-0.wildcards"].GetProperty("value").GetString());
+        Assert.Equal("true", firstRule["rule-0.denyDataPort"].GetProperty("value").GetString());
+        var warning = Assert.Single((await Findings()).EnumerateArray());
+        Assert.Equal(73, warning.GetProperty("tableNumber").GetInt32());
+        Assert.False(warning.GetProperty("blocking").GetBoolean());
+
+        var tariff = new byte[1192];
+        tariff[0] = 73;
+        await ImportRecord(73, tariff, 1);
+        Assert.Empty((await Findings()).EnumerateArray());
+        using var published = await _client.PostAsync($"{path}/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+
+        async Task<JsonElement> Findings() => (await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("firmwareFindings");
+
+        async Task ImportRecord(int number, byte[] bytes, int sortOrder)
+        {
+            using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = $"Screening review MT{number}", tableNumber = number });
+            definition.EnsureSuccessStatusCode();
+            using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+            {
+                tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+                tableRevision = 1, payloadBase64 = Convert.ToBase64String(bytes), sortOrder
+            });
+            imported.EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
     public async Task Service_restriction_template_creates_one_native_draft_record()
     {
         using var set = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Native service restriction template" });

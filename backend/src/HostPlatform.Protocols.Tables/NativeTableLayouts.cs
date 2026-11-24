@@ -341,8 +341,9 @@ public static partial class NativeTableLayouts
     private static NativeTableSection[] CallScreenRules(int count) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
     {
         var offset = 1 + i * 17;
-        return [DialField($"{key}.pattern", "Number pattern", offset + 4, 8),
-            Field($"{key}.wildcards", "Trailing wildcard digits", offset + 3, max: 16),
+        return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, KeypadDial, 8),
+            Select($"{key}.wildcards", "Trailing wildcard digits", offset + 3,
+                [.. Enumerable.Range(0, 15).Select(digits => (digits, digits.ToString())), (15, "Unlimited")]),
             Bits($"{key}.classification", "Call classification", offset + 1, 15, CallKinds),
             Bits($"{key}.payment", "Payment classification", offset + 1, 240, PaymentKinds),
             Field($"{key}.rate", "Rate index", offset + 2, help: "Use 255 for an unrated free call."),
@@ -352,7 +353,10 @@ public static partial class NativeTableLayouts
             Toggle($"{key}.fallback", "Use only in fallback service", offset, 8),
             Toggle($"{key}.mute", "Mute until answer supervision", offset, 16),
             Toggle($"{key}.preDialDelay", "Wait before dialing", offset, 32),
-            Toggle($"{key}.coinException", "Allow the coin routing exception", offset, 64)];
+            Toggle($"{key}.coinException", "Allow the coin routing exception", offset, 64),
+            Toggle($"{key}.featureGroupB", "Use Feature Group B", offset, 128),
+            Toggle($"{key}.denyModemData", "Deny modem data service", offset + 13, 1),
+            Toggle($"{key}.denyDataPort", "Deny data-port calls", offset + 13, 2)];
     });
 
     private static NativeTableSection[] CardRules(int count, int stride) => Rows("card", count, i => $"Card range {i + 1}", (i, key) =>

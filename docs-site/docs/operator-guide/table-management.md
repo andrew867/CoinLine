@@ -27,6 +27,8 @@ In **Dialing, screening and service**, open the numbering plan and select **Numb
 
 Under **Settings**, select **Number display and currency** to change the symbol, spoken currency and number of decimal places. The same record also holds digit timers, carrier behavior and the call classifications assigned after a rate response.
 
+In **Call screening**, number patterns accept `*` and `#`. Choose **Unlimited** to match any number of additional digits after the pattern. On the verified 200-entry Multi-pay profile, a standard free rule needs rate index `255`. A standard paid rule that uses a tariff directly needs an MT73 index from `0` through `127`. The firmware review highlights the relevant screening row before publishing. When the set refers to a tariff but omits MT73, review the warning and confirm the phone already has the expected tariffs for a partial update.
+
 In **Phones**, open a phone and expand **Phone groups** to choose its memberships. A phone can belong to up to 40 groups. Its primary group appears in the phone list. Every saved membership is included in that group's assignment preview.
 
 The console also exposes **Terminal status**, where decoded alarms, maintenance reports and status flags can be filtered by phone or report type.
