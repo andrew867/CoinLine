@@ -361,7 +361,8 @@ public static partial class NativeTableLayouts
             Toggle($"{key}.fallback", "Use only in fallback service", offset, 8),
             Toggle($"{key}.mute", "Mute until answer supervision", offset, 16),
             Toggle($"{key}.preDialDelay", "Wait before dialing", offset, 32),
-            Toggle($"{key}.coinException", "Allow the coin routing exception", offset, 64),
+            new NativeTableField($"{key}.coinException", "Restrict route to coin payment", offset, Flag, Mask: 64,
+                Help: "Leave this off for a Multi-pay route that should accept cards. The phone can reject card payment before requesting authorization."),
             Toggle($"{key}.featureGroupB", "Use Feature Group B", offset, 128),
             Toggle($"{key}.denyModemData", "Deny modem data service", offset + 13, 1),
             Toggle($"{key}.denyDataPort", "Deny data-port calls", offset + 13, 2)];
