@@ -154,6 +154,10 @@ internal sealed class NccLinkProcessor(
                 }
             }
         }
+        catch (IOException ex)
+        {
+            logger.LogInformation("NCC link ended for session {SessionId}. {Reason}", _session.Id, ex.Message);
+        }
         finally
         {
             if (HasPendingInstall)
@@ -206,8 +210,10 @@ internal sealed class NccLinkProcessor(
         var callDetails = messageType is { } detailType && DlogCallDetailWire.IsRecord(detailType);
         var rateRequest = messageType == DlogRateWire.MessageTypeRequest;
         var uploadAttention = messageType == DlogCallDetailWire.UploadAttention && packet.Data.Length >= 2;
+        var reports = DlogTerminalStatisticsWire.FindReports(packet.Data, out var truncatedReport);
+        var statistics = reports.Count > 0 || truncatedReport;
         // A rate request can carry a call record after its fixed-length header.
-        var recordedBytes = cardAuthorization || callDetails || messageType == 6 ||
+        var recordedBytes = cardAuthorization || callDetails || statistics || messageType == 6 ||
             (rateRequest && packet.Data.Length > DlogRateWire.RequestLength) ? Array.Empty<byte>() : raw;
         _session.LastFrameSample = recordedBytes;
         _session.UpdatedAtUtc = DateTime.UtcNow;
@@ -258,11 +264,33 @@ internal sealed class NccLinkProcessor(
 
         var maintenanceRequest = DlogMaintenanceWire.HasRequestRecord(packet.Data);
         var callIn = packet.Data is [RoutineCallInMessageType] or [CallbackMessageType];
+        if (statistics)
+        {
+            if (terminal == null || truncatedReport)
+            {
+                // Without a link ACK, the terminal retains its reports for another call.
+                var reason = truncatedReport ? "truncated statistics report" : "unregistered statistics source";
+                throw new IOException($"NCC link closed before acknowledgement: {reason}.");
+            }
+
+            try
+            {
+                foreach (var reportRange in reports)
+                {
+                    var report = DlogTerminalStatisticsWire.Decode(packet.Data.AsSpan()[reportRange], out var fingerprint);
+                    await TerminalUploads.StoreAsync(db, terminal.Id, _session.Id, report, fingerprint, stoppingToken);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new IOException($"Statistics upload was not stored ({ex.GetType().Name}).", ex);
+            }
+        }
         var receipts = callDetails && terminal != null
             ? await StoreCallDetailsAsync(packet.Data, terminal) : [];
         if (terminal != null)
         {
-            _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn || callDetails || uploadAttention
+            _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn || callDetails || uploadAttention || statistics
                 || packet.Data is [DlogTimeSyncWire.Request] or [TableDownloadRequestType, _, ..];
             // Give the terminal time to arm its reply timer after transmit completion.
             if (_firmwareDialogue)
@@ -294,7 +322,7 @@ internal sealed class NccLinkProcessor(
 
         if (maintenanceRequest)
         {
-            await RecordFieldEventAsync(packet, terminal);
+            await RecordFieldEventAsync(packet.Data, terminal);
             if (terminal != null && DlogMaintenanceWire.TryBuildAcknowledgement(packet.Data, out var reply))
                 await SendDialogueReplyAsync(stream, packet, reply, "maintenance");
             return;
@@ -321,7 +349,9 @@ internal sealed class NccLinkProcessor(
             await ApplyTableAckAsync(stream, packet.Data[1], raw);
         else if (FieldEventCatalog.TryDescribe(applicationType, out _))
         {
-            var stored = await RecordFieldEventAsync(packet, terminal);
+            // Only pass the status record itself to the event ledger when statistics follow it.
+            var fieldData = statistics ? packet.Data[..DlogTerminalStatisticsWire.StatusRecordLength(applicationType)] : packet.Data;
+            var stored = await RecordFieldEventAsync(fieldData, terminal);
             if (stored && terminal != null && applicationType == DlogAlarmWire.AlarmMessageType
                 && DlogAlarmWire.TryBuildAcknowledgement(packet.Data, out var acknowledgement))
                 await SendDialogueReplyAsync(stream, packet, acknowledgement, "alarm");
@@ -347,7 +377,7 @@ internal sealed class NccLinkProcessor(
                 if (length == 0 || length > data.Length - offset)
                     break;
                 var detail = DlogCallDetailWire.Decode(data.AsSpan(offset, length), fullCombinedNumber, out var fingerprint);
-                await TerminalCallUploads.StoreAsync(db, terminal.Id, _session.Id, detail, fingerprint, stoppingToken);
+                await TerminalUploads.StoreAsync(db, terminal.Id, _session.Id, detail, fingerprint, stoppingToken);
                 var receipt = new byte[3];
                 DlogCallDetailWire.WriteAcknowledgement(receipt, detail.Sequence);
                 replies.AddRange(receipt);
@@ -362,11 +392,11 @@ internal sealed class NccLinkProcessor(
         return replies.ToArray();
     }
 
-    private async Task<bool> RecordFieldEventAsync(NccWirePacket packet, Terminal? terminal)
+    private async Task<bool> RecordFieldEventAsync(byte[] data, Terminal? terminal)
     {
         try
         {
-            var records = FieldEventCatalog.SplitUpload(packet.Data);
+            var records = FieldEventCatalog.SplitUpload(data);
             var capturedAt = DateTime.UtcNow;
             for (var i = 0; i < records.Count; i++)
             {

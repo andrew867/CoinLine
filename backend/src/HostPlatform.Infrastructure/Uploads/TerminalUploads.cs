@@ -7,18 +7,21 @@ using Npgsql;
 
 namespace HostPlatform.Infrastructure.Uploads;
 
-public static class TerminalCallUploads
+public static class TerminalUploads
 {
-    public const string KeyPrefix = "ncc-call-detail:";
+    public const string CallDetailPrefix = "ncc-call-detail:";
+    public const string StatisticsPrefix = "ncc-statistics:";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public static bool IsTerminalCallDetail(string key) => key.StartsWith(KeyPrefix, StringComparison.Ordinal);
+    public static bool IsTerminalUpload(string key) => IsCallDetail(key) || IsStatistics(key);
+    public static bool IsCallDetail(string key) => key.StartsWith(CallDetailPrefix, StringComparison.Ordinal);
+    public static bool IsStatistics(string key) => key.StartsWith(StatisticsPrefix, StringComparison.Ordinal);
 
-    public static DlogCallDetailWire.CallDetail? ReadMetadata(string json)
+    public static T? ReadMetadata<T>(string json) where T : class
     {
         try
         {
-            return JsonSerializer.Deserialize<DlogCallDetailWire.CallDetail>(json, Json);
+            return JsonSerializer.Deserialize<T>(json, Json);
         }
         catch (JsonException)
         {
@@ -26,11 +29,19 @@ public static class TerminalCallUploads
         }
     }
 
-    public static async Task StoreAsync(HostPlatformDbContext db, Guid terminalId, Guid sessionId,
-        DlogCallDetailWire.CallDetail detail, string fingerprint, CancellationToken ct)
+    public static Task StoreAsync(HostPlatformDbContext db, Guid terminalId, Guid sessionId,
+        DlogCallDetailWire.CallDetail detail, string fingerprint, CancellationToken ct) =>
+        StoreAsync(db, terminalId, sessionId, CallDetailPrefix, detail, fingerprint, ct);
+
+    public static Task StoreAsync(HostPlatformDbContext db, Guid terminalId, Guid sessionId,
+        DlogTerminalStatisticsWire.Report report, string fingerprint, CancellationToken ct) =>
+        StoreAsync(db, terminalId, sessionId, StatisticsPrefix, report, fingerprint, ct);
+
+    private static async Task StoreAsync<T>(HostPlatformDbContext db, Guid terminalId, Guid sessionId,
+        string keyPrefix, T detail, string fingerprint, CancellationToken ct)
     {
         var metadata = JsonSerializer.Serialize(detail, Json);
-        var key = $"{KeyPrefix}{terminalId:N}:{fingerprint}";
+        var key = $"{keyPrefix}{terminalId:N}:{fingerprint}";
         if (await db.UploadBatches.AnyAsync(batch => batch.IdempotencyKey == key, ct))
             return;
 

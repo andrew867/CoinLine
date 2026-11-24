@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiPostBareOk } from '../api/client'
+import './UploadDetail.css'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
@@ -10,6 +11,7 @@ type RecordRow = {
   decodedMetadataJson: string
   createdAtUtc: string
   terminalCall: TerminalCall | null
+  terminalStatistics: TerminalStatistics | null
 }
 
 type TerminalCall = {
@@ -26,12 +28,24 @@ type TerminalCall = {
   amountCollected: number | null
 }
 
+type CounterGroup = { label: string; counters: { label: string; value: number }[] }
+type TerminalStatistics = {
+  messageType: number
+  name: string
+  periodStart: string | null
+  periodEnd: string | null
+  groups: CounterGroup[]
+  carriers: { reference: number; groups: CounterGroup[] }[]
+  carrierFormat: number | null
+}
+
 type Detail = {
   id: string
   terminalId: string | null
   status: number
   idempotencyKey: string
   isTerminalCallDetail?: boolean
+  isTerminalStatistics?: boolean
   rawPayloadHex: string
   decodedMetadataJson: string | null
   relatedDlogTransactionId: string | null
@@ -119,6 +133,8 @@ export function UploadDetail() {
   if (!id) return <p>Missing id.</p>
   if (!d) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
 
+  const isTerminalUpload = d.isTerminalCallDetail || d.isTerminalStatistics
+  const title = d.isTerminalCallDetail ? 'Terminal call detail' : d.isTerminalStatistics ? 'Terminal statistics' : 'Upload batch'
   let metadataBlock = d.decodedMetadataJson ?? '{}'
   if (metaMode === 'pretty') {
     try {
@@ -133,7 +149,7 @@ export function UploadDetail() {
       <p>
         <Link to="/uploads">← Uploads</Link>
       </p>
-      <h1>{d.isTerminalCallDetail ? 'Terminal call detail' : 'Upload batch'}</h1>
+      <h1>{title}</h1>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       <p>
         <strong>{statusLabel(d.status)}</strong>
@@ -144,11 +160,11 @@ export function UploadDetail() {
           </>
         )}
       </p>
-      {!d.isTerminalCallDetail && <p style={{ fontSize: 13, color: '#444' }}>
+      {!isTerminalUpload && <p style={{ fontSize: 13, color: '#444' }}>
         Idempotency <code>{d.idempotencyKey}</code>
       </p>}
 
-      {!d.isTerminalCallDetail && <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      {!isTerminalUpload && <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <button type="button" onClick={() => void ingest()}>
           Run ingest
         </button>
@@ -165,7 +181,13 @@ export function UploadDetail() {
         <button type="submit">Save review</button>
       </form>
 
-      {d.isTerminalCallDetail ? (
+      {d.isTerminalStatistics ? (
+        <section aria-label="Received statistics" data-testid="upload-records">
+          {d.records.map(({ id: recordId, terminalStatistics }) => terminalStatistics &&
+            <StatisticsReport key={recordId} report={terminalStatistics} />)}
+          <p>Received <time dateTime={d.createdAtUtc}>{new Date(d.createdAtUtc).toLocaleString()}</time></p>
+        </section>
+      ) : d.isTerminalCallDetail ? (
         <section aria-labelledby="terminal-call-details-heading">
           <h2 id="terminal-call-details-heading" data-testid="upload-records">Received call record</h2>
           {d.records.map(({ id: recordId, terminalCall }) => terminalCall && <TerminalCallDetails key={recordId} call={terminalCall} />)}
@@ -204,6 +226,39 @@ export function UploadDetail() {
       )}
     </div>
   )
+}
+
+function StatisticsReport({ report }: { report: TerminalStatistics }) {
+  const period = (value: string | null) => value?.replace('T', ' ') ?? 'Unavailable'
+
+  return <article className="upload-statistics">
+    <header className="upload-statistics-header">
+      <h2>{report.name}</h2>
+      <dl>
+        <div><dt>Period starts (phone clock)</dt><dd>{period(report.periodStart)}</dd></div>
+        <div><dt>Period ends (phone clock)</dt><dd>{period(report.periodEnd)}</dd></div>
+        <div><dt>Record type</dt><dd>MT{report.messageType}</dd></div>
+        {report.carrierFormat != null && <div><dt>Carrier record version</dt><dd>{report.carrierFormat}</dd></div>}
+      </dl>
+    </header>
+    {report.groups.length > 0 && <CounterGroups groups={report.groups} />}
+    {report.carriers.map(({ reference, groups }, index) => <details key={`${reference}-${index}`} open={index === 0}>
+      <summary>Carrier reference {reference}</summary>
+      <CounterGroups groups={groups} />
+    </details>)}
+    {report.groups.length === 0 && report.carriers.length === 0 && <p>No carrier entries in this report.</p>}
+  </article>
+}
+
+function CounterGroups({ groups }: { groups: CounterGroup[] }) {
+  return <div className="upload-statistics-groups">
+    {groups.map(({ label, counters }) => <section key={label}>
+      <h3>{label}</h3>
+      <dl>{counters.map(({ label: counter, value }) => <div key={counter}>
+        <dt>{counter}</dt><dd>{value.toLocaleString()}</dd>
+      </div>)}</dl>
+    </section>)}
+  </div>
 }
 
 function TerminalCallDetails({ call }: { call: TerminalCall }) {

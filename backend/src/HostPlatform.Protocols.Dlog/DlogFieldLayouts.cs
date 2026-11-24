@@ -230,6 +230,16 @@ internal static class DlogFieldLayouts
         return arr;
     }
 
+    public static DateTime? ReadClock(ReadOnlySpan<byte> time)
+    {
+        var year = 1900 + time[0];
+        var month = time[1];
+        if (time[0] == 0 || month is < 1 or > 12 || time[2] < 1 || time[2] > DateTime.DaysInMonth(year, month)
+            || time[3] > 23 || time[4] > 59 || time[5] > 59)
+            return null;
+        return new DateTime(year, month, time[2], time[3], time[4], time[5], DateTimeKind.Unspecified);
+    }
+
     private static string FormatYmdhms(ReadOnlySpan<byte> raw) =>
         string.Create(CultureInfo.InvariantCulture,
             $"{raw[0]:D2}-{raw[1]:D2}-{raw[2]:D2} {raw[3]:D2}:{raw[4]:D2}:{raw[5]:D2}");

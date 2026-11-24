@@ -63,6 +63,7 @@ public static class DlogMessageTypeRegistry
         Add(53, "DLOG_MT_CALL_DETAILS", "DLOG_MA_MULT_OUT", false, "Second DLOG_MT_CALL_DETAILS define in OEM compatibility catalogue (value 53).");
         Add(55, "DLOG_MT_REP_DIAL_LIST", "DLOG_MA_TAB_UPD", false);
         Add(56, "DLOG_MT_CALL_STATS", "DLOG_MA_MULT_OUT", false);
+        Add(57, "DLOG_MT_CARRIER_STATS", "DLOG_MA_MULT_OUT", false, "Earlier firmware wire type.");
         Add(58, "DLOG_MT_LIMSERV_DATA", "DLOG_MA_TAB_UPD", false);
         Add(59, "DLOG_MT_CALL_SCREEN_LIST", "DLOG_MA_TAB_UPD", false, "Earlier firmware wire type.");
         Add(60, "DLOG_MT_SW_VERSION", "DLOG_MA_SW_VERSION", false);
@@ -72,6 +73,7 @@ public static class DlogMessageTypeRegistry
         Add(64, "DLOG_MT_RATE_RESPONSE", "DLOG_MA_INPUT", false);
         Add(65, "DLOG_MT_AUTH_RESP_CODE", "DLOG_MA_INPUT", false);
         Add(68, "DLOG_MT_MDS_FCONFIG", "DLOG_MA_TAB_UPD", false, "Optional earlier service profile.");
+        Add(69, "DLOG_MT_MDS_STATS", "DLOG_MA_MULT_OUT", false, "Optional messaging service profile.");
         Add(70, "DLOG_MT_MDX_DEPOSIT_REC", "DLOG_MA_MULT_OUT", false,
             "OPEN QUESTION: Mondex docs cite immediate-clear scheduling; XSETROM catalogue lists DLOG_MA_MULT_OUT — reconcile with captures.");
         Add(71, "DLOG_MT_CARRIER_STATS", "DLOG_MA_MULT_OUT", false);

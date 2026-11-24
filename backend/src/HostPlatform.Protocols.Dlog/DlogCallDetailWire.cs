@@ -73,7 +73,7 @@ public static class DlogCallDetailWire
 
         return new CallDetail(type, BinaryPrimitives.ReadUInt16LittleEndian(record[sequenceOffset..]), digits,
             numberLength == 8 && digits.Length == 16, record[12], DescribeCall(classification),
-            DescribePayment(type, classification), ReadClock(time),
+            DescribePayment(type, classification), DlogFieldLayouts.ReadClock(time),
             duration[1] < 60 && duration[2] < 60 ? duration[0] * 3600 + duration[1] * 60 + duration[2] : null,
             charged, collected);
     }
@@ -82,16 +82,6 @@ public static class DlogCallDetailWire
     {
         destination[0] = Acknowledgement;
         BinaryPrimitives.WriteUInt16LittleEndian(destination[1..], sequence);
-    }
-
-    private static DateTime? ReadClock(ReadOnlySpan<byte> time)
-    {
-        var year = 1900 + time[0];
-        var month = time[1];
-        if (time[0] == 0 || month is < 1 or > 12 || time[2] < 1 || time[2] > DateTime.DaysInMonth(year, month)
-            || time[3] > 23 || time[4] > 59 || time[5] > 59)
-            return null;
-        return new DateTime(year, month, time[2], time[3], time[4], time[5], DateTimeKind.Unspecified);
     }
 
     private static string DescribeCall(byte classification) => (classification & 0x0F) switch

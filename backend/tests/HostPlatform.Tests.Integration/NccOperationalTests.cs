@@ -446,6 +446,124 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Terminal_statistics_are_decoded_and_saved_before_link_acknowledgement()
+    {
+        var tablesBefore = await BatchIdsAsync();
+        var uploadsBefore = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+        var existing = uploadsBefore.EnumerateArray().Select(row => row.GetProperty("id").GetGuid()).ToHashSet();
+        var calls = StatisticsReport(56, 81);
+        BinaryPrimitives.WriteUInt16LittleEndian(calls.AsSpan(35), 22);
+        BinaryPrimitives.WriteUInt32LittleEndian(calls.AsSpan(65), 7200);
+        var performance = StatisticsReport(37, 99);
+        BinaryPrimitives.WriteUInt16LittleEndian(performance.AsSpan(21), 8);
+        BinaryPrimitives.WriteUInt16LittleEndian(performance.AsSpan(77), 9);
+        var carriers = StatisticsReport(57, 190);
+        carriers[13] = 0;
+        carriers[72] = 8;
+        carriers[131] = 0xFE;
+        BinaryPrimitives.WriteUInt16LittleEndian(carriers.AsSpan(73), 4);
+        var extended = StatisticsReport(71, 244);
+        extended[13] = 2;
+        extended[14] = 9;
+        extended[129] = 0xFE;
+        BinaryPrimitives.WriteUInt16LittleEndian(extended.AsSpan(21), 11);
+        var messaging = StatisticsReport(69, 213);
+        BinaryPrimitives.WriteUInt16LittleEndian(messaging.AsSpan(77), 3);
+        BinaryPrimitives.WriteUInt16LittleEndian(messaging.AsSpan(91), 5);
+        var status = new byte[11];
+        status[0] = 10;
+        var version = new byte[28];
+        version[0] = 60;
+        var cash = new byte[57];
+        cash[0] = 38;
+
+        await using (var link = await OpenAsync())
+        {
+            await link.Stream.WriteAsync(Message(KnownId, [42, 0]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var invitation = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 17 }, invitation.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | invitation.Control)));
+
+            await link.Stream.WriteAsync(Message(KnownId, [.. TerminalCallDetail(61, 0x7675, 0x33), .. status, .. version, .. cash, .. calls]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var receipt = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 5, 0x75, 0x76 }, receipt.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | receipt.Control)));
+
+            foreach (var data in new byte[][] { carriers, extended, messaging, [.. performance, 13] })
+            {
+                await link.Stream.WriteAsync(Message(KnownId, data));
+                AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            }
+
+            await link.Stream.WriteAsync(HeaderOnlyRetransmission(KnownId, 0));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => ReadFrameAsync(link.Stream, TimeSpan.FromMilliseconds(400)));
+        }
+
+        await using (var replay = await OpenAsync())
+        {
+            // Empty slots can contain stale padding bytes that change between sends.
+            extended[^1] = 0xAA;
+            await replay.Stream.WriteAsync(Message(KnownId, extended));
+            AssertAck(await ReadFrameAsync(replay.Stream, TimeSpan.FromSeconds(5)));
+        }
+
+        var uploads = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+        var reports = new Dictionary<int, JsonElement>();
+        foreach (var row in uploads.EnumerateArray().Where(row => !existing.Contains(row.GetProperty("id").GetGuid()) &&
+            row.GetProperty("isTerminalStatistics").GetBoolean()))
+        {
+            var path = $"/api/uploads/{row.GetProperty("id").GetGuid()}";
+            var detail = await fx.Client.GetFromJsonAsync<JsonElement>(path, Json);
+            var record = Assert.Single(detail.GetProperty("records").EnumerateArray());
+            Assert.Equal("", record.GetProperty("rawPayloadHex").GetString());
+            var report = record.GetProperty("terminalStatistics");
+            Assert.Equal("2028-02-29T10:11:12", report.GetProperty("periodStart").GetString());
+            reports.Add(report.GetProperty("messageType").GetInt32(), report);
+            using var reprocess = await fx.Client.PostAsync($"{path}/reprocess?confirm=true", null);
+            Assert.Equal(HttpStatusCode.Conflict, reprocess.StatusCode);
+        }
+        Assert.Equal(5, reports.Count);
+        Assert.Equal(22, StatisticsCounter(reports[56], "Call counters", "Directory assistance"));
+        Assert.Equal(7200, StatisticsCounter(reports[56], "Use duration", "Completed calls (seconds)"));
+        Assert.Equal(8, StatisticsCounter(reports[37], "Line seizure to end of dialing", "Bucket 1"));
+        Assert.Equal(9, StatisticsCounter(reports[37], "Connection counters", "Failed dialogues"));
+        var carrierRows = reports[57].GetProperty("carriers");
+        Assert.Equal(2, carrierRows.GetArrayLength());
+        Assert.Equal(0, carrierRows[0].GetProperty("reference").GetInt32());
+        Assert.Equal(4, StatisticsCounter(carrierRows[1], "Local", "Coins"));
+        Assert.Equal(2, reports[71].GetProperty("carrierFormat").GetInt32());
+        Assert.Equal(11, StatisticsCounter(Assert.Single(reports[71].GetProperty("carriers").EnumerateArray()), "Local", "Mondex"));
+        Assert.Equal(3, StatisticsCounter(reports[69], "Stored-value cards", "Local"));
+        Assert.Equal(5, StatisticsCounter(reports[69], "Other messaging counters", "No-answer counter"));
+        Assert.True(tablesBefore.SetEquals(await BatchIdsAsync()));
+    }
+
+    [Fact]
+    public async Task Truncated_statistics_close_the_link_before_acknowledgement()
+    {
+        await using var link = await OpenAsync();
+        await link.Stream.WriteAsync(Message(KnownId, StatisticsReport(37, 99)[..^1]));
+        await Assert.ThrowsAsync<EndOfStreamException>(
+            () => ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+    }
+
+    private static byte[] StatisticsReport(byte type, int length)
+    {
+        var report = new byte[length];
+        report[0] = type;
+        new byte[] { 128, 2, 29, 10, 11, 12, 128, 3, 1, 10, 11, 12 }.CopyTo(report, 1);
+        return report;
+    }
+
+    private static int StatisticsCounter(JsonElement report, string group, string label) => report.GetProperty("groups").EnumerateArray()
+        .Single(element => element.GetProperty("label").GetString() == group).GetProperty("counters").EnumerateArray()
+        .Single(element => element.GetProperty("label").GetString() == label).GetProperty("value").GetInt32();
+
+    [Fact]
     public async Task Rating_with_a_call_detail_suffix_keeps_the_suffix_out_of_captures()
     {
         var request = DlogRateWire.EncodeRequest("5550187", international: false);
