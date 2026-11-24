@@ -399,7 +399,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 targets = await FirmwareScheduleTargetsAsync(targets, allowFirmwareReschedule, ct);
             else if (allowFirmwareReschedule)
                 return BadRequest(new { error = "Rescheduling firmware parameters requires an MT94-only set." });
-            var firmwareAllocation = BuildFirmwareAllocation(code, firmwareWindow, targets, clock.GetUtcNow().UtcDateTime);
+            var firmwareAllocation = await BuildFirmwareAllocationAsync(code, firmwareWindow, targets, clock.GetUtcNow().UtcDateTime, ct);
             return Ok(new { targets, recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber), firmwareAllocation });
         }
         catch (InvalidOperationException ex)
@@ -564,8 +564,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         }).ToList();
     }
 
-    private static FirmwareAllocationPreview? BuildFirmwareAllocation(TableVersion? code, FirmwareDownloadWindow? window,
-        List<AssignmentTarget> targets, DateTime availableAtUtc)
+    private async Task<FirmwareAllocationPreview?> BuildFirmwareAllocationAsync(TableVersion? code, FirmwareDownloadWindow? window,
+        List<AssignmentTarget> targets, DateTime availableAtUtc, CancellationToken ct)
     {
         if (window?.IsSpecified != true)
             return null;
@@ -575,7 +575,12 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         var raw = TableDistributionService.GetEffectivePayload(code);
         var eligible = targets.Where(target => target.Eligible).OrderBy(target => target.TerminalIdHex, StringComparer.Ordinal)
             .ThenBy(target => target.Id).ToArray();
-        var slots = FirmwareDownloadPlanner.Allocate(raw, window, eligible.Length, availableAtUtc);
+        var replacing = eligible.Where(target => target.ReplacesFirmwareScheduleId.HasValue)
+            .Select(target => target.ReplacesFirmwareScheduleId!.Value).ToArray();
+        var reservationFrom = window.StartDate is { } date && window.DailyStart is { } start
+            ? date.ToDateTime(start, DateTimeKind.Utc) : availableAtUtc;
+        var (reservations, fixedTimeCount) = await ReadFirmwareReservationsAsync(raw, replacing, reservationFrom, ct);
+        var slots = FirmwareDownloadPlanner.Allocate(raw, window, eligible.Length, availableAtUtc, reservations);
         var allocated = eligible.Zip(slots).ToDictionary(pair => pair.First.Id, pair => pair.Second);
         for (var index = 0; index < targets.Count; index++)
         {
@@ -589,12 +594,47 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
         var preview = JsonSerializer.SerializeToUtf8Bytes(new
         {
-            code.Id, payloadHash = TablePayloadHasher.Sha256Hex(raw), window,
+            code.Id, payloadHash = TablePayloadHasher.Sha256Hex(raw), window, existingReservations = reservations.Count, fixedTimeCount,
             phones = eligible.Select(target => new { target.Id, target.ReplacesFirmwareScheduleId, slot = allocated[target.Id] })
         });
         return new FirmwareAllocationPreview(Convert.ToHexString(SHA256.HashData(preview)), CodeDownloadWire.SelectedBlockCount(raw),
             CodeDownloadWire.MinimumTransferMinutes(raw)!.Value, window.ActiveServers!.Value, window.SlotMinutes!.Value,
-            slots.Count == 0 ? null : slots[0].StartAtUtc, slots.Count == 0 ? null : slots[^1].EndAtUtc);
+            slots.Count == 0 ? null : slots[0].StartAtUtc, slots.Count == 0 ? null : slots[^1].EndAtUtc,
+            reservations.Count, fixedTimeCount);
+    }
+
+    private async Task<(List<FirmwareDownloadReservation> Reservations, int FixedTimeCount)> ReadFirmwareReservationsAsync(
+        byte[] raw, Guid[] replacing, DateTime reservationFrom, CancellationToken ct)
+    {
+        var completedFirmware = CompletedFirmwareSchedules();
+        var existing = await db.ScheduledTableDownloads.AsNoTracking()
+            .Where(s => s.CancelledAtUtc == null && s.RecordNumbers == null && s.TableSet!.Versions.Count == 1
+                && s.TableSet.Versions.Any(v => v.TableDefinition!.TableNumber == CodeDownloadWire.MessageType)
+                && (s.FirmwareSlotEndAtUtc == null || s.FirmwareSlotEndAtUtc > reservationFrom)
+                && (s.CompletedAtUtc == null && !replacing.Contains(s.Id)
+                    || s.CompletedAtUtc != null && s.Id == completedFirmware.Where(other => other.TerminalId == s.TerminalId)
+                        .OrderByDescending(other => other.CompletedAtUtc).ThenByDescending(other => other.CreatedAtUtc)
+                        .ThenByDescending(other => other.Id).Select(other => other.Id).FirstOrDefault()))
+            .Select(s => new
+            {
+                s.FirmwareSlotEndAtUtc,
+                Record = s.TableSet!.Versions.Select(v => v.TablePayload == null ? v.EmbeddedPayload : v.TablePayload.RawContent).FirstOrDefault()
+            }).ToListAsync(ct);
+
+        var route = CodeDownloadWire.ServerRoute(raw);
+        var reservations = new List<FirmwareDownloadReservation>();
+        var fixedTimeCount = 0;
+        foreach (var row in existing)
+        {
+            if (row.Record == null || route == null || !string.Equals(route, CodeDownloadWire.ServerRoute(row.Record), StringComparison.Ordinal)
+                || CodeDownloadWire.StartAt(row.Record) is not { } start)
+                continue;
+            if (row.FirmwareSlotEndAtUtc is { } end && end > start)
+                reservations.Add(new FirmwareDownloadReservation(start, end));
+            else if (start >= reservationFrom)
+                fixedTimeCount++;
+        }
+        return (reservations, fixedTimeCount);
     }
 
     [HttpPost("sets/{id:guid}/schedules")]
@@ -602,6 +642,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     {
         if (!db.Database.IsRelational() ||
             (body.TargetType != "configuration-id" && !body.AllowFirmwareReschedule &&
+             body.FirmwareWindow?.IsSpecified != true &&
              await tables.FindCodeOnlyVersionAsync(id, ct) == null))
             return await SaveScheduleAsync(id, body, ct);
         try
@@ -654,7 +695,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 body.RecordNumbers is { Length: 1 } ? body.RecordNumbers[0] : null);
             if (codeVersion != null)
                 targets = await FirmwareScheduleTargetsAsync(targets, body.AllowFirmwareReschedule, ct);
-            firmwareAllocation = BuildFirmwareAllocation(codeVersion, body.FirmwareWindow, targets, ready);
+            firmwareAllocation = await BuildFirmwareAllocationAsync(codeVersion, body.FirmwareWindow, targets, ready, ct);
         }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         var recordNumbers = records?.Select(record => record.TableDefinition!.TableNumber).ToArray();
@@ -1145,7 +1186,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         bool Eligible, string? Reason, string? TerminalIdHex, Guid? ReplacesFirmwareScheduleId = null,
         DateTime? FirmwareStartAtUtc = null, DateTime? FirmwareSlotEndAtUtc = null, int? FirmwareServerSlot = null);
     private sealed record FirmwareAllocationPreview(string PreviewToken, int SelectedBlocks, int MinimumTransferMinutes,
-        int ActiveServers, int SlotMinutes, DateTime? FirstStartAtUtc, DateTime? LastEndAtUtc);
+        int ActiveServers, int SlotMinutes, DateTime? FirstStartAtUtc, DateTime? LastEndAtUtc,
+        int ExistingReservations, int FixedTimeSchedules);
 
     public sealed record TableSetDto(string Name, Guid? CustomerId, bool IsDefault, Guid? TargetFirmwareVersionId = null);
     public sealed record TableSetFirmwareDto(Guid? FirmwareVersionId);

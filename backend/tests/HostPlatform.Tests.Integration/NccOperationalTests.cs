@@ -1341,9 +1341,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var original = NativeTableLayouts.Find(94, template)!.Apply(template, settings);
         var target = new { terminalIdFrom = wireIds[0], terminalIdTo = wireIds[^1] };
         var window = new { startDate = date, dailyStart = new TimeOnly(2, 0), dailyEnd = new TimeOnly(2, 30), activeServers = 2, slotMinutes = 30 };
-        var previewUrl = $"{path}/assignment-preview?targetType=terminal-id-range&firmwareTarget.terminalIdFrom={wireIds[0]}&firmwareTarget.terminalIdTo={wireIds[^1]}" +
-            $"&firmwareWindow.startDate={date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}&firmwareWindow.dailyStart=02%3A00&firmwareWindow.dailyEnd=02%3A30" +
+        var windowParams = $"&firmwareWindow.startDate={date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}&firmwareWindow.dailyStart=02%3A00&firmwareWindow.dailyEnd=02%3A30" +
             "&firmwareWindow.activeServers=2&firmwareWindow.slotMinutes=30";
+        var previewUrl = $"{path}/assignment-preview?targetType=terminal-id-range&firmwareTarget.terminalIdFrom={wireIds[0]}&firmwareTarget.terminalIdTo={wireIds[^1]}{windowParams}";
         var preview = await fx.Client.GetFromJsonAsync<JsonElement>(previewUrl, Json);
         var allocation = preview.GetProperty("firmwareAllocation");
         Assert.Equal(3, allocation.GetProperty("selectedBlocks").GetInt32());
@@ -1383,10 +1383,23 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var delivered = (await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json)).EnumerateArray();
         Assert.All(delivered, row => Assert.Equal("Delivered", row.GetProperty("status").GetString()));
 
+        const string nextWireId = "0000000914";
+        using var nextPhoneResponse = await fx.Client.PostAsJsonAsync("/api/terminals",
+            new { siteId = site, displayName = "Later firmware window fixture", terminalIdHex = nextWireId, status = 0 }, Json);
+        nextPhoneResponse.EnsureSuccessStatusCode();
+        var nextPhone = (await nextPhoneResponse.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var nextPreviewUrl = $"{path}/assignment-preview?targetType=terminal&targetId={nextPhone}{windowParams}";
+        var reserved = await fx.Client.GetFromJsonAsync<JsonElement>(nextPreviewUrl, Json);
+        Assert.Equal(3, reserved.GetProperty("firmwareAllocation").GetProperty("existingReservations").GetInt32());
+        Assert.Equal(first.AddDays(1), reserved.GetProperty("targets")[0].GetProperty("firmwareStartAtUtc").GetDateTime());
+        Assert.Equal(2, reserved.GetProperty("targets")[0].GetProperty("firmwareServerSlot").GetInt32());
+
         var lastScheduleId = schedules[phones[^1]].GetProperty("id").GetGuid();
         using var cleared = await fx.Client.PostAsync($"{path}/schedules/{lastScheduleId}/clear-firmware", null);
         cleared.EnsureSuccessStatusCode();
         var clearing = await cleared.Content.ReadFromJsonAsync<JsonElement>(Json);
+        var pendingClear = await fx.Client.GetFromJsonAsync<JsonElement>(nextPreviewUrl, Json);
+        Assert.Equal(3, pendingClear.GetProperty("firmwareAllocation").GetProperty("existingReservations").GetInt32());
         await DeliverAsync(wireIds[^1], CodeDownloadWire.Disable(CodeDownloadWire.WithStart(original, starts[^1])),
             clearing.GetProperty("batchId").GetGuid());
         var history = (await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json)).EnumerateArray().ToArray();
@@ -1395,6 +1408,25 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(source, clearRow.GetProperty("sourceTableSetId").GetGuid());
         Assert.Equal("Delivered", clearRow.GetProperty("status").GetString());
         Assert.Equal(JsonValueKind.Null, clearRow.GetProperty("firmwareStartAtUtc").ValueKind);
+
+        var released = await fx.Client.GetFromJsonAsync<JsonElement>(nextPreviewUrl, Json);
+        Assert.Equal(2, released.GetProperty("firmwareAllocation").GetProperty("existingReservations").GetInt32());
+        Assert.Equal(1, released.GetProperty("targets")[0].GetProperty("firmwareServerSlot").GetInt32());
+        using var staleCapacity = await fx.Client.PostAsJsonAsync($"{path}/schedules", new
+        {
+            targetType = "terminal", targetId = nextPhone, terminalIds = new[] { nextPhone }, firmwareWindow = window,
+            firmwarePreviewToken = reserved.GetProperty("firmwareAllocation").GetProperty("previewToken").GetString()
+        }, Json);
+        Assert.Equal(HttpStatusCode.Conflict, staleCapacity.StatusCode);
+        using var queuedNextJob = await fx.Client.PostAsJsonAsync($"{path}/schedules", new
+        {
+            targetType = "terminal", targetId = nextPhone, terminalIds = new[] { nextPhone }, firmwareWindow = window,
+            firmwarePreviewToken = released.GetProperty("firmwareAllocation").GetProperty("previewToken").GetString()
+        }, Json);
+        queuedNextJob.EnsureSuccessStatusCode();
+        var nextJob = (await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json)).EnumerateArray()
+            .Single(row => row.GetProperty("terminalId").GetGuid() == nextPhone);
+        await DeliverAsync(nextWireId, CodeDownloadWire.WithStart(original, first.AddDays(1)), nextJob.GetProperty("lastBatchId").GetGuid());
 
         async Task DeliverAsync(string wireId, byte[] expected, Guid batchId)
         {

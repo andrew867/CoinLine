@@ -29,6 +29,7 @@ export type FirmwareSchedule = { enabled: boolean; selectedBlocks: number; minim
 type FirmwareAllocation = {
   previewToken: string; selectedBlocks: number; minimumTransferMinutes: number; activeServers: number; slotMinutes: number
   firstStartAtUtc: string | null; lastEndAtUtc: string | null
+  existingReservations?: number; fixedTimeSchedules?: number
 }
 const utcTime = (value: string) => new Date(value).toISOString().slice(0, 16).replace('T', ' ') + ' UTC'
 type SavedRecord = {
@@ -481,6 +482,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             {firmwareAllocation.selectedBlocks} selected blocks. {firmwareAllocation.activeServers} active server slots, {firmwareAllocation.slotMinutes} minutes per phone.
             {firmwareAllocation.firstStartAtUtc && firmwareAllocation.lastEndAtUtc &&
               <> First start {utcTime(firmwareAllocation.firstStartAtUtc)}. Last slot ends {utcTime(firmwareAllocation.lastEndAtUtc)}.</>}
+            {!!firmwareAllocation.existingReservations && <> {firmwareAllocation.existingReservations} existing {firmwareAllocation.existingReservations === 1 ? 'reservation' : 'reservations'} accounted for.</>}
+          </p>}
+          {!!firmwareAllocation?.fixedTimeSchedules && <p role="note">
+            {firmwareAllocation.fixedTimeSchedules} fixed-time {firmwareAllocation.fixedTimeSchedules === 1 ? 'schedule has' : 'schedules have'} no reserved duration in this code-server pool.
           </p>}
           {wireSelection && <p>Records to send {wireSelection.map(number => `MT${number}`).join(', ')}</p>}
           {targets.length > 0 && <ul>{targets.map((item) => <li key={item.id}>

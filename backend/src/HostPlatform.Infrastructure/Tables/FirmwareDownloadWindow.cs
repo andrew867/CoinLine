@@ -9,11 +9,12 @@ public sealed record FirmwareDownloadWindow(DateOnly? StartDate, TimeOnly? Daily
 }
 
 public sealed record FirmwareDownloadSlot(DateTime StartAtUtc, DateTime EndAtUtc, int ServerSlot);
+public sealed record FirmwareDownloadReservation(DateTime StartAtUtc, DateTime EndAtUtc);
 
 public static class FirmwareDownloadPlanner
 {
     public static IReadOnlyList<FirmwareDownloadSlot> Allocate(ReadOnlySpan<byte> record, FirmwareDownloadWindow window,
-        int phoneCount, DateTime availableAtUtc)
+        int phoneCount, DateTime availableAtUtc, IReadOnlyCollection<FirmwareDownloadReservation>? reservations = null)
     {
         if (!CodeDownloadWire.IsEnabled(record))
             throw new InvalidOperationException("Enable MT94 before allocating firmware download windows.");
@@ -41,10 +42,18 @@ public static class FirmwareDownloadPlanner
         if (slotsPerDay == 0)
             throw new InvalidOperationException("The daily window must accommodate at least one complete phone slot.");
 
+        // A sweep over existing half-open intervals tracks the peak occupancy within each proposed slot.
+        // A free server must remain available for the entire slot, including partial overlaps.
+        var events = (reservations ?? []).Where(reservation => reservation.EndAtUtc > first
+                && reservation.EndAtUtc > reservation.StartAtUtc)
+            .SelectMany(reservation => new[] { (At: reservation.StartAtUtc, Delta: 1), (At: reservation.EndAtUtc, Delta: -1) })
+            .GroupBy(item => item.At).Select(group => (At: group.Key, Delta: group.Sum(item => item.Delta)))
+            .OrderBy(item => item.At).ToArray();
+        var nextEvent = 0;
+        var occupied = 0;
         var result = new List<FirmwareDownloadSlot>(phoneCount);
-        for (var index = 0; index < phoneCount; index++)
+        for (var wave = 0; result.Count < phoneCount; wave++)
         {
-            var wave = index / window.ActiveServers.Value;
             DateTime allocatedStart;
             DateTime allocatedEnd;
             try
@@ -58,7 +67,16 @@ public static class FirmwareDownloadPlanner
             }
             // Validate even the last slot against the terminal's supported clock range.
             _ = CodeDownloadWire.WithStart(record, allocatedEnd);
-            result.Add(new FirmwareDownloadSlot(allocatedStart, allocatedEnd, index % window.ActiveServers.Value + 1));
+            while (nextEvent < events.Length && events[nextEvent].At <= allocatedStart)
+                occupied += events[nextEvent++].Delta;
+            var peakOccupied = occupied;
+            while (nextEvent < events.Length && events[nextEvent].At < allocatedEnd)
+            {
+                occupied += events[nextEvent++].Delta;
+                peakOccupied = Math.Max(peakOccupied, occupied);
+            }
+            for (var serverSlot = peakOccupied + 1; serverSlot <= window.ActiveServers.Value && result.Count < phoneCount; serverSlot++)
+                result.Add(new FirmwareDownloadSlot(allocatedStart, allocatedEnd, serverSlot));
         }
         return result;
     }

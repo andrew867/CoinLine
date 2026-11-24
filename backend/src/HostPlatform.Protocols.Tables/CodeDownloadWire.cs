@@ -22,6 +22,9 @@ public static class CodeDownloadWire
         IsEnabled(record) && TerminalClockWire.TryReadCalendar(record.Slice(CalendarOffset, CalendarLength), out var start)
             ? start : null;
 
+    public static string? ServerRoute(ReadOnlySpan<byte> record) =>
+        record.Length == RecordLength && record[0] == MessageType ? CodeServer.Read(record) : null;
+
     public static int SelectedBlockCount(ReadOnlySpan<byte> record)
     {
         if (record.Length != RecordLength || record[0] != MessageType)

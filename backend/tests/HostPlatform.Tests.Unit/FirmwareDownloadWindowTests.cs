@@ -45,6 +45,26 @@ public sealed class FirmwareDownloadWindowTests
         Assert.Throws<InvalidOperationException>(() => FirmwareDownloadPlanner.Allocate(record, window, 1, Ready));
     }
 
+    [Fact]
+    public void Existing_reservations_consume_peak_capacity_over_each_complete_slot()
+    {
+        var record = ArmedRecord();
+        var first = Date.ToDateTime(new TimeOnly(1, 0), DateTimeKind.Utc);
+        var window = new FirmwareDownloadWindow(Date, new TimeOnly(1, 0), new TimeOnly(2, 0), 2, 30);
+        FirmwareDownloadReservation[] existing =
+        [
+            new(first.AddMinutes(-15), first.AddMinutes(15)),
+            new(first.AddMinutes(15), first.AddMinutes(30)),
+            new(first.AddMinutes(31), first.AddMinutes(50)),
+            new(first.AddMinutes(40), first.AddMinutes(60)),
+            new(first.AddDays(1).AddMinutes(30), first.AddDays(1).AddMinutes(45))
+        ];
+        var slots = FirmwareDownloadPlanner.Allocate(record, window, 4, Ready, existing);
+        Assert.Equal(new[] { first, first.AddDays(1), first.AddDays(1), first.AddDays(1).AddMinutes(30) },
+            slots.Select(slot => slot.StartAtUtc));
+        Assert.Equal(new[] { 2, 1, 2, 2 }, slots.Select(slot => slot.ServerSlot));
+    }
+
     private static byte[] ArmedRecord()
     {
         var template = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(94)));

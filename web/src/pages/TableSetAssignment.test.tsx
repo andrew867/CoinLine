@@ -46,7 +46,8 @@ it('previews the daily firmware window and confirms its exact allocation', async
     targets: [{ id: 'window-phone', displayName: 'Window phone', eligible: true, firmwareStartAtUtc: start,
       firmwareSlotEndAtUtc: end, firmwareServerSlot: 1 }],
     firmwareAllocation: { previewToken: 'window-token', selectedBlocks: 3, minimumTransferMinutes: 1,
-      activeServers: 2, slotMinutes: 30, firstStartAtUtc: start, lastEndAtUtc: end },
+      activeServers: 2, slotMinutes: 30, firstStartAtUtc: start, lastEndAtUtc: end,
+      existingReservations: 2, fixedTimeSchedules: 1 },
   }))
   vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json({ scheduled: 1, replaced: 0, skipped: 0 }))
 
@@ -62,6 +63,8 @@ it('previews the daily firmware window and confirms its exact allocation', async
   fireEvent.change(screen.getByLabelText('Minutes per phone'), { target: { value: '30' } })
   fireEvent.click(screen.getByRole('button', { name: 'Preview phones' }))
   expect(await screen.findByText(/2028-02-28 02:00 UTC to 2028-02-28 02:30 UTC/)).toBeVisible()
+  expect(screen.getByText(/2 existing reservations accounted for/)).toBeVisible()
+  expect(screen.getByRole('note')).toHaveTextContent('1 fixed-time schedule has no reserved duration')
   expect(apiGetRaw).toHaveBeenLastCalledWith(expect.stringContaining('firmwareWindow.activeServers=2'))
   fireEvent.click(screen.getByRole('button', { name: 'Schedule for 1 phone' }))
   expect(await screen.findByRole('status')).toHaveTextContent('Scheduled firmware parameters for 1 phone.')
