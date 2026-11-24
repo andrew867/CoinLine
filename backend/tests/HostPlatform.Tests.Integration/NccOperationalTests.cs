@@ -1212,7 +1212,59 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             new { targetType = "software-version", firmwareTarget, terminalIds = new[] { second } }, Json);
         scheduled.EnsureSuccessStatusCode();
         var queued = await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json);
-        Assert.Equal(second, Assert.Single(queued.EnumerateArray()).GetProperty("terminalId").GetGuid());
+        var previousSchedule = Assert.Single(queued.EnumerateArray());
+        Assert.Equal(second, previousSchedule.GetProperty("terminalId").GetGuid());
+        var previousScheduleId = previousSchedule.GetProperty("id").GetGuid();
+        var previousBatchId = previousSchedule.GetProperty("lastBatchId").GetGuid();
+
+        using var clone = await fx.Client.PostAsJsonAsync($"{setPath}/clone", new { name = "Revised firmware selection test" }, Json);
+        clone.EnsureSuccessStatusCode();
+        var revisedId = (await clone.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var revisedPath = $"/api/tables/sets/{revisedId}";
+        var revisedFieldPath = $"{revisedPath}/records/94/fields";
+        var revisedFields = await fx.Client.GetFromJsonAsync<JsonElement>(revisedFieldPath, Json);
+        var changes = new Dictionary<string, string> { ["accessMinutes"] = "17" };
+        using var edited = await fx.Client.PutAsJsonAsync(revisedFieldPath, new
+        {
+            profile = revisedFields.GetProperty("profile"), revision = revisedFields.GetProperty("revision"),
+            sha256 = revisedFields.GetProperty("sha256"), changes
+        }, Json);
+        edited.EnsureSuccessStatusCode();
+        using var revisedPublished = await fx.Client.PostAsync($"{revisedPath}/publish?confirm=true", null);
+        revisedPublished.EnsureSuccessStatusCode();
+        var revisedPreview = (await fx.Client.GetFromJsonAsync<JsonElement>(
+            $"{revisedPath}/assignment-preview?{byVersion}&allowFirmwareReschedule=true", Json)).GetProperty("targets")[0];
+        Assert.True(revisedPreview.GetProperty("eligible").GetBoolean());
+        Assert.Equal(previousScheduleId, revisedPreview.GetProperty("replacesFirmwareScheduleId").GetGuid());
+        using var replacement = await fx.Client.PostAsJsonAsync($"{revisedPath}/schedules", new
+        {
+            targetType = "software-version", firmwareTarget, terminalIds = new[] { second },
+            allowFirmwareReschedule = true, replacesFirmwareScheduleIds = new[] { previousScheduleId }
+        }, Json);
+        replacement.EnsureSuccessStatusCode();
+        Assert.Equal("Cancelled", (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("status").GetString());
+        await WaitBatchAsync(previousBatchId, 4);
+        var revisedBatchId = (await fx.Client.GetFromJsonAsync<JsonElement>($"{revisedPath}/schedules", Json))[0].GetProperty("lastBatchId").GetGuid();
+        var template = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(94)));
+        var expected = NativeTableLayouts.Find(94, template)!.Apply(template, changes);
+        await using (var callIn = await OpenAsync())
+        {
+            var wire = Convert.FromHexString(secondWireId);
+            await callIn.Stream.WriteAsync(Message(wire, [8]));
+            AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            var header = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+            var parameters = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(expected, parameters.Data);
+            await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | parameters.Control)));
+            await callIn.Stream.WriteAsync(Message(wire, [14, 94]));
+            AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            var end = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+            await WaitBatchAsync(revisedBatchId, 2);
+        }
 
         var dataSet = await CreateRateTableSetAsync("Firmware scope rejects data sets", new byte[1192]);
         using var dataPreview = await fx.Client.GetAsync($"/api/tables/sets/{dataSet}/assignment-preview?{byVersion}");
@@ -1392,7 +1444,22 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 using var cleanupCancellation = await fx.Client.PostAsync($"{cancellationSchedulesPath}/{cancellationSchedule}/cancel", null);
             }
 
-            using var rescheduled = await fx.Client.PostAsJsonAsync(schedulePath, selection, Json);
+            var existingPreview = (await fx.Client.GetFromJsonAsync<JsonElement>(
+                $"{setPath}/assignment-preview?targetType=time-area&timeAreaCode=e7", Json)).GetProperty("targets")[0];
+            Assert.False(existingPreview.GetProperty("eligible").GetBoolean());
+            Assert.Contains("Existing firmware schedule", existingPreview.GetProperty("reason").GetString());
+            using var keepExisting = await fx.Client.PostAsJsonAsync(schedulePath, selection, Json);
+            Assert.Equal(HttpStatusCode.Conflict, keepExisting.StatusCode);
+            var replacementPreview = (await fx.Client.GetFromJsonAsync<JsonElement>(
+                $"{setPath}/assignment-preview?targetType=time-area&timeAreaCode=e7&allowFirmwareReschedule=true", Json))
+                .GetProperty("targets")[0];
+            Assert.True(replacementPreview.GetProperty("eligible").GetBoolean());
+            Assert.Equal(cancellationSchedule, replacementPreview.GetProperty("replacesFirmwareScheduleId").GetGuid());
+            using var rescheduled = await fx.Client.PostAsJsonAsync(schedulePath, new
+            {
+                selection.targetType, selection.timeAreaCode, selection.terminalIds,
+                allowFirmwareReschedule = true, replacesFirmwareScheduleIds = new[] { cancellationSchedule }
+            }, Json);
             rescheduled.EnsureSuccessStatusCode();
             scheduleId = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("id").GetGuid();
             fx.Factory.Clock.Advance(TimeSpan.FromHours(2));

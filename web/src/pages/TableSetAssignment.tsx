@@ -20,7 +20,7 @@ const scopes = {
 
 type Scope = keyof typeof scopes
 type Option = { id: string; name?: string; displayName?: string; code?: string | null }
-type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null; terminalIdHex?: string | null }
+type Target = { id: string; displayName: string; terminalFamilyLabel: string | null; eligible: boolean; reason: string | null; terminalIdHex?: string | null; replacesFirmwareScheduleId?: string | null }
 type SavedRecord = {
   tableNumber: number; definitionName: string; payloadLengthBytes: number; validationPassed: boolean; configurationId: string | null
 }
@@ -57,6 +57,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [busy, setBusy] = useState(false)
   const [mode, setMode] = useState(codeOnly ? 'now' : 'assignment')
   const [availableAt, setAvailableAt] = useState('')
+  const [allowFirmwareReschedule, setAllowFirmwareReschedule] = useState(false)
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
   const [action, setAction] = useState<AssignmentAction>('set')
   const [actions, setActions] = useState<Record<number, RecordAction>>({})
@@ -163,6 +164,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       }
       if (scopeSelection.configurationId) params.set('configurationId', scopeSelection.configurationId)
       if (partialSchedule) selectedDeliveryRecords.forEach(number => params.append('recordNumbers', String(number)))
+      if (codeOnly) params.set('allowFirmwareReschedule', String(allowFirmwareReschedule))
       const response = await apiGetRaw(`/api/tables/sets/${setId}/assignment-preview?${params}`)
       const result = await response.json().catch(() => null)
       if (!response.ok) throw new Error(result?.error ?? 'Could not preview this assignment.')
@@ -220,11 +222,18 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         ...scopeSelection, terminalIds: targets?.filter((target) => target.eligible).map((target) => target.id) ?? [],
         ...(scheduled ? { availableAtUtc: selected?.toISOString() ?? null } : {}),
         ...(partialSchedule ? { recordNumbers: selectedDeliveryRecords } : {}),
+        ...(codeOnly ? {
+          allowFirmwareReschedule,
+          replacesFirmwareScheduleIds: targets?.filter(target => target.eligible && target.replacesFirmwareScheduleId)
+            .map(target => target.replacesFirmwareScheduleId) ?? [],
+        } : {}),
       })
       const result = await response.json().catch(() => null)
       if (!response.ok) throw new Error(result?.error ?? 'Could not save the assignment.')
       if (scheduled) {
-        setFeedback(`Scheduled for ${result.scheduled} ${result.scheduled === 1 ? 'phone' : 'phones'}. Already scheduled for ${result.alreadyScheduled}.`)
+        setFeedback(codeOnly
+          ? `Scheduled firmware parameters for ${result.scheduled} ${result.scheduled === 1 ? 'phone' : 'phones'}. Replaced ${result.replaced} existing ${result.replaced === 1 ? 'schedule' : 'schedules'}. Skipped ${result.skipped} ${result.skipped === 1 ? 'phone' : 'phones'}.`
+          : `Scheduled for ${result.scheduled} ${result.scheduled === 1 ? 'phone' : 'phones'}. Already scheduled for ${result.alreadyScheduled}.`)
         setScheduleRefresh((value) => value + 1)
       } else
         setFeedback(`Updated ${result.changed} of ${result.targetCount} eligible phone assignments.`)
@@ -237,6 +246,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   }
 
   const eligible = targets?.filter((target) => target.eligible).length ?? 0
+  const replacements = targets?.filter(target => target.eligible && target.replacesFirmwareScheduleId).length ?? 0
   return (
     <section className="table-config-panel" aria-labelledby="table-assignment-heading">
       <h2 id="table-assignment-heading">{codeOnly ? 'Schedule firmware parameters' : 'Assign this set'}</h2>
@@ -368,6 +378,11 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               MT{number} · {choice.name}
             </label>)}
         </fieldset>}
+        {codeOnly && <label className="native-table-toggle">
+          <input type="checkbox" checked={allowFirmwareReschedule} disabled={busy}
+            onChange={event => { setAllowFirmwareReschedule(event.target.checked); clearReview() }} />
+          Allow rescheduling existing firmware parameters
+        </label>}
         <button type="submit" disabled={!targetId || busy || (scope === 'software-version' && !secondTarget.trim())
           || (selectedRecords && !copyRecords.length && !removeRecords.length)
           || (configurationScope && !configurationRecord) || (partialSchedule && !selectedDeliveryRecords.length)}>
@@ -393,6 +408,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       {targets && (
         <div className="table-config-preview">
           <strong>{eligible} eligible {eligible === 1 ? 'phone' : 'phones'}</strong>
+          {codeOnly && <p>{replacements} existing {replacements === 1 ? 'schedule' : 'schedules'} to replace. {targets.length - eligible} {targets.length - eligible === 1 ? 'phone' : 'phones'} to skip.</p>}
           {wireSelection && <p>Records to send {wireSelection.map(number => `MT${number}`).join(', ')}</p>}
           {targets.length > 0 && <ul>{targets.map((item) => <li key={item.id}>
             {item.displayName}{item.terminalIdHex && ` · ${item.terminalIdHex}`}
