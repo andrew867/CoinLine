@@ -106,6 +106,8 @@ Visual prompt sections with `showDisplayPreview` set contain the upper and lower
 
 Graphical records MT131 through MT133 expose fields based on the screen type. A field ending in `.kind` accepts `0` for undefined, `66` for bitmap, `77` for mixed, or `84` for text. The API can apply a type change and the new content in the same request. A type change reinitializes that screen's content area. Text uses newline-separated rows. A screen link packs the zero-based screen index into the low six bits and the panel into the high two bits. Value `255` means no link.
 
+Graphical screen and mixed-panel `.dwell` values use 10 ms ticks. The two nibbles in `.flash` and the MT131 `offHookDuration` field use seconds.
+
 The MT68 `serviceKey` field is write-only in the native field API. Omit it from `changes` to keep the stored key. The field response provides `editor: "password"` and `value: null`. Enabling messaging requires a valid service number and key.
 
 ## Inmate Feature Configurations

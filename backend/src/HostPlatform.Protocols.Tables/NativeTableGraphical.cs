@@ -128,7 +128,7 @@ public static partial class NativeTableLayouts
 
     private static IEnumerable<NativeTableField> ScreenControls(string key, int offset)
     {
-        yield return Field($"{key}.dwell", "Screen display duration (seconds)", offset, Word);
+        yield return Field($"{key}.dwell", "Screen display duration (10 ms ticks)", offset, Word);
         yield return Field($"{key}.flash", "Flash rate", offset + 2, GraphicalFlashRate);
         yield return Field($"{key}.owner", "Screen owner code", offset + 11, Word);
         yield return ScreenLink($"{key}.next", "Next screen", offset + 13);

@@ -3,11 +3,8 @@ import { useEffect, useRef, useState } from 'react'
 const width = 112
 const height = 72
 
-export function NativeBitmapField({ name, value, onChange }: {
-  name: string; value: string | null; onChange: (value: string) => void
-}) {
+export function NativeBitmapPreview({ name, value }: { name: string; value: string }) {
   const canvas = useRef<HTMLCanvasElement>(null)
-  const [message, setMessage] = useState('')
 
   useEffect(() => {
     const context = canvas.current?.getContext('2d')
@@ -23,6 +20,14 @@ export function NativeBitmapField({ name, value, onChange }: {
     }
     context.putImageData(pixels, 0, 0)
   }, [value])
+
+  return <canvas ref={canvas} width={width} height={height} aria-label={`${name} preview`} role="img" />
+}
+
+export function NativeBitmapField({ name, value, onChange }: {
+  name: string; value: string | null; onChange: (value: string) => void
+}) {
+  const [message, setMessage] = useState('')
 
   async function replace(file: File) {
     setMessage('')
@@ -60,7 +65,7 @@ export function NativeBitmapField({ name, value, onChange }: {
   if (value === null) return <p className="page-intro">Artwork editing is available for bitmap screens.</p>
   return (
     <div className="native-table-bitmap">
-      <canvas ref={canvas} width={width} height={height} aria-label={`${name} preview`} role="img" />
+      <NativeBitmapPreview name={name} value={value} />
       <label>{name}
         <input type="file" accept="image/png,image/bmp,image/jpeg" onChange={(event) => {
           const file = event.target.files?.[0]

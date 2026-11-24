@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { apiFetch, apiPostRaw } from '../api/client'
 import { NativeBitmapField } from './NativeBitmapField'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
+import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
 import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
 import { LocalDialingImport } from './LocalDialingImport'
@@ -304,6 +305,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         <div><strong>{layout.profile}</strong><span>{layout.length.toLocaleString()} bytes · Revision {layout.revision}</span></div>
         {!layout.editable && <span>Published record</span>}
       </header>
+      {number >= 131 && number <= 133 && (
+        <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />
+      )}
       {layout.profiles && layout.profiles.length > 1 && (
         <div className="table-config-selectors">
           <label>Firmware profile
