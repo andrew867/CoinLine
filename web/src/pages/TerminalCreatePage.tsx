@@ -1,10 +1,9 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { apiPost } from '../api/client'
+import { apiFetch, apiPost } from '../api/client'
 import { EmptyHint, ErrorBanner } from '../components/AppStates'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type SiteOpt = { id: string; name: string; code: string }
 type GroupOpt = { id: string; name: string }
@@ -20,14 +19,14 @@ export function TerminalCreatePage() {
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
-    void fetch('/api/sites', { headers })
+    void apiFetch('/api/sites')
       .then((r) => r.json() as Promise<SiteOpt[]>)
       .then((s) => {
         setSites(s)
         setSiteId((prev) => prev || s[0]?.id || '')
       })
       .catch(() => {})
-    void fetch('/api/terminal-groups', { headers })
+    void apiFetch('/api/terminal-groups')
       .then((r) => r.json() as Promise<GroupOpt[]>)
       .then(setGroups)
       .catch(() => {})

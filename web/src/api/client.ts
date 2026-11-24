@@ -1,30 +1,48 @@
+import { consoleSession } from './consoleSession'
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const r = await fetch(path, { headers: { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } })
+  const r = await apiFetch(path)
   if (!r.ok) throw new Error(`${path} ${r.status}`)
   return (await r.json()) as T
 }
 
-const jsonHeaders = {
-  'Content-Type': 'application/json',
-  'X-Operator-Id': 'ui@local',
-  'X-Operator-Role': 'Admin',
-} as const
+const jsonHeaders = { 'Content-Type': 'application/json' } as const
 
-const opHeaders = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } as const
+async function request(path: string, init: RequestInit, token: string | null, apiKey: string | null): Promise<Response> {
+  const origin = window.location.origin
+  const url = new URL(path, origin)
+  if (url.origin !== origin || url.username || url.password ||
+      (url.pathname !== '/api' && !url.pathname.startsWith('/api/')) || /%2f|%5c/i.test(url.pathname)) {
+    throw new TypeError('CoinLine API requests must use a same-origin /api URL.')
+  }
+
+  const headers = new Headers(init.headers)
+  headers.delete('Authorization')
+  headers.delete('X-API-Key')
+  if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (apiKey) headers.set('X-API-Key', apiKey)
+  return fetch(url.href, { ...init, headers, redirect: 'error', mode: 'same-origin', credentials: 'omit' })
+}
+
+export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return request(path, init, consoleSession.token(), consoleSession.apiKey())
+}
+
+export function apiSignIn(username: string, password: string, apiKey: string): Promise<Response> {
+  return request('/api/auth/login', {
+    method: 'POST', headers: jsonHeaders, body: JSON.stringify({ username, password }),
+  }, null, apiKey.trim())
+}
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const r = await fetch(path, {
-    method: 'POST',
-    headers: jsonHeaders,
-    body: JSON.stringify(body),
-  })
+  const r = await apiPostRaw(path, body)
   if (!r.ok) throw new Error(`${path} ${r.status}`)
   return (await r.json()) as T
 }
 
 /** POST with optional JSON body — use when you need status / error payload without throwing. */
 export async function apiPostRaw(path: string, body?: unknown): Promise<Response> {
-  return fetch(path, {
+  return apiFetch(path, {
     method: 'POST',
     headers: jsonHeaders,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -32,12 +50,12 @@ export async function apiPostRaw(path: string, body?: unknown): Promise<Response
 }
 
 export async function apiPut(path: string, body: unknown): Promise<void> {
-  const r = await fetch(path, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) })
+  const r = await apiFetch(path, { method: 'PUT', headers: jsonHeaders, body: JSON.stringify(body) })
   if (!r.ok) throw new Error(`${path} ${r.status}`)
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const r = await fetch(path, { method: 'DELETE', headers: opHeaders })
+  const r = await apiFetch(path, { method: 'DELETE' })
   if (!r.ok) throw new Error(`${path} ${r.status}`)
 }
 
@@ -50,7 +68,7 @@ function bareUrl(path: string, options?: BarePostOptions): string {
 
 /** POST with no JSON body. Pass `confirm: true` for server-side destructive / state-changing actions. */
 export async function apiPostBare(path: string, options?: BarePostOptions): Promise<Response> {
-  return fetch(bareUrl(path, options), { method: 'POST', headers: opHeaders })
+  return apiFetch(bareUrl(path, options), { method: 'POST' })
 }
 
 export async function apiPostBareOk(path: string, options?: BarePostOptions): Promise<void> {

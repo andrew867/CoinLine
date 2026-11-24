@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiPostBareOk } from '../api/client'
+import { apiFetch, apiPostBareOk } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type RecordRow = {
   id: string
@@ -45,7 +44,7 @@ export function UploadDetail() {
   const load = () => {
     if (!id) return
     setErr(null)
-    fetch(`/api/uploads/${id}`, { headers })
+    apiFetch(`/api/uploads/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Detail>
@@ -62,7 +61,7 @@ export function UploadDetail() {
     if (!id) return
     setErr(null)
     try {
-      const r = await fetch(`/api/uploads/${id}/ingest`, { method: 'POST', headers })
+      const r = await apiFetch(`/api/uploads/${id}/ingest`, { method: 'POST' })
       if (!r.ok) throw new Error(`ingest ${r.status}`)
       load()
     } catch (ex) {
@@ -87,9 +86,9 @@ export function UploadDetail() {
     if (!id) return
     setErr(null)
     try {
-      const r = await fetch(`/api/uploads/${id}/operator-review`, {
+      const r = await apiFetch(`/api/uploads/${id}/operator-review`, {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ note: reviewNote.trim() || null }),
       })
       if (!r.ok) throw new Error(`review ${r.status}`)

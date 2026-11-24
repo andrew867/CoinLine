@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
+import { apiFetch } from '../api/client'
 
 type HealthJson = { status?: string; ts?: string }
 type SipModem = {
@@ -46,7 +47,7 @@ export function StatusPage() {
   const [hangupMsg, setHangupMsg] = useState<string | null>(null)
 
   async function refreshSip() {
-    const sipResponse = await fetch('/api/sip-modem')
+    const sipResponse = await apiFetch('/api/sip-modem')
     if (sipResponse.ok)
       setSip((await sipResponse.json()) as SipModem)
   }
@@ -69,10 +70,10 @@ export function StatusPage() {
         setLive(lb)
         setReadyStatus(rd.status)
         setReadyBody(rt.slice(0, 4000))
-        const sipResponse = await fetch('/api/sip-modem')
+        const sipResponse = await apiFetch('/api/sip-modem')
         if (sipResponse.ok)
           setSip((await sipResponse.json()) as SipModem)
-        const serialResponse = await fetch('/api/serial-modem')
+        const serialResponse = await apiFetch('/api/serial-modem')
         if (serialResponse.ok)
           setSerial((await serialResponse.json()) as SerialModem)
         if (!h.ok || !l.ok) throw new Error(`health ${h.status} / live ${l.status}`)
@@ -153,7 +154,7 @@ export function StatusPage() {
                     onClick={() => {
                       setSelfTestBusy(true)
                       setSelfTest(null)
-                      void fetch('/api/sip-modem/self-test', { method: 'POST', headers: { 'X-Operator-Role': 'Admin' } })
+                      void apiFetch('/api/sip-modem/self-test', { method: 'POST' })
                         .then(async (r) => {
                           const body = (await r.json().catch(() => null)) as { detail?: string; ok?: boolean } | null
                           setSelfTest(body?.detail ?? (r.ok ? 'Self-test finished.' : `Self-test failed (${r.status}).`))
@@ -172,7 +173,7 @@ export function StatusPage() {
                       onClick={() => {
                         setHangupBusy(true)
                         setHangupMsg(null)
-                        void fetch('/api/sip-modem/hangup', { method: 'POST', headers: { 'X-Operator-Role': 'Admin' } })
+                        void apiFetch('/api/sip-modem/hangup', { method: 'POST' })
                           .then(async (r) => {
                             const body = (await r.json().catch(() => null)) as { detail?: string } | null
                             setHangupMsg(body?.detail ?? (r.ok ? 'Calls cleared.' : `Hangup failed (${r.status}).`))

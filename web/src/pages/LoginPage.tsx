@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { apiSignIn } from '../api/client'
+import { consoleSession } from '../api/consoleSession'
 
 export function LoginPage() {
   const [username, setUsername] = useState('operator')
   const [password, setPassword] = useState('')
-  const [apiKey, setApiKey] = useState(localStorage.getItem('coinline.apiKey') ?? '')
+  const [apiKey, setApiKey] = useState(() => consoleSession.apiKey() ?? '')
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -13,20 +15,11 @@ export function LoginPage() {
     setBusy(true)
     setErr(null)
     try {
-      if (apiKey.trim()) localStorage.setItem('coinline.apiKey', apiKey.trim())
-      const r = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      if (r.status === 401) {
-        setErr('That username or password is not recognized.')
-        return
-      }
-      if (!r.ok) throw new Error(String(r.status))
-      const body = (await r.json()) as { token: string; displayName?: string }
-      localStorage.setItem('coinline.token', body.token)
-      if (body.displayName) localStorage.setItem('coinline.displayName', body.displayName)
+      const r = await apiSignIn(username, password, apiKey)
+      const body = (await r.json().catch(() => null)) as { token?: string; displayName?: string; error?: string } | null
+      if (!r.ok) throw new Error(body?.error ?? `Could not sign in (HTTP ${r.status}).`)
+      if (!body?.token) throw new Error('The server did not return a sign-in token.')
+      consoleSession.save(body.token, apiKey, body.displayName)
       window.location.assign('/')
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'Could not sign in')
@@ -59,7 +52,7 @@ export function LoginPage() {
           <summary>API key, when the server requires one</summary>
           <label>
             API key
-            <input value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
+            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} autoComplete="off" />
           </label>
         </details>
         <button type="submit" disabled={busy}>

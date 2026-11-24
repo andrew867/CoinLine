@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiPostBareOk, apiPut } from '../api/client'
+import { apiFetch, apiPostBareOk, apiPut } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Ver = {
   id: string
@@ -37,7 +36,7 @@ export function TableSetDetail() {
   const load = () => {
     if (!id) return
     setErr(null)
-    fetch(`/api/tables/sets/${id}`, { headers })
+    apiFetch(`/api/tables/sets/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Detail>

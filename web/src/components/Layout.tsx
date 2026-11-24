@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { FirmwareLiveFlashBanner } from './FirmwareLiveFlashBanner'
 import { GlobalSearch } from './GlobalSearch'
+import { consoleSession } from '../api/consoleSession'
 
 const groups = [
   {
@@ -79,7 +80,7 @@ export function Layout() {
           type="button"
           className="sign-out"
           onClick={() => {
-            localStorage.removeItem('coinline.token')
+            consoleSession.clear()
             window.location.assign('/login')
           }}
         >

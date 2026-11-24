@@ -1,8 +1,10 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../components/AppStates'
+import { apiFetch } from '../api/client'
+import { consoleSession } from '../api/consoleSession'
 
-const headers = { 'Content-Type': 'application/json', 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
+const headers = { 'Content-Type': 'application/json' }
 
 type Me = { username: string; displayName: string; role: string }
 
@@ -29,7 +31,7 @@ export function SettingsPage() {
   const [me, setMe] = useState<Me | null>(null)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
-  const [apiKey, setApiKey] = useState(localStorage.getItem('coinline.apiKey') ?? '')
+  const [apiKey, setApiKey] = useState(() => consoleSession.apiKey() ?? '')
   const [err, setErr] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [craft, setCraft] = useState<CraftPolicy | null>(null)
@@ -37,25 +39,25 @@ export function SettingsPage() {
   const [serial, setSerial] = useState<SerialModem | null>(null)
 
   useEffect(() => {
-    void fetch('/api/auth/me', { headers })
+    void apiFetch('/api/auth/me', { headers })
       .then((r) => (r.ok ? (r.json() as Promise<Me>) : null))
       .then((body) => {
         if (body) setMe(body)
       })
       .catch(() => {})
-    void fetch('/api/craft/execution-policy', { headers })
+    void apiFetch('/api/craft/execution-policy', { headers })
       .then((r) => (r.ok ? (r.json() as Promise<CraftPolicy>) : null))
       .then((body) => {
         if (body) setCraft(body)
       })
       .catch(() => {})
-    void fetch('/api/firmware/execution-policy', { headers })
+    void apiFetch('/api/firmware/execution-policy', { headers })
       .then((r) => (r.ok ? (r.json() as Promise<FirmwarePolicy>) : null))
       .then((body) => {
         if (body) setFirmware(body)
       })
       .catch(() => {})
-    void fetch('/api/serial-modem', { headers })
+    void apiFetch('/api/serial-modem', { headers })
       .then((r) => (r.ok ? (r.json() as Promise<SerialModem>) : null))
       .then((body) => {
         if (body) setSerial(body)
@@ -67,7 +69,7 @@ export function SettingsPage() {
     e.preventDefault()
     setErr(null)
     setNote(null)
-    const r = await fetch('/api/auth/password', {
+    const r = await apiFetch('/api/auth/password', {
       method: 'POST',
       headers,
       body: JSON.stringify({ currentPassword, newPassword }),
@@ -85,8 +87,7 @@ export function SettingsPage() {
   function onKey(e: FormEvent) {
     e.preventDefault()
     const value = apiKey.trim()
-    if (value) localStorage.setItem('coinline.apiKey', value)
-    else localStorage.removeItem('coinline.apiKey')
+    consoleSession.setApiKey(value)
     setNote(value ? 'API key saved in this browser.' : 'API key cleared.')
   }
 

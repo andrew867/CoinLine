@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiPostBareCreated, apiPostBareOk } from '../api/client'
+import { apiFetch, apiPostBareCreated, apiPostBareOk } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Step = {
   id: string
@@ -42,7 +41,7 @@ export function DownloadDetail() {
   const load = () => {
     if (!id) return
     setErr(null)
-    fetch(`/api/downloads/${id}`, { headers })
+    apiFetch(`/api/downloads/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Detail>
@@ -120,6 +119,7 @@ export function DownloadDetail() {
       <p>
         Set: {d.tableSetName ?? d.tableSetId} · Scope: {d.scope === 1 ? 'Partial' : 'Full'} · Retries: {d.retryCount}
       </p>
+      {d.lastError && <p role="alert">{d.lastError}</p>}
       {d.diagnosticsJson && (
         <pre style={{ background: '#f6f8fa', padding: 12, fontSize: 12 }}>{d.diagnosticsJson}</pre>
       )}
@@ -150,6 +150,7 @@ export function DownloadDetail() {
               Host phase: {s.hostDownloadPhaseName} ({s.hostDownloadPhase}) · ACK: {s.lastAckStatus} · Item status:{' '}
               {s.itemStatus}
             </div>
+            {s.errorDetail && <div>{s.errorDetail}</div>}
             <div style={{ fontSize: 12 }}>
               Payload SHA-256: <code>{s.payloadSha256Hex}</code>
             </div>

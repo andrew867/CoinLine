@@ -1,8 +1,8 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../components/AppStates'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type GroupRow = { id: string; name: string; customerId: string | null; terminalCount: number }
 type Cust = { id: string; name: string; code: string }
@@ -16,13 +16,13 @@ export function TerminalGroupsPage() {
   const [saving, setSaving] = useState(false)
 
   async function load() {
-    const list = await fetch('/api/terminal-groups', { headers })
+    const list = await apiFetch('/api/terminal-groups')
     if (!list.ok) throw new Error(String(list.status))
     setRows(await list.json() as GroupRow[])
   }
 
   useEffect(() => {
-    void fetch('/api/customers', { headers })
+    void apiFetch('/api/customers')
       .then((r) => r.json() as Promise<Cust[]>)
       .then((c) => {
         setCustomers(c)
@@ -37,9 +37,9 @@ export function TerminalGroupsPage() {
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch('/api/terminal-groups', {
+      const r = await apiFetch('/api/terminal-groups', {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), customerId: customerId || null }),
       })
       if (!r.ok) throw new Error(String(r.status))
@@ -54,9 +54,9 @@ export function TerminalGroupsPage() {
 
   async function rename(id: string, name: string) {
     setErr(null)
-    const r = await fetch(`/api/terminal-groups/${id}`, {
+    const r = await apiFetch(`/api/terminal-groups/${id}`, {
       method: 'PUT',
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     })
     if (!r.ok) {
@@ -68,7 +68,7 @@ export function TerminalGroupsPage() {
 
   async function remove(id: string) {
     setErr(null)
-    const r = await fetch(`/api/terminal-groups/${id}`, { method: 'DELETE', headers })
+    const r = await apiFetch(`/api/terminal-groups/${id}`, { method: 'DELETE' })
     if (r.status === 409) {
       setErr('Move the phones out of this group first.')
       return

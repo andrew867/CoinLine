@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiPost } from '../api/client'
+import { apiFetch, apiPost } from '../api/client'
 import { dispositionWords, reconciliationWords } from '../callWords'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Diag = { code: string; severity: string; message: string }
 type Res = {
@@ -37,7 +36,7 @@ export function CallRecordDetail() {
 
   const load = async (): Promise<Doc | null> => {
     if (!id) return null
-    const r = await fetch(`/api/call-records/${id}`, { headers })
+    const r = await apiFetch(`/api/call-records/${id}`)
     if (r.status === 404) return null
     if (!r.ok) throw new Error(String(r.status))
     return (await r.json()) as Doc

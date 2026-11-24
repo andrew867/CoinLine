@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -29,7 +29,7 @@ export function UploadsPage() {
 
   useEffect(() => {
     setErr(null)
-    fetch('/api/uploads', { headers })
+    apiFetch('/api/uploads')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>

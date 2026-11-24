@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiPost, apiPostBareOk } from '../api/client'
+import { apiFetch, apiPost, apiPostBareOk } from '../api/client'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
 import { StatusBadge, terminalStatusLabel, terminalStatusVariant } from '../components/StatusBadge'
 
@@ -26,7 +26,6 @@ type DiagnosticsPayload = {
   }[]
 }
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 function sessionWords(status: number): string {
   return ({ 0: 'Active', 1: 'Closed', 2: 'Archived' } as Record<number, string>)[status] ?? 'Unknown'
@@ -144,11 +143,11 @@ export function TerminalDetail() {
     setErr(null)
     ;(async () => {
       try {
-        const t = await fetch(`/api/terminals/${id}`, { headers })
+        const t = await apiFetch(`/api/terminals/${id}`)
         if (!t.ok) throw new Error(String(t.status))
         if (!c) setTerm((await t.json()) as Term)
 
-        const a = await fetch(`/api/terminals/${id}/table-assignment`, { headers })
+        const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
         if (a.status === 404) {
           if (!c) setAssign(null)
         } else if (a.ok) {
@@ -157,7 +156,7 @@ export function TerminalDetail() {
           setErr(`Assignment ${a.status}`)
         }
 
-        const s = await fetch('/api/tables/sets', { headers })
+        const s = await apiFetch('/api/tables/sets')
         if (s.ok) {
           const list = (await s.json()) as SetRow[]
           if (!c) {
@@ -167,14 +166,14 @@ export function TerminalDetail() {
           }
         }
 
-        const groupsRes = await fetch('/api/terminal-groups', { headers })
+        const groupsRes = await apiFetch('/api/terminal-groups')
         if (groupsRes.ok && !c) setGroups((await groupsRes.json()) as { id: string; name: string }[])
 
-        const dg = await fetch(`/api/terminals/${id}/diagnostics`, { headers })
+        const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
         if (dg.ok && !c) setDiag((await dg.json()) as DiagnosticsPayload)
         else if (!dg.ok && !c) setDiagErr(`diagnostics ${dg.status}`)
 
-        const tl = await fetch(`/api/operator/terminals/${id}/timeline?take=60`, { headers })
+        const tl = await apiFetch(`/api/operator/terminals/${id}/timeline?take=60`)
         if (tl.ok && !c) setTimeline((await tl.json()) as TimelineResp)
         else if (!tl.ok && !c) setTlErr(`timeline ${tl.status}`)
       } catch (e) {
@@ -196,7 +195,7 @@ export function TerminalDetail() {
         customerId: null,
         siteId: null,
       })
-      const a = await fetch(`/api/terminals/${id}/table-assignment`, { headers })
+      const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
       if (a.ok) setAssign((await a.json()) as Assign)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'error')
@@ -212,7 +211,7 @@ export function TerminalDetail() {
         snapshotJson: snapJson,
         source: 'operator_ui',
       })
-      const dg = await fetch(`/api/terminals/${id}/diagnostics`, { headers })
+      const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
       if (dg.ok) setDiag((await dg.json()) as DiagnosticsPayload)
     } catch (ex) {
       setDiagErr(ex instanceof Error ? ex.message : 'error')
@@ -227,7 +226,7 @@ export function TerminalDetail() {
         detailJson: '{"intent":"cdr_upload"}',
         simulationMode: true,
       })
-      const dg = await fetch(`/api/terminals/${id}/diagnostics`, { headers })
+      const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
       if (dg.ok) setDiag((await dg.json()) as DiagnosticsPayload)
     } catch (ex) {
       setDiagErr(ex instanceof Error ? ex.message : 'error')
@@ -242,7 +241,7 @@ export function TerminalDetail() {
         detailJson: '{"intent":"table_reload"}',
         simulationMode: true,
       })
-      const dg = await fetch(`/api/terminals/${id}/diagnostics`, { headers })
+      const dg = await apiFetch(`/api/terminals/${id}/diagnostics`)
       if (dg.ok) setDiag((await dg.json()) as DiagnosticsPayload)
     } catch (ex) {
       setDiagErr(ex instanceof Error ? ex.message : 'error')
@@ -260,7 +259,7 @@ export function TerminalDetail() {
     setErr(null)
     try {
       await apiPostBareOk(`/api/terminals/${id}/table-assignment/rollback`, { confirm: true })
-      const a = await fetch(`/api/terminals/${id}/table-assignment`, { headers })
+      const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
       if (a.ok) setAssign((await a.json()) as Assign)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'error')
@@ -271,9 +270,9 @@ export function TerminalDetail() {
     if (!id) return
     let cancel = false
     ;(async () => {
-      const sessionsResp = await fetch('/api/ncc/sessions?includeArchived=true', { headers })
-      const callsResp = await fetch('/api/call-records', { headers })
-      const batchesResp = await fetch('/api/downloads', { headers })
+      const sessionsResp = await apiFetch('/api/ncc/sessions?includeArchived=true')
+      const callsResp = await apiFetch('/api/call-records')
+      const batchesResp = await apiFetch('/api/downloads')
       if (cancel) return
       const sessionRows = sessionsResp.ok ? ((await sessionsResp.json()) as SessionRow[]) : []
       const mine = sessionRows.filter((s) => s.terminalId === id)
@@ -285,7 +284,7 @@ export function TerminalDetail() {
         : []
       const views: BatchView[] = []
       for (const b of batchRows.filter((x) => x.terminalId === id).slice(0, 5)) {
-        const detail = await fetch('/api/downloads/' + b.id, { headers })
+        const detail = await apiFetch('/api/downloads/' + b.id)
         if (!detail.ok) {
           views.push({ id: b.id, status: b.status, lastError: b.lastError, phases: [] })
           continue
@@ -337,9 +336,9 @@ export function TerminalDetail() {
           value={term.terminalGroupId ?? ''}
           onChange={(e) => {
             const terminalGroupId = e.target.value || null
-            void fetch(`/api/terminals/${term.id}/group`, {
+            void apiFetch(`/api/terminals/${term.id}/group`, {
               method: 'PUT',
-              headers: { ...headers, 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ terminalGroupId }),
             }).then((r) => {
               if (r.ok) setTerm({ ...term, terminalGroupId })

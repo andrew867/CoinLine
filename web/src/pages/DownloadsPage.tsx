@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { apiPost } from '../api/client'
+import { apiFetch, apiPost } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Batch = {
   id: string
@@ -31,7 +30,7 @@ export function DownloadsPage() {
 
   const load = () => {
     setErr(null)
-    fetch('/api/downloads', { headers })
+    apiFetch('/api/downloads')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Batch[]>
@@ -48,7 +47,7 @@ export function DownloadsPage() {
     let c = false
     async function safeJson<T>(path: string): Promise<T | null> {
       try {
-        const r = await fetch(path, { headers })
+        const r = await apiFetch(path)
         if (!r.ok) return null
         const ct = r.headers.get('content-type')
         if (!ct?.includes('application/json')) return null

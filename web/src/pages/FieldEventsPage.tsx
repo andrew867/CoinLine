@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Item = {
   id: string
@@ -21,7 +21,7 @@ export function FieldEventsPage() {
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
-    void fetch('/api/field-events', { headers })
+    void apiFetch('/api/field-events')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<List>

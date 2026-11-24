@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { HexViewer } from '../components/HexViewer'
 import { JsonPanel } from '../components/JsonPanel'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Detail = {
   id: string
@@ -39,7 +39,7 @@ export function DlogTransactionDetail() {
       setDetail(null)
       setLoading(true)
       try {
-        const r = await fetch(`/api/dlog/transactions/${id}`, { headers })
+        const r = await apiFetch(`/api/dlog/transactions/${id}`)
         if (!r.ok) throw new Error(`Detail ${r.status}`)
         const j = (await r.json()) as Detail
         if (!cancelled) setDetail(j)

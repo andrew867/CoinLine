@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -54,7 +54,7 @@ export function DlogTransactions() {
     setLoading(true)
     try {
       const url = query ? `/api/dlog/transactions?${query}` : '/api/dlog/transactions'
-      const r = await fetch(url, { headers })
+      const r = await apiFetch(url)
       if (!r.ok) throw new Error(`List ${r.status}`)
       setRows((await r.json()) as Row[])
     } catch (e) {

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { terminalStatusLabel } from '../components/StatusBadge'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -21,7 +21,7 @@ export function TerminalsList() {
 
   useEffect(() => {
     let c = false
-    fetch('/api/terminals', { headers })
+    apiFetch('/api/terminals')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>

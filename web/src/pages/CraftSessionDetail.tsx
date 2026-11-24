@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiGet } from '../api/client'
+import { apiFetch, apiGet } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } as const
 
 type CmdType = {
   id: string
@@ -154,9 +153,9 @@ export function CraftSessionDetail() {
     }
 
     try {
-      const r = await fetch(`/api/craft/sessions/${sessionId}/commands`, {
+      const r = await apiFetch(`/api/craft/sessions/${sessionId}/commands`, {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           commandName,
           requestHex,
@@ -182,7 +181,7 @@ export function CraftSessionDetail() {
   async function simulateCommand(cmdId: string) {
     setSubmitErr(null)
     try {
-      const r = await fetch(`/api/craft/commands/${cmdId}/simulate`, { method: 'POST', headers })
+      const r = await apiFetch(`/api/craft/commands/${cmdId}/simulate`, { method: 'POST' })
       if (!r.ok) {
         setSubmitErr(await r.text())
         return
@@ -196,7 +195,7 @@ export function CraftSessionDetail() {
   async function executeLiveCommand(cmdId: string) {
     setSubmitErr(null)
     try {
-      const r = await fetch(`/api/craft/commands/${cmdId}/execute-live`, { method: 'POST', headers })
+      const r = await apiFetch(`/api/craft/commands/${cmdId}/execute-live`, { method: 'POST' })
       if (!r.ok) {
         setSubmitErr(await r.text())
         return
@@ -210,9 +209,9 @@ export function CraftSessionDetail() {
   async function cancelCommand(cmdId: string) {
     setSubmitErr(null)
     try {
-      const r = await fetch(`/api/craft/commands/${cmdId}/cancel`, {
+      const r = await apiFetch(`/api/craft/commands/${cmdId}/cancel`, {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: 'operator_cancel' }),
       })
       if (!r.ok) {
