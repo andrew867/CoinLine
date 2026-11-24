@@ -7,7 +7,8 @@ namespace HostPlatform.Protocols.Tables;
 public enum TableFieldEncoding
 {
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
-    KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes
+    KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes,
+    TerminatedDisplayText
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -27,7 +28,7 @@ public sealed record NativeTableField(
         TableFieldEncoding.GraphicalLink => "screen-link",
         TableFieldEncoding.GraphicalFlashRate => "flash-rate",
         TableFieldEncoding.GraphicalIcon => "screen-icon",
-        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial
+        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial
             or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes => "text",
         _ when Choices != null => "select",
         _ => "number"
@@ -42,7 +43,7 @@ public sealed record NativeTableField(
 
     public int? TextLimit => Encoding switch
     {
-        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.MessagingKey => Size,
+        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.MessagingKey => Size,
         TableFieldEncoding.Bcd or TableFieldEncoding.CredentialBcd => Maximum ?? Size * 2,
         TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes => Size * 2,
         _ => null
@@ -78,6 +79,7 @@ public sealed record NativeTableField(
             TableFieldEncoding.SignedLong => Format(BinaryPrimitives.ReadInt32LittleEndian(data)),
             TableFieldEncoding.Text => ReadText(data),
             TableFieldEncoding.DisplayText => VisualPromptText.Read(data),
+            TableFieldEncoding.TerminatedDisplayText => ReadTerminatedDisplayText(data),
             TableFieldEncoding.GraphicalText => GraphicalScreenText.Read(data),
             TableFieldEncoding.Bcd => ReadDigits(data, isDial: false, TextLimit ?? 0),
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
@@ -109,7 +111,8 @@ public sealed record NativeTableField(
                 System.Text.Encoding.ASCII.GetBytes(value, data);
                 return;
             case TableFieldEncoding.DisplayText:
-                if (!VisualPromptText.TryWrite(value, data))
+            case TableFieldEncoding.TerminatedDisplayText:
+                if (!VisualPromptText.TryWrite(value, data, Encoding == TableFieldEncoding.TerminatedDisplayText ? (byte)0 : (byte)' '))
                     throw Invalid($"enter up to {Size} display characters using ASCII or supported accents");
                 return;
             case TableFieldEncoding.GraphicalText:
@@ -216,6 +219,12 @@ public sealed record NativeTableField(
         var value = System.Text.Encoding.ASCII.GetString(data).TrimEnd(' ', '\0');
         return value.Any(ch => ch is < ' ' or > '~') || data.IndexOfAnyInRange((byte)128, byte.MaxValue) >= 0
             ? null : value;
+    }
+
+    private static string? ReadTerminatedDisplayText(ReadOnlySpan<byte> data)
+    {
+        var terminator = data.IndexOf((byte)0);
+        return VisualPromptText.Read(terminator < 0 ? data : data[..terminator]);
     }
 
     private static string Format(int value) => value.ToString(CultureInfo.InvariantCulture);

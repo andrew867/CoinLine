@@ -23,7 +23,9 @@ Under **Terminal features and call setup**, select **Audio-Gram messaging** to e
 
 The set summary shows the operating type, enabled coin slots and configured magnetic-card ranges for the recognized profiles. Review any provisioning findings before assigning the set.
 
-In **Dialing, screening and service**, the numbering plan editor shows the existing matching rules for a recognized dial plan. It can change the digit classes and selected call options while preserving the links and number-formatting data.
+In **Dialing, screening and service**, open the numbering plan and select **Numbering rules**. Choose **Dialing** to configure matching, fallback, prefix conversion and call classifications. Choose **Display formatting** to configure digit groups and separators. Each rule set starts at Rule 1. After adding or removing rules, check the links from the start rule before saving. A draft save validates links and available space, and shows an error if the edit would overwrite unrecognized record data.
+
+Under **Settings**, select **Number display and currency** to change the symbol, spoken currency and number of decimal places. The same record also holds digit timers, carrier behavior and the call classifications assigned after a rate response.
 
 In **Phones**, open a phone and expand **Phone groups** to choose its memberships. A phone can belong to up to 40 groups. Its primary group appears in the phone list. Every saved membership is included in that group's assignment preview.
 

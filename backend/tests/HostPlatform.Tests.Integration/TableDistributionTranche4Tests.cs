@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using HostPlatform.Protocols.Tables;
 
 namespace HostPlatform.Tests.Integration;
 
@@ -9,6 +10,54 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
 {
     private readonly HttpClient _client = CreateClient(factory);
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+
+    [Fact]
+    public async Task Numbering_plan_editor_saves_both_rule_sets_and_currency_in_one_revision()
+    {
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Numbering editor test", tableNumber = 62 });
+        definition.EnsureSuccessStatusCode();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Numbering editor test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var data = new byte[NumberingPlanWire.RecordLength];
+        data[0] = NumberingPlanWire.MessageType;
+        var root = new NumberingRule("first", null, null, 0, 48, 3, [18]);
+        NumberingPlanWire.Apply(data, new([root], null));
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            tableRevision = 1, payloadBase64 = Convert.ToBase64String(data), sortOrder = 0
+        });
+        imported.EnsureSuccessStatusCode();
+
+        var path = $"/api/tables/sets/{id}/records/62/fields";
+        var original = await _client.GetFromJsonAsync<JsonElement>(path);
+        var originalPlan = original.GetProperty("numberingPlan").Deserialize<NumberingPlanChanges>(JsonOpts)!;
+        var added = new NumberingRule("second", null, null, 0, 48, 5, [10, 17]);
+        var formatting = new NumberingRule("format", null, null, 4, 0, 0, [0x51, 0x91]);
+        var edits = new
+        {
+            profile = original.GetProperty("profile"), revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["currencySymbol"] = "¢", ["formatCurrency"] = "true" },
+            numberingPlan = new NumberingPlanChanges([originalPlan.Dial![0] with { NoMatch = added.Id }, added], [formatting])
+        };
+
+        using var saved = await _client.PutAsJsonAsync(path, edits);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var result = await _client.GetFromJsonAsync<JsonElement>(path);
+        var updated = result.GetProperty("numberingPlan").Deserialize<NumberingPlanChanges>(JsonOpts)!;
+        Assert.Equal(2, result.GetProperty("revision").GetInt32());
+        Assert.Equal(updated.Dial![1].Id, updated.Dial[0].NoMatch);
+        Assert.Equal(added.Digits, updated.Dial[1].Digits);
+        Assert.Equal(formatting.Digits, Assert.Single(updated.Format!).Digits);
+        var fields = result.GetProperty("sections").EnumerateArray().Single(section => section.GetProperty("key").GetString() == "number-display")
+            .GetProperty("fields").EnumerateArray().ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal("¢", fields["currencySymbol"].GetProperty("value").GetString());
+        Assert.Equal("true", fields["formatCurrency"].GetProperty("value").GetString());
+
+        using var stale = await _client.PutAsJsonAsync(path, edits);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+    }
 
     [Fact]
     public async Task Service_restriction_template_creates_one_native_draft_record()

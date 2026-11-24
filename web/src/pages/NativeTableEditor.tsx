@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { NativeBitmapField } from './NativeBitmapField'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
+import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
 
 type Field = {
   key: string
@@ -28,6 +29,7 @@ type Layout = {
   revision: number
   sha256: string
   sections: Section[]
+  numberingPlan?: NumberingPlan | null
 } | { supported: false; reason: string; profiles?: string[]; templates?: { profile: string; length: number }[] }
 
 type Props = {
@@ -43,6 +45,8 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   const [sectionKey, setSectionKey] = useState('')
   const [search, setSearch] = useState('')
   const [edits, setEdits] = useState<Record<string, string>>({})
+  const [ruleEdits, setRuleEdits] = useState<NumberingPlanChanges>({})
+  const [view, setView] = useState<'settings' | 'rules'>('settings')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [reload, setReload] = useState(0)
@@ -75,7 +79,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
     if (value === field.value || (field.editor === 'password' && value === '')) delete updated[field.key]
     else updated[field.key] = value
     setEdits(updated)
-    onDirty(Object.keys(updated).length > 0)
+    onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0)
     setMessage('')
   }
 
@@ -87,13 +91,15 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
     try {
       const response = await fetch(endpoint, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ revision: layout.revision, sha256: layout.sha256, changes: edits, profile: layout.profile }),
+        body: JSON.stringify({ revision: layout.revision, sha256: layout.sha256, changes: edits, profile: layout.profile,
+          numberingPlan: Object.keys(ruleEdits).length ? ruleEdits : undefined }),
       })
       if (!response.ok) {
         const body = await response.json().catch(() => null)
         throw new Error(body?.error ?? 'Could not save this record.')
       }
       setEdits({})
+      setRuleEdits({})
       onDirty(false)
       setMessage('Changes saved to this draft.')
       setReload((count) => count + 1)
@@ -123,8 +129,11 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   }
 
   function changeProfile(value: string) {
-    if (Object.keys(edits).length > 0 && !window.confirm('Discard the unsaved changes and switch firmware profiles?')) return
+    if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0)
+      && !window.confirm('Discard the unsaved changes and switch firmware profiles?')) return
     setEdits({})
+    setRuleEdits({})
+    setView('settings')
     onDirty(false)
     setSectionKey('')
     setSearch('')
@@ -153,12 +162,15 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   )
 
   const needle = search.trim().toLowerCase()
-  const sections = layout.sections.filter((section) => !needle || section.label.toLowerCase().includes(needle)
+  const settings = layout.sections.filter((section) => !layout.numberingPlan?.dial || !section.key.startsWith('dial-'))
+  const sections = settings.filter((section) => !needle || section.label.toLowerCase().includes(needle)
     || section.fields.some((field) => field.label.toLowerCase().includes(needle) || field.help?.toLowerCase().includes(needle)
       || (field.editor !== 'bitmap' && field.editor !== 'password'
         && (field.value?.toLowerCase().includes(needle) || edits[field.key]?.toLowerCase().includes(needle)))))
   const current = sections.find((section) => section.key === sectionKey) ?? sections[0]
   const changed = Object.keys(edits).length
+  const ruleChanges = Object.keys(ruleEdits).length > 0
+  const showingRules = layout.numberingPlan && view === 'rules'
   const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
   const effectiveValue = (field: Field) => edits[field.key] ?? field.value
 
@@ -177,9 +189,22 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
           </label>
         </div>
       )}
-      {layout.sections.length > 1 && (
+      {layout.numberingPlan && <div className="row-actions" role="group" aria-label="Numbering-plan editor">
+        <button type="button" aria-pressed={!showingRules} onClick={() => setView('settings')}>Settings</button>
+        <button type="button" aria-pressed={!!showingRules} onClick={() => setView('rules')}>Numbering rules</button>
+      </div>}
+      {showingRules && layout.numberingPlan && <NumberingPlanEditor plan={layout.numberingPlan} changes={ruleEdits}
+        editable={layout.editable && !busy} onChange={(group, rules) => {
+          const updated = { ...ruleEdits }
+          if (JSON.stringify(rules) === JSON.stringify(layout.numberingPlan?.[group])) delete updated[group]
+          else updated[group] = rules
+          setRuleEdits(updated)
+          onDirty(changed > 0 || Object.keys(updated).length > 0)
+          setMessage('')
+        }} />}
+      {!showingRules && settings.length > 1 && (
         <div className="table-config-selectors">
-          {layout.sections.length > 12 && <label>Find entry<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
+          {settings.length > 12 && <label>Find entry<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
           <label>Section or entry
             <select value={current?.key ?? ''} disabled={!current} onChange={(event) => setSectionKey(event.target.value)}>
               {!current && <option value="">No matching entries</option>}
@@ -188,7 +213,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
           </label>
         </div>
       )}
-      {current && (
+      {!showingRules && current && (
         <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
           <legend>{current.label}</legend>
           {changingKind && <p className="native-graphical-status">Save the screen type to load its editor.</p>}
@@ -218,8 +243,9 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
       )}
       {layout.editable && (
         <div className="row-actions">
-          <button type="submit" disabled={changed === 0 || busy}>{busy ? 'Saving…' : 'Save record'}</button>
+          <button type="submit" disabled={(changed === 0 && !ruleChanges) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
           {changed > 0 && <span>{changed} {changed === 1 ? 'field changed' : 'fields changed'}</span>}
+          {ruleChanges && <span>Numbering rules changed</span>}
         </div>
       )}
       {message && <p className="native-table-feedback" role="status">{message}</p>}

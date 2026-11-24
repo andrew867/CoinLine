@@ -264,7 +264,7 @@ public sealed class NativeTableLayoutTests
         record[213] = 0xB4;
 
         var layout = NativeTableLayouts.Find(62, record)!;
-        Assert.Equal(new[] { "numbering", "dial-0", "dial-8" }, layout.Sections.Select(section => section.Key));
+        Assert.Equal(new[] { "numbering", "number-display", "rate-mapping", "dial-0", "dial-8" }, layout.Sections.Select(section => section.Key));
         var updated = layout.Apply(record, new Dictionary<string, string>
         {
             ["dial-0.digit-0"] = "18",
@@ -278,9 +278,9 @@ public sealed class NativeTableLayoutTests
         Assert.Equal(expected, updated);
 
         record[33] = 6;
-        Assert.Single(NativeTableLayouts.Find(62, record)!.Sections);
+        Assert.Equal(3, NativeTableLayouts.Find(62, record)!.Sections.Count);
         record[33] = 250;
-        Assert.Single(NativeTableLayouts.Find(62, record)!.Sections);
+        Assert.Equal(3, NativeTableLayouts.Find(62, record)!.Sections.Count);
     }
 
     [Fact]

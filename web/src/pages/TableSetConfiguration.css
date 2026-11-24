@@ -78,6 +78,12 @@
 .native-table-toggle { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border-radius: 6px; color: #2e493e; }
 .native-table-fields [data-dirty='true'] { background: #e8f4ec; }
 .native-table-feedback { margin-top: 9px; }
+.native-table-editor [aria-pressed='true'] { background: #d9ede2; border-color: #8eb5a0; color: #1b4834; }
+.numbering-plan .table-config-selectors { align-items: center; }
+.numbering-plan .table-config-selectors small { margin-top: 1.2em; color: #526c61; }
+.numbering-digit { background: #f2f8f5; border-radius: 8px; padding: 4px 6px 8px; }
+.numbering-digit button { margin-inline: 8px; }
+.numbering-digits .row-actions { grid-column: 1 / -1; }
 .native-table-summary { display: flex; flex-wrap: wrap; gap: 9px; margin: 0; }
 .native-table-summary > div { min-width: 130px; padding: 8px 10px; border-radius: 8px; background: #eef6f1; }
 .native-table-summary dt { color: #526c61; font-size: .84rem; }

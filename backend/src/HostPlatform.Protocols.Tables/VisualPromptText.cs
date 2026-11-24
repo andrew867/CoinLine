@@ -24,7 +24,7 @@ internal static class VisualPromptText
         return new string(text);
     }
 
-    public static bool TryWrite(string value, Span<byte> data)
+    public static bool TryWrite(string value, Span<byte> data, byte padding = (byte)' ')
     {
         if (value.Length > data.Length * 2 || value.Any(char.IsSurrogate))
             return false;
@@ -33,7 +33,7 @@ internal static class VisualPromptText
             return false;
 
         Span<byte> encoded = stackalloc byte[data.Length];
-        encoded.Fill((byte)' ');
+        encoded.Fill(padding);
         for (var index = 0; index < text.Length; index++)
         {
             var character = text[index];
