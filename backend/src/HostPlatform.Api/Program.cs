@@ -129,6 +129,7 @@ builder.Services.AddSwaggerGen(o =>
 });
 builder.Services.AddScoped<DlogTransactionEngine>();
 builder.Services.AddScoped<TableDistributionService>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ICraftSimulationTransport, CraftSimulationTransport>();
 builder.Services.AddSingleton<ICraftExecutionPolicy, CraftExecutionPolicy>();
 builder.Services.AddSingleton<INccSessionOutbound, NccSessionOutboundHub>();

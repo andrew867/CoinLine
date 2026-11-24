@@ -11,7 +11,7 @@
   ],
   "pairs": [
     { "request": 1, "response": 3 },
-    { "request": 2, "response": 3 },
+    { "request": 2, "response": 65 },
     { "request": 4, "response": 5 },
     { "request": 53, "response": 5 },
     { "request": 6, "response": 15 },

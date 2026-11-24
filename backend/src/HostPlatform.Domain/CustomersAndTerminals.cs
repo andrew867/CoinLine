@@ -29,6 +29,7 @@ public class FirmwareVersion : AuditableEntity
     public string Label { get; set; } = string.Empty;
     public string? BuildId { get; set; }
     public string? Notes { get; set; }
+    public string? TableProfileId { get; set; }
 }
 
 public class TransportEndpoint : AuditableEntity
@@ -44,6 +45,7 @@ public class Terminal : AuditableEntity
     public Site? Site { get; set; }
     public Guid? TerminalGroupId { get; set; }
     public TerminalGroup? TerminalGroup { get; set; }
+    public ICollection<TerminalGroupMembership> AdditionalGroups { get; } = new List<TerminalGroupMembership>();
     public Guid? TransportEndpointId { get; set; }
     public TransportEndpoint? TransportEndpoint { get; set; }
     public Guid? FirmwareVersionId { get; set; }
@@ -53,6 +55,12 @@ public class Terminal : AuditableEntity
     public string DisplayName { get; set; } = string.Empty;
     public TerminalOperationalStatus Status { get; set; } = TerminalOperationalStatus.Provisioned;
     public ICollection<TerminalEvent> Events { get; set; } = new List<TerminalEvent>();
+}
+
+public class TerminalGroupMembership
+{
+    public Guid TerminalId { get; set; }
+    public Guid TerminalGroupId { get; set; }
 }
 
 public class TerminalEvent : AuditableEntity

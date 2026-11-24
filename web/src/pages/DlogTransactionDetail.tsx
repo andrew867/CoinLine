@@ -65,12 +65,12 @@ export function DlogTransactionDetail() {
   return (
     <div>
       <p>
-        <Link to={fromPhone ? '/field-events' : '/dlog'}>{fromPhone ? '← Alarms' : '← Message log'}</Link>
+        <Link to={fromPhone ? '/field-events' : '/dlog'}>{fromPhone ? '← Terminal status' : '← Message log'}</Link>
       </p>
       <h1>{title}</h1>
       <p className="page-intro">
         {fromPhone
-          ? 'This is the message the phone sent. Documented alarm and cash fields are shown when the body is long enough; raw bytes stay authoritative.'
+          ? 'This phone report includes any fields CoinLine could decode from its documented layout.'
           : 'This is a message stored from a phone session.'}
       </p>
       {(() => {
@@ -157,8 +157,10 @@ function decodedFields(decodedJson: string): unknown | null {
 }
 
 function fieldTitle(messageType: number): string | null {
+  if (messageType === 6) return 'Maintenance report'
   if (messageType === 7) return 'Alarm'
   if (messageType === 10) return 'Phone status'
+  if (messageType === 15) return 'Maintenance acknowledgement'
   if (messageType === 16) return 'Alarm acknowledgement'
   if (messageType === 38) return 'Cash box status'
   if (messageType === 39) return 'Attention callback'

@@ -2,10 +2,11 @@ namespace HostPlatform.Protocols.Dlog;
 
 public static class DlogMaintenanceWire
 {
-    private const byte RequestMessageType = 6;
-    private const byte AckMessageType = 15;
+    public const byte RequestMessageType = 6;
+    internal const byte AckMessageType = 15;
     private const byte EndDataMessageType = 13;
-    private const int RequestLength = 6;
+    internal const int RequestLength = 6;
+    internal const int OpcodeRecordLength = 3;
 
     public static bool HasRequestRecord(ReadOnlySpan<byte> data) =>
         data.Length >= RequestLength && data[0] == RequestMessageType;

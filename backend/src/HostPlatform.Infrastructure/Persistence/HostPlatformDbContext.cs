@@ -10,6 +10,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<TerminalGroup> TerminalGroups => Set<TerminalGroup>();
+    public DbSet<TerminalGroupMembership> TerminalGroupMemberships => Set<TerminalGroupMembership>();
     public DbSet<FirmwareVersion> FirmwareVersions => Set<FirmwareVersion>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
@@ -34,6 +35,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<SiteTableOverride> SiteTableOverrides => Set<SiteTableOverride>();
     public DbSet<TerminalTableOverride> TerminalTableOverrides => Set<TerminalTableOverride>();
     public DbSet<TerminalTableAssignment> TerminalTableAssignments => Set<TerminalTableAssignment>();
+    public DbSet<ScheduledTableDownload> ScheduledTableDownloads => Set<ScheduledTableDownload>();
     public DbSet<DownloadBatch> DownloadBatches => Set<DownloadBatch>();
     public DbSet<DownloadBatchItem> DownloadBatchItems => Set<DownloadBatchItem>();
     public DbSet<RatePlan> RatePlans => Set<RatePlan>();
@@ -88,17 +90,32 @@ public class HostPlatformDbContext : DbContext
         {
             b.HasOne(t => t.Site).WithMany(s => s.Terminals).HasForeignKey(t => t.SiteId);
             b.HasOne(t => t.TerminalGroup).WithMany(g => g.Terminals).HasForeignKey(t => t.TerminalGroupId);
+            b.Property(t => t.Version).IsConcurrencyToken();
             b.HasOne(t => t.TransportEndpoint).WithMany().HasForeignKey(t => t.TransportEndpointId);
             b.HasOne(t => t.FirmwareVersion).WithMany().HasForeignKey(t => t.FirmwareVersionId);
+        });
+        modelBuilder.Entity<TerminalGroupMembership>(b =>
+        {
+            b.HasKey(m => new { m.TerminalId, m.TerminalGroupId });
+            b.HasOne<Terminal>().WithMany(t => t.AdditionalGroups).HasForeignKey(m => m.TerminalId);
+            b.HasOne<TerminalGroup>().WithMany().HasForeignKey(m => m.TerminalGroupId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Site>(b => b.HasOne(s => s.Customer).WithMany(c => c.Sites).HasForeignKey(s => s.CustomerId));
         modelBuilder.Entity<TerminalGroup>(b => b.HasOne(g => g.Customer).WithMany().HasForeignKey(g => g.CustomerId));
 
-        modelBuilder.Entity<TableSet>(b => b.HasOne(ts => ts.Customer).WithMany().HasForeignKey(ts => ts.CustomerId));
+        modelBuilder.Entity<FirmwareVersion>().Property(f => f.TableProfileId).HasMaxLength(48);
+        modelBuilder.Entity<TableSet>(b =>
+        {
+            b.HasOne(ts => ts.Customer).WithMany().HasForeignKey(ts => ts.CustomerId);
+            b.HasOne(ts => ts.TargetFirmwareVersion).WithMany().HasForeignKey(ts => ts.TargetFirmwareVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TableSet>().Property(set => set.Version).IsConcurrencyToken();
         modelBuilder.Entity<TableVersion>(b =>
         {
             b.Property(tv => tv.EmbeddedPayload).HasColumnName("Payload");
+            b.Property(tv => tv.TableRevision).IsConcurrencyToken();
             b.HasOne(tv => tv.TableSet).WithMany(ts => ts.Versions).HasForeignKey(tv => tv.TableSetId);
             b.HasOne(tv => tv.TableDefinition).WithMany().HasForeignKey(tv => tv.TableDefinitionId);
             b.HasOne(tv => tv.TablePayload).WithMany().HasForeignKey(tv => tv.TablePayloadId).OnDelete(DeleteBehavior.SetNull);
@@ -130,6 +147,7 @@ public class HostPlatformDbContext : DbContext
 
         modelBuilder.Entity<TerminalTableAssignment>(b =>
         {
+            b.Property(a => a.Version).IsConcurrencyToken();
             b.HasOne(a => a.Terminal).WithMany().HasForeignKey(a => a.TerminalId);
             b.HasOne(a => a.TableSet).WithMany().HasForeignKey(a => a.TableSetId);
             b.HasOne(a => a.PreviousTableSet).WithMany().HasForeignKey(a => a.PreviousTableSetId)
@@ -137,6 +155,18 @@ public class HostPlatformDbContext : DbContext
             b.HasOne(a => a.Site).WithMany().HasForeignKey(a => a.SiteId);
             b.HasOne(a => a.Customer).WithMany().HasForeignKey(a => a.CustomerId);
             b.HasIndex(a => a.TerminalId).IsUnique();
+        });
+
+        modelBuilder.Entity<ScheduledTableDownload>(b =>
+        {
+            b.Property(s => s.Version).IsConcurrencyToken();
+            b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId);
+            b.HasOne(s => s.TableSet).WithMany().HasForeignKey(s => s.TableSetId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(s => s.NccSession).WithMany().HasForeignKey(s => s.NccSessionId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(s => s.LastBatch).WithMany().HasForeignKey(s => s.LastBatchId).OnDelete(DeleteBehavior.SetNull);
+            b.HasIndex(s => s.TerminalId).IsUnique()
+                .HasFilter("\"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
+            b.HasIndex(s => new { s.TableSetId, s.AvailableAtUtc });
         });
 
         modelBuilder.Entity<DownloadBatch>(b =>

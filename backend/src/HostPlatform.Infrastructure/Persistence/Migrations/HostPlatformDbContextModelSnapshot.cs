@@ -2039,6 +2039,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<string>("TableProfileId")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2590,6 +2594,69 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("RemoteTableReloadRequests");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.ScheduledTableDownload", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LastBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("NccSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TableSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LastBatchId");
+
+                    b.HasIndex("NccSessionId");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique()
+                        .HasFilter("\"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
+
+                    b.HasIndex("TableSetId", "AvailableAtUtc");
+
+                    b.ToTable("ScheduledTableDownloads");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.Site", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2890,6 +2957,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("TargetFirmwareVersionId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2898,11 +2968,14 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("TargetFirmwareVersionId");
 
                     b.ToTable("TableSets");
                 });
@@ -2944,6 +3017,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<int>("TableRevision")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<Guid>("TableSetId")
@@ -3064,6 +3138,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -3201,6 +3276,21 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("TerminalGroups");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TerminalGroupMembership", b =>
+                {
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TerminalGroupId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("TerminalId", "TerminalGroupId");
+
+                    b.HasIndex("TerminalGroupId");
+
+                    b.ToTable("TerminalGroupMemberships");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TerminalStatusRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3283,6 +3373,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -4115,6 +4206,39 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("Terminal");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.ScheduledTableDownload", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.DownloadBatch", "LastBatch")
+                        .WithMany()
+                        .HasForeignKey("LastBatchId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("HostPlatform.Domain.NccSession", "NccSession")
+                        .WithMany()
+                        .HasForeignKey("NccSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("HostPlatform.Domain.TableSet", "TableSet")
+                        .WithMany()
+                        .HasForeignKey("TableSetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.Terminal", "Terminal")
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LastBatch");
+
+                    b.Navigation("NccSession");
+
+                    b.Navigation("TableSet");
+
+                    b.Navigation("Terminal");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.Site", b =>
                 {
                     b.HasOne("HostPlatform.Domain.Customer", "Customer")
@@ -4176,7 +4300,14 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .WithMany()
                         .HasForeignKey("CustomerId");
 
+                    b.HasOne("HostPlatform.Domain.FirmwareVersion", "TargetFirmwareVersion")
+                        .WithMany()
+                        .HasForeignKey("TargetFirmwareVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Customer");
+
+                    b.Navigation("TargetFirmwareVersion");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TableVersion", b =>
@@ -4274,6 +4405,21 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CustomerId");
 
                     b.Navigation("Customer");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalGroupMembership", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.TerminalGroup", null)
+                        .WithMany()
+                        .HasForeignKey("TerminalGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithMany("AdditionalGroups")
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TerminalStatusRecord", b =>
@@ -4487,6 +4633,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HostPlatform.Domain.Terminal", b =>
                 {
+                    b.Navigation("AdditionalGroups");
+
                     b.Navigation("Events");
                 });
 

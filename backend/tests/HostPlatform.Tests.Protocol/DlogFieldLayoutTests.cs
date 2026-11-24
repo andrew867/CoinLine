@@ -82,9 +82,18 @@ public sealed class DlogFieldLayoutTests
         using (var doc = JsonDocument.Parse(DlogPayloadClassifier.ToDecodedJson(atn)))
             Assert.Equal(5, doc.RootElement.GetProperty("Fields").GetProperty("reasons").GetInt32());
 
-        Assert.Equal("Alarm 9", FieldEventSummary.TryBuild(16, new byte[] { 16, 9 }));
-        Assert.Equal("Reasons 0x05", FieldEventSummary.TryBuild(42, new byte[] { 42, 0x05 }));
+        Assert.Equal("Display not responding (alarm 9)", FieldEventSummary.TryBuild(16, [16, 9]));
+        Assert.Equal("Call record store full, Unlisted reason bits (1)", FieldEventSummary.TryBuild(42, [42, 0x05]));
+        Assert.Equal("Technician requested download, Cash box follow-up", FieldEventSummary.TryBuild(44, [44, 0x81]));
         Assert.True(FieldEventCatalog.TryDescribe(39, out var title));
         Assert.Contains("Attention", title, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unknown_alarm_and_maintenance_codes_stay_visible_in_decimal()
+    {
+        Assert.Equal("Unlisted alarm 42", FieldEventSummary.TryBuild(7, [7, 26, 11, 23, 12, 0, 0, 42]));
+        Assert.Equal("Unlisted maintenance opcode 4660", FieldEventSummary.TryBuild(6, [6, 0x34, 0x12]));
+        Assert.Null(FieldEventSummary.TryBuild(6, [6, 0x34]));
     }
 }

@@ -10,7 +10,7 @@ const groups = [
       ['/terminals', 'Phones'],
       ['/call-records', 'Calls'],
       ['/downloads', 'Downloads'],
-      ['/field-events', 'Alarms'],
+      ['/field-events', 'Terminal status'],
     ],
   },
   {

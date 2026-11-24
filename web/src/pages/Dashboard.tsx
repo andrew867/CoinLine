@@ -115,7 +115,7 @@ export function Dashboard() {
             </Link>
             <Link className="stat" to="/field-events">
               <strong>{alarms ?? 0}</strong>
-              <span>Alarms and cash</span>
+              <span>Terminal reports</span>
             </Link>
             <Link className="stat" to="/card-reconciliation">
               <strong>{money}</strong>
@@ -132,13 +132,12 @@ export function Dashboard() {
           </ul>
           {recentAlarms.length > 0 && (
             <>
-              <h2>Recent alarms and cash</h2>
+              <h2>Recent terminal reports</h2>
               <ul>
                 {recentAlarms.map((a) => (
                   <li key={a.id}>
                     <Link to={`/dlog/${a.id}`}>
-                      {a.title}
-                      {a.summary ? ` — ${a.summary}` : ''}
+                      {a.summary ?? a.title}
                     </Link>
                     {a.terminalName ? ` · ${a.terminalName}` : ''} ·{' '}
                     {new Date(a.capturedAtUtc).toLocaleString()}
@@ -146,7 +145,7 @@ export function Dashboard() {
                 ))}
               </ul>
               <p className="page-intro">
-                <Link to="/field-events">All alarms and cash</Link>
+                <Link to="/field-events">Terminal status</Link>
               </p>
             </>
           )}

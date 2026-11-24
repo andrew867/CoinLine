@@ -10,7 +10,7 @@ public static class DlogCorrelationRules
     private static readonly (int Request, int Response)[] Pairs =
     {
         (1, 3),  // CARD_AUTH_REQ → AUTH_RESPONSE
-        (2, 3),  // FUNF_CARD_AUTH → AUTH_RESPONSE
+        (2, 65), // FUNF_CARD_AUTH → AUTH_RESP_CODE
         (4, 5),  // CD_CALL_DETAILS → CDR_DETAILS_ACK
         (53, 5), // CALL_DETAILS → CDR_DETAILS_ACK (later #define in OEM compatibility catalogue)
         (6, 15), // MAINT_REQ → MAINT_ACK

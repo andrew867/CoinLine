@@ -11,14 +11,18 @@ namespace HostPlatform.Api.Controllers;
 public sealed class FieldEventsController(HostPlatformDbContext db) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<object>> List([FromQuery] int take = 100, CancellationToken ct = default)
+    public async Task<ActionResult<object>> List([FromQuery] int take = 100, [FromQuery] Guid? terminalId = null,
+        CancellationToken ct = default)
     {
         var types = FieldEventCatalog.MessageTypes;
         var query = db.DlogTransactions.AsNoTracking().Where(t => types.Contains(t.MessageType));
+        if (terminalId is { } id)
+            query = query.Where(t => t.TerminalId == id);
         var total = await query.CountAsync(ct);
         var limit = take is < 1 or > 100 ? 100 : take;
         var rows = await query
             .OrderByDescending(t => t.CapturedAtUtc)
+            .ThenByDescending(t => t.Id)
             .Take(limit)
             .Select(t => new
             {
@@ -41,6 +45,7 @@ public sealed class FieldEventsController(HostPlatformDbContext db) : Controller
                 r.TerminalId,
                 r.terminalName,
                 r.MessageType,
+                category = FieldEventCatalog.Category(r.MessageType),
                 title = string.IsNullOrEmpty(title) ? "Field event" : title,
                 summary = FieldEventSummary.TryBuild(r.MessageType, r.RawPayload),
                 r.CapturedAtUtc,
@@ -52,8 +57,7 @@ public sealed class FieldEventsController(HostPlatformDbContext db) : Controller
         return Ok(new
         {
             total,
-            note =
-                "These are messages stored from the phone. Documented fields appear in the summary when the body is long enough; raw bytes stay authoritative.",
+            note = "Summaries use documented terminal fields. Unlisted values remain visible by numeric code.",
             items
         });
     }

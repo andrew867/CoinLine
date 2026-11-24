@@ -20,7 +20,7 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
                 g.Id,
                 g.Name,
                 g.CustomerId,
-                terminalCount = g.Terminals.Count
+                terminalCount = g.Terminals.Count + db.TerminalGroupMemberships.Count(m => m.TerminalGroupId == g.Id)
             })
             .ToListAsync(ct);
         return Ok(groups);
@@ -67,7 +67,8 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
         var group = await db.TerminalGroups.FirstOrDefaultAsync(g => g.Id == id, ct);
         if (group == null)
             return NotFound();
-        var phones = await db.Terminals.CountAsync(t => t.TerminalGroupId == id, ct);
+        var phones = await db.Terminals.CountAsync(t => t.TerminalGroupId == id ||
+            t.AdditionalGroups.Any(m => m.TerminalGroupId == id), ct);
         if (phones > 0)
             return Conflict(new { error = "Move the phones out of this group first." });
         db.TerminalGroups.Remove(group);

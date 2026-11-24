@@ -16,6 +16,7 @@ namespace HostPlatform.Api.Hosting;
 public sealed class NccModemListenService(
     IServiceScopeFactory scopes,
     INccSessionOutbound outbound,
+    TimeProvider clock,
     IConfiguration config,
     IHostEnvironment env,
     ILogger<NccModemListenService> logger) : BackgroundService
@@ -91,7 +92,7 @@ public sealed class NccModemListenService(
         var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
         var tables = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
         var dlog = scope.ServiceProvider.GetRequiredService<DlogTransactionEngine>();
-        var processor = new NccLinkProcessor(db, tables, dlog, outbound, logger, stoppingToken);
+        var processor = new NccLinkProcessor(db, tables, dlog, outbound, clock, logger, stoppingToken);
         await processor.RunAsync(client);
     }
 
@@ -116,6 +117,29 @@ public sealed class NccModemListenService(
                 s.Status = NccSessionStatus.Closed;
                 s.EndedAtUtc ??= now;
                 s.UpdatedAtUtc = now;
+            }
+
+            var orphanIds = orphans.Select(s => s.Id).ToArray();
+            var schedules = await db.ScheduledTableDownloads.Include(s => s.LastBatch).ThenInclude(b => b!.Items)
+                .Where(s => s.NccSessionId != null && orphanIds.Contains(s.NccSessionId.Value))
+                .ToListAsync(ct);
+            const string reason = "The host restarted before the scheduled transfer completed.";
+            foreach (var schedule in schedules)
+            {
+                schedule.NccSessionId = null;
+                schedule.Version++;
+                if (schedule.LastBatch is not { Status: DownloadBatchStatus.Running } interrupted)
+                    continue;
+                interrupted.Status = DownloadBatchStatus.Failed;
+                interrupted.LastError = reason;
+                interrupted.CompletedAtUtc = now;
+                foreach (var item in interrupted.Items.Where(item => !item.Succeeded))
+                {
+                    item.ItemStatus = DownloadBatchItemStatus.Failed;
+                    item.LastAckStatus = "missing";
+                    item.HostDownloadPhase = TableDownloadHostPhase.Failed;
+                    item.ErrorDetail = reason;
+                }
             }
 
             await db.SaveChangesAsync(ct);

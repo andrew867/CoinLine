@@ -25,6 +25,8 @@ public class TableSet : AuditableEntity
     public string Name { get; set; } = string.Empty;
     public Guid? CustomerId { get; set; }
     public Customer? Customer { get; set; }
+    public Guid? TargetFirmwareVersionId { get; set; }
+    public FirmwareVersion? TargetFirmwareVersion { get; set; }
     public bool IsDefault { get; set; }
     public TableSetStatus Status { get; set; } = TableSetStatus.Draft;
     public DateTime? PublishedAtUtc { get; set; }
@@ -71,6 +73,22 @@ public class TerminalTableAssignment : AuditableEntity
     public Guid? PreviousTableSetId { get; set; }
     public TableSet? PreviousTableSet { get; set; }
     public DateTime AssignedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public class ScheduledTableDownload : AuditableEntity
+{
+    public Guid TerminalId { get; set; }
+    public Terminal? Terminal { get; set; }
+    public Guid TableSetId { get; set; }
+    public TableSet? TableSet { get; set; }
+    public DateTime AvailableAtUtc { get; set; }
+    public Guid? NccSessionId { get; set; }
+    public NccSession? NccSession { get; set; }
+    public Guid? LastBatchId { get; set; }
+    public DownloadBatch? LastBatch { get; set; }
+    public DateTime? StartedAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
 }
 
 /// <summary>Customer-scoped pin of a specific table version for a definition (MVP — optional layer).</summary>

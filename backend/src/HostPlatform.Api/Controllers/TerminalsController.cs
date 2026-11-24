@@ -16,6 +16,8 @@ public sealed class TerminalsController(
     FirmwareJobOrchestrator firmwareOrchestrator,
     Hosting.INccSessionOutbound outbound) : ControllerBase
 {
+    private const int GroupLimit = 40;
+
     [HttpGet]
     public async Task<ActionResult<object>> GetAll(
         [FromQuery] Guid? siteId,
@@ -138,6 +140,8 @@ public sealed class TerminalsController(
     [HttpPost]
     public async Task<ActionResult<object>> Create([FromBody] TerminalCreateDto body, CancellationToken ct)
     {
+        if (body.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
+            return BadRequest(new { error = "Choose a registered firmware version." });
         var e = new Terminal
         {
             SiteId = body.SiteId,
@@ -167,18 +171,82 @@ public sealed class TerminalsController(
     [HttpPut("{id:guid}/group")]
     public async Task<ActionResult<object>> AssignGroup(Guid id, [FromBody] AssignGroupDto body, CancellationToken ct)
     {
-        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == id, ct);
+        var terminal = await db.Terminals.Include(t => t.Site).Include(t => t.AdditionalGroups).FirstOrDefaultAsync(t => t.Id == id, ct);
         if (terminal == null)
             return NotFound();
         if (body.TerminalGroupId is { } groupId &&
-            !await db.TerminalGroups.AsNoTracking().AnyAsync(g => g.Id == groupId, ct))
-            return NotFound(new { error = "Unknown phone group." });
+            !await db.TerminalGroups.AsNoTracking().AnyAsync(g => g.Id == groupId &&
+                (g.CustomerId == null || g.CustomerId == terminal.Site!.CustomerId), ct))
+            return NotFound(new { error = "Unknown phone group for this customer." });
+        var additional = terminal.AdditionalGroups.FirstOrDefault(m => m.TerminalGroupId == body.TerminalGroupId);
+        if (additional != null)
+            db.TerminalGroupMemberships.Remove(additional);
         terminal.TerminalGroupId = body.TerminalGroupId;
-        await db.SaveChangesAsync(ct);
+        terminal.Version++;
         ApiAudit.Write(db, HttpContext, "terminals", "assign_group", $"Terminal:{terminal.Id}",
             new { terminal.TerminalGroupId }, terminal.Id);
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "Phone groups changed. Reload and try again." }); }
         return Ok(new { terminal.Id, terminal.TerminalGroupId });
+    }
+
+    [HttpGet("{id:guid}/groups")]
+    public async Task<ActionResult<object>> Groups(Guid id, CancellationToken ct)
+    {
+        var terminal = await db.Terminals.AsNoTracking()
+            .Select(t => new { t.Id, t.Version, t.TerminalGroupId, GroupIds = t.AdditionalGroups.Select(m => m.TerminalGroupId).ToList(), t.Site!.CustomerId })
+            .FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (terminal == null)
+            return NotFound();
+
+        var groupIds = terminal.GroupIds;
+        if (terminal.TerminalGroupId is { } primary)
+            groupIds.Insert(0, primary);
+        var available = await db.TerminalGroups.AsNoTracking()
+            .Where(g => g.CustomerId == null || g.CustomerId == terminal.CustomerId || groupIds.Contains(g.Id))
+            .OrderBy(g => g.Name).Select(g => new { g.Id, g.Name }).ToListAsync(ct);
+        return Ok(new { groupIds, revision = terminal.Version, limit = GroupLimit, available });
+    }
+
+    [HttpPut("{id:guid}/groups")]
+    public async Task<ActionResult<object>> AssignGroups(Guid id, [FromBody] AssignGroupsDto body, CancellationToken ct)
+    {
+        var groupIds = body.GroupIds;
+        if (groupIds.Length > GroupLimit)
+            return BadRequest(new { error = $"A phone can belong to up to {GroupLimit} groups." });
+        if (groupIds.Distinct().Count() != groupIds.Length)
+            return BadRequest(new { error = "Select each phone group once." });
+        var terminal = await db.Terminals.Include(t => t.Site).Include(t => t.AdditionalGroups)
+            .FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (terminal == null)
+            return NotFound();
+        if (terminal.Version != body.Revision)
+            return Conflict(new { error = "Phone groups changed. Reload and try again." });
+
+        var current = terminal.AdditionalGroups.Select(m => m.TerminalGroupId).ToHashSet();
+        if (terminal.TerminalGroupId is { } currentPrimary)
+            current.Add(currentPrimary);
+        var additions = groupIds.Where(group => !current.Contains(group)).ToList();
+        var customerId = terminal.Site!.CustomerId;
+        if (await db.TerminalGroups.CountAsync(g => additions.Contains(g.Id) &&
+                (g.CustomerId == null || g.CustomerId == customerId), ct) != additions.Count)
+            return BadRequest(new { error = "A selected group is unavailable to this phone's customer." });
+
+        Guid? primary = groupIds.Length == 0 ? null : groupIds[0];
+        var additionalIds = groupIds.Skip(1).ToHashSet();
+        var existing = terminal.AdditionalGroups.ToDictionary(m => m.TerminalGroupId);
+        if (terminal.TerminalGroupId != primary || !additionalIds.SetEquals(existing.Keys))
+        {
+            db.TerminalGroupMemberships.RemoveRange(existing.Values.Where(m => !additionalIds.Contains(m.TerminalGroupId)));
+            db.TerminalGroupMemberships.AddRange(additionalIds.Where(group => !existing.ContainsKey(group))
+                .Select(group => new TerminalGroupMembership { TerminalId = id, TerminalGroupId = group }));
+            terminal.TerminalGroupId = primary;
+            terminal.Version++;
+            ApiAudit.Write(db, HttpContext, "terminals", "assign_groups", $"Terminal:{id}", new { groupIds }, id);
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateConcurrencyException) { return Conflict(new { error = "Phone groups changed. Reload and try again." }); }
+        }
+        return Ok(new { groupIds, revision = terminal.Version });
     }
 
     [HttpGet("{id:guid}")]
@@ -237,16 +305,38 @@ public sealed class TerminalsController(
         return Ok(list);
     }
 
+    [HttpPut("{id:guid}/firmware")]
+    public async Task<ActionResult> SetFirmware(Guid id, [FromBody] TerminalFirmwareDto body, CancellationToken ct)
+    {
+        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (terminal == null)
+            return NotFound();
+        if (body.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
+            return BadRequest(new { error = "Choose a registered firmware version." });
+        if (terminal.FirmwareVersionId == body.FirmwareVersionId)
+            return NoContent();
+
+        terminal.FirmwareVersionId = body.FirmwareVersionId;
+        terminal.Version++;
+        ApiAudit.Write(db, HttpContext, "terminals", "register_firmware", $"Terminal:{id}", new { body.FirmwareVersionId }, id);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The phone record changed. Reload and try again." }); }
+        return NoContent();
+    }
+
     [HttpPut("{id:guid}")]
     public async Task<ActionResult> Update(Guid id, [FromBody] TerminalUpdateDto body, CancellationToken ct)
     {
         var t = await db.Terminals.FirstOrDefaultAsync(x => x.Id == id, ct);
         if (t == null) return NotFound();
+        if (body.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
+            return BadRequest(new { error = "Choose a registered firmware version." });
         t.DisplayName = body.DisplayName;
         t.Status = body.Status;
         t.TerminalIdHex = body.TerminalIdHex;
         t.FirmwareVersionId = body.FirmwareVersionId;
         t.TransportEndpointId = body.TransportEndpointId;
+        t.Version++;
         ApiAudit.Write(db, HttpContext, "terminals", "update", $"Terminal:{id}",
             new
             {
@@ -258,7 +348,8 @@ public sealed class TerminalsController(
                 HARDWARE_VALIDATION_REQUIRED =
                     "Catalog edit — verify modem routing and firmware pointers against bench hardware before production."
             }, id);
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The phone record changed. Reload and try again." }); }
         return NoContent();
     }
 
@@ -329,6 +420,10 @@ public sealed class TerminalsController(
                 a.AssignedAtUtc
             });
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "The phone assignment changed. Reload it and try again." });
+        }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { error = ex.Message });
@@ -359,6 +454,10 @@ public sealed class TerminalsController(
                 a.PreviousTableSetId,
                 a.AssignedAtUtc
             });
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "The phone assignment changed. Reload it and try again." });
         }
         catch (InvalidOperationException ex)
         {
@@ -424,6 +523,8 @@ public sealed class TerminalsController(
     }
 
     public sealed record AssignGroupDto(Guid? TerminalGroupId);
+    public sealed record TerminalFirmwareDto(Guid? FirmwareVersionId);
+    public sealed record AssignGroupsDto(Guid[] GroupIds, int Revision);
 
     public sealed record TerminalCreateDto(
         Guid SiteId,

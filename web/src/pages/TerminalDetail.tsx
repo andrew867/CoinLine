@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiPost, apiPostBareOk } from '../api/client'
+import { apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
+import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
 import { StatusBadge, terminalStatusLabel, terminalStatusVariant } from '../components/StatusBadge'
 
@@ -78,7 +79,7 @@ type Term = {
   displayName: string
   terminalIdHex: string
   status: number
-  terminalGroupId: string | null
+  firmwareVersionId: string | null
 }
 
 type Assign = {
@@ -90,7 +91,7 @@ type Assign = {
   assignedAtUtc: string
 }
 
-type SetRow = { id: string; name: string; status: number }
+type SetRow = { id: string; name: string; status: number; targetFirmwareVersionId: string | null; targetFirmware: string | null }
 
 type SessionRow = {
   id: string
@@ -121,10 +122,102 @@ type TimelineResp = {
   items: { kind: string; atUtc: string; title: string; refKey: string; detail: Record<string, unknown> }[]
 }
 
+type GroupMembership = {
+  groupIds: string[]
+  revision: number
+  limit: number
+  available: { id: string; name: string }[]
+}
+
+function PhoneGroups({ terminalId }: { terminalId: string }) {
+  const [groups, setGroups] = useState<GroupMembership | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
+  const endpoint = `/api/terminals/${terminalId}/groups`
+
+  useEffect(() => {
+    let current = true
+    void apiGet<GroupMembership>(endpoint).then((data) => {
+      if (current) {
+        setGroups(data)
+        setSelected(data.groupIds)
+      }
+    }).catch(() => { if (current) setError('Could not load phone groups.') })
+    return () => { current = false }
+  }, [endpoint])
+
+  async function save() {
+    if (!groups) return
+    setBusy(true)
+    setNotice('')
+    setError('')
+    try {
+      const response = await fetch(endpoint, {
+        method: 'PUT', headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ groupIds: selected, revision: groups.revision }),
+      })
+      if (!response.ok)
+        throw new Error((await response.json().catch(() => null))?.error ?? 'Could not save phone groups.')
+      const saved = await response.json() as Pick<GroupMembership, 'groupIds' | 'revision'>
+      setGroups({ ...groups, ...saved })
+      setSelected(saved.groupIds)
+      setNotice('Phone groups saved.')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save phone groups.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <details>
+      <summary>Phone groups{groups ? ` (${groups.groupIds.length})` : ''}</summary>
+      {error && <ErrorBanner message={error} />}
+      {notice && <p role="status">{notice}</p>}
+      {groups && groups.available.length > 0 && (
+        <form onSubmit={(event) => { event.preventDefault(); void save() }}>
+          <fieldset disabled={busy}>
+            <legend>Participating groups</legend>
+            {groups.available.map((group) => (
+              <label key={group.id} style={{ display: 'block' }}>
+                <input type="checkbox" checked={selected.includes(group.id)}
+                  disabled={selected.length >= groups.limit && !selected.includes(group.id)}
+                  onChange={(event) => {
+                    setSelected(event.target.checked ? [...selected, group.id] : selected.filter((id) => id !== group.id))
+                    setNotice('')
+                  }} /> {group.name}
+              </label>
+            ))}
+            {selected.length > 1 && (
+              <label>Primary group
+                <select value={selected[0]} onChange={(event) => {
+                  const group = event.target.value
+                  setSelected([group, ...selected.filter((id) => id !== group)])
+                  setNotice('')
+                }}>
+                  {groups.available.filter((group) => selected.includes(group.id)).map((group) => (
+                    <option key={group.id} value={group.id}>{group.name}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </fieldset>
+          <button type="submit" disabled={busy || selected.join(',') === groups.groupIds.join(',')}>Save phone groups</button>
+        </form>
+      )}
+      {groups?.available.length === 0 && <p>No matching groups. <Link to="/terminal-groups">Manage phone groups</Link>.</p>}
+    </details>
+  )
+}
+
 export function TerminalDetail() {
   const { id } = useParams()
   const [term, setTerm] = useState<Term | null>(null)
-  const [groups, setGroups] = useState<{ id: string; name: string }[]>([])
+  const [firmwareEdit, setFirmwareEdit] = useState<string | null>(null)
+  const [savingFirmware, setSavingFirmware] = useState(false)
+  const [firmwareNotice, setFirmwareNotice] = useState('')
   const [assign, setAssign] = useState<Assign | null | undefined>(undefined)
   const [sets, setSets] = useState<SetRow[]>([])
   const [pick, setPick] = useState('')
@@ -142,11 +235,14 @@ export function TerminalDetail() {
     if (!id) return
     let c = false
     setErr(null)
+    setFirmwareEdit(null)
+    setFirmwareNotice('')
     ;(async () => {
       try {
         const t = await fetch(`/api/terminals/${id}`, { headers })
         if (!t.ok) throw new Error(String(t.status))
-        if (!c) setTerm((await t.json()) as Term)
+        const terminal = await t.json() as Term
+        if (!c) setTerm(terminal)
 
         const a = await fetch(`/api/terminals/${id}/table-assignment`, { headers })
         if (a.status === 404) {
@@ -162,13 +258,11 @@ export function TerminalDetail() {
           const list = (await s.json()) as SetRow[]
           if (!c) {
             setSets(list)
-            const pub = list.find((x) => x.status === 1)
+            const pub = list.find((x) => x.status === 1 &&
+              (!x.targetFirmwareVersionId || x.targetFirmwareVersionId === terminal.firmwareVersionId))
             if (pub) setPick(pub.id)
           }
         }
-
-        const groupsRes = await fetch('/api/terminal-groups', { headers })
-        if (groupsRes.ok && !c) setGroups((await groupsRes.json()) as { id: string; name: string }[])
 
         const dg = await fetch(`/api/terminals/${id}/diagnostics`, { headers })
         if (dg.ok && !c) setDiag((await dg.json()) as DiagnosticsPayload)
@@ -312,11 +406,31 @@ export function TerminalDetail() {
   if (!id) return <p>Missing id.</p>
   if (err && !term) return <p style={{ color: 'crimson' }}>{err}</p>
   if (!term) return <p>Loading…</p>
+  const firmwareSelection = firmwareEdit ?? term.firmwareVersionId ?? ''
+  const pickedSet = sets.find((set) => set.id === pick)
+  const assignedSet = sets.find((set) => set.id === assign?.tableSetId)
+
+  async function saveInstalledFirmware(event: React.FormEvent) {
+    event.preventDefault()
+    if (!term || firmwareEdit == null) return
+    setSavingFirmware(true)
+    setFirmwareNotice('')
+    try {
+      await apiPut(`/api/terminals/${term.id}/firmware`, { firmwareVersionId: firmwareEdit || null })
+      setTerm({ ...term, firmwareVersionId: firmwareEdit || null })
+      setFirmwareEdit(null)
+      setFirmwareNotice('Installed firmware saved.')
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not save installed firmware.')
+    } finally {
+      setSavingFirmware(false)
+    }
+  }
 
   return (
     <div>
       <p>
-        <Link to="/terminals">← Phones</Link>
+        <Link to="/terminals">← Phones</Link> · <Link to={`/field-events?terminalId=${term.id}`}>Terminal status</Link>
       </p>
       <h1>{term.displayName}</h1>
       <p>
@@ -331,29 +445,15 @@ export function TerminalDetail() {
         />
       </p>
       <p>Terminal id (hex): {term.terminalIdHex}</p>
-      <label>
-        Phone group
-        <select
-          value={term.terminalGroupId ?? ''}
-          onChange={(e) => {
-            const terminalGroupId = e.target.value || null
-            void fetch(`/api/terminals/${term.id}/group`, {
-              method: 'PUT',
-              headers: { ...headers, 'Content-Type': 'application/json' },
-              body: JSON.stringify({ terminalGroupId }),
-            }).then((r) => {
-              if (r.ok) setTerm({ ...term, terminalGroupId })
-            })
-          }}
-        >
-          <option value="">No group</option>
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </select>
-      </label>
+      <form onSubmit={(event) => void saveInstalledFirmware(event)}
+        style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'end', marginBottom: 12 }}>
+        <FirmwareVersionSelect label="Installed firmware" value={firmwareSelection} onChange={setFirmwareEdit}
+          emptyLabel="Unknown firmware" disabled={savingFirmware} />
+        <button type="submit" disabled={savingFirmware || firmwareSelection === (term.firmwareVersionId ?? '')}>Save firmware</button>
+        <Link to="/firmware/versions">Manage versions</Link>
+      </form>
+      {firmwareNotice && <p role="status">{firmwareNotice}</p>}
+      <PhoneGroups key={term.id} terminalId={term.id} />
 
       <h2>Phone session</h2>
       <div data-testid="ncc-sessions">
@@ -400,8 +500,10 @@ export function TerminalDetail() {
       {assign && (
         <div style={{ background: '#f6f8fa', padding: 12, marginBottom: 12 }}>
           <div>
-            Active set: <code>{assign.tableSetId}</code>
+            Active set <Link to={`/table-sets/${assign.tableSetId}`}>{assignedSet?.name ?? assign.tableSetId}</Link>
           </div>
+          {assignedSet?.targetFirmwareVersionId && assignedSet.targetFirmwareVersionId !== term.firmwareVersionId &&
+            <p role="status">This set requires {assignedSet.targetFirmware}. Register matching firmware or assign a compatible set.</p>}
           {assign.previousTableSetId && (
             <div>
               Previous set: <code>{assign.previousTableSetId}</code>
@@ -414,14 +516,16 @@ export function TerminalDetail() {
         <label>
           Table set
           <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ display: 'block', minWidth: 220 }}>
-            {sets.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name} {s.status === 1 ? '(published)' : '(draft)'}
+            <option value="">Choose a table set</option>
+            {sets.map((s) => {
+              const mismatch = !!s.targetFirmwareVersionId && s.targetFirmwareVersionId !== term.firmwareVersionId
+              return <option key={s.id} value={s.id} disabled={mismatch}>
+                {s.name} {mismatch ? `(requires ${s.targetFirmware})` : s.status === 1 ? '(published)' : '(draft)'}
               </option>
-            ))}
+            })}
           </select>
         </label>
-        <button type="submit">Assign set</button>
+        <button type="submit" disabled={!pickedSet || (!!pickedSet.targetFirmwareVersionId && pickedSet.targetFirmwareVersionId !== term.firmwareVersionId)}>Assign set</button>
         <button type="button" onClick={() => void rollback()}>
           Rollback to previous set
         </button>

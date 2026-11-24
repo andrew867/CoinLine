@@ -1,14 +1,16 @@
 namespace HostPlatform.Protocols.Dlog;
 
-/// <summary>Message types an operator should see as alarms, cash, or phone status. Coin counts stay in the raw bytes.</summary>
+/// <summary>Terminal reports and their boundaries within a supported NCC upload.</summary>
 public static class FieldEventCatalog
 {
     public static bool TryDescribe(int messageType, out string title)
     {
         title = messageType switch
         {
+            6 => "Maintenance report",
             7 => "Alarm",
             10 => "Phone status",
+            15 => "Maintenance acknowledgement",
             16 => "Alarm acknowledgement",
             38 => "Cash box status",
             39 => "Attention callback",
@@ -28,5 +30,52 @@ public static class FieldEventCatalog
     }
 
     public static int[] MessageTypes { get; } =
-        [7, 10, 16, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 51, 83];
+        [6, 7, 10, 15, 16, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 51, 83];
+
+    public static string Category(int messageType) => messageType switch
+    {
+        7 or 16 or 83 => "alarm",
+        6 or 15 => "maintenance",
+        38 or 51 => "cash",
+        >= 39 and <= 47 => "attention",
+        _ => "status"
+    };
+
+    public static List<byte[]> SplitUpload(ReadOnlySpan<byte> data)
+    {
+        if (data.IsEmpty || !TryDescribe(data[0], out _))
+            return [];
+
+        var type = data[0];
+        var recordLength = type switch
+        {
+            DlogMaintenanceWire.RequestMessageType => DlogMaintenanceWire.RequestLength,
+            DlogAlarmWire.AlarmMessageType => DlogFieldLayouts.AlarmMinBytes,
+            >= 40 and <= 47 => DlogFieldLayouts.AttentionRequiredMinBytes,
+            _ => 0
+        };
+        if (recordLength == 0 || data.Length < recordLength)
+            return [type == DlogMaintenanceWire.RequestMessageType ? [type] : data.ToArray()];
+
+        var records = new List<byte[]>();
+        do
+        {
+            // The technician PIN follows the maintenance opcode. Keep only the opcode.
+            var captureLength = type == DlogMaintenanceWire.RequestMessageType
+                ? DlogMaintenanceWire.OpcodeRecordLength : recordLength;
+            records.Add(data[..captureLength].ToArray());
+            data = data[recordLength..];
+        }
+        while (type is 6 or 7 && data.Length >= recordLength && data[0] == type);
+
+        if (DlogFieldLayouts.HasUploadTrailer(data))
+        {
+            records.Add(data[..DlogFieldLayouts.TerminalStatusLength].ToArray());
+            var cashTail = data[(DlogFieldLayouts.TerminalStatusLength + DlogFieldLayouts.SoftwareVersionLength)..];
+            if (cashTail.Length > 1)
+                records.Add(cashTail[..^1].ToArray());
+        }
+
+        return records;
+    }
 }

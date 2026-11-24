@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiPost } from '../api/client'
+import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
@@ -108,10 +109,11 @@ export function DownloadsPage() {
     <div>
       <h1>Download batches</h1>
       <p style={{ color: '#555' }}>
-        A bound phone receives the batch on its next call. Batches stay <strong>Running</strong> until each table is acknowledged.
-        A missing or failed acknowledgement marks the batch Failed. Use cancel to stop a batch that is still running.
+        Batches show the result of each table transfer. To prepare a download for a phone’s next call-in, open a published
+        set under <Link to="/table-sets">Table sets</Link> and schedule delivery.
       </p>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
+      <TableDownloadScheduleList terminalId={preTerm || undefined} />
       {terms && terms.length === 0 && (
         <p style={{ color: '#666' }}>
           No terminals yet — create one under <Link to="/terminals">Terminals</Link>.

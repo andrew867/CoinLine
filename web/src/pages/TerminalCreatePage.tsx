@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { apiPost } from '../api/client'
 import { EmptyHint, ErrorBanner } from '../components/AppStates'
+import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
@@ -15,6 +16,7 @@ export function TerminalCreatePage() {
   const [groups, setGroups] = useState<GroupOpt[]>([])
   const [siteId, setSiteId] = useState('')
   const [groupId, setGroupId] = useState('')
+  const [firmwareVersionId, setFirmwareVersionId] = useState('')
   const [displayName, setDisplayName] = useState('Bench terminal')
   const [terminalIdHex, setTerminalIdHex] = useState('E2E010203')
   const [err, setErr] = useState<string | null>(null)
@@ -41,7 +43,7 @@ export function TerminalCreatePage() {
         siteId,
         terminalGroupId: groupId || null,
         transportEndpointId: null,
-        firmwareVersionId: null,
+        firmwareVersionId: firmwareVersionId || null,
         terminalIdHex,
         displayName,
         status: 1,
@@ -89,6 +91,8 @@ export function TerminalCreatePage() {
             ))}
           </select>
         </label>
+        <FirmwareVersionSelect label="Installed firmware" value={firmwareVersionId}
+          onChange={setFirmwareVersionId} emptyLabel="Unknown firmware" />
         <label>
           Display name
           <input

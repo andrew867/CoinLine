@@ -5,6 +5,7 @@ using HostPlatform.Api.Options;
 using HostPlatform.Api.Services;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -42,23 +43,34 @@ public sealed class FirmwareController(
             .ToListAsync(ct));
 
     [AllowAnonymous]
+    [HttpGet("table-profiles")]
+    public ActionResult<object> TableProfiles() => Ok(FirmwareTableProfiles.Catalog.Select(profile =>
+        new { profile.Id, profile.Label, profile.VerifiedLengths }));
+
+    [AllowAnonymous]
     [HttpGet("versions")]
     public async Task<ActionResult<IEnumerable<object>>> FirmwareVersions(CancellationToken ct) =>
         Ok(await db.FirmwareVersions.AsNoTracking()
             .OrderBy(v => v.Label)
-            .Select(v => new { v.Id, v.Label, v.BuildId })
+            .Select(v => new { v.Id, v.Label, v.BuildId, v.TableProfileId })
             .ToListAsync(ct));
 
-    public sealed record FirmwareVersionCreateDto(string Label, string? BuildId, string? Notes);
+    public sealed record FirmwareVersionCreateDto(string Label, string? BuildId, string? Notes, string? TableProfileId = null);
 
     [HttpPost("versions")]
     public async Task<ActionResult<object>> CreateFirmwareVersion([FromBody] FirmwareVersionCreateDto body, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(body.Label))
+            return BadRequest(new { error = "Enter a label for the firmware version." });
+        if (body.TableProfileId != null && FirmwareTableProfiles.Find(body.TableProfileId) == null)
+            return BadRequest(new { error = "Choose a known table layout profile." });
+
         var v = new FirmwareVersion
         {
             Label = body.Label.Trim(),
             BuildId = body.BuildId,
-            Notes = body.Notes
+            Notes = body.Notes,
+            TableProfileId = body.TableProfileId
         };
         db.FirmwareVersions.Add(v);
         ApiAudit.Write(db, HttpContext, "firmware.version", "create", $"FirmwareVersion:{v.Id}", new { v.Label }, null);

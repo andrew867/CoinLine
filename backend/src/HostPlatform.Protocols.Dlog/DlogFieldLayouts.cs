@@ -32,6 +32,8 @@ internal static class DlogFieldLayouts
 
     // msg_type + reasons (BFLAGS)
     public const int AttentionRequiredMinBytes = 2;
+    public const int TerminalStatusLength = 11;
+    public const int SoftwareVersionLength = 28;
 
     // msg_type + YMDHMS + status + box_number + pcent_full + currency_value + num_coins + spare
     public const int CashBoxStatusMinBytes =
@@ -47,10 +49,8 @@ internal static class DlogFieldLayouts
 
     public static bool HasUploadTrailer(ReadOnlySpan<byte> data)
     {
-        const int statusLength = 11;
-        const int softwareVersionLength = 28;
-        const int statusAndVersionLength = statusLength + softwareVersionLength;
-        if (data.Length <= statusAndVersionLength || data[0] != 10 || data[statusLength] != 60)
+        const int statusAndVersionLength = TerminalStatusLength + SoftwareVersionLength;
+        if (data.Length <= statusAndVersionLength || data[0] != 10 || data[TerminalStatusLength] != 60)
             return false;
 
         var tail = data[statusAndVersionLength..];
@@ -63,7 +63,9 @@ internal static class DlogFieldLayouts
         note = "";
         return messageType switch
         {
+            6 or 15 => TryDecodeMaintenance(raw, fields, out note),
             7 => TryDecodeAlarm(raw, fields, out note),
+            10 => TryDecodeTerminalStatus(raw, fields, out note),
             16 => TryDecodeAlarmAck(raw, fields, out note),
             38 => TryDecodeCashBoxStatus(raw, fields, out note),
             39 => TryDecodeAttentionCallback(raw, fields, out note),
@@ -71,6 +73,44 @@ internal static class DlogFieldLayouts
             51 => TryDecodeCashBoxCollection(raw, fields, out note),
             _ => false
         };
+    }
+
+    private static bool TryDecodeMaintenance(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
+    {
+        note = "Maintenance opcode from the two-byte little-endian field.";
+        if (raw.Length < DlogMaintenanceWire.OpcodeRecordLength)
+        {
+            note = "Maintenance opcode requires three bytes including its message type.";
+            return false;
+        }
+
+        fields["opcode"] = BinaryPrimitives.ReadUInt16LittleEndian(raw[1..]);
+        return true;
+    }
+
+    private static bool TryDecodeTerminalStatus(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
+    {
+        note = "Phone status requires an eleven-byte report.";
+        if (raw.Length < TerminalStatusLength)
+            return false;
+
+        var flags = new JsonArray();
+        AddFlags(flags, raw[6], ["Handset fault", "Telephony not responding", null, null, null, null, null, "Telephony communications fault"]);
+        AddFlags(flags, raw[7], ["Power interruption", "Display not responding", "Voice prompts unavailable", null, "Card reader blocked"]);
+        AddFlags(flags, raw[8], ["Call record checksum fault", "Statistics checksum fault", "Table checksum fault", "Other data checksum fault", "Call record store full", "EEPROM fault", "Memory lost", "Memory hardware fault"]);
+        AddFlags(flags, raw[9], ["Access cover open", "Keypad fault", "Phone removed from mount", "Cash box threshold reached", "Cash box cover open", "Cash box removed", "Cash box full", "Coin jam"]);
+        AddFlags(flags, raw[10], ["Coin escrow jam", "Coin validator fault", "Line check failed", "Data call failed"]);
+        fields["statusFlags"] = flags;
+        fields["hasStatusBits"] = raw[6..TerminalStatusLength].IndexOfAnyExcept((byte)0) >= 0;
+        note = "Named status bits shared by the inspected terminal profiles.";
+        return true;
+    }
+
+    private static void AddFlags(JsonArray target, byte source, ReadOnlySpan<string?> labels)
+    {
+        for (var i = 0; i < labels.Length; i++)
+            if ((source & (1 << i)) != 0 && labels[i] is { } label)
+                target.Add(label);
     }
 
     private static bool TryDecodeAlarm(ReadOnlySpan<byte> raw, JsonObject fields, out string note)

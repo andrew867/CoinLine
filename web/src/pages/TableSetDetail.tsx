@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { apiPostBareOk, apiPut } from '../api/client'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { apiPost, apiPostBareOk, apiPut } from '../api/client'
+import { TableSetAssignment } from './TableSetAssignment'
+import { TableSetConfiguration } from './TableSetConfiguration'
+import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
+import './TableSetConfiguration.css'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
@@ -8,6 +12,8 @@ type Ver = {
   id: string
   tableDefinitionId: string
   definitionName: string
+  tableNumber: number
+  dependsOnTableDefinitionId: string | null
   tableRevision: number
   payloadSha256Hex: string
   payloadLengthBytes: number
@@ -25,14 +31,30 @@ type Detail = {
   status: number
   publishedAtUtc: string | null
   publishGeneration: number
+  targetFirmwareVersionId: string | null
+  targetFirmware: string | null
+  tableProfile: string | null
+  firmwareFindings: { tableNumber: number; blocking: boolean; message: string }[]
   versions: Ver[]
+  provisioning?: {
+    operatingType: string | null
+    acceptedCoinSlots: number | null
+    configuredCardRanges: number | null
+    onHookAdvertising: boolean | null
+    findings: { tableNumber: number; message: string }[]
+  }
 }
 
 export function TableSetDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
   const [d, setD] = useState<Detail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [copying, setCopying] = useState(false)
+  const [targetEdit, setTargetEdit] = useState<string | null>(null)
+  const [savingTarget, setSavingTarget] = useState(false)
+  const [recordDirty, setRecordDirty] = useState(false)
 
   const load = () => {
     if (!id) return
@@ -50,8 +72,25 @@ export function TableSetDetail() {
   }
 
   useEffect(() => {
+    setTargetEdit(null)
+    setRecordDirty(false)
     load()
   }, [id])
+
+  async function saveTarget(e: React.FormEvent) {
+    e.preventDefault()
+    if (!d || targetEdit == null || recordDirty) return
+    setSavingTarget(true)
+    setErr(null)
+    try {
+      await apiPut(`/api/tables/sets/${d.id}/firmware-target`, { firmwareVersionId: targetEdit || null })
+      load()
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not save target firmware.')
+    } finally {
+      setSavingTarget(false)
+    }
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
@@ -86,11 +125,29 @@ export function TableSetDetail() {
     }
   }
 
+  async function clone(event: React.FormEvent) {
+    event.preventDefault()
+    if (!id) return
+    setCopying(true)
+    setErr(null)
+    try {
+      const copy = await apiPost<{ id: string }>(`/api/tables/sets/${id}/clone`, { name })
+      setD(null)
+      void navigate(`/table-sets/${copy.id}`)
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not make a draft copy.')
+    } finally {
+      setCopying(false)
+    }
+  }
+
   if (!id) return <p>Missing id.</p>
   if (!d) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
 
   const draft = d.status !== 1
   const noVersions = d.versions.length === 0
+  const targetSelection = targetEdit ?? d.targetFirmwareVersionId ?? ''
+  const targetChanged = targetSelection !== (d.targetFirmwareVersionId ?? '')
 
   return (
     <div>
@@ -115,11 +172,51 @@ export function TableSetDetail() {
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <button type="submit">Save</button>
-          <button type="button" onClick={() => void publish()}>
+          <button type="button" onClick={() => void publish()}
+            disabled={recordDirty || targetChanged || d.firmwareFindings?.some((finding) => finding.blocking)}>
             Publish set
           </button>
         </form>
       )}
+      {!draft && (
+        <form className="table-config-selectors" onSubmit={(event) => void clone(event)}>
+          <label>Draft copy name<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
+          <button type="submit" disabled={copying || !name.trim()}>Make draft copy</button>
+        </form>
+      )}
+      <section className="table-config-panel" aria-labelledby="firmware-target-heading">
+        <h2 id="firmware-target-heading">Firmware compatibility</h2>
+        {draft ? (
+          <form className="table-config-selectors" onSubmit={(event) => void saveTarget(event)}>
+            <FirmwareVersionSelect label="Target firmware" value={targetSelection} onChange={setTargetEdit}
+              emptyLabel="No firmware target" disabled={savingTarget} />
+            <button type="submit" disabled={!targetChanged || savingTarget || recordDirty}>Save target</button>
+          </form>
+        ) : <p>Target firmware <strong>{d.targetFirmware ?? 'Any'}</strong></p>}
+        {draft && recordDirty && targetChanged && <p>Save the record edits before changing the target.</p>}
+        {d.targetFirmware && <p>Table layout <strong>{d.tableProfile ?? 'Unverified'}</strong></p>}
+        {!!d.firmwareFindings?.length && <ul>{d.firmwareFindings.map((finding) => (
+          <li key={finding.tableNumber}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}</li>
+        ))}</ul>}
+      </section>
+      {d.provisioning && (d.provisioning.operatingType || d.provisioning.acceptedCoinSlots !== null ||
+        d.provisioning.configuredCardRanges !== null || d.provisioning.findings.length > 0) && (
+        <section className="table-config-panel" aria-labelledby="provisioning-heading">
+          <h2 id="provisioning-heading">Provisioning review</h2>
+          <dl className="native-table-summary">
+            {d.provisioning.operatingType && <div><dt>Operating type</dt><dd>{d.provisioning.operatingType}</dd></div>}
+            {d.provisioning.acceptedCoinSlots !== null && <div><dt>Accepted coin slots</dt><dd>{d.provisioning.acceptedCoinSlots}</dd></div>}
+            {d.provisioning.configuredCardRanges !== null && <div><dt>Configured card ranges</dt><dd>{d.provisioning.configuredCardRanges}</dd></div>}
+            {d.provisioning.onHookAdvertising !== null && <div><dt>On-hook advertising</dt><dd>{d.provisioning.onHookAdvertising ? 'Enabled' : 'Disabled'}</dd></div>}
+          </dl>
+          {d.provisioning.findings.length > 0 && <ul>{d.provisioning.findings.map((finding) => (
+            <li key={finding.message}>MT{finding.tableNumber} · {finding.message}</li>
+          ))}</ul>}
+        </section>
+      )}
+      <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}`} setId={id} draft={draft}
+        versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />
+      {!draft && <TableSetAssignment key={id} setId={id} />}
       <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>
       </p>

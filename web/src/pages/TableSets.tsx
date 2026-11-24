@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
@@ -11,12 +12,14 @@ type Row = {
   status: number
   publishedAtUtc: string | null
   publishGeneration: number
+  targetFirmware: string | null
 }
 
 export function TableSets() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [targetFirmwareVersionId, setTargetFirmwareVersionId] = useState('')
 
   function load() {
     fetch('/api/tables/sets', { headers })
@@ -40,7 +43,7 @@ export function TableSets() {
     const r = await fetch('/api/tables/sets', {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: trimmed, customerId: null, isDefault: false }),
+      body: JSON.stringify({ name: trimmed, customerId: null, isDefault: false, targetFirmwareVersionId: targetFirmwareVersionId || null }),
     })
     if (!r.ok) {
       setErr(String(r.status))
@@ -53,11 +56,13 @@ export function TableSets() {
   return (
     <div>
       <h1>Table sets</h1>
-      <form onSubmit={(e) => void createSet(e)} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>
+      <form onSubmit={(e) => void createSet(e)} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>
         <label>
           New set name
           <input value={name} onChange={(e) => setName(e.target.value)} required style={{ display: 'block' }} />
         </label>
+        <FirmwareVersionSelect label="Target firmware" value={targetFirmwareVersionId}
+          onChange={setTargetFirmwareVersionId} emptyLabel="No firmware target" />
         <button type="submit">Create table set</button>
       </form>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
@@ -69,6 +74,7 @@ export function TableSets() {
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
               <th>Name</th>
               <th>Status</th>
+              <th>Target firmware</th>
               <th>Default</th>
               <th>Gen</th>
             </tr>
@@ -80,6 +86,7 @@ export function TableSets() {
                   <Link to={`/table-sets/${r.id}`}>{r.name}</Link>
                 </td>
                 <td>{r.status === 1 ? 'Published' : 'Draft'}</td>
+                <td>{r.targetFirmware ?? 'Any'}</td>
                 <td>{r.isDefault ? 'yes' : ''}</td>
                 <td>{r.publishGeneration}</td>
               </tr>

@@ -11,6 +11,172 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     [Fact]
+    public async Task Service_restriction_template_creates_one_native_draft_record()
+    {
+        using var set = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Native service restriction template" });
+        set.EnsureSuccessStatusCode();
+        var id = (await set.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}/records/58/fields";
+        var initial = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.False(initial.GetProperty("supported").GetBoolean());
+        var template = initial.GetProperty("templates")[0];
+        using var created = await _client.PostAsJsonAsync(path, template);
+        Assert.Equal(HttpStatusCode.NoContent, created.StatusCode);
+        var details = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.True(details.GetProperty("editable").GetBoolean());
+        Assert.Equal(26, details.GetProperty("length").GetInt32());
+        Assert.Equal("0", details.GetProperty("sections")[0].GetProperty("fields")[0].GetProperty("value").GetString());
+        using var repeated = await _client.PostAsJsonAsync(path, template);
+        Assert.Equal(HttpStatusCode.Conflict, repeated.StatusCode);
+    }
+
+    [Fact]
+    public async Task Messaging_template_and_updates_keep_the_key_out_of_editor_reads()
+    {
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Messaging template test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}/records/68/fields";
+        var missing = await _client.GetFromJsonAsync<JsonElement>(path);
+        using var initialized = await _client.PostAsJsonAsync(path, missing.GetProperty("templates")[0]);
+        Assert.Equal(HttpStatusCode.NoContent, initialized.StatusCode);
+
+        var initial = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.Equal(72, initial.GetProperty("length").GetInt32());
+        var changes = new Dictionary<string, string> { ["enabled"] = "1" };
+        var request = new { profile = initial.GetProperty("profile"), revision = initial.GetProperty("revision"), sha256 = initial.GetProperty("sha256"), changes };
+        using var rejected = await _client.PutAsJsonAsync(path, request);
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+
+        changes["serviceKey"] = string.Concat(Enumerable.Range(1, 8));
+        changes["serviceNumber"] = "120";
+        changes["allowCoin"] = "true";
+        using var saved = await _client.PutAsJsonAsync(path, request);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var result = await _client.GetFromJsonAsync<JsonElement>(path);
+        var fields = result.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal("1", fields["enabled"].GetProperty("value").GetString());
+        Assert.Equal("120", fields["serviceNumber"].GetProperty("value").GetString());
+        Assert.Equal("true", fields["allowCoin"].GetProperty("value").GetString());
+        Assert.Equal("password", fields["serviceKey"].GetProperty("editor").GetString());
+        Assert.Equal(JsonValueKind.Null, fields["serviceKey"].GetProperty("value").ValueKind);
+    }
+
+    [Fact]
+    public async Task Draft_clone_retains_original_records_and_can_publish_advertising()
+    {
+        var sets = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets"))!;
+        var source = sets.EnumerateArray().First(s => s.GetProperty("isDefault").GetBoolean());
+        var sourceId = source.GetProperty("id").GetGuid();
+        var original = (await _client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{sourceId}"))!;
+
+        using var cloned = await _client.PostAsJsonAsync($"/api/tables/sets/{sourceId}/clone", new { name = "Advertising test" });
+        Assert.Equal(HttpStatusCode.Created, cloned.StatusCode);
+        var id = (await cloned.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var slots = Enumerable.Range(0, 20).Select(i => new
+        {
+            text = i == 0 ? "TEST MESSAGE" : "", durationTicks = i == 0 ? 300 : 0, mode = 0, blankBefore = false,
+            endSequence = i > 1
+        }).ToArray();
+        var body = new { slots };
+
+        using var saved = await _client.PutAsJsonAsync($"/api/tables/sets/{id}/advertising", body);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var messages = (await _client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{id}/advertising"))!;
+        Assert.Equal("TEST MESSAGE", messages.GetProperty("slots")[0].GetProperty("text").GetString());
+        Assert.False(messages.GetProperty("slots")[1].GetProperty("endSequence").GetBoolean());
+        Assert.True(messages.GetProperty("slots")[2].GetProperty("endSequence").GetBoolean());
+        Assert.Equal(1, messages.GetProperty("revision").GetInt32());
+        Assert.Equal(HttpStatusCode.Conflict, (await _client.PutAsJsonAsync($"/api/tables/sets/{id}/advertising",
+            new { slots, revision = 0, sha256 = (string?)null })).StatusCode);
+        var detail = (await _client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{id}"))!;
+        var versions = detail.GetProperty("versions").EnumerateArray().ToArray();
+        Assert.Equal(481, versions.Single(v => v.GetProperty("tableNumber").GetInt32() == 29).GetProperty("payloadLengthBytes").GetInt32());
+        foreach (var inherited in original.GetProperty("versions").EnumerateArray())
+        {
+            var inheritedId = inherited.GetProperty("tableDefinitionId").GetGuid();
+            Assert.Equal(inherited.GetProperty("payloadSha256Hex").GetString(),
+                versions.Single(v => v.GetProperty("tableDefinitionId").GetGuid() == inheritedId).GetProperty("payloadSha256Hex").GetString());
+        }
+
+        Assert.Equal(HttpStatusCode.NoContent,
+            (await _client.PostAsync($"/api/tables/sets/{id}/publish?confirm=true", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest,
+            (await _client.PutAsJsonAsync($"/api/tables/sets/{id}/advertising", body)).StatusCode);
+    }
+
+    [Fact]
+    public async Task Scope_assignment_requires_current_preview_and_is_idempotent()
+    {
+        var sets = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets"))!;
+        var setId = sets.EnumerateArray().First(s => s.GetProperty("isDefault").GetBoolean()).GetProperty("id").GetGuid();
+        var terminals = (await _client.GetFromJsonAsync<JsonElement>("/api/terminals"))!;
+        var terminal = terminals[0];
+        var siteId = terminal.GetProperty("siteId").GetGuid();
+        var terminalId = terminal.GetProperty("id").GetGuid();
+        var endpoint = $"/api/tables/sets/{setId}";
+        var preview = (await _client.GetFromJsonAsync<JsonElement>($"{endpoint}/assignment-preview?targetType=site&targetId={siteId}"))!;
+        var targetIds = preview.GetProperty("targets").EnumerateArray().Where(t => t.GetProperty("eligible").GetBoolean())
+            .Select(t => t.GetProperty("id").GetGuid()).ToArray();
+        Assert.Contains(terminalId, targetIds);
+
+        using var stale = await _client.PostAsJsonAsync($"{endpoint}/assignments", new { targetType = "site", targetId = siteId, terminalIds = Array.Empty<Guid>() });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var current = new { targetType = "site", targetId = siteId, terminalIds = targetIds };
+        using var assigned = await _client.PostAsJsonAsync($"{endpoint}/assignments", current);
+        Assert.Equal(HttpStatusCode.OK, assigned.StatusCode);
+        using var repeated = await _client.PostAsJsonAsync($"{endpoint}/assignments", current);
+        Assert.Equal(0, (await repeated.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("changed").GetInt32());
+    }
+
+    [Fact]
+    public async Task Phone_group_membership_adds_the_phone_to_each_assignment_preview()
+    {
+        var terminal = (await _client.GetFromJsonAsync<JsonElement>("/api/terminals"))[0].GetProperty("id").GetGuid();
+        var path = $"/api/terminals/{terminal}/groups";
+        var existing = await _client.GetFromJsonAsync<JsonElement>(path);
+        var original = existing.GetProperty("groupIds").Deserialize<Guid[]>()!;
+        var revision = existing.GetProperty("revision").GetInt32();
+        var set = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets")).EnumerateArray()
+            .First(row => row.GetProperty("isDefault").GetBoolean()).GetProperty("id").GetGuid();
+
+        using var first = await _client.PostAsJsonAsync("/api/terminal-groups", new { name = "Membership preview A" });
+        using var second = await _client.PostAsJsonAsync("/api/terminal-groups", new { name = "Membership preview B" });
+        first.EnsureSuccessStatusCode();
+        second.EnsureSuccessStatusCode();
+        var firstId = (await first.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var secondId = (await second.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        Guid[] groupIds = [firstId, secondId];
+        using var saved = await _client.PutAsJsonAsync(path, new { groupIds, revision });
+        saved.EnsureSuccessStatusCode();
+        try
+        {
+            var read = await _client.GetFromJsonAsync<JsonElement>(path);
+            Assert.Equal(groupIds, read.GetProperty("groupIds").Deserialize<Guid[]>());
+            foreach (var groupId in groupIds)
+            {
+                var preview = await _client.GetFromJsonAsync<JsonElement>(
+                    $"/api/tables/sets/{set}/assignment-preview?targetType=group&targetId={groupId}");
+                var target = Assert.Single(preview.GetProperty("targets").EnumerateArray());
+                Assert.Equal(terminal, target.GetProperty("id").GetGuid());
+                Assert.True(target.GetProperty("eligible").GetBoolean());
+            }
+
+            using var stale = await _client.PutAsJsonAsync(path, new { groupIds = original, revision });
+            Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+            using var deletion = await _client.DeleteAsync($"/api/terminal-groups/{secondId}");
+            Assert.Equal(HttpStatusCode.Conflict, deletion.StatusCode);
+        }
+        finally
+        {
+            var state = await saved.Content.ReadFromJsonAsync<JsonElement>();
+            using var reverted = await _client.PutAsJsonAsync(path, new { groupIds = original, revision = state.GetProperty("revision").GetInt32() });
+            reverted.EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
     public async Task Publish_confirm_writes_tables_set_audit_event()
     {
         var cust = (await _client.GetFromJsonAsync<JsonElement>("/api/customers"))![0].GetProperty("id").GetGuid();

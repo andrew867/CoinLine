@@ -9,12 +9,13 @@ using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
 using HostPlatform.Protocols.Tables;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HostPlatform.Api.Hosting;
 
 /// <summary>
-/// One modem socket. Stores every accepted frame, echoes a control acknowledgement,
-/// quotes type 63 against the terminal's published plan, and pushes the assigned install set.
+/// One modem socket. Records accepted frames with sensitive card data omitted, replies
+/// to runtime requests, and pushes the assigned install set on an explicit request.
 /// A control acknowledgement has no terminal-id field; the session row stores the five bytes.
 /// </summary>
 internal sealed class NccLinkProcessor(
@@ -22,6 +23,7 @@ internal sealed class NccLinkProcessor(
     TableDistributionService tables,
     DlogTransactionEngine dlog,
     INccSessionOutbound outbound,
+    TimeProvider clock,
     ILogger logger,
     CancellationToken stoppingToken)
 {
@@ -30,6 +32,8 @@ internal sealed class NccLinkProcessor(
     private const byte TableAckMessageType = 14;
     private const byte TableUpdateMessageType = 18;
     private const byte TableDownloadRequestType = 44;
+    private const byte RoutineCallInMessageType = 8;
+    private const byte CallbackMessageType = 9;
     private const int MaxInstallRetransmissions = 2;
     private static readonly TimeSpan AckWait = TimeSpan.FromSeconds(20);
     private static readonly TimeSpan FirmwareLinkAckDelay = TimeSpan.FromMilliseconds(350);
@@ -42,6 +46,7 @@ internal sealed class NccLinkProcessor(
     private NccWirePacket? _lastDialogueReply;
     private bool _timeSyncAwaitingAck;
     private DownloadBatch? _batch;
+    private ScheduledTableDownload? _scheduledDownload;
     private bool _installStarted;
     private bool _firmwareDialogue;
     private readonly Dictionary<int, DownloadBatchItem> _waiting = new();
@@ -194,7 +199,11 @@ internal sealed class NccLinkProcessor(
             if (!headerOnlyRetry)
                 _lastInboundMessage = terminal == null ? null : packet;
         }
-        _session.LastFrameSample = raw;
+        var messageType = !control && packet.Data.Length > 0 ? packet.Data[0] : (byte?)null;
+        var cardAuthorization = messageType is { } type && DlogCardAuthorizationWire.IsRequest(type);
+        // Card records can contain payment credentials. Maintenance requests contain a technician PIN.
+        var recordedBytes = cardAuthorization || messageType is 4 or 6 or 53 ? Array.Empty<byte>() : raw;
+        _session.LastFrameSample = recordedBytes;
         _session.UpdatedAtUtc = DateTime.UtcNow;
         _session.UpdatedBy = Actor;
 
@@ -207,7 +216,7 @@ internal sealed class NccLinkProcessor(
             Sequence = ++_sequence,
             TerminalIdHex = hex,
             TerminalMatched = terminal != null,
-            RawBytes = raw,
+            RawBytes = recordedBytes,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow,
             CreatedBy = Actor,
@@ -219,7 +228,8 @@ internal sealed class NccLinkProcessor(
             correlationId = _session.CorrelationId,
             terminalIdHex = hex,
             matched = terminal != null,
-            unknown = !control && terminal == null
+            unknown = !control && terminal == null,
+            redactedMessageType = recordedBytes.Length == 0 ? messageType : null
         }, _session.TerminalId);
 
         try
@@ -241,10 +251,11 @@ internal sealed class NccLinkProcessor(
         }
 
         var maintenanceRequest = DlogMaintenanceWire.HasRequestRecord(packet.Data);
+        var callIn = packet.Data is [RoutineCallInMessageType] or [CallbackMessageType];
         var rateRequest = packet.Data is [DlogRateWire.MessageTypeRequest, ..];
         if (terminal != null)
         {
-            _firmwareDialogue |= maintenanceRequest || rateRequest
+            _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn
                 || packet.Data is [DlogTimeSyncWire.Request] or [TableDownloadRequestType, _, ..];
             // Give the terminal time to arm its reply timer after transmit completion.
             if (_firmwareDialogue)
@@ -264,6 +275,7 @@ internal sealed class NccLinkProcessor(
 
         if (maintenanceRequest)
         {
+            await RecordFieldEventAsync(packet, terminal);
             if (terminal != null && DlogMaintenanceWire.TryBuildAcknowledgement(packet.Data, out var reply))
                 await SendDialogueReplyAsync(stream, packet, reply, "maintenance");
             return;
@@ -275,43 +287,53 @@ internal sealed class NccLinkProcessor(
             return;
         }
 
-        var messageType = packet.Data[0];
-        var fieldEvent = FieldEventCatalog.TryDescribe(messageType, out _);
-        if (packet.Data.Length >= 2 && messageType == TableAckMessageType)
+        if (cardAuthorization)
+        {
+            // An approval requires a connected authorization provider.
+            if (terminal != null && DlogCardAuthorizationWire.TryBuildDecline(packet.Data, out var decline))
+                await SendDialogueReplyAsync(stream, packet, decline, "card authorization declined");
+            return;
+        }
+
+        if (messageType is not { } applicationType)
+            return;
+
+        if (packet.Data.Length >= 2 && applicationType == TableAckMessageType)
             await ApplyTableAckAsync(stream, packet.Data[1], raw);
-        else if (fieldEvent)
+        else if (FieldEventCatalog.TryDescribe(applicationType, out _))
         {
             var stored = await RecordFieldEventAsync(packet, terminal);
-            if (stored && terminal != null && messageType == DlogAlarmWire.AlarmMessageType
+            if (stored && terminal != null && applicationType == DlogAlarmWire.AlarmMessageType
                 && DlogAlarmWire.TryBuildAcknowledgement(packet.Data, out var acknowledgement))
                 await SendDialogueReplyAsync(stream, packet, acknowledgement, "alarm");
         }
 
-        if (terminal == null)
-            return;
-
-        if (messageType == TableDownloadRequestType && packet.Data.Length >= 2)
-            await StartInstallAsync(stream, packet.TerminalId, firmwareRequest: true);
-        else if (!fieldEvent && _lastTimeSync == null)
-            await StartInstallAsync(stream, packet.TerminalId);
+        if (terminal != null && (callIn || applicationType == TableDownloadRequestType && packet.Data.Length >= 2))
+            await StartInstallAsync(stream, packet.TerminalId, terminal, callIn);
     }
 
     private async Task<bool> RecordFieldEventAsync(NccWirePacket packet, Terminal? terminal)
     {
         try
         {
-            await dlog.IngestAsync(
-                packet.Data.ToArray(),
-                DlogDirection.TerminalToHost,
-                terminal?.Id,
-                _session.Id,
-                _session.CorrelationId,
-                packet.Data[0],
-                true,
-                _sequence.ToString(),
-                DateTime.UtcNow,
-                _session.CorrelationId,
-                stoppingToken);
+            var records = FieldEventCatalog.SplitUpload(packet.Data);
+            var capturedAt = DateTime.UtcNow;
+            for (var i = 0; i < records.Count; i++)
+            {
+                var record = records[i];
+                await dlog.IngestAsync(
+                    record,
+                    DlogDirection.TerminalToHost,
+                    terminal?.Id,
+                    _session.Id,
+                    _session.CorrelationId,
+                    record[0],
+                    true,
+                    $"{_sequence}:{i}",
+                    capturedAt,
+                    _session.CorrelationId,
+                    stoppingToken);
+            }
             return true;
         }
         catch (Exception ex)
@@ -347,7 +369,7 @@ internal sealed class NccLinkProcessor(
         var hit = rows.FirstOrDefault(t => string.Equals(t.TerminalIdHex, hex, StringComparison.OrdinalIgnoreCase));
         if (hit == null)
             return null;
-        return await db.Terminals.FirstAsync(t => t.Id == hit.Id, stoppingToken);
+        return await db.Terminals.AsNoTracking().FirstOrDefaultAsync(t => t.Id == hit.Id, stoppingToken);
     }
 
     private async Task WriteAckAsync(NetworkStream stream, byte requestControl)
@@ -524,47 +546,81 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, bool firmwareRequest = false)
+    private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn)
     {
-        if (_installStarted || _session.TerminalId is not { } boundId)
+        if (_installStarted)
             return;
+
+        var now = clock.GetUtcNow().UtcDateTime;
+        var scheduled = await db.ScheduledTableDownloads.Include(s => s.NccSession).Include(s => s.TableSet)
+            .FirstOrDefaultAsync(s => s.TerminalId == terminal.Id && s.AvailableAtUtc <= now
+                && s.CompletedAtUtc == null && s.CancelledAtUtc == null, stoppingToken);
+        if (scheduled?.NccSession?.Status == NccSessionStatus.Active)
+        {
+            await SendInstallEndAsync(stream, terminalId);
+            return;
+        }
+
+        Guid? tableSetId = null;
+        if (scheduled != null && await IsScheduledSetEligibleAsync(scheduled, terminal))
+            tableSetId = scheduled.TableSetId;
+        else
+        {
+            if (scheduled != null)
+            {
+                scheduled.CancelledAtUtc = DateTime.UtcNow;
+                scheduled.Version++;
+                var audit = Audit("scheduled_download_ineligible", new { scheduleId = scheduled.Id, scheduled.TableSetId }, terminal.Id);
+                try { await db.SaveChangesAsync(stoppingToken); }
+                catch (DbUpdateConcurrencyException)
+                {
+                    db.Entry(scheduled).State = EntityState.Detached;
+                    if (audit != null)
+                        db.Entry(audit).State = EntityState.Detached;
+                    // The schedule changed while eligibility was being checked.
+                    await SendInstallEndAsync(stream, terminalId);
+                    return;
+                }
+            }
+            scheduled = null;
+            if (!callIn)
+                tableSetId = await db.TerminalTableAssignments.AsNoTracking()
+                    .Where(a => a.TerminalId == terminal.Id && a.TableSet!.Status == TableSetStatus.Published)
+                    .Select(a => (Guid?)a.TableSetId).FirstOrDefaultAsync(stoppingToken);
+        }
+
+        if (tableSetId == null)
+        {
+            await SendInstallEndAsync(stream, terminalId);
+            return;
+        }
+
         _installStarted = true;
-
-        var assignment = await db.TerminalTableAssignments.AsNoTracking()
-            .Where(a => a.TerminalId == boundId)
-            .OrderByDescending(a => a.AssignedAtUtc)
-            .FirstOrDefaultAsync(stoppingToken);
-        if (assignment == null)
-        {
-            if (firmwareRequest)
-                await SendInstallEndAsync(stream, terminalId);
-            return;
-        }
-
-        var published = await db.TableSets.AsNoTracking()
-            .AnyAsync(s => s.Id == assignment.TableSetId && s.Status == TableSetStatus.Published, stoppingToken);
-        if (!published)
-        {
-            if (firmwareRequest)
-                await SendInstallEndAsync(stream, terminalId);
-            return;
-        }
-
         try
         {
+            if (scheduled != null)
+            {
+                scheduled.NccSessionId = _session.Id;
+                scheduled.StartedAtUtc = DateTime.UtcNow;
+                scheduled.Version++;
+            }
             var (created, _) = await tables.CreateDownloadBatchAsync(
-                boundId,
-                assignment.TableSetId,
+                terminal.Id,
+                tableSetId.Value,
                 DownloadScope.Full,
                 null,
                 stoppingToken,
-                "ncc-install-" + _session.Id.ToString("N"));
-            _batch = await db.DownloadBatches.Include(b => b.Items)
-                .FirstAsync(b => b.Id == created.Id, stoppingToken);
+                "ncc-install-" + _session.Id.ToString("N"),
+                scheduled);
+            _batch = created;
+            _scheduledDownload = scheduled;
         }
         catch (Exception ex)
         {
+            if (scheduled != null)
+                db.Entry(scheduled).State = EntityState.Detached;
             logger.LogWarning(ex, "Install batch was not created.");
+            await SendInstallEndAsync(stream, terminalId);
             return;
         }
 
@@ -575,59 +631,32 @@ internal sealed class NccLinkProcessor(
             .OrderBy(i => i.StepIndex)
             .ToListAsync(stoppingToken);
 
-        if (firmwareRequest)
-        {
-            await StartFirmwareTableTransferAsync(stream, terminalId, items);
-            return;
-        }
+        await StartFirmwareTableTransferAsync(stream, terminalId, items);
+    }
 
-        foreach (var item in items)
-        {
-            var version = item.TableVersion;
-            var payload = version == null ? Array.Empty<byte>() : TableDistributionService.GetEffectivePayload(version);
-            if (payload.Length == 0 || version?.TableDefinition == null)
-            {
-                Advance(item, TableDownloadTrigger.FailPermanent);
-                item.Succeeded = false;
-                item.ErrorDetail = "version bytes were empty";
-                item.LastAckStatus = "missing";
-                continue;
-            }
+    private async Task<bool> IsScheduledSetEligibleAsync(ScheduledTableDownload scheduled, Terminal terminal)
+    {
+        if (scheduled.TableSet?.Status != TableSetStatus.Published ||
+            TableSetFirmwareCompatibility.Mismatch(scheduled.TableSet, terminal.FirmwareVersionId) != null)
+            return false;
+        if (scheduled.TableSet.CustomerId is { } customerId &&
+            !await db.Sites.AsNoTracking().AnyAsync(s => s.Id == terminal.SiteId && s.CustomerId == customerId, stoppingToken))
+            return false;
 
-            Advance(item, TableDownloadTrigger.BeginHeaderTransfer);
-            Advance(item, TableDownloadTrigger.HeaderSent);
-            Advance(item, TableDownloadTrigger.PayloadSent);
-            item.LastAckStatus = "pending_terminal_ack";
-            _waiting[version.TableDefinition.TableNumber] = item;
-
-            try
-            {
-                await WriteMessageAsync(stream, terminalId, payload);
-            }
-            catch (Exception ex)
-            {
-                logger.LogInformation(ex, "Install frame was not sent.");
-                Advance(item, TableDownloadTrigger.FailPermanent);
-                item.ErrorDetail = "frame was not written";
-                item.Succeeded = false;
-                _waiting.Remove(version.TableDefinition.TableNumber);
-            }
-        }
-
-        await db.SaveChangesAsync(stoppingToken);
-        if (_waiting.Count == 0)
-            await FinishBatchAsync("version bytes were empty");
+        var access = await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
+            .Where(v => v.TableSetId == scheduled.TableSetId && v.TableDefinition!.TableNumber == 21)
+            .Take(2).ToListAsync(stoppingToken);
+        if (access.Count > 1)
+            return false;
+        var payload = access.Count == 0 ? [] : TableDistributionService.GetEffectivePayload(access[0]);
+        return payload.Length < 18 || string.Equals(terminal.TerminalIdHex,
+            Convert.ToHexString(payload.AsSpan(1, 5)), StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task StartFirmwareTableTransferAsync(NetworkStream stream, byte[] terminalId, List<DownloadBatchItem> items)
     {
-        var records = items.Select(item => (
-            Item: item,
-            TableNumber: item.TableVersion?.TableDefinition?.TableNumber,
-            Payload: item.TableVersion is { } version ? TableDistributionService.GetEffectivePayload(version) : Array.Empty<byte>())).ToArray();
-        if (records.Length == 0 || records.Any(record => record.Payload.Length <= 2
-            || record.TableNumber != record.Payload[0])
-            || records.Select(record => record.TableNumber).Distinct().Count() != records.Length)
+        if (items.Any(item => item.TableVersion == null) ||
+            !TableDistributionService.HasCompleteDlogRecords(items.Select(item => item.TableVersion!)))
         {
             const string reason = "The assigned set must contain complete DLOG table records with matching message types.";
             foreach (var item in items)
@@ -645,13 +674,14 @@ internal sealed class NccLinkProcessor(
 
         var transfer = new FirmwareTableTransfer(terminalId);
         transfer.Frames.Enqueue(new FirmwareTableFrame([TableUpdateMessageType]));
-        foreach (var record in records)
+        foreach (var item in items)
         {
-            _waiting.Add(record.Payload[0], record.Item);
-            for (var offset = 0; offset < record.Payload.Length; offset += NccConstants.MaxDataSize)
+            var payload = TableDistributionService.GetEffectivePayload(item.TableVersion!);
+            _waiting.Add(payload[0], item);
+            for (var offset = 0; offset < payload.Length; offset += NccConstants.MaxDataSize)
             {
-                var end = Math.Min(offset + NccConstants.MaxDataSize, record.Payload.Length);
-                transfer.Frames.Enqueue(new FirmwareTableFrame(record.Payload[offset..end], record.Item, end == record.Payload.Length));
+                var end = Math.Min(offset + NccConstants.MaxDataSize, payload.Length);
+                transfer.Frames.Enqueue(new FirmwareTableFrame(payload[offset..end], item, end == payload.Length));
             }
         }
         _firmwareTables = transfer;
@@ -830,7 +860,29 @@ internal sealed class NccLinkProcessor(
         _batch.UpdatedAtUtc = DateTime.UtcNow;
         try
         {
-            await db.SaveChangesAsync(CancellationToken.None);
+            if (_scheduledDownload is { } schedule)
+            {
+                schedule.NccSessionId = null;
+                schedule.Version++;
+                if (_batch.Status == DownloadBatchStatus.Completed)
+                {
+                    schedule.CompletedAtUtc = _batch.CompletedAtUtc;
+                    await tables.StageDeliveredAssignmentAsync(schedule, _batch.CompletedAtUtc.Value, CancellationToken.None);
+                }
+            }
+            try
+            {
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (DbUpdateException ex) when (_scheduledDownload != null &&
+                (ex is DbUpdateConcurrencyException || ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+                && ex.Entries.Count > 0 && ex.Entries.All(entry => entry.Entity is TerminalTableAssignment))
+            {
+                // A newer operator assignment took precedence. The terminal's confirmed delivery still counts.
+                foreach (var entry in ex.Entries)
+                    entry.State = EntityState.Detached;
+                await db.SaveChangesAsync(CancellationToken.None);
+            }
         }
         catch (Exception ex)
         {
@@ -847,16 +899,17 @@ internal sealed class NccLinkProcessor(
         item.UpdatedAtUtc = DateTime.UtcNow;
     }
 
-    private void Audit(string action, object detail, Guid? terminalId)
+    private AuditEvent? Audit(string action, object detail, Guid? terminalId)
     {
         ApiAudit.Write(db, null, "ncc", action, _session.Id.ToString(), detail, terminalId);
         var ev = db.ChangeTracker.Entries<AuditEvent>()
             .Select(e => e.Entity)
             .LastOrDefault(e => e.Action == action && e.Resource == _session.Id.ToString());
         if (ev == null)
-            return;
+            return null;
         ev.CorrelationId = _session.CorrelationId;
         ev.TerminalSessionId = _session.Id.ToString();
+        return ev;
     }
 
     private sealed record FirmwareTableFrame(byte[] Data, DownloadBatchItem? Item = null, bool EndsTable = false);

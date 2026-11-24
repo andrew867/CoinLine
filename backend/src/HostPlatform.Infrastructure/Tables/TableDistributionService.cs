@@ -17,6 +17,18 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     public static string ComputePayloadSha256Hex(TableVersion v) =>
         TablePayloadHasher.Sha256Hex(GetEffectivePayload(v));
 
+    public static bool HasCompleteDlogRecords(IEnumerable<TableVersion> versions)
+    {
+        var types = new HashSet<int>();
+        foreach (var version in versions)
+        {
+            var payload = GetEffectivePayload(version);
+            if (payload.Length <= 2 || version.TableDefinition?.TableNumber != payload[0] || !types.Add(payload[0]))
+                return false;
+        }
+        return types.Count > 0;
+    }
+
     /// <summary>
     /// Validates non-empty payload. Does not parse firmware structs — diagnostics only.
     /// </summary>
@@ -84,15 +96,27 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         byte[] rawPayload,
         int sortOrder,
         Guid? dependsOnTableDefinitionId,
-        CancellationToken ct)
+        CancellationToken ct,
+        int? expectedRevision = null,
+        string? expectedHash = null,
+        bool createOnly = false)
     {
         var set = await db.TableSets.FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
                   ?? throw new InvalidOperationException("Table set not found.");
         if (set.Status == TableSetStatus.Published)
             throw new InvalidOperationException("Cannot add versions to a published set; clone the set or create a new draft.");
 
-        var def = await db.TableDefinitions.FirstOrDefaultAsync(d => d.Id == tableDefinitionId, ct)
+        var def = await db.TableDefinitions.FindAsync([tableDefinitionId], ct)
                   ?? throw new InvalidOperationException("Table definition not found.");
+
+        var existing = await db.TableVersions.FirstOrDefaultAsync(
+            v => v.TableSetId == tableSetId && v.TableDefinitionId == tableDefinitionId, ct);
+        if (createOnly && await db.TableVersions.AnyAsync(v => v.TableSetId == tableSetId
+                && v.TableDefinition!.TableNumber == def.TableNumber, ct))
+            throw new DbUpdateConcurrencyException("The record is already in the set.");
+        if (expectedRevision is { } revision && (existing == null || existing.TableRevision != revision
+                || !string.Equals(existing.PayloadSha256Hex, expectedHash, StringComparison.OrdinalIgnoreCase)))
+            throw new DbUpdateConcurrencyException("The table changed after the editor loaded it.");
 
         var (ok, diag) = ValidatePayload(def, rawPayload);
         var sha = TablePayloadHasher.Sha256Hex(rawPayload);
@@ -105,47 +129,31 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             LengthBytes = rawPayload.Length
         };
         db.TablePayloads.Add(payloadRow);
-        await db.SaveChangesAsync(ct);
-
-        var existing = await db.TableVersions.FirstOrDefaultAsync(
-            v => v.TableSetId == tableSetId && v.TableDefinitionId == tableDefinitionId, ct);
-
-        if (existing != null)
-        {
-            existing.TableRevision = tableRevision;
-            existing.TablePayloadId = payloadRow.Id;
-            existing.EmbeddedPayload = null;
-            existing.PayloadSha256Hex = sha;
-            existing.SortOrder = sortOrder;
-            existing.DependsOnTableDefinitionId = dependsOnTableDefinitionId;
-            existing.ValidationPassed = ok;
-            existing.ValidationDiagnosticsJson = diag;
-            existing.Checksum = checksum;
-            await db.SaveChangesAsync(ct);
-            return await db.TableVersions.Include(x => x.TablePayload).FirstAsync(x => x.Id == existing.Id, ct);
-        }
-
-        var tv = new TableVersion
+        var version = existing ?? new TableVersion
         {
             TableSetId = tableSetId,
-            TableDefinitionId = tableDefinitionId,
-            TableRevision = tableRevision,
-            TablePayloadId = payloadRow.Id,
-            PayloadSha256Hex = sha,
-            SortOrder = sortOrder,
-            DependsOnTableDefinitionId = dependsOnTableDefinitionId,
-            ValidationPassed = ok,
-            ValidationDiagnosticsJson = diag,
-            Checksum = checksum
+            TableDefinitionId = tableDefinitionId
         };
-        db.TableVersions.Add(tv);
+        version.TableRevision = tableRevision;
+        version.TablePayload = payloadRow;
+        version.EmbeddedPayload = null;
+        version.PayloadSha256Hex = sha;
+        version.SortOrder = sortOrder;
+        version.DependsOnTableDefinitionId = dependsOnTableDefinitionId;
+        version.ValidationPassed = ok;
+        version.ValidationDiagnosticsJson = diag;
+        version.Checksum = checksum;
+        if (existing == null)
+            db.TableVersions.Add(version);
+        set.Version++;
         await db.SaveChangesAsync(ct);
-        return await db.TableVersions.Include(x => x.TablePayload).FirstAsync(x => x.Id == tv.Id, ct);
+        return version;
     }
 
     public async Task PublishTableSetAsync(Guid tableSetId, CancellationToken ct)
     {
         var set = await db.TableSets.Include(s => s.Versions).ThenInclude(v => v.TablePayload)
+            .Include(s => s.Versions).ThenInclude(v => v.TableDefinition).Include(s => s.TargetFirmwareVersion)
             .FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
             ?? throw new InvalidOperationException("Table set not found.");
 
@@ -158,6 +166,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             if (!v.ValidationPassed)
                 issues.Add($"Table version {v.Id} failed validation (see ValidationDiagnosticsJson).");
         }
+        issues.AddRange(TableSetFirmwareCompatibility.Review(set).Where(finding => finding.Blocking)
+            .Select(finding => $"MT{finding.TableNumber}. {finding.Message}"));
 
         if (issues.Count > 0)
             throw new InvalidOperationException(string.Join(" ", issues));
@@ -165,6 +175,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         set.Status = TableSetStatus.Published;
         set.PublishedAtUtc = DateTime.UtcNow;
         set.PublishGeneration++;
+        set.Version++;
         await db.SaveChangesAsync(ct);
     }
 
@@ -174,7 +185,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         DownloadScope scope,
         IReadOnlyList<Guid>? partialDefinitionIds,
         CancellationToken ct,
-        string? clientIdempotencyKey = null)
+        string? clientIdempotencyKey = null,
+        ScheduledTableDownload? scheduled = null)
     {
         var trimmedKey = string.IsNullOrWhiteSpace(clientIdempotencyKey)
             ? null
@@ -190,11 +202,12 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             }
         }
 
-        _ = await db.Terminals.FirstOrDefaultAsync(t => t.Id == terminalId, ct)
+        var terminal = await db.Terminals.AsNoTracking().FirstOrDefaultAsync(t => t.Id == terminalId, ct)
               ?? throw new InvalidOperationException("Terminal not found.");
-        _ = await db.TableSets.AsNoTracking()
+        var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion)
                 .FirstOrDefaultAsync(s => s.Id == tableSetId && s.Status == TableSetStatus.Published, ct)
             ?? throw new InvalidOperationException("Published table set not found.");
+        CheckFirmwareTarget(set, terminal.FirmwareVersionId);
 
         var versions = await db.TableVersions
             .Include(v => v.TablePayload)
@@ -242,13 +255,10 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
                 ? JsonSerializer.Serialize(partialDefinitionIds, JsonOpts)
                 : null
         };
-        db.DownloadBatches.Add(batch);
-        await db.SaveChangesAsync(ct);
-
         var step = 0;
         foreach (var v in ordered)
         {
-            db.DownloadBatchItems.Add(new DownloadBatchItem
+            batch.Items.Add(new DownloadBatchItem
             {
                 DownloadBatchId = batch.Id,
                 TableVersionId = v.Id,
@@ -268,14 +278,28 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             note =
                 "Per-item HostDownloadPhase tracks host orchestration; Completed/Succeeded requires terminal ACK validated under field conditions."
         }, JsonOpts);
-        await db.SaveChangesAsync(ct);
-
-        var created = await db.DownloadBatches.Include(b => b.Items).FirstAsync(b => b.Id == batch.Id, ct);
-        return (created, false);
+        db.DownloadBatches.Add(batch);
+        if (scheduled != null)
+            scheduled.LastBatch = batch;
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            foreach (var item in batch.Items.ToArray())
+                db.Entry(item).State = EntityState.Detached;
+            db.Entry(batch).State = EntityState.Detached;
+            throw;
+        }
+        return (batch, false);
     }
 
     public async Task CancelDownloadAsync(Guid batchId, CancellationToken ct)
     {
+        if (await db.ScheduledTableDownloads.AsNoTracking().AnyAsync(s => s.LastBatchId == batchId &&
+            s.NccSession != null && s.NccSession.Status == NccSessionStatus.Active, ct))
+            throw new InvalidOperationException("Cancel the schedule between delivery attempts.");
         var b = await db.DownloadBatches.Include(x => x.Items).FirstOrDefaultAsync(x => x.Id == batchId, ct)
                 ?? throw new InvalidOperationException("Download batch not found.");
         if (b.Status is DownloadBatchStatus.Completed or DownloadBatchStatus.Cancelled)
@@ -295,6 +319,9 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
 
     public async Task<DownloadBatch> RetryDownloadAsync(Guid batchId, CancellationToken ct)
     {
+        if (await db.ScheduledTableDownloads.AsNoTracking().AnyAsync(s => s.LastBatchId == batchId &&
+            s.CompletedAtUtc == null && s.CancelledAtUtc == null, ct))
+            throw new InvalidOperationException("An open schedule retries on the next eligible call-in.");
         var old = await db.DownloadBatches.AsNoTracking().FirstOrDefaultAsync(x => x.Id == batchId, ct)
                   ?? throw new InvalidOperationException("Download batch not found.");
         if (old.Status is not (DownloadBatchStatus.Failed or DownloadBatchStatus.Cancelled))
@@ -321,8 +348,10 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     {
         var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == terminalId, ct)
                        ?? throw new InvalidOperationException("Terminal not found.");
-        _ = await db.TableSets.FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
+        var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion)
+            .FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
             ?? throw new InvalidOperationException("Table set not found.");
+        CheckFirmwareTarget(set, terminal.FirmwareVersionId);
 
         var existing = await db.TerminalTableAssignments.FirstOrDefaultAsync(a => a.TerminalId == terminalId, ct);
         if (existing != null)
@@ -332,6 +361,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             existing.CustomerId = customerId;
             existing.SiteId = siteId ?? terminal.SiteId;
             existing.AssignedAtUtc = DateTime.UtcNow;
+            existing.Version++;
             await db.SaveChangesAsync(ct);
             return existing;
         }
@@ -351,16 +381,53 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
 
     public async Task<TerminalTableAssignment> RollbackAssignmentAsync(Guid terminalId, CancellationToken ct)
     {
-        var a = await db.TerminalTableAssignments.FirstOrDefaultAsync(x => x.TerminalId == terminalId, ct)
+        var a = await db.TerminalTableAssignments.Include(x => x.Terminal)
+            .Include(x => x.PreviousTableSet).ThenInclude(s => s!.TargetFirmwareVersion)
+            .FirstOrDefaultAsync(x => x.TerminalId == terminalId, ct)
                 ?? throw new InvalidOperationException("No table assignment for terminal.");
         if (a.PreviousTableSetId is not { } prev)
             throw new InvalidOperationException("No previous table set recorded for rollback.");
+        if (a.PreviousTableSet != null)
+            CheckFirmwareTarget(a.PreviousTableSet, a.Terminal?.FirmwareVersionId);
 
         var cur = a.TableSetId;
         a.TableSetId = prev;
         a.PreviousTableSetId = cur;
         a.AssignedAtUtc = DateTime.UtcNow;
+        a.Version++;
         await db.SaveChangesAsync(ct);
         return a;
+    }
+
+    private static void CheckFirmwareTarget(TableSet set, Guid? installedFirmwareId)
+    {
+        if (TableSetFirmwareCompatibility.Mismatch(set, installedFirmwareId) is { } reason)
+            throw new InvalidOperationException(reason);
+    }
+
+    public async Task StageDeliveredAssignmentAsync(ScheduledTableDownload schedule, DateTime completedAt,
+        CancellationToken ct)
+    {
+        var terminal = await db.Terminals.AsNoTracking().Where(t => t.Id == schedule.TerminalId)
+            .Select(t => new { t.SiteId, t.Site!.CustomerId, t.FirmwareVersionId }).SingleAsync(ct);
+        if (schedule.TableSet != null && TableSetFirmwareCompatibility.Mismatch(schedule.TableSet, terminal.FirmwareVersionId) != null)
+            return;
+        var assignment = await db.TerminalTableAssignments.SingleOrDefaultAsync(a => a.TerminalId == schedule.TerminalId, ct);
+        // Leave a newer operator choice in place if it changed while these bytes were in flight.
+        if (assignment != null && assignment.AssignedAtUtc > schedule.StartedAtUtc)
+            return;
+
+        if (assignment == null)
+        {
+            assignment = new TerminalTableAssignment { TerminalId = schedule.TerminalId };
+            db.TerminalTableAssignments.Add(assignment);
+        }
+        else if (assignment.TableSetId != schedule.TableSetId)
+            assignment.PreviousTableSetId = assignment.TableSetId;
+        assignment.TableSetId = schedule.TableSetId;
+        assignment.SiteId = terminal.SiteId;
+        assignment.CustomerId = terminal.CustomerId;
+        assignment.AssignedAtUtc = completedAt;
+        assignment.Version++;
     }
 }
