@@ -276,7 +276,7 @@ public sealed class NativeTableLayoutTests
         var candidates = NativeTableLayouts.Candidates(93, data);
         Assert.Equal(2, candidates.Count);
         Assert.Equal(191, NativeTableLayouts.Find(93, data, candidates[0].Profile)!.Sections[0].Fields[0].Offset);
-        Assert.Equal(81, NativeTableLayouts.Find(93, data, candidates[1].Profile)!.Sections[0].Fields[0].Offset);
+        Assert.Equal(81, NativeTableLayouts.Find(93, data, candidates[1].Profile)!.Sections[0].Fields.Single(field => field.Key == "discount-0.localInitial").Offset);
     }
 
     [Fact]

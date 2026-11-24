@@ -21,8 +21,12 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         var versions = await ReadVersions(id, number, ct);
         if (versions.Count == 0)
         {
+            var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
             var templates = set.Status == TableSetStatus.Draft
-                ? NativeTableLayouts.DraftTemplates(number).Select(layout => new { layout.Profile, layout.Length }).ToArray() : [];
+                ? NativeTableLayouts.DraftTemplates(number)
+                    .Where(layout => firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expectedLength)
+                        || (layout.Length == expectedLength && layout.Profile == firmware.NativeLayout))
+                    .Select(layout => new { layout.Profile, layout.Length }).ToArray() : [];
             return Ok(new { supported = false, templates, reason = templates.Length == 0
                 ? "Import a complete record to open its editor." : "Start a record from the default inactive configuration." });
         }
@@ -192,6 +196,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     {
         22 or 134 => "Card acceptance",
         23 or 135 => "Carrier screens",
+        93 => "Stored-value parameters",
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
         95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}", 152 => "Holiday and time-of-day discounts",
         _ => $"MT{number}"

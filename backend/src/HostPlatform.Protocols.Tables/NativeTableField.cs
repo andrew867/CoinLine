@@ -8,7 +8,7 @@ public enum TableFieldEncoding
 {
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
     KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes,
-    TerminatedDisplayText, CardStandard, CardServiceCode
+    TerminatedDisplayText, CardStandard, CardServiceCode, CredentialHex, BigEndianWord, BigEndianBits, SignedByte, SmartDiscountMethod
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -23,12 +23,14 @@ public sealed record NativeTableField(
         TableFieldEncoding.Flag => "checkbox",
         TableFieldEncoding.Bitmap => "bitmap",
         TableFieldEncoding.MessagingKey or TableFieldEncoding.CredentialBcd => "password",
+        TableFieldEncoding.CredentialHex => "password-hex",
         TableFieldEncoding.GraphicalKind => "screen-kind",
         TableFieldEncoding.GraphicalText => "screen-text",
         TableFieldEncoding.GraphicalLink => "screen-link",
         TableFieldEncoding.GraphicalFlashRate => "flash-rate",
         TableFieldEncoding.GraphicalIcon => "screen-icon",
         TableFieldEncoding.CardStandard => "card-standard",
+        TableFieldEncoding.SmartDiscountMethod => "discount-method",
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial
             or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes or TableFieldEncoding.CardServiceCode => "text",
         _ when Choices != null => "select",
@@ -37,7 +39,7 @@ public sealed record NativeTableField(
 
     public int Width => Encoding switch
     {
-        TableFieldEncoding.Word or TableFieldEncoding.SignedWord => 2,
+        TableFieldEncoding.Word or TableFieldEncoding.SignedWord or TableFieldEncoding.BigEndianWord or TableFieldEncoding.BigEndianBits => 2,
         TableFieldEncoding.SignedLong => 4,
         _ => Size
     };
@@ -47,12 +49,13 @@ public sealed record NativeTableField(
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.MessagingKey => Size,
         TableFieldEncoding.Bcd or TableFieldEncoding.CredentialBcd => Maximum ?? Size * 2,
         TableFieldEncoding.CardServiceCode => 3,
-        TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes => Size * 2,
+        TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes or TableFieldEncoding.CredentialHex => Size * 2,
         _ => null
     };
 
     public int LowerBound => Minimum ?? (Encoding switch
     {
+        TableFieldEncoding.SignedByte => sbyte.MinValue,
         TableFieldEncoding.SignedWord => short.MinValue,
         TableFieldEncoding.SignedLong => int.MinValue,
         _ => 0
@@ -60,10 +63,11 @@ public sealed record NativeTableField(
 
     public int UpperBound => Maximum ?? (Encoding switch
     {
-        TableFieldEncoding.Word => ushort.MaxValue,
+        TableFieldEncoding.Word or TableFieldEncoding.BigEndianWord => ushort.MaxValue,
+        TableFieldEncoding.SignedByte => sbyte.MaxValue,
         TableFieldEncoding.SignedWord => short.MaxValue,
         TableFieldEncoding.SignedLong => int.MaxValue,
-        TableFieldEncoding.Bits => Mask >> Shift,
+        TableFieldEncoding.Bits or TableFieldEncoding.BigEndianBits or TableFieldEncoding.SmartDiscountMethod => Mask >> Shift,
         _ => byte.MaxValue
     });
 
@@ -75,8 +79,11 @@ public sealed record NativeTableField(
         return Encoding switch
         {
             TableFieldEncoding.Flag => (data[0] & Mask) != 0 ? "true" : "false",
-            TableFieldEncoding.Bits => Format((data[0] & Mask) >> Shift),
+            TableFieldEncoding.Bits or TableFieldEncoding.SmartDiscountMethod => Format((data[0] & Mask) >> Shift),
             TableFieldEncoding.Word => Format(BinaryPrimitives.ReadUInt16LittleEndian(data)),
+            TableFieldEncoding.BigEndianWord => Format(BinaryPrimitives.ReadUInt16BigEndian(data)),
+            TableFieldEncoding.BigEndianBits => Format((BinaryPrimitives.ReadUInt16BigEndian(data) & Mask) >> Shift),
+            TableFieldEncoding.SignedByte => Format(unchecked((sbyte)data[0])),
             TableFieldEncoding.SignedWord => Format(BinaryPrimitives.ReadInt16LittleEndian(data)),
             TableFieldEncoding.SignedLong => Format(BinaryPrimitives.ReadInt32LittleEndian(data)),
             TableFieldEncoding.Text => ReadText(data),
@@ -89,7 +96,7 @@ public sealed record NativeTableField(
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
             TableFieldEncoding.KeypadDial => ReadDigits(data, isDial: true, TextLimit ?? 0, allowKeypad: true),
             TableFieldEncoding.Bitmap => IsBitmapScreen(record) ? Convert.ToBase64String(data) : null,
-            TableFieldEncoding.MessagingKey or TableFieldEncoding.CredentialBcd => null,
+            TableFieldEncoding.MessagingKey or TableFieldEncoding.CredentialBcd or TableFieldEncoding.CredentialHex => null,
             TableFieldEncoding.HexBytes => Convert.ToHexString(data),
             _ => Format(data[0])
         };
@@ -143,6 +150,9 @@ public sealed record NativeTableField(
                 }
                 return;
             case TableFieldEncoding.HexBytes:
+            case TableFieldEncoding.CredentialHex:
+                if (Encoding == TableFieldEncoding.CredentialHex && value.Length == 0)
+                    return;
                 if (value.Length != Size * 2 || !value.All(Uri.IsHexDigit))
                     throw Invalid($"enter exactly {Size * 2} hexadecimal characters");
                 Convert.FromHexString(value).CopyTo(data);
@@ -171,6 +181,16 @@ public sealed record NativeTableField(
             case TableFieldEncoding.Word:
                 BinaryPrimitives.WriteUInt16LittleEndian(data, (ushort)number);
                 break;
+            case TableFieldEncoding.BigEndianWord:
+                BinaryPrimitives.WriteUInt16BigEndian(data, (ushort)number);
+                break;
+            case TableFieldEncoding.BigEndianBits:
+                var current = BinaryPrimitives.ReadUInt16BigEndian(data);
+                BinaryPrimitives.WriteUInt16BigEndian(data, (ushort)((current & ~Mask) | (number << Shift)));
+                break;
+            case TableFieldEncoding.SignedByte:
+                data[0] = unchecked((byte)(sbyte)number);
+                break;
             case TableFieldEncoding.SignedWord:
                 BinaryPrimitives.WriteInt16LittleEndian(data, (short)number);
                 break;
@@ -178,6 +198,7 @@ public sealed record NativeTableField(
                 BinaryPrimitives.WriteInt32LittleEndian(data, number);
                 break;
             case TableFieldEncoding.Bits:
+            case TableFieldEncoding.SmartDiscountMethod:
                 data[0] = (byte)((data[0] & ~Mask) | (number << Shift));
                 break;
             default:
@@ -263,6 +284,7 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
         var sections = Number switch
         {
             22 or 134 => NativeTableLayouts.PrepareCardChanges(edited, changes),
+            93 => NativeTableLayouts.PrepareStoredValueChanges(edited, changes, this),
             >= 131 and <= 133 => NativeTableLayouts.PrepareGraphicalChanges(edited, changes),
             _ => Sections
         };

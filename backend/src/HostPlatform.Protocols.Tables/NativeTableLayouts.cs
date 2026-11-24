@@ -39,12 +39,13 @@ public static partial class NativeTableLayouts
         {
             22 or 134 => layout with { Sections = CardSections(record) },
             62 => ExpandNumberingPlan(layout, record),
+            93 when layout.Profile == Later => layout with { Sections = StoredValueSections(record, later: true) },
             >= 131 and <= 133 => layout with { Sections = GraphicalSections(record) },
             _ => layout
         };
     }
 
-    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord or 95 or >= 131 and <= 135 or 152
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord or 93 or 95 or >= 131 and <= 135 or 152
         ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
         : [];
 
@@ -56,6 +57,8 @@ public static partial class NativeTableLayouts
             InitializeGraphicalRecord(bytes);
         if (template.Number is 22 or 23 or 134 or 135)
             InitializePaymentRecord(bytes);
+        if (template.Number == 93 && template.Profile == Later)
+            InitializeStoredValueRecord(bytes);
         return bytes;
     }
 
@@ -263,17 +266,8 @@ public static partial class NativeTableLayouts
         yield return Layout(92, 1021, CallScreenRules(60));
         yield return Layout(92, 3401, CallScreenRules(200));
         yield return new NativeTableLayout(92, 3061, Later, CallScreenRules(180));
-        yield return Layout(93, 225, Section("rebates", "Smart-card toll rebates",
-            Field("domestic", "Domestic toll rebate (cents)", 191, Word),
-            Field("international", "International toll rebate (cents)", 193, Word)));
-        yield return new NativeTableLayout(93, 225, Later, Rows("discount", 10, i => $"Smart-card discount {i}", (i, key) =>
-        {
-            var offset = 81 + i * 8;
-            return [Field($"{key}.localInitial", "Local initial rate index", offset), Field($"{key}.localLater", "Local additional rate index", offset + 1),
-                Field($"{key}.intraInitial", "Intra-area initial rate index", offset + 2), Field($"{key}.intraLater", "Intra-area additional rate index", offset + 3),
-                Field($"{key}.interInitial", "Inter-area initial rate index", offset + 4), Field($"{key}.interLater", "Inter-area additional rate index", offset + 5),
-                Field($"{key}.internationalInitial", "International initial rate index", offset + 6), Field($"{key}.internationalLater", "International additional rate index", offset + 7)];
-        }));
+        yield return Layout(93, 225, StoredValueSections([], later: false));
+        yield return new NativeTableLayout(93, 225, Later, []);
 
         foreach (var type in new byte[] { 27, 28 })
             yield return Layout(type, 2801, VisualPromptCatalog.Build(expanded: false));

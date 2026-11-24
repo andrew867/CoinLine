@@ -62,6 +62,8 @@ public static partial class NativeTableLayouts
             var key = $"card-{index}";
             var name = $"Card range {index + 1}";
             var offset = 1 + index * stride;
+            var standard = record[offset + CardStandardOffset];
+            var kind = CardKind(standard);
             sections.Add(Section(key, name,
                 [Digits($"{key}.start", "Lowest six-digit prefix", offset, 3, 6),
                  Digits($"{key}.end", "Highest six-digit prefix", offset + 3, 3, 6),
@@ -72,7 +74,8 @@ public static partial class NativeTableLayouts
                  Field($"{key}.reference", "Card reference number", offset + 31),
                  CarrierReference($"{key}.carrier", "Carrier reference", offset + 32),
                  Toggle($"{key}.unformattedRequest", "Send unformatted authorization request", offset + 7, 1),
-                 Toggle($"{key}.positiveValidation", "Accept listed service codes only", offset + 7, 2),
+                 Toggle($"{key}.positiveValidation", kind == CardDataKind.StoredValue
+                     ? "Accept listed manufacturers only" : "Accept listed service codes only", offset + 7, 2),
                  Toggle($"{key}.hostValidation", "Require host validation", offset + 7, 4),
                  Toggle($"{key}.creditPath", "Use credit-card processing", offset + 7, 8),
                  Toggle($"{key}.delayedAuthorization", "Delay card-specific authorization", offset + 7, 16),
@@ -80,7 +83,7 @@ public static partial class NativeTableLayouts
                  Toggle($"{key}.promptTelcoPin", "Prompt for the carrier PIN", offset + 7, 64),
                  Toggle($"{key}.routeAccs", "Route to calling-card service", offset + 7, 128)]));
 
-            switch (CardKind(record[offset + CardStandardOffset]))
+            switch (kind)
             {
                 case CardDataKind.Magnetic:
                     sections.Add(Section($"{key}-service", $"{name} service codes",
@@ -92,7 +95,8 @@ public static partial class NativeTableLayouts
                     break;
                 case CardDataKind.StoredValue when later:
                     sections.Add(Section($"{key}-stored-value", $"{name} stored-value settings",
-                        Field($"{key}.discount", "Stored-value discount index", offset + 30),
+                        Field($"{key}.discount", "Embedded discount index", offset + 30, max: 10,
+                            help: "Use a one-based MT93 discount number, or zero to disable it."),
                         Toggle($"{key}.reloadable", "Reloadable stored-value card", offset + 33, 2),
                         Toggle($"{key}.summaryRequired", "Require a summary card", offset + 33, 4),
                         Toggle($"{key}.showBalance", "Display remaining balance", offset + 33, 8),
@@ -100,6 +104,8 @@ public static partial class NativeTableLayouts
                         Field($"{key}.reloadScreen", "Reload call-screening entry", offset + 34)));
                     break;
             }
+            if (kind == CardDataKind.StoredValue && (later || standard == 10))
+                sections.AddRange(SmartCodeSections(key, name, offset, later));
         }
         return sections.ToArray();
     }
@@ -108,6 +114,8 @@ public static partial class NativeTableLayouts
         Section($"{key}-spill", $"{name} data spill",
             [new NativeTableField($"{key}.spillLanguage", "Language digits", offset + 35, KeypadDial),
              Toggle($"{key}.spillCallRecord", "Flag calling-card call record for credit-card reporting", offset + 33, 1),
+             Field($"{key}.discount", "Embedded discount index", offset + 30, max: 10,
+                 help: "Use a one-based MT93 discount number, or zero to disable it."),
              Bits($"{key}.spillEnd", "Spill terminating key", offset + SpillTerminatorOffset, 15,
                  (0, "None"), (1, "#"), (3, "*")),
              .. Enumerable.Range(0, SpillStepCount).SelectMany(step => new[] {
@@ -129,8 +137,17 @@ public static partial class NativeTableLayouts
             var offset = 1 + index * stride;
             var previous = CardKind(record[offset + CardStandardOffset]);
             CardStandardField(key, offset, later).Write(record, value);
-            if (previous != CardKind(record[offset + CardStandardOffset]))
-                record.Slice(offset + CardDataOffset, CardDataLength).Clear();
+            var standard = record[offset + CardStandardOffset];
+            var kind = CardKind(standard);
+            if (previous == kind)
+                continue;
+            var data = record.Slice(offset + CardDataOffset, CardDataLength);
+            data.Clear();
+            if (kind == CardDataKind.StoredValue && (later || standard == 10))
+            {
+                data[..6].Fill(0x0F);
+                data.Slice(6, 8).Fill(byte.MaxValue);
+            }
         }
         return CardSections(record);
     }
@@ -142,7 +159,27 @@ public static partial class NativeTableLayouts
         for (var index = 0; index < (record.Length - 1) / stride; index++)
         {
             var offset = 1 + index * stride;
-            if (CardKind(record[offset + CardStandardOffset]) != CardDataKind.Magnetic)
+            var standard = record[offset + CardStandardOffset];
+            var kind = CardKind(standard);
+            if (kind == CardDataKind.StoredValue && (later || standard == 10))
+            {
+                for (var issuer = 0; issuer < 6; issuer++)
+                {
+                    var position = offset + CardDataOffset + issuer;
+                    var value = record[position];
+                    if (value != original[position] && value != 0x0F && (value & 15) >= 8)
+                        throw new InvalidOperationException($"Choose a validation key slot 0 through 7 for issuer {issuer + 1} of card range {index + 1}, or select issuer code 0 with a disabled key.");
+                }
+                // The later value reader indexes a low-nibble entry with the packed byte.
+                for (var pair = 0; later && pair < 8; pair++)
+                {
+                    var position = offset + CardDataOffset + 6 + pair;
+                    var value = record[position];
+                    if (value != original[position] && (value & 15) != 15 && (value & 0xF0) != 0)
+                        throw new InvalidOperationException($"For card range {index + 1}, set value code {pair * 2} to index 0 before enabling value code {pair * 2 + 1}.");
+                }
+            }
+            if (kind != CardDataKind.Magnetic)
                 continue;
             var codeCount = later ? 5 : 10;
             var codes = record.Slice(offset + CardDataOffset, codeCount * 2);

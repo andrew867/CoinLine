@@ -6,8 +6,8 @@ import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } fr
 type Field = {
   key: string
   label: string
-  editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password'
-    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard'
+  editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password' | 'password-hex'
+    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard' | 'discount-method'
   value: string | null
   min: number
   max: number
@@ -39,6 +39,8 @@ type Props = {
   onSaved: () => void
   onDirty: (dirty: boolean) => void
 }
+
+const isCredential = (field: Field) => field.editor === 'password' || field.editor === 'password-hex'
 
 export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }: Props) {
   const [layout, setLayout] = useState<Layout | null>(null)
@@ -84,7 +86,12 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
         for (const item of section.fields) delete updated[item.key]
       }
     }
-    if (value === field.value || (field.editor === 'password' && value === '')) delete updated[field.key]
+    if (field.editor === 'discount-method' && value !== (edits[field.key] ?? field.value)) {
+      const prefix = field.key.slice(0, -4)
+      delete updated[`${prefix}Initial`]
+      delete updated[`${prefix}Later`]
+    }
+    if (value === field.value || (isCredential(field) && value === '')) delete updated[field.key]
     else updated[field.key] = value
     setEdits(updated)
     onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0)
@@ -173,17 +180,22 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   const settings = layout.sections.filter((section) => !layout.numberingPlan?.dial || !section.key.startsWith('dial-'))
   const sections = settings.filter((section) => !needle || section.label.toLowerCase().includes(needle)
     || section.fields.some((field) => field.label.toLowerCase().includes(needle) || field.help?.toLowerCase().includes(needle)
-      || (field.editor !== 'bitmap' && field.editor !== 'password'
+      || (field.editor !== 'bitmap' && !isCredential(field)
         && (field.value?.toLowerCase().includes(needle) || edits[field.key]?.toLowerCase().includes(needle)))))
   const current = sections.find((section) => section.key === sectionKey) ?? sections[0]
   const changed = Object.keys(edits).length
   const ruleChanges = Object.keys(ruleEdits).length > 0
   const showingRules = layout.numberingPlan && view === 'rules'
   const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
-  const cardMainSection = current?.key.match(/^card-\d+(?=-(?:service|spill|stored-value)$)/)?.[0]
+  const cardMainSection = current?.key.match(/^card-\d+(?=-(?:service|spill|stored-value|smart-issuers|smart-values)$)/)?.[0]
   const cardStandard = layout.sections.find((section) => section.key === cardMainSection)?.fields
     .find((field) => field.editor === 'card-standard')
   const changingCardFamily = cardStandard && cardDataKind(edits[cardStandard.key] ?? cardStandard.value) !== cardDataKind(cardStandard.value)
+  const changingDiscountMethods = current?.fields.filter((field) => field.editor === 'discount-method' && field.key in edits) ?? []
+  const replacedDiscountFields = new Set(changingDiscountMethods.flatMap((field) => {
+    const prefix = field.key.slice(0, -4)
+    return [`${prefix}Initial`, `${prefix}Later`]
+  }))
   const effectiveValue = (field: Field) => edits[field.key] ?? field.value
 
   return (
@@ -230,6 +242,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
           <legend>{current.label}</legend>
           {changingKind && <p className="native-graphical-status">Save the screen type to load its editor.</p>}
           {changingCardFamily && <p className="native-graphical-status">Save the card standard to load its settings.</p>}
+          {changingDiscountMethods.length > 0 && <p className="native-graphical-status">Save the discount methods to edit their new values.</p>}
           {!changingKind && current.showPanelPreview && (
             <GraphicalPanelPreview text={current.fields.slice(0, 4).map(effectiveValue)} keys={current.fields.slice(4, 10).map(effectiveValue)} />
           )}
@@ -248,7 +261,8 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
               </div>
             </figure>
           )}
-          {!changingCardFamily && current.fields.filter((field) => !changingKind || field.editor === 'screen-kind').map((field) => (
+          {!changingCardFamily && current.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
+            && !replacedDiscountFields.has(field.key)).map((field) => (
             <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}
@@ -298,7 +312,8 @@ function FieldInput({ field, value, dirty, onChange }: {
   }
 
   const numeric = field.editor === 'number'
-  const password = field.editor === 'password'
+  const password = isCredential(field)
+  const hex = field.editor === 'password-hex'
   return (
     <label className="native-table-field" data-dirty={dirty}>
       <span>{field.label}</span>
@@ -310,8 +325,8 @@ function FieldInput({ field, value, dirty, onChange }: {
       ) : (
         <input type={password ? 'password' : numeric ? 'number' : 'text'} value={value} min={numeric && dirty ? field.min : undefined}
           max={numeric && dirty ? field.max : undefined} step={numeric ? 1 : undefined}
-          autoComplete={password ? 'new-password' : undefined} inputMode={password ? 'numeric' : undefined}
-          pattern={password && field.maxLength ? `[0-9]{${field.maxLength}}` : undefined}
+          autoComplete={password ? 'new-password' : undefined} inputMode={password && !hex ? 'numeric' : undefined}
+          pattern={password && field.maxLength ? `[${hex ? '0-9A-Fa-f' : '0-9'}]{${field.maxLength}}` : undefined}
           maxLength={field.maxLength ?? undefined} required={numeric && dirty}
           onChange={(event) => onChange(event.target.value)} />
       )}

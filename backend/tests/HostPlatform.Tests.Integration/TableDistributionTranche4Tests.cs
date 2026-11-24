@@ -12,6 +12,46 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     [Fact]
+    public async Task Stored_value_editor_masks_validation_keys_and_loads_the_selected_discount_method()
+    {
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Stored-value parameter editor test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}/records/93/fields";
+        var missing = await _client.GetFromJsonAsync<JsonElement>(path);
+        var template = missing.GetProperty("templates").EnumerateArray().Single(item => item.GetProperty("profile").GetString() != NativeTableLayouts.MultiPay);
+        using var initialized = await _client.PostAsJsonAsync(path, template);
+        Assert.Equal(HttpStatusCode.NoContent, initialized.StatusCode);
+        var ambiguous = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.False(ambiguous.GetProperty("supported").GetBoolean());
+        var profileName = template.GetProperty("profile").GetString()!;
+        var withProfile = $"{path}?profile={Uri.EscapeDataString(profileName)}";
+        var original = await _client.GetFromJsonAsync<JsonElement>(withProfile);
+        var syntheticSlotBytes = Convert.ToHexString(Enumerable.Range(0, 8).Select(number => (byte)(number + 80)).ToArray());
+        using var saved = await _client.PutAsJsonAsync(path, new
+        {
+            profile = profileName, revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
+            changes = new Dictionary<string, string>
+            {
+                ["validation-key-0"] = syntheticSlotBytes, ["discount-0.localMode"] = "0", ["discount-0.localInitial"] = "-5"
+            }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        using var after = await _client.GetAsync(withProfile);
+        after.EnsureSuccessStatusCode();
+        var serialized = await after.Content.ReadAsStringAsync();
+        Assert.DoesNotContain(syntheticSlotBytes, serialized, StringComparison.OrdinalIgnoreCase);
+        using var document = JsonDocument.Parse(serialized);
+        var result = document.RootElement;
+        var fields = result.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal(JsonValueKind.Null, fields["validation-key-0"].GetProperty("value").ValueKind);
+        Assert.Equal("password-hex", fields["validation-key-0"].GetProperty("editor").GetString());
+        Assert.Equal("-5", fields["discount-0.localInitial"].GetProperty("value").GetString());
+        Assert.Equal("3", fields["discount-0.internationalMode"].GetProperty("value").GetString());
+    }
+
+    [Fact]
     public async Task Card_template_saves_family_specific_fields_and_refreshes_the_editor()
     {
         using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Card family editor test" });
