@@ -19,7 +19,7 @@ public sealed class MinimumRoleAuthorizationHandler(IWebHostEnvironment env)
         }
 
         var role = OperatorContext.Current?.Role ?? OperatorRole.Viewer;
-        if (role >= requirement.MinimumRole)
+        if (context.User.Identity?.IsAuthenticated == true && role >= requirement.MinimumRole)
             context.Succeed(requirement);
 
         return Task.CompletedTask;
