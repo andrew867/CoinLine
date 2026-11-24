@@ -45,6 +45,10 @@ Under **Settings**, select **Number display and currency** to change the symbol,
 
 In **Call screening**, number patterns accept `*` and `#`. Choose **Unlimited** to match any number of additional digits after the pattern. On the verified 200-entry Multi-pay profile, a standard free rule needs rate index `255`. A standard paid rule that uses a tariff directly needs an MT73 index from `0` through `127`. The firmware review highlights the relevant screening row before publishing. When the set refers to a tariff but omits MT73, review the warning and confirm the phone already has the expected tariffs for a partial update.
 
+Under **Rates and local dialing**, use **Rate table** to edit the phone's MT73 charge and duration steps. A new template starts with all 128 rates marked unavailable. Choose the profile for the installed firmware. The later profile exposes international toll and local data-port rate classes. Choose the rate classification, enter the charges in cents, and use **Unlimited initial period** or **Unlimited additional period** when that charge applies for the rest of the call. The terminal can also obtain a charge from CoinLine when the route and rate classification call for host rating.
+
+For compatible firmware, **NPA set-based rating** sets a fallback by area code. **International set-based rating** sets rates by destination prefix and the action when no prefix matches. The rate pickers show the corresponding MT73 row numbers. Enable the matching set-based rating switches in the later MT26 feature record. Deliver the matching records together, or confirm the phone already has the referenced tariffs.
+
 In **Phones**, open a phone and expand **Phone groups** to choose its memberships. A phone can belong to up to 40 groups. Its primary group appears in the phone list. Every saved membership is included in that group's assignment preview.
 
 The console also exposes **Terminal status**, where decoded alarms, maintenance reports and status flags can be filtered by phone or report type.

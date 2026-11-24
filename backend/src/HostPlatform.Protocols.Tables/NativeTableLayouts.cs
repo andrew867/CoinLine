@@ -33,7 +33,7 @@ public static partial class NativeTableLayouts
     {
         var candidates = Candidates(number, record);
         // Existing sets without a registered target already use the older editing profile for these records.
-        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 ? MultiPay : null);
+        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 73 ? MultiPay : null);
         var layout = selection == null ? candidates.Count == 1 ? candidates[0] : null
             : candidates.SingleOrDefault(layout => layout.Profile == selection);
         if (layout == null)
@@ -53,7 +53,7 @@ public static partial class NativeTableLayouts
         if (number == AnswerSupervisionRecord)
             return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
         return number is 22 or 23 or CallInRecord or 55 or 58 or MessagingRecord
-            or SpareTableWire.MessageType or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or 152
+            or SpareTableWire.MessageType or 73 or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or >= 150 and <= 152
             ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
             : [];
     }
@@ -82,6 +82,8 @@ public static partial class NativeTableLayouts
             bytes[3] = 50;
             bytes[5] = 200;
         }
+        if (template.Number == 73)
+            InitializeTerminalTariffs(bytes);
         return bytes;
     }
 
@@ -265,20 +267,8 @@ public static partial class NativeTableLayouts
         yield return Layout(23, 678, CarrierRules(21, 32, 4, 20));
         yield return new NativeTableLayout(134, 1153, Later, []);
         yield return new NativeTableLayout(135, 1109, Later, CarrierRules(33, 33, 10, 32));
-        yield return Layout(73, 1192, [Section("effective", "Tariff effective date",
-            [.. DateTimeFields("effective", 1), Field("telco", "Rate owner code", 7)]),
-            .. Rows("rate", 128, i => $"Rate {i}", (i, key) =>
-            {
-                var offset = 40 + i * 9;
-                return [Select($"{key}.classification", "Rate classification", offset,
-                        (0, "Host-rated intra-area toll"), (1, "Local measured service"), (2, "Fixed local charge"),
-                        (3, "Rate unavailable"), (4, "Invalid number"), (5, "Intra-area toll"), (6, "Inter-area toll"),
-                        (7, "Host-rated inter-area toll"), (8, "Host-rated local")),
-                    Field($"{key}.initialPeriod", "Initial period (seconds)", offset + 1, Word),
-                    Field($"{key}.initialCharge", "Initial charge (cents)", offset + 3, Word),
-                    Field($"{key}.additionalPeriod", "Additional period (seconds)", offset + 5, Word),
-                    Field($"{key}.additionalCharge", "Additional charge (cents)", offset + 7, Word)];
-            })]);
+        yield return Layout(73, 1192, TerminalTariffs(later: false));
+        yield return new NativeTableLayout(73, 1192, Later, TerminalTariffs(later: true));
 
         yield return Layout(59, 1021, CallScreenRules(60));
         yield return Layout(92, 1021, CallScreenRules(60));
@@ -343,12 +333,9 @@ public static partial class NativeTableLayouts
                     Digits($"{key}.start", "First card serial", offset + 2, 3, 6), Digits($"{key}.end", "Last card serial", offset + 5, 3, 6)];
             })]);
 
-        yield return new NativeTableLayout(150, 401, Later, PairedRates(1, "Area code"));
+        yield return new NativeTableLayout(150, 401, Later, PairedRates(1, "Area code", AreaRatingOffset));
 
-        yield return new NativeTableLayout(151, 604, Later, [Section("default", "International fallback",
-            Field("fallback", "Default rate index", 2)), .. Rows("country", 200, i => $"Destination {i + 1}", (i, key) =>
-            [Field($"{key}.country", "Country calling code", 4 + i * 3, Word, max: 999),
-             Field($"{key}.rate", "Rate index", 6 + i * 3, max: 63)])]);
+        yield return new NativeTableLayout(151, 604, Later, InternationalRating());
 
         yield return new NativeTableLayout(152, 95, Later, [.. Rows("holiday", 10, i => $"Holiday {i + 1}", (i, key) =>
             [Field($"{key}.month", "Month", 1 + i * 2, max: 12), Field($"{key}.day", "Day of month", 2 + i * 2, max: 31)]),
@@ -499,10 +486,12 @@ public static partial class NativeTableLayouts
 
     private static NativeTableSection AreaCode() => Section("region", "Local dialing region", Digits("areaCode", "Area code", 1, 2, 3));
 
-    private static NativeTableSection[] PairedRates(int offset, string label) => Rows("pair", 400,
+    private static NativeTableSection[] PairedRates(int offset, string label, int? tariffOffset = null) => Rows("pair", 400,
         i => $"{label} {200 + i * 2} and {201 + i * 2}", (i, key) =>
-            [Bits($"{key}.even", $"Rate index for {200 + i * 2}", offset + i, 240),
-             Bits($"{key}.odd", $"Rate index for {201 + i * 2}", offset + i, 15)]);
+            [new NativeTableField($"{key}.even", $"Rate index for {200 + i * 2}", offset + i, TableFieldEncoding.Bits,
+                Mask: 240, TariffIndexOffset: tariffOffset),
+             new NativeTableField($"{key}.odd", $"Rate index for {201 + i * 2}", offset + i, TableFieldEncoding.Bits,
+                Mask: 15, TariffIndexOffset: tariffOffset)]);
 
     private static NativeTableSection[] ReportTimes(int offset) => Rows("timestamp", 4, i => $"Report timestamp {i + 1}", (i, key) =>
         [Hour($"{key}.hour", "Hour", offset + i * 2), Minute($"{key}.minute", "Minute", offset + i * 2 + 1)]);

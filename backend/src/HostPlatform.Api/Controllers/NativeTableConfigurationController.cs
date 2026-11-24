@@ -75,6 +75,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                     max = field.UpperBound,
                     maxLength = field.TextLimit,
                     field.Choices,
+                    field.TariffIndexOffset,
                     field.Help,
                     value = field.Read(raw)
                 })
@@ -202,10 +203,12 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         NativeTableLayouts.CallInRecord => "Time and call-in settings",
         NativeTableLayouts.AnswerSupervisionRecord => "Answer supervision",
         SpareTableWire.MessageType => "Spare table",
+        73 => "Terminal rate table",
         93 => "Stored-value parameters",
         CodeDownloadWire.MessageType => "Code download schedule",
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
-        95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}", 152 => "Holiday and time-of-day discounts",
+        95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}",
+        150 => "NPA set-based rating", 151 => "International set-based rating", 152 => "Holiday and time-of-day discounts",
         _ => $"MT{number}"
     };
 }

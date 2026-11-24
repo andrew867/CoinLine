@@ -86,6 +86,65 @@ public sealed class NativeTableLayoutTests
     }
 
     [Fact]
+    public void Terminal_tariff_periods_round_trip_signed_seconds_and_the_unlimited_value()
+    {
+        var template = Assert.Single(NativeTableLayouts.DraftTemplates(73), item => item.Profile == NativeTableLayouts.MultiPay);
+        var record = NativeTableLayouts.CreateDraftTemplate(template);
+        Assert.Equal(1192, record.Length);
+        Assert.All(Enumerable.Range(0, 128), row => Assert.Equal(3, record[40 + row * 9]));
+        record[39] = 0xA5;
+        var layout = NativeTableLayouts.Find(73, record)!;
+        var initial = layout.Sections.Single(section => section.Key == "rate-127").Fields
+            .Single(field => field.Key.EndsWith("initialPeriod", StringComparison.Ordinal));
+        var updated = layout.Apply(record, new Dictionary<string, string>
+        {
+            ["rate-127.classification"] = "2", [initial.Key] = "-1", ["rate-127.initialCharge"] = "25",
+            ["rate-127.additionalPeriod"] = "60", ["rate-127.additionalCharge"] = "5"
+        });
+        Assert.Equal(record[..1183], updated[..1183]);
+        Assert.Equal(new byte[] { 2, 255, 255, 25, 0, 60, 0, 5, 0 }, updated[1183..]);
+        Assert.Equal("rate-period", initial.Editor);
+        Assert.Equal("-1", initial.Read(updated));
+        Assert.Equal(updated, layout.Apply(updated, new Dictionary<string, string> { [initial.Key] = "65535" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(updated, new Dictionary<string, string> { [initial.Key] = "32768" }));
+        var later = Assert.Single(NativeTableLayouts.Candidates(73, record), item => item.Profile != NativeTableLayouts.MultiPay);
+        var internationalRate = new Dictionary<string, string> { ["rate-127.classification"] = "9" };
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(updated, internationalRate));
+        Assert.Equal(9, later.Apply(updated, internationalRate)[1183]);
+    }
+
+    [Fact]
+    public void Set_based_rating_keeps_wire_codes_and_unrelated_bits()
+    {
+        var npa = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(150)));
+        var npaLayout = NativeTableLayouts.Find(150, npa)!;
+        Assert.Equal(14, npaLayout.Sections[0].Fields[0].TariffIndexOffset);
+        var npaUpdated = npaLayout.Apply(npa, new Dictionary<string, string>
+        {
+            ["pair-0.even"] = "2", ["pair-0.odd"] = "1", ["pair-399.odd"] = "15"
+        });
+        Assert.Equal(0x21, npaUpdated[1]);
+        Assert.Equal(0x0F, npaUpdated[^1]);
+        Assert.All(npaUpdated[2..^1], value => Assert.Equal(0, value));
+
+        var international = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(151)));
+        international[1] = 0xA0;
+        international[3] = 0xB7;
+        var intlLayout = NativeTableLayouts.Find(151, international)!;
+        var fallback = intlLayout.Sections[0].Fields.Single(field => field.Key == "fallback");
+        Assert.Equal(28, fallback.TariffIndexOffset);
+        var intlUpdated = intlLayout.Apply(international, new Dictionary<string, string>
+        {
+            ["noMatch"] = "1", ["fallback"] = "63", ["country-199.country"] = "12345", ["country-199.rate"] = "99"
+        });
+        Assert.Equal(new byte[] { 151, 0xA1, 63, 0xB7 }, intlUpdated[..4]);
+        Assert.Equal(new byte[] { 0x39, 0x30, 99 }, intlUpdated[^3..]);
+        Assert.All(intlUpdated[4..^3], value => Assert.Equal(0, value));
+        Assert.Throws<InvalidOperationException>(() => intlLayout.Apply(intlUpdated,
+            new Dictionary<string, string> { ["country-199.rate"] = "100" }));
+    }
+
+    [Fact]
     public void Older_card_service_codes_use_bcd_and_preserve_other_entries()
     {
         var record = new byte[661];

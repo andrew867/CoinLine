@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NativeBitmapField } from './NativeBitmapField'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
@@ -8,12 +8,13 @@ type Field = {
   key: string
   label: string
   editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password' | 'password-hex' | 'password-pin'
-    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard' | 'discount-method' | 'datetime' | 'time'
+    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard' | 'discount-method' | 'datetime' | 'time' | 'rate-period'
   value: string | null
   min: number
   max: number
   maxLength: number | null
   choices: { value: number; label: string }[] | null
+  tariffIndexOffset?: number | null
   help: string | null
 }
 
@@ -144,6 +145,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(template),
       })
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not create this record.')
+      setProfile(template.profile)
       setReload((count) => count + 1)
       onSaved()
     } catch (error) {
@@ -337,6 +339,7 @@ function FieldInput({ field, value, dirty, onChange }: {
       <input type="checkbox" checked={value === 'true'} onChange={(event) => onChange(String(event.target.checked))} />{field.label}
     </label>
   }
+  if (field.editor === 'rate-period') return <RatePeriodInput field={field} value={value} dirty={dirty} onChange={onChange} />
 
   const numeric = field.editor === 'number'
   const calendar = field.editor === 'datetime'
@@ -346,13 +349,20 @@ function FieldInput({ field, value, dirty, onChange }: {
   const pin = field.editor === 'password-pin'
   const clearingPin = pin && value === 'clear'
   const passwordLength = pin ? `1,${field.maxLength}` : field.maxLength
+  const tariffOffset = field.tariffIndexOffset
+  const choices = field.choices ?? (tariffOffset == null ? null : [
+    { value: 0, label: 'Ask CoinLine' }, { value: 1, label: 'Reject the call' },
+    ...Array.from({ length: field.max - 1 }, (_, index) => ({
+      value: index + 2, label: `MT73 rate ${index + 2 + tariffOffset}`,
+    })),
+  ])
   const input = (
     <label className="native-table-field" data-dirty={dirty}>
       <span>{field.label}</span>
-      {field.choices ? (
+      {choices ? (
         <select value={value} onChange={(event) => onChange(event.target.value)}>
-          {!field.choices.some((option) => String(option.value) === value) && <option value={value}>Stored value {value}</option>}
-          {field.choices.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          {!choices.some((option) => String(option.value) === value) && <option value={value}>Stored value {value}</option>}
+          {choices.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       ) : (
         <input type={password ? 'password' : numeric ? 'number' : calendar ? 'datetime-local' : time ? 'time' : 'text'}
@@ -377,5 +387,26 @@ function FieldInput({ field, value, dirty, onChange }: {
     {input}
     <button type="button" onClick={() => onChange(clearingPin ? '' : 'clear')}>{clearingPin ? 'Keep stored PIN' : 'Clear PIN'}</button>
     {clearingPin && <small role="status">Saving will clear the PIN.</small>}
+  </div>
+}
+
+function RatePeriodInput({ field, value, dirty, onChange }: {
+  field: Field; value: string; dirty: boolean; onChange: (value: string) => void
+}) {
+  const lastFinite = useRef<string | null>(null)
+  const unlimited = value === '-1'
+  return <div data-dirty={dirty}>
+    <label className="native-table-field">
+      <span>{field.label}</span>
+      <input type="number" value={unlimited ? '' : value} min={dirty ? 0 : undefined} max={dirty ? field.max : undefined} step={1}
+        disabled={unlimited} required={dirty && !unlimited} onChange={(event) => onChange(event.target.value)} />
+    </label>
+    <label className="native-table-toggle">
+      <input type="checkbox" checked={unlimited} onChange={(event) => {
+        if (event.target.checked) lastFinite.current = value
+        onChange(event.target.checked ? '-1' : lastFinite.current ?? (field.value === '-1' ? '0' : field.value ?? '0'))
+      }} />
+      Unlimited {field.label.toLowerCase().replace(' (seconds)', '')}
+    </label>
   </div>
 }
