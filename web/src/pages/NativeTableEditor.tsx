@@ -7,7 +7,7 @@ type Field = {
   key: string
   label: string
   editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password'
-    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon'
+    | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard'
   value: string | null
   min: number
   max: number
@@ -75,6 +75,14 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
       if ((field.value !== '0' || others.some((item) => item.key in updated)) &&
           !window.confirm('Changing the screen type replaces its content and clears pending edits for this screen. Continue?')) return
       for (const item of others) delete updated[item.key]
+    }
+    if (field.editor === 'card-standard' && layout?.supported && cardDataKind(value) !== cardDataKind(edits[field.key] ?? field.value)) {
+      if (cardDataKind(value) !== cardDataKind(field.value)
+          && !window.confirm('Changing card families clears the stored service-code or stored-value data for this range. Continue?')) return
+      const prefix = field.key.replace(/\.format$/, '-')
+      for (const section of layout.sections.filter((section) => section.key.startsWith(prefix))) {
+        for (const item of section.fields) delete updated[item.key]
+      }
     }
     if (value === field.value || (field.editor === 'password' && value === '')) delete updated[field.key]
     else updated[field.key] = value
@@ -172,6 +180,10 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   const ruleChanges = Object.keys(ruleEdits).length > 0
   const showingRules = layout.numberingPlan && view === 'rules'
   const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
+  const cardMainSection = current?.key.match(/^card-\d+(?=-(?:service|spill|stored-value)$)/)?.[0]
+  const cardStandard = layout.sections.find((section) => section.key === cardMainSection)?.fields
+    .find((field) => field.editor === 'card-standard')
+  const changingCardFamily = cardStandard && cardDataKind(edits[cardStandard.key] ?? cardStandard.value) !== cardDataKind(cardStandard.value)
   const effectiveValue = (field: Field) => edits[field.key] ?? field.value
 
   return (
@@ -217,6 +229,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
         <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
           <legend>{current.label}</legend>
           {changingKind && <p className="native-graphical-status">Save the screen type to load its editor.</p>}
+          {changingCardFamily && <p className="native-graphical-status">Save the card standard to load its settings.</p>}
           {!changingKind && current.showPanelPreview && (
             <GraphicalPanelPreview text={current.fields.slice(0, 4).map(effectiveValue)} keys={current.fields.slice(4, 10).map(effectiveValue)} />
           )}
@@ -235,7 +248,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
               </div>
             </figure>
           )}
-          {current.fields.filter((field) => !changingKind || field.editor === 'screen-kind').map((field) => (
+          {!changingCardFamily && current.fields.filter((field) => !changingKind || field.editor === 'screen-kind').map((field) => (
             <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}
@@ -251,6 +264,11 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
       {message && <p className="native-table-feedback" role="status">{message}</p>}
     </form>
   )
+}
+
+function cardDataKind(standard: string | null) {
+  const code = standard === null ? 255 : Number(standard)
+  return code >= 1 && code <= 9 ? 'magnetic' : code >= 10 && code <= 16 ? 'stored-value' : 'unknown'
 }
 
 function FieldInput({ field, value, dirty, onChange }: {

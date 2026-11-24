@@ -17,7 +17,6 @@ public static class NativeTableSetReview
         var type = features?[1] switch { 1 => "Card only", 2 => "Multi-pay", 3 => "Coin only", _ => null };
         bool? advertising = features == null ? null : (features[22] & 1) != 0;
         var coins = Get(records, 50, 105);
-        var cards = Get(records, 22, 661);
         var screenings = Get(records, 92, 3401);
         int? coinSlots = null;
         int? cardRanges = null;
@@ -38,18 +37,36 @@ public static class NativeTableSetReview
                 findings.Add(new(50, "The selected operating type accepts coins and this record enables no payable coin slots."));
         }
 
-        if (cards != null)
+        foreach (var later in new[] { false, true })
         {
-            cardRanges = 0;
-            for (var i = 0; i < 20; i++)
+            var cardNumber = later ? 134 : 22;
+            var cards = Get(records, cardNumber, later ? 1153 : 661);
+            var carriers = Get(records, later ? 135 : 23, later ? 1109 : 678);
+            var cardStride = later ? 36 : 33;
+            if (cards != null)
             {
-                var row = cards.AsSpan(1 + 33 * i, 33);
-                if (row[6] is < 1 or > 7)
-                    continue;
-                cardRanges++;
-                if (row[..3].SequenceCompareTo(row.Slice(3, 3)) > 0)
-                    findings.Add(new(22, $"Card range {i + 1} starts after its ending prefix."));
+                cardRanges ??= 0;
+                for (var index = 0; index < (cards.Length - 1) / cardStride; index++)
+                {
+                    var row = cards.AsSpan(1 + cardStride * index, cardStride);
+                    if (row[6] is < 1 or > 9)
+                        continue;
+                    cardRanges++;
+                    if (row[..3].SequenceCompareTo(row.Slice(3, 3)) > 0)
+                        findings.Add(new(cardNumber, $"Card range {index + 1} starts after its ending prefix."));
+                    if (carriers == null || row[32] == byte.MaxValue)
+                        continue;
+
+                    var offset = FindCarrier(carriers, row[32], later);
+                    if (offset < 0)
+                        findings.Add(new(cardNumber, $"Card range {index + 1} selects carrier reference {row[32]}, which is missing from the carrier record."));
+                    else if ((carriers[offset + 3 + index / 8] & (1 << (index % 8))) == 0)
+                        findings.Add(new(cardNumber, $"Card range {index + 1} selects carrier reference {row[32]}. Enable this range in that carrier’s acceptance list."));
+                }
             }
+
+            if (carriers != null && features?[1] is 2 or 3)
+                ReviewCoinCarriers(carriers, later, findings);
         }
 
         if (screenings != null)
@@ -67,4 +84,37 @@ public static class NativeTableSetReview
 
     private static byte[]? Get(IReadOnlyDictionary<int, byte[]> records, int number, int length) =>
         records.TryGetValue(number, out var record) && record.Length == length && record[0] == number ? record : null;
+
+    private static int FindCarrier(ReadOnlySpan<byte> carriers, byte reference, bool later)
+    {
+        var header = later ? 10 : 4;
+        var stride = later ? 33 : 32;
+        var count = later ? 33 : 21;
+        for (var index = 0; index < count; index++)
+        {
+            var offset = header + index * stride;
+            if (carriers[offset] == reference)
+                return offset;
+        }
+        return -1;
+    }
+
+    private static void ReviewCoinCarriers(ReadOnlySpan<byte> carriers, bool later, List<TableReviewFinding> findings)
+    {
+        const int acceptsCoin = 4;
+        (int Offset, string Name)[] defaults = later
+            ? [(2, "Default"), (5, "Intra-area"), (8, "Local")]
+            : [(2, "Default")];
+        foreach (var (position, name) in defaults)
+        {
+            var reference = carriers[position];
+            if (reference == byte.MaxValue)
+                continue;
+            var offset = FindCarrier(carriers, reference, later);
+            if (offset < 0)
+                findings.Add(new(carriers[0], $"{name} coin carrier reference {reference} is missing from the carrier record."));
+            else if ((carriers[offset + (later ? 28 : 27)] & acceptsCoin) == 0)
+                findings.Add(new(carriers[0], $"{name} coin carrier reference {reference} has coin and stored-value acceptance turned off."));
+        }
+    }
 }

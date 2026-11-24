@@ -12,6 +12,46 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     [Fact]
+    public async Task Card_template_saves_family_specific_fields_and_refreshes_the_editor()
+    {
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Card family editor test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}/records/134/fields";
+        var before = await Read();
+        using var initialized = await _client.PostAsJsonAsync(path, before.GetProperty("templates")[0]);
+        Assert.Equal(HttpStatusCode.NoContent, initialized.StatusCode);
+        var initial = await Read();
+        Assert.Equal(1153, initial.GetProperty("length").GetInt32());
+        Assert.DoesNotContain(initial.GetProperty("sections").EnumerateArray(), section => section.GetProperty("key").GetString() == "card-0-service");
+
+        await Save(initial, new() { ["card-0.format"] = "1", ["card-0.serviceCode-0"] = "123", ["card-0.spillStep-0.type"] = "2" });
+        var magnetic = await Read();
+        var firstCode = magnetic.GetProperty("sections").EnumerateArray()
+            .Single(section => section.GetProperty("key").GetString() == "card-0-service").GetProperty("fields")[0];
+        Assert.Equal("123", firstCode.GetProperty("value").GetString());
+
+        await Save(magnetic, new() { ["card-0.format"] = "10", ["card-0.discount"] = "2" });
+        var storedValue = await Read();
+        Assert.Equal(3, storedValue.GetProperty("revision").GetInt32());
+        var sections = storedValue.GetProperty("sections").EnumerateArray().ToDictionary(section => section.GetProperty("key").GetString()!);
+        Assert.False(sections.ContainsKey("card-0-service"));
+        Assert.False(sections.ContainsKey("card-0-spill"));
+        Assert.Equal("2", sections["card-0-stored-value"].GetProperty("fields")[0].GetProperty("value").GetString());
+
+        async Task<JsonElement> Read() => await _client.GetFromJsonAsync<JsonElement>(path);
+
+        async Task Save(JsonElement fields, Dictionary<string, string> changes)
+        {
+            using var saved = await _client.PutAsJsonAsync(path, new
+            {
+                profile = fields.GetProperty("profile"), revision = fields.GetProperty("revision"), sha256 = fields.GetProperty("sha256"), changes
+            });
+            Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        }
+    }
+
+    [Fact]
     public async Task Numbering_plan_editor_saves_both_rule_sets_and_currency_in_one_revision()
     {
         using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Numbering editor test", tableNumber = 62 });

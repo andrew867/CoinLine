@@ -8,7 +8,7 @@ public enum TableFieldEncoding
 {
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
     KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes,
-    TerminatedDisplayText
+    TerminatedDisplayText, CardStandard, CardServiceCode
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -28,8 +28,9 @@ public sealed record NativeTableField(
         TableFieldEncoding.GraphicalLink => "screen-link",
         TableFieldEncoding.GraphicalFlashRate => "flash-rate",
         TableFieldEncoding.GraphicalIcon => "screen-icon",
+        TableFieldEncoding.CardStandard => "card-standard",
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial
-            or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes => "text",
+            or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes or TableFieldEncoding.CardServiceCode => "text",
         _ when Choices != null => "select",
         _ => "number"
     };
@@ -45,6 +46,7 @@ public sealed record NativeTableField(
     {
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.MessagingKey => Size,
         TableFieldEncoding.Bcd or TableFieldEncoding.CredentialBcd => Maximum ?? Size * 2,
+        TableFieldEncoding.CardServiceCode => 3,
         TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes => Size * 2,
         _ => null
     };
@@ -82,6 +84,8 @@ public sealed record NativeTableField(
             TableFieldEncoding.TerminatedDisplayText => ReadTerminatedDisplayText(data),
             TableFieldEncoding.GraphicalText => GraphicalScreenText.Read(data),
             TableFieldEncoding.Bcd => ReadDigits(data, isDial: false, TextLimit ?? 0),
+            TableFieldEncoding.CardServiceCode => data.IndexOfAnyExcept((byte)0) < 0 ? "" : (data[^1] & 15) == 14
+                ? ReadDigits(data, isDial: false, 3) : null,
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
             TableFieldEncoding.KeypadDial => ReadDigits(data, isDial: true, TextLimit ?? 0, allowKeypad: true),
             TableFieldEncoding.Bitmap => IsBitmapScreen(record) ? Convert.ToBase64String(data) : null,
@@ -128,6 +132,15 @@ public sealed record NativeTableField(
                 WriteDigits(data, value, isDial: false, allowKeypad: false);
                 if ((value.Length & 1) != 0)
                     data[^1] = (byte)((data[^1] & 0xF0) | 0x0E);
+                return;
+            case TableFieldEncoding.CardServiceCode:
+                if (value.Length == 0)
+                    data.Clear();
+                else
+                {
+                    WriteDigits(data, value, isDial: false, allowKeypad: false);
+                    data[^1] = (byte)((data[^1] & 0xF0) | 0x0E);
+                }
                 return;
             case TableFieldEncoding.HexBytes:
                 if (value.Length != Size * 2 || !value.All(Uri.IsHexDigit))
@@ -247,7 +260,12 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
         if (original.Length != Length || original[0] != Number)
             throw new InvalidOperationException("The record does not match this editor's wire profile.");
         var edited = original.ToArray();
-        var sections = NativeTableLayouts.IsGraphicalRecord(Number) ? NativeTableLayouts.PrepareGraphicalChanges(edited, changes) : Sections;
+        var sections = Number switch
+        {
+            22 or 134 => NativeTableLayouts.PrepareCardChanges(edited, changes),
+            >= 131 and <= 133 => NativeTableLayouts.PrepareGraphicalChanges(edited, changes),
+            _ => Sections
+        };
         var fields = sections.SelectMany(s => s.Fields).ToDictionary(f => f.Key, StringComparer.Ordinal);
         foreach (var (key, value) in changes)
         {
@@ -257,6 +275,10 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
         }
         if (Number == NativeTableLayouts.MessagingRecord)
             NativeTableLayouts.ValidateMessagingChanges(original, edited);
+        if (Number is 22 or 134)
+            NativeTableLayouts.ValidateCardChanges(original, edited);
+        if (Number is 23 or 135)
+            NativeTableLayouts.ValidateCarrierChanges(original, edited);
         return edited;
     }
 }

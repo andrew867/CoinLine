@@ -29,6 +29,136 @@ public sealed class NativeTableLayoutTests
     }
 
     [Fact]
+    public void Older_card_service_codes_use_bcd_and_preserve_other_entries()
+    {
+        var record = new byte[661];
+        record[0] = 22;
+        record[7] = 1;
+        record[8] = 0x80;
+        record[^1] = 0x5A;
+        var layout = NativeTableLayouts.Find(22, record)!;
+        var updated = layout.Apply(record, new Dictionary<string, string>
+        {
+            ["card-0.serviceCode-0"] = "123", ["card-0.serviceCode-1"] = "007", ["card-0.positiveValidation"] = "true"
+        });
+        var expected = record.ToArray();
+        expected[8] = 0x82;
+        new byte[] { 0x12, 0x3E, 0, 0x7E }.CopyTo(expected, 12);
+        Assert.Equal(expected, updated);
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(updated,
+            new Dictionary<string, string> { ["card-0.serviceCode-0"] = "" }));
+        Assert.Equal(record[12..16], layout.Apply(updated, new Dictionary<string, string>
+        {
+            ["card-0.serviceCode-0"] = "", ["card-0.serviceCode-1"] = ""
+        })[12..16]);
+    }
+
+    [Fact]
+    public void Changing_a_later_card_family_replaces_only_the_overlapping_data()
+    {
+        var record = new byte[1153];
+        record[0] = 134;
+        record[7] = 10;
+        record.AsSpan(12, 20).Fill(0x5A);
+        record[32] = 2;
+        record[34] = 0x80;
+        record[^1] = 0x7B;
+        var layout = NativeTableLayouts.Find(134, record)!;
+        Assert.Contains(layout.Sections, section => section.Key == "card-0-stored-value");
+        Assert.DoesNotContain(layout.Sections, section => section.Key == "card-0-service");
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(record,
+            new Dictionary<string, string> { ["card-0.serviceCode-0"] = "123" }));
+
+        var updated = layout.Apply(record, new Dictionary<string, string>
+        {
+            ["card-0.format"] = "1", ["card-0.serviceCode-0"] = "123", ["card-0.spillStep-0.type"] = "2",
+            ["card-0.spillStep-0.timeout"] = "3", ["card-0.spillEnd"] = "1", ["card-0.spillCallRecord"] = "true"
+        });
+        var expected = record.ToArray();
+        expected.AsSpan(12, 20).Clear();
+        expected[7] = 1;
+        expected[12] = 0x12;
+        expected[13] = 0x3E;
+        expected[22] = 0x32;
+        expected[30] = 1;
+        expected[34] = 0x81;
+        Assert.Equal(expected, updated);
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(updated,
+            new Dictionary<string, string> { ["card-0.spillStep-2.type"] = "3" }));
+    }
+
+    [Theory]
+    [InlineData(23, 678, 4, 30, 19)]
+    [InlineData(135, 1109, 10, 37, 31)]
+    public void Carrier_controls_keep_card_bits_and_call_screen_references_in_their_slots(int type, int length,
+        int row, int control, int card)
+    {
+        var record = new byte[length];
+        record[0] = (byte)type;
+        record[control] = 0x80;
+        record[control + 1] = 0x10;
+        record[control + 4] = 0x80;
+        var layout = NativeTableLayouts.Find(type, record)!;
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(record,
+            new Dictionary<string, string> { ["carrier-0.featureGroupB"] = "true" }));
+        var changes = new Dictionary<string, string>
+        {
+            [$"carrier-0.card-{card}"] = "true", ["carrier-0.stripLocalPrefix"] = "true", ["carrier-0.acceptCash"] = "true",
+            ["carrier-0.featureGroupB"] = "true", ["carrier-0.featureGroupBTimeout"] = "200", ["carrier-0.screeningEntry"] = "3"
+        };
+        if (type == 135)
+            changes["carrier-0.intraCashRate"] = "true";
+        var updated = layout.Apply(record, changes);
+        var expected = record.ToArray();
+        expected[row + 3 + card / 8] = (byte)(1 << (card % 8));
+        expected[control] = 0x82;
+        expected[control + 1] = 0x94;
+        expected[control + 2] = 200;
+        if (type == 135)
+            expected[control + 4] = 0x88;
+        expected[control + 5] = 3;
+        Assert.Equal(expected, updated);
+    }
+
+    [Fact]
+    public void Payment_record_templates_and_review_track_the_referenced_carrier_and_card_slot()
+    {
+        var cards = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(134)));
+        var carriers = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(135)));
+        var features = new byte[72];
+        features[0] = 26;
+        features[1] = 2;
+        var cardsLayout = NativeTableLayouts.Find(134, cards)!;
+        var carrierLayout = NativeTableLayouts.Find(135, carriers)!;
+        var records = new Dictionary<int, byte[]> { [26] = features, [134] = cards, [135] = carriers };
+        Assert.Empty(NativeTableSetReview.Build(records).Findings);
+        Assert.Equal(255, cards[33 + 31 * 36]);
+        Assert.Equal(255, carriers[2]);
+        Assert.Equal(255, carriers[10 + 32 * 33]);
+
+        records[134] = cardsLayout.Apply(cards, new Dictionary<string, string>
+        {
+            ["card-31.format"] = "8", ["card-31.carrier"] = "9"
+        });
+        Assert.Contains("missing", Assert.Single(NativeTableSetReview.Build(records).Findings).Message);
+
+        records[135] = carrierLayout.Apply(carriers, new Dictionary<string, string>
+        {
+            ["carrier-0.reference"] = "9", ["localCoin"] = "9"
+        });
+        var review = NativeTableSetReview.Build(records);
+        Assert.Equal(1, review.ConfiguredCardRanges);
+        Assert.Contains(review.Findings, finding => finding.TableNumber == 134 && finding.Message.Contains("Card range 32"));
+        Assert.Contains(review.Findings, finding => finding.TableNumber == 135 && finding.Message.Contains("Local coin carrier"));
+
+        records[135] = carrierLayout.Apply(records[135], new Dictionary<string, string>
+        {
+            ["carrier-0.card-31"] = "true", ["carrier-0.acceptCash"] = "true"
+        });
+        Assert.Empty(NativeTableSetReview.Build(records).Findings);
+    }
+
+    [Fact]
     public void Payment_and_advertising_edits_only_change_their_bytes_and_bits()
     {
         var data = new byte[72];

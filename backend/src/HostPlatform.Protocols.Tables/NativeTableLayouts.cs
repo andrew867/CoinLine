@@ -37,13 +37,14 @@ public static partial class NativeTableLayouts
             return null;
         return number switch
         {
+            22 or 134 => layout with { Sections = CardSections(record) },
             62 => ExpandNumberingPlan(layout, record),
             >= 131 and <= 133 => layout with { Sections = GraphicalSections(record) },
             _ => layout
         };
     }
 
-    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 55 or 58 or MessagingRecord or 95 or >= 131 and <= 133 or 152
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord or 95 or >= 131 and <= 135 or 152
         ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
         : [];
 
@@ -53,6 +54,8 @@ public static partial class NativeTableLayouts
         bytes[0] = template.Number;
         if (IsGraphicalRecord(template.Number))
             InitializeGraphicalRecord(bytes);
+        if (template.Number is 22 or 23 or 134 or 135)
+            InitializePaymentRecord(bytes);
         return bytes;
     }
 
@@ -237,9 +240,9 @@ public static partial class NativeTableLayouts
                 Field("spillTimeout", "Timeout before sending digits", 346),
                 Field("sessionTimeout", "Session timeout (seconds)", 349))]);
 
-        yield return Layout(22, 661, CardRules(20, 33));
+        yield return Layout(22, 661, []);
         yield return Layout(23, 678, CarrierRules(21, 32, 4, 20));
-        yield return new NativeTableLayout(134, 1153, Later, CardRules(32, 36));
+        yield return new NativeTableLayout(134, 1153, Later, []);
         yield return new NativeTableLayout(135, 1109, Later, CarrierRules(33, 33, 10, 32));
         yield return Layout(73, 1192, [Section("effective", "Tariff effective date",
             [.. DateTimeFields("effective", 1), Field("telco", "Rate owner code", 7)]),
@@ -359,46 +362,68 @@ public static partial class NativeTableLayouts
             Toggle($"{key}.denyDataPort", "Deny data-port calls", offset + 13, 2)];
     });
 
-    private static NativeTableSection[] CardRules(int count, int stride) => Rows("card", count, i => $"Card range {i + 1}", (i, key) =>
-    {
-        var offset = 1 + i * stride;
-        return [Digits($"{key}.start", "Lowest six-digit prefix", offset, 3, 6),
-            Digits($"{key}.end", "Highest six-digit prefix", offset + 3, 3, 6),
-            Select($"{key}.format", "Card number standard", offset + 6, (0, "Unset"), (1, "Mod 10"),
-                (2, "ANSI"), (3, "ABA"), (4, "CBA"), (5, "BOC"), (6, "ANSI 59"), (7, "CCITT")),
-            Field($"{key}.expiry", "Expiry position after separator", offset + 8),
-            Field($"{key}.initial", "Start-date position after separator", offset + 9),
-            Field($"{key}.discretionary", "Discretionary-data position", offset + 10),
-            Field($"{key}.reference", "Card reference number", offset + 31),
-            Field($"{key}.carrier", "Carrier reference", offset + 32),
-            .. (stride == 33 ? new[] {
-                Toggle($"{key}.positiveValidation", "Validate every call", offset + 7, 2),
-                Toggle($"{key}.hostValidation", "Require host validation", offset + 7, 4),
-                Toggle($"{key}.creditPath", "Use credit-card processing", offset + 7, 8),
-                Toggle($"{key}.promptPin", "Prompt for PIN", offset + 7, 32),
-                Toggle($"{key}.routeAccs", "Route to calling-card service", offset + 7, 128)
-            } : [])];
-    });
-
     private static NativeTableSection[] CarrierRules(int count, int stride, int header, int cardCount) => [Section("selection", "Carrier selection",
-        [Field("primary", "Primary carrier reference", 1), Field("coinDefault", "Default coin carrier reference", 2),
-        Field("cardDefault", "Default credit-card carrier reference", 3),
+        [CarrierReference("primary", "Primary carrier reference", 1), CarrierReference("coinDefault", "Default coin carrier reference", 2),
+        CarrierReference("cardDefault", "Default credit-card carrier reference", 3),
         .. (header == 10 ? new[] {
-            Field("intraPrimary", "Intra-area primary carrier reference", 4),
-            Field("intraCoin", "Intra-area coin carrier reference", 5),
-            Field("intraCard", "Intra-area credit-card carrier reference", 6),
-            Field("localPrimary", "Local primary carrier reference", 7),
-            Field("localCoin", "Local coin carrier reference", 8),
-            Field("localCard", "Local credit-card carrier reference", 9)
+            CarrierReference("intraPrimary", "Intra-area primary carrier reference", 4),
+            CarrierReference("intraCoin", "Intra-area coin carrier reference", 5),
+            CarrierReference("intraCard", "Intra-area credit-card carrier reference", 6),
+            CarrierReference("localPrimary", "Local primary carrier reference", 7),
+            CarrierReference("localCoin", "Local coin carrier reference", 8),
+            CarrierReference("localCard", "Local credit-card carrier reference", 9)
         } : [])]),
         .. Rows("carrier", count, i => $"Carrier {i}", (i, key) =>
         {
             var offset = header + i * stride;
-            return [Field($"{key}.reference", "Carrier reference", offset),
-                Digits($"{key}.access", "Carrier number", offset + 1, 2, 4), TextField($"{key}.name", "Display name", offset + 3 + (cardCount + 7) / 8, 20),
+            var prompt = offset + 3 + (cardCount + 7) / 8;
+            var control = prompt + 20;
+            return [Field($"{key}.reference", "Carrier reference", offset, help: "Use 255 for an unused carrier row."),
+                Digits($"{key}.access", "Carrier number", offset + 1, 2, 4),
+                new NativeTableField($"{key}.name", "Display name", prompt, DisplayText, 20),
+                Toggle($"{key}.promptNumber", "Ask for the destination number", control, 1),
+                Toggle($"{key}.stripLocalPrefix", "Remove the dialed prefix for local calls", control, 2),
+                Toggle($"{key}.stripIntraPrefix", "Remove the dialed prefix for intra-area calls", control, 4),
+                Toggle($"{key}.carrierCard", "Use carrier-card processing", control + 1, 1),
+                Toggle($"{key}.carrierPrompt", "Show the carrier's display name", control + 1, 2),
+                Toggle($"{key}.acceptCash", "Accept coins and stored-value cards", control + 1, 4),
+                Toggle($"{key}.alternateBongTimeout", "Use the alternate bong-tone timeout", control + 1, 8),
+                Toggle($"{key}.alternateBongDelay", "Use the alternate delay after the bong tone", control + 1, 16),
+                Toggle($"{key}.intraToLocalCarrier", "Send intra-area calls to the local carrier", control + 1, 32),
+                Toggle($"{key}.featureGroupBSpillOrder", "Use the alternate Feature Group B spill order", control + 1, 64),
+                Toggle($"{key}.featureGroupB", "Use Feature Group B", control + 1, 128),
+                Field($"{key}.featureGroupBTimeout", "Feature Group B timeout (10 ms ticks)", control + 2, Word),
+                Field($"{key}.screeningEntry", "Call-screening entry", control + 5,
+                    help: "Feature Group B requires a one-based rule number from the call-screening list."),
+                .. (cardCount == 32 ? new[] {
+                    Toggle($"{key}.localCardRate", "Use terminal rates for local credit-card calls", control + 4, 1),
+                    Toggle($"{key}.localCashRate", "Use terminal rates for local coin or stored-value calls", control + 4, 2),
+                    Toggle($"{key}.intraCardRate", "Use terminal rates for intra-area credit-card calls", control + 4, 4),
+                    Toggle($"{key}.intraCashRate", "Use terminal rates for intra-area coin or stored-value calls", control + 4, 8),
+                    Toggle($"{key}.interCardRate", "Use terminal rates for inter-area credit-card calls", control + 4, 16),
+                    Toggle($"{key}.interCashRate", "Use terminal rates for inter-area coin or stored-value calls", control + 4, 32)
+                } : []),
                 .. Enumerable.Range(0, cardCount).Select(card => Toggle($"{key}.card-{card}", $"Accept card range {card + 1}",
                     offset + 3 + card / 8, 1 << card % 8))];
         })];
+
+    internal static void ValidateCarrierChanges(ReadOnlySpan<byte> original, ReadOnlySpan<byte> record)
+    {
+        var later = record[0] == 135;
+        var start = later ? 10 : 4;
+        var stride = later ? 33 : 32;
+        var count = later ? 33 : 21;
+        for (var index = 0; index < count; index++)
+        {
+            const int featureGroupB = 128;
+            var startOfRow = start + index * stride;
+            var control = startOfRow + stride - 5;
+            var screening = startOfRow + stride - 1;
+            if ((record[control] & featureGroupB) != 0 && record[screening] == 0 &&
+                ((original[control] & featureGroupB) == 0 || original[screening] != 0))
+                throw new InvalidOperationException($"Choose a call-screening entry for Feature Group B on carrier {index}.");
+        }
+    }
 
     private static NativeTableLayout ExpandNumberingPlan(NativeTableLayout layout, ReadOnlySpan<byte> record)
     {

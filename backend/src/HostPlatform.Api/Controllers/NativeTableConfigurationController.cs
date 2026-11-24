@@ -190,6 +190,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
 
     private static string TemplateName(int number) => number switch
     {
+        22 or 134 => "Card acceptance",
+        23 or 135 => "Carrier screens",
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
         95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}", 152 => "Holiday and time-of-day discounts",
         _ => $"MT{number}"

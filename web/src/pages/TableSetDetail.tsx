@@ -210,7 +210,7 @@ export function TableSetDetail() {
             {d.provisioning.onHookAdvertising !== null && <div><dt>On-hook advertising</dt><dd>{d.provisioning.onHookAdvertising ? 'Enabled' : 'Disabled'}</dd></div>}
           </dl>
           {d.provisioning.findings.length > 0 && <ul>{d.provisioning.findings.map((finding) => (
-            <li key={finding.message}>MT{finding.tableNumber} · {finding.message}</li>
+            <li key={`${finding.tableNumber}:${finding.message}`}>MT{finding.tableNumber} · {finding.message}</li>
           ))}</ul>}
         </section>
       )}
