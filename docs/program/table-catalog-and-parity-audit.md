@@ -92,6 +92,10 @@ Inmate and electronic purse validation remain outside the first-release acceptan
 | 3 | Home-exchange LCD generation | Playwright generated two U.S. segments from a LATA crosswalk and one Canadian segment by joining the CNA code-status and exchange-area files. The cases covered a LATA shared across area codes, a different LATA, and two LIRs within the same NPA. All three saved MT101 or MT102 records matched the exact 403 bytes sent by isolated NCC. The no-op saves preserved their hashes, and the TCP fixture returned MT14 to each original selected batch. Stock-phone call classification and rating with the generated records remain pending. |
 | 4 | Physical compatibility | Run a stock MTR 2.x Multi-pay bench test, then a Desk install. Record exact firmware, records delivered, application acknowledgements and observed behavior separately for each terminal. Physical acceptance is pending. |
 
+### WebUI follow-up
+
+- **Decoded alarm details.** Clicking an alarm from Terminal status opens a message detail whose decoded fields are currently shown as JSON. Reuse the list's alarm catalogue in the detail view and display the alarm name and number, phone and timestamps as readable fields. Keep raw payload and JSON available for diagnosis. Verify the click-through displays Memory lost for alarm 22 and a numeric fallback for an unlisted code.
+
 ## Advertising text field map
 
 The legacy desktop supported named 20-slot advertising configurations, individual and block editing, and simulation. Its help describes showing the full sequence while on hook. With call-established advertising enabled, the sequence splits into the first ten for on-hook display and the last ten for established calls. Feature switches live with the terminal's universal feature configuration. Scroll timing is a user-interface parameter. Preview flash timing in the Windows executable comes from workstation settings.
