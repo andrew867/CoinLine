@@ -23,6 +23,7 @@ type Layout = {
   supported: true
   editable: boolean
   profile: string
+  profiles?: string[]
   length: number
   revision: number
   sha256: string
@@ -121,12 +122,23 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
     }
   }
 
+  function changeProfile(value: string) {
+    if (Object.keys(edits).length > 0 && !window.confirm('Discard the unsaved changes and switch firmware profiles?')) return
+    setEdits({})
+    onDirty(false)
+    setSectionKey('')
+    setSearch('')
+    setMessage('')
+    setProfile(value)
+    setLayout(null)
+  }
+
   if (!layout) return <p role="status">{message || 'Loading record fields…'}</p>
   if (!layout.supported) return (
     <div className="native-table-editor">
       <p className="page-intro">{layout.reason}</p>
       {layout.profiles && layout.profiles.length > 1 && <label>Firmware profile
-        <select value={profile} onChange={(event) => setProfile(event.target.value)}>
+        <select value={profile} onChange={(event) => changeProfile(event.target.value)}>
           <option value="">Select firmware profile</option>
           {layout.profiles.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
@@ -156,6 +168,15 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
         <div><strong>{layout.profile}</strong><span>{layout.length.toLocaleString()} bytes · Revision {layout.revision}</span></div>
         {!layout.editable && <span>Published record</span>}
       </header>
+      {layout.profiles && layout.profiles.length > 1 && (
+        <div className="table-config-selectors">
+          <label>Firmware profile
+            <select value={layout.profile} disabled={busy} onChange={(event) => changeProfile(event.target.value)}>
+              {layout.profiles.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
       {layout.sections.length > 1 && (
         <div className="table-config-selectors">
           {layout.sections.length > 12 && <label>Find entry<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}

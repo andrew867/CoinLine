@@ -29,8 +29,10 @@ public static partial class NativeTableLayouts
     public static NativeTableLayout? Find(int number, ReadOnlySpan<byte> record, string? profile = null)
     {
         var candidates = Candidates(number, record);
-        var layout = profile == null ? candidates.Count == 1 ? candidates[0] : null
-            : candidates.SingleOrDefault(layout => layout.Profile == profile);
+        // Existing sets without a registered target already use the older editing profile for these records.
+        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 ? MultiPay : null);
+        var layout = selection == null ? candidates.Count == 1 ? candidates[0] : null
+            : candidates.SingleOrDefault(layout => layout.Profile == selection);
         if (layout == null)
             return null;
         return number switch
@@ -69,80 +71,8 @@ public static partial class NativeTableLayouts
 
     private static IEnumerable<NativeTableLayout> Build()
     {
-        yield return Layout(21, 18, Section("access", "Management access",
-            Digits("terminalNumber", "Terminal wire ID", 1, 5, 10),
-            DialField("primary", "Primary manager number", 6, 6),
-            DialField("alternate", "Alternate manager number", 12, 6)));
-
-        yield return Layout(26, 72,
-            Section("payment", "Terminal and payment",
-                Select("terminalType", "Terminal operating type", 1, (1, "Card only"), (2, "Multi-pay (cards and coins)"), (3, "Coin only")),
-                Field("followOn", "Maximum follow-on calls", 3),
-                Toggle("localAuthorization", "Require host authorization for local card calls", 4, 1),
-                Toggle("delayAuthorization", "Defer card authorization", 4, 2),
-                Toggle("manualLocalAuthorization", "Require authorization for local manual card entry", 4, 4),
-                Toggle("manualCallingCards", "Allow manual calling card entry", 4, 16),
-                Toggle("cardEntry", "Enable manual entry service", 5, 4),
-                Toggle("entryAuthorization", "Require host validation for manual entry service", 5, 8),
-                Toggle("coinOvertime", "Allow overtime coin deposits", 28, 1),
-                Toggle("coinVoice", "Announce coin deposits", 28, 2),
-                Toggle("secondCoinWarning", "Play second coin warning", 28, 4),
-                Field("coinOvertimePeriod", "Coin overtime period (seconds)", 29, Word),
-                Field("coinPotsTime", "Coin fallback call time (seconds)", 31, Word),
-                Bits("defaultPayment", "Default payment for rate requests", 34, 15, PaymentKinds),
-                Field("minManualDigits", "Minimum manual card digits", 50),
-                Field("maxManualDigits", "Maximum manual card digits", 47)),
-            Section("display", "Display and advertising",
-                Select("displayPresent", "Display fitted", 2, (0, "No display"), (1, "Display fitted")),
-                Toggle("onHookAds", "Rotate advertisements on hook", 22, 1),
-                Toggle("quickAccessAds", "Display quick-access advertisements", 22, 2),
-                Toggle("establishedAds", "Display advertisements during connected calls", 22, 4),
-                Toggle("showClock", "Display date and time on hook", 22, 8),
-                Toggle("clock12Hour", "Use a 12-hour clock", 22, 16),
-                Bits("defaultLanguage", "Default language slot", 23, 1, (0, "Language 1"), (1, "Language 2")),
-                Toggle("displayNumber", "Display called number", 24, 1),
-                Toggle("hideCalling", "Suppress the calling prompt", 24, 128)),
-            Section("callSetup", "Call setup",
-                Field("dtmfTime", "DTMF duration (10 ms ticks)", 25),
-                Field("digitGap", "Interdigit pause (10 ms ticks)", 26),
-                Toggle("operatorToToll", "Convert operator calls to toll calls", 27, 1),
-                Toggle("tollToOperator", "Convert toll calls to operator calls", 27, 2),
-                Field("internationalDigits", "Minimum international digits", 33),
-                Field("domesticGrace", "Domestic grace period (seconds)", 68),
-                Field("internationalGrace", "International grace period (seconds)", 70)),
-            Section("reporting", "Reporting and supervision",
-                Field("lineCheckFailures", "Line check failures before action", 42),
-                Field("alternateFailures", "Alternate manager failures before action", 43),
-                Field("outOfServiceFailures", "Dialogue failures before out of service", 44),
-                Field("alarmFailures", "Dialogue failures before an alarm", 45)));
-
-        yield return Layout(31, 37, Section("installation", "Installation and packet timing",
-            Field("transmitDelay", "Transmit packet delay (10 ms ticks)", 11),
-            Field("receiveGap", "Receive packet gap (10 ms ticks)", 12),
-            Field("retries", "Retries before out of service", 13),
-            Field("coinBoxTimeout", "Coin box lock timeout (seconds)", 15, Word),
-            DialField("predial", "Primary predial digits", 17, 4),
-            DialField("alternatePredial", "Alternate predial digits", 21, 4)));
-
-        yield return Layout(30, 68,
-            Section("prompts", "Prompt and input timing",
-                Field("clearDigits", "Clear digits after (10 ms ticks)", 1, SignedWord, min: 0),
-                Field("transient", "Transient message time (10 ms ticks)", 3, SignedWord, min: 0),
-                Field("voiceDelay", "Visual-to-voice delay (10 ms ticks)", 7, SignedWord, min: 0),
-                Field("voiceRepeat", "Voice repeat delay (10 ms ticks)", 9, SignedWord, min: 0),
-                Field("idleTimeout", "User inactivity timeout (10 ms ticks)", 11, SignedWord, min: 0),
-                Field("languageTimeout", "Language selection time (10 ms ticks)", 21, SignedWord, min: 0),
-                Field("voiceRepetitions", "Voice prompt repetitions", 27),
-                Field("scrollSpeed", "Display scroll timing (10 ms ticks)", 54, SignedWord, min: 0)),
-            Section("calls", "Card, rating and dialing timers",
-                Field("cardValidation", "Card validation timeout (10 ms ticks)", 13, SignedWord, min: 0),
-                Field("zeroPlus", "Operator call entry timeout (10 ms ticks)", 17, SignedWord, min: 0),
-                Field("authorization", "Host card authorization timeout (10 ms ticks)", 36, SignedWord, min: 0),
-                Field("rating", "Host rating timeout (10 ms ticks)", 38, SignedWord, min: 0),
-                Field("manualHold", "Manual dialing hold (10 ms ticks)", 40, SignedWord, min: 0),
-                Field("quickAccessHold", "Quick-access dialing hold (10 ms ticks)", 42, SignedWord, min: 0),
-                Field("coinWarning1", "First coin warning (seconds)", 44, Word),
-                Field("coinWarning2", "Second coin warning (seconds)", 46, Word)));
+        foreach (var terminalLayout in TerminalConfigurationLayouts())
+            yield return terminalLayout;
 
         yield return Layout(32, 33, [Section("collection", "Performance reporting",
             Field("threshold", "Upload threshold", 21), Hour("startHour", "Start hour", 22),
@@ -158,8 +88,14 @@ public static partial class NativeTableLayouts
             Field("dialToneDelay", "Delay after dial tone (10 ms ticks)", 4, Word),
             Field("busyCycle", "Busy and ringback interval (10 ms ticks)", 6, Word),
             Field("answerDelay", "Delay after answer tone (10 ms ticks)", 8, Word),
+            Field("laptopSeizeTime", "Data device line seizure time (10 ms ticks)", 10, Word),
             Field("carrierDelay", "Delay after carrier detection (10 ms ticks)", 14, Word),
             Field("turnaroundDelay", "Receive-to-transmit delay (10 ms ticks)", 16, Word),
+            Toggle("groundStart", "Use ground-start line seizure", 32, 1),
+            Toggle("carrierLossTimeout", "Enable carrier-loss timeout", 32, 2),
+            Toggle("answerToneDetection", "Enable answer tone detection", 33, 2),
+            Toggle("answerToneOptional", "Allow connection without answer tone", 33, 4),
+            Toggle("skipAnswerToneRemoval", "Skip waiting for answer tone removal", 33, 8),
             Field("busyThreshold", "Busy signal threshold", 34)),
             .. Rows("debounce", 5, i => new[] { "Dial tone", "Busy and ringback", "Answer tone", "Carrier", "Lost carrier" }[i], (i, key) =>
                 [Field($"{key}.interval", "Interval", 18 + i * 3), Field($"{key}.off", "Off count", 19 + i * 3),

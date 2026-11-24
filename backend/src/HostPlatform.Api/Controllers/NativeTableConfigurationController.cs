@@ -47,6 +47,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             supported = true,
             editable = set.Status == TableSetStatus.Draft,
             layout.Profile,
+            profiles = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId)?.VerifiedLengths.ContainsKey(number) == true
+                ? [layout.Profile] : NativeTableLayouts.Candidates(number, raw).Select(candidate => candidate.Profile).ToArray(),
             layout.Length,
             revision = version.TableRevision,
             sha256 = version.PayloadSha256Hex,

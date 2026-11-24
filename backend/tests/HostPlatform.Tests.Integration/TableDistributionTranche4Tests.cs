@@ -135,6 +135,46 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Installation_editor_lists_both_profiles_and_does_not_return_craft_credentials()
+    {
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Servicing record test", tableNumber = 31 });
+        definition.EnsureSuccessStatusCode();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Servicing editor test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var bytes = new byte[37];
+        bytes[0] = 31;
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            tableRevision = 1, payloadBase64 = Convert.ToBase64String(bytes), sortOrder = 0
+        });
+        imported.EnsureSuccessStatusCode();
+
+        var path = $"/api/tables/sets/{id}/records/31/fields";
+        var initial = await _client.GetFromJsonAsync<JsonElement>(path);
+        var profiles = initial.GetProperty("profiles").EnumerateArray().Select(profile => profile.GetString()).ToArray();
+        Assert.Equal(2, profiles.Length);
+        Assert.Equal("MTR 1.9 packed", initial.GetProperty("profile").GetString());
+        var later = profiles.Single(profile => profile != "MTR 1.9 packed")!;
+        var laterPath = $"{path}?profile={Uri.EscapeDataString(later)}";
+        Assert.Equal(later, (await _client.GetFromJsonAsync<JsonElement>(laterPath)).GetProperty("profile").GetString());
+        using var saved = await _client.PutAsJsonAsync(path, new
+        {
+            profile = later, revision = initial.GetProperty("revision"), sha256 = initial.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["craftAccessCode"] = string.Concat(Enumerable.Range(1, 7)), ["analogPrefix"] = "*#" }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        var result = await _client.GetFromJsonAsync<JsonElement>(laterPath);
+        var fields = result.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal("*#", fields["analogPrefix"].GetProperty("value").GetString());
+        Assert.Equal("password", fields["craftAccessCode"].GetProperty("editor").GetString());
+        Assert.Equal(JsonValueKind.Null, fields["craftAccessCode"].GetProperty("value").ValueKind);
+        Assert.Equal(JsonValueKind.Null, fields["keyCardNumber"].GetProperty("value").ValueKind);
+    }
+
+    [Fact]
     public async Task Draft_clone_retains_original_records_and_can_publish_advertising()
     {
         var sets = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets"))!;

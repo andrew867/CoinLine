@@ -5,7 +5,7 @@ namespace HostPlatform.Tests.Unit;
 public sealed class NativeTableLayoutTests
 {
     [Theory]
-    [InlineData(21, 18)] [InlineData(22, 661)] [InlineData(23, 678)] [InlineData(26, 72)]
+    [InlineData(21, 18)] [InlineData(21, 40)] [InlineData(22, 661)] [InlineData(23, 678)] [InlineData(26, 72)]
     [InlineData(27, 2801)] [InlineData(28, 2801)] [InlineData(30, 68)] [InlineData(31, 37)]
     [InlineData(32, 33)] [InlineData(33, 35)] [InlineData(34, 19)] [InlineData(35, 21)]
     [InlineData(49, 199)] [InlineData(50, 105)] [InlineData(55, 571)] [InlineData(58, 26)]
@@ -49,6 +49,92 @@ public sealed class NativeTableLayoutTests
         Assert.Equal(expected, edited);
         Assert.Throws<InvalidOperationException>(() => layout.Apply(data, new Dictionary<string, string> { ["terminalType"] = "9" }));
         Assert.Null(NativeTableLayouts.Find(26, [26, 1]));
+    }
+
+    [Fact]
+    public void Feature_profiles_expose_different_meanings_at_reused_offsets()
+    {
+        var record = new byte[72];
+        record[0] = 26;
+        record[10] = 0x21;
+        record[13] = 0x80;
+        record[27] = 0xC0;
+        var layouts = NativeTableLayouts.Candidates(26, record);
+        Assert.Equal(2, layouts.Count);
+        var earlier = NativeTableLayouts.Find(26, record)!;
+        Assert.Equal(NativeTableLayouts.MultiPay, earlier.Profile);
+        var later = layouts.Single(layout => layout.Profile != earlier.Profile);
+        Assert.DoesNotContain(later.Sections.SelectMany(section => section.Fields), field => field.Key is "incomingRate" or "operatorToToll" or "defaultLanguage");
+        Assert.DoesNotContain(earlier.Sections.SelectMany(section => section.Fields), field => field.Key is "languageFirst" or "preAuthorizationLimit");
+
+        var changed = later.Apply(record, new Dictionary<string, string>
+        {
+            ["languageFirst"] = "3", ["roundUp"] = "true", ["preAuthorizationLimit"] = "60"
+        });
+        var expected = record.ToArray();
+        expected[10] = 0x23;
+        expected[13] = 0x90;
+        expected[27] = 60;
+        Assert.Equal(expected, changed);
+        Assert.Throws<InvalidOperationException>(() => earlier.Apply(record, new Dictionary<string, string> { ["languageFirst"] = "3" }));
+    }
+
+    [Fact]
+    public void Craft_credentials_pack_to_exact_bytes_without_readback_and_later_prefixes_preserve_spares()
+    {
+        var record = new byte[37];
+        record[0] = 31;
+        record[10] = 0x80;
+        record[31] = 0x80;
+        record[32] = 0xAD;
+        var earlier = NativeTableLayouts.Find(31, record)!;
+        var later = NativeTableLayouts.Candidates(31, record).Single(layout => layout.Profile != earlier.Profile);
+        var code = string.Concat(Enumerable.Range(0, 7));
+        var keyCard = string.Concat(Enumerable.Range(0, 10).Reverse());
+        var changed = later.Apply(record, new Dictionary<string, string>
+        {
+            ["craftAccessCode"] = code, ["keyCardNumber"] = keyCard, ["usePredial"] = "true", ["useAnalogPrefix"] = "true",
+            ["analogPrefix"] = "*0#", ["delayCraftReport"] = "true"
+        });
+        var expected = record.ToArray();
+        new byte[] { 0x01, 0x23, 0x45, 0x6E, 0x98, 0x76, 0x54, 0x32, 0x10 }.CopyTo(expected, 1);
+        expected[10] = 0xC1;
+        expected[25] = 0xBA;
+        expected[26] = 0xC0;
+        expected[31] = 0x81;
+        Assert.Equal(expected, changed);
+        Assert.All(later.Sections.Single(section => section.Key == "craft").Fields, field =>
+        {
+            Assert.Equal("password", field.Editor);
+            Assert.Null(field.Read(changed));
+        });
+        Assert.Throws<InvalidOperationException>(() => later.Apply(record, new Dictionary<string, string> { ["craftAccessCode"] = new string('0', 8) }));
+        Assert.Throws<InvalidOperationException>(() => earlier.Apply(record, new Dictionary<string, string> { ["analogPrefix"] = "*#" }));
+    }
+
+    [Fact]
+    public void Additional_ui_and_modem_fields_follow_the_packed_timer_and_flag_widths()
+    {
+        var timers = new byte[68];
+        timers[0] = 30;
+        var updatedTimers = NativeTableLayouts.Find(30, timers)!.Apply(timers, new Dictionary<string, string>
+        {
+            ["dataJackConnect"] = "15000", ["afterBong"] = "25", ["transientHint"] = "450"
+        });
+        Assert.Equal(new byte[] { 0xC2, 0x01 }, updatedTimers[5..7]);
+        Assert.Equal(new byte[] { 25, 0 }, updatedTimers[50..52]);
+        Assert.Equal(new byte[] { 0x98, 0x3A }, updatedTimers[62..64]);
+
+        var modem = new byte[35];
+        modem[0] = 33;
+        modem[32] = 0x80;
+        modem[33] = 0x40;
+        var updatedModem = NativeTableLayouts.Find(33, modem)!.Apply(modem, new Dictionary<string, string>
+        {
+            ["laptopSeizeTime"] = "300", ["carrierLossTimeout"] = "true", ["answerToneOptional"] = "true"
+        });
+        Assert.Equal(new byte[] { 44, 1 }, updatedModem[10..12]);
+        Assert.Equal(new byte[] { 0x82, 0x44 }, updatedModem[32..34]);
     }
 
     [Fact]

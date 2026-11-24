@@ -7,7 +7,7 @@ namespace HostPlatform.Protocols.Tables;
 public enum TableFieldEncoding
 {
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
-    KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon
+    KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -21,13 +21,14 @@ public sealed record NativeTableField(
     {
         TableFieldEncoding.Flag => "checkbox",
         TableFieldEncoding.Bitmap => "bitmap",
-        TableFieldEncoding.MessagingKey => "password",
+        TableFieldEncoding.MessagingKey or TableFieldEncoding.CredentialBcd => "password",
         TableFieldEncoding.GraphicalKind => "screen-kind",
         TableFieldEncoding.GraphicalText => "screen-text",
         TableFieldEncoding.GraphicalLink => "screen-link",
         TableFieldEncoding.GraphicalFlashRate => "flash-rate",
         TableFieldEncoding.GraphicalIcon => "screen-icon",
-        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial => "text",
+        TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial
+            or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes => "text",
         _ when Choices != null => "select",
         _ => "number"
     };
@@ -42,8 +43,8 @@ public sealed record NativeTableField(
     public int? TextLimit => Encoding switch
     {
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.MessagingKey => Size,
-        TableFieldEncoding.Bcd => Maximum ?? Size * 2,
-        TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial => Size * 2,
+        TableFieldEncoding.Bcd or TableFieldEncoding.CredentialBcd => Maximum ?? Size * 2,
+        TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.HexBytes => Size * 2,
         _ => null
     };
 
@@ -82,7 +83,8 @@ public sealed record NativeTableField(
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
             TableFieldEncoding.KeypadDial => ReadDigits(data, isDial: true, TextLimit ?? 0, allowKeypad: true),
             TableFieldEncoding.Bitmap => IsBitmapScreen(record) ? Convert.ToBase64String(data) : null,
-            TableFieldEncoding.MessagingKey => null,
+            TableFieldEncoding.MessagingKey or TableFieldEncoding.CredentialBcd => null,
+            TableFieldEncoding.HexBytes => Convert.ToHexString(data),
             _ => Format(data[0])
         };
     }
@@ -118,6 +120,16 @@ public sealed record NativeTableField(
             case TableFieldEncoding.Dial:
             case TableFieldEncoding.KeypadDial:
                 WriteDigits(data, value, Encoding != TableFieldEncoding.Bcd, Encoding == TableFieldEncoding.KeypadDial);
+                return;
+            case TableFieldEncoding.CredentialBcd:
+                WriteDigits(data, value, isDial: false, allowKeypad: false);
+                if ((value.Length & 1) != 0)
+                    data[^1] = (byte)((data[^1] & 0xF0) | 0x0E);
+                return;
+            case TableFieldEncoding.HexBytes:
+                if (value.Length != Size * 2 || !value.All(Uri.IsHexDigit))
+                    throw Invalid($"enter exactly {Size * 2} hexadecimal characters");
+                Convert.FromHexString(value).CopyTo(data);
                 return;
             case TableFieldEncoding.MessagingKey:
                 if (value.Length != Size || value.Any(ch => !char.IsAsciiDigit(ch)) || value.StartsWith("0000", StringComparison.Ordinal))
