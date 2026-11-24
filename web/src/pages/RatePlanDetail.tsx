@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import { apiFetch, apiDelete, apiGet, apiPost, apiPut } from '../api/client'
 
 type VerSummary = { id: string; versionNumber: number; status: number; publishedAtUtc: string | null }
 type Detail = {
@@ -43,10 +43,9 @@ type VerDetail = {
   timeBands: BandRow[]
 }
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 async function fetchVersionJson(id: string, planId: string): Promise<VerDetail> {
-  const r = await fetch(`/api/rate-plans/${planId}/versions/${id}`, { headers })
+  const r = await apiFetch(`/api/rate-plans/${planId}/versions/${id}`)
   if (!r.ok) throw new Error(String(r.status))
   return (await r.json()) as VerDetail
 }

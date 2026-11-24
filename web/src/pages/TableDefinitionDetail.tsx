@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Def = { id: string; name: string; tableNumber: number; description: string | null }
 
@@ -19,7 +19,7 @@ export function TableDefinitionDetail() {
     setD(null)
     ;(async () => {
       try {
-        const r = await fetch(`/api/tables/definitions/${id}`, { headers })
+        const r = await apiFetch(`/api/tables/definitions/${id}`)
         if (r.status === 404) {
           if (!c) {
             setErr('not-found')

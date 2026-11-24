@@ -8,6 +8,7 @@ using HostPlatform.Api.Health;
 using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Middleware;
 using HostPlatform.Api.Options;
+using HostPlatform.Api.Security;
 using HostPlatform.Api.Services;
 using HostPlatform.Api.Swagger;
 using HostPlatform.Firmware;
@@ -16,6 +17,7 @@ using HostPlatform.Infrastructure.Craft;
 using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -51,6 +53,9 @@ if (!builder.Environment.IsEnvironment("Testing"))
     });
 }
 
+builder.Services.AddSingleton<OperatorTokenSigningKey>();
+builder.Services.AddAuthentication(OperatorAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, OperatorAuthenticationHandler>(OperatorAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddSingleton<IAuthorizationHandler, MinimumRoleAuthorizationHandler>();
 builder.Services.AddAuthorization(o =>
 {
@@ -166,7 +171,8 @@ app.UseCors();
 app.UseRateLimiter();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ApiKeyGateMiddleware>();
-app.UseMiddleware<DevOperatorMiddleware>();
+app.UseAuthentication();
+app.UseMiddleware<OperatorContextMiddleware>();
 app.UseAuthorization();
 
 var swaggerEnabled = app.Configuration.GetValue("Swagger:Enabled", true);

@@ -11,7 +11,7 @@ namespace HostPlatform.Api.Controllers;
 
 [ApiController]
 [Route("api/auth")]
-public sealed class AuthController(HostPlatformDbContext db, IConfiguration config) : ControllerBase
+public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSigningKey signingKey) : ControllerBase
 {
     [HttpPost("login")]
     public async Task<ActionResult<object>> Login([FromBody] LoginDto body, CancellationToken ct)
@@ -22,7 +22,7 @@ public sealed class AuthController(HostPlatformDbContext db, IConfiguration conf
             return Unauthorized(new { error = "Unknown username or password." });
 
         var expires = DateTimeOffset.UtcNow.AddHours(12);
-        var token = OperatorToken.Issue(user.Username, user.Role, TokenKey(), expires);
+        var token = OperatorToken.Issue(user.Username, user.Role, signingKey.Value, expires);
         return Ok(new
         {
             token,
@@ -50,8 +50,9 @@ public sealed class AuthController(HostPlatformDbContext db, IConfiguration conf
     {
         var rows = await db.OperatorAccounts.AsNoTracking()
             .OrderBy(u => u.Username)
+            .Select(u => new { u.Id, u.Username, u.DisplayName, role = u.Role.ToString(), u.Enabled })
             .ToListAsync(ct);
-        return Ok(rows.Select(AccountView));
+        return Ok(rows);
     }
 
     [HttpPost("accounts")]
@@ -145,12 +146,6 @@ public sealed class AuthController(HostPlatformDbContext db, IConfiguration conf
         role = user.Role.ToString(),
         user.Enabled
     };
-
-    private string TokenKey()
-    {
-        var key = config["Security:OperatorTokenKey"];
-        return string.IsNullOrWhiteSpace(key) ? "coinline-lab-token-key" : key;
-    }
 
     public sealed record LoginDto(string? Username, string? Password);
     public sealed record CreateAccountDto(string? Username, string? DisplayName, string? Password, string? Role);

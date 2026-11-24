@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { HexViewer } from '../components/HexViewer'
 import { JsonPanel } from '../components/JsonPanel'
+import { apiDownload, apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Detail = {
   id: string
@@ -30,6 +30,7 @@ export function DlogTransactionDetail() {
   const [detail, setDetail] = useState<Detail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [downloadError, setDownloadError] = useState('')
 
   useEffect(() => {
     if (!id) return
@@ -38,8 +39,9 @@ export function DlogTransactionDetail() {
       setErr(null)
       setDetail(null)
       setLoading(true)
+      setDownloadError('')
       try {
-        const r = await fetch(`/api/dlog/transactions/${id}`, { headers })
+        const r = await apiFetch(`/api/dlog/transactions/${id}`)
         if (!r.ok) throw new Error(`Detail ${r.status}`)
         const j = (await r.json()) as Detail
         if (!cancelled) setDetail(j)
@@ -61,6 +63,15 @@ export function DlogTransactionDetail() {
 
   const title = fieldTitle(detail.messageType) ?? 'Stored message'
   const fromPhone = fieldTitle(detail.messageType) != null
+
+  async function download(messageId: string) {
+    setDownloadError('')
+    try {
+      await apiDownload(`/api/dlog/transactions/${messageId}/payload`, `message-${messageId}.bin`)
+    } catch (error) {
+      setDownloadError(error instanceof Error ? error.message : 'Could not download the raw bytes.')
+    }
+  }
 
   return (
     <div>
@@ -110,10 +121,11 @@ export function DlogTransactionDetail() {
       <h2>Raw bytes</h2>
       <HexViewer hex={detail.rawPayloadHex} />
       <p>
-        <a href={`/api/dlog/transactions/${detail.id}/payload`} download={`message-${detail.id}.bin`}>
+        <button type="button" onClick={() => void download(detail.id)}>
           Download raw bytes
-        </a>
+        </button>
       </p>
+      {downloadError && <p role="alert">{downloadError}</p>}
 
       <details>
         <summary>Technical record</summary>

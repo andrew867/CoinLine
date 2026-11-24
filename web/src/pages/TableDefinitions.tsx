@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiPost } from '../api/client'
+import { apiFetch, apiPost } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = { id: string; name: string; tableNumber: number; description: string | null }
 
@@ -15,7 +14,7 @@ export function TableDefinitions() {
 
   const load = () => {
     setErr(null)
-    fetch('/api/tables/definitions', { headers })
+    apiFetch('/api/tables/definitions')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>

@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { apiPost, apiPostBareOk, apiPut } from '../api/client'
+import { apiFetch, apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { TableSetAssignment } from './TableSetAssignment'
 import { TableSetConfiguration } from './TableSetConfiguration'
 import { TableRecordCopy } from './TableRecordCopy'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import './TableSetConfiguration.css'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Ver = {
   id: string
@@ -64,7 +63,7 @@ export function TableSetDetail() {
   const load = () => {
     if (!id) return
     setErr(null)
-    fetch(`/api/tables/sets/${id}`, { headers })
+    apiFetch(`/api/tables/sets/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Detail>

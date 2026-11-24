@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { apiFetch, apiPostRaw } from '../api/client'
 import { NativeBitmapField } from './NativeBitmapField'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
@@ -77,7 +78,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   useEffect(() => {
     const request = new AbortController()
     const url = profile ? `${endpoint}?profile=${encodeURIComponent(profile)}` : endpoint
-    void fetch(url, { signal: request.signal }).then(async (response) => {
+    void apiFetch(url, { signal: request.signal }).then(async (response) => {
       if (!response.ok) throw new Error('Could not load this configuration record.')
       const result = await response.json() as Layout
       if (!request.signal.aborted) setLayout(result)
@@ -168,7 +169,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     setMessage('')
     try {
       const changes = Object.fromEntries(Object.entries(edits).filter(([key]) => !isClearingField(key) && !controlledScreeningField(key)))
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision: layout.revision, sha256: layout.sha256, changes, profile: layout.profile,
           numberingPlan: Object.keys(ruleEdits).length ? ruleEdits : undefined,
@@ -201,9 +202,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     setBusy(true)
     setMessage('')
     try {
-      const response = await fetch(endpoint, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(template),
-      })
+      const response = await apiPostRaw(endpoint, template)
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not create this record.')
       setProfile(template.profile)
       setReload((count) => count + 1)

@@ -1,6 +1,6 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
-import { apiGet } from '../api/client'
+import { apiFetch, apiGet } from '../api/client'
 
 type Row = {
   id: string
@@ -14,7 +14,7 @@ type Row = {
   sortOrder: number
 }
 
-const headers = { 'Content-Type': 'application/json', 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
+const headers = { 'Content-Type': 'application/json' }
 
 export function NumberClassesPage() {
   const [rows, setRows] = useState<Row[]>([])
@@ -45,7 +45,7 @@ export function NumberClassesPage() {
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch('/api/number-classes', {
+      const r = await apiFetch('/api/number-classes', {
         method: 'POST',
         headers,
         body: JSON.stringify({

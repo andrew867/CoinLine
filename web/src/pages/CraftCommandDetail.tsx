@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } as const
 
 type Cmd = {
   id: string
@@ -44,7 +44,7 @@ export function CraftCommandDetail() {
     setErr(null)
     ;(async () => {
       try {
-        const r = await fetch(`/api/craft/commands/${commandId}`, { headers })
+        const r = await apiFetch(`/api/craft/commands/${commandId}`)
         if (r.status === 404) {
           if (!c) setErr('not_found')
           return

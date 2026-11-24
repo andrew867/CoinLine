@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 import './FieldEventsPage.css'
 
 const categories = {
@@ -35,7 +36,7 @@ const reportTime = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', tim
 const refreshTime = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' })
 
 async function readJson<T>(url: string, signal: AbortSignal): Promise<T> {
-  const response = await fetch(url, { signal })
+  const response = await apiFetch(url, { signal })
   if (!response.ok) throw new Error(`HTTP ${response.status}`)
   return response.json() as Promise<T>
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { apiGet } from '../api/client'
+import { apiFetch, apiGet } from '../api/client'
 import './TerminalInventoryPanel.css'
 
 type Value = string | number | boolean | null
@@ -140,9 +140,9 @@ export function TerminalInventoryPanel({ terminalId }: { terminalId: string }) {
     try {
       const profile = Object.fromEntries(sections.flatMap(section =>
         section.fields.map(field => [field.key, saveValue(field, draft[field.key])])))
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision: saved.revision, profile }),
       })
       const data = await response.json()

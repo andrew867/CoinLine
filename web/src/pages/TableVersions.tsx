@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -26,7 +26,7 @@ export function TableVersions() {
     let c = false
     const q = setFilter ? `?tableSetId=${encodeURIComponent(setFilter)}` : ''
     setErr(null)
-    fetch(`/api/tables/versions${q}`, { headers })
+    apiFetch(`/api/tables/versions${q}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>

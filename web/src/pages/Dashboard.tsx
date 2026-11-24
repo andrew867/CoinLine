@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ErrorBanner, LoadingBlock } from '../components/AppStates'
 import { terminalStatusLabel } from '../components/StatusBadge'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Dash = {
   terminalsByStatus: { status: number; count: number }[]
@@ -41,7 +41,7 @@ export function Dashboard() {
 
   useEffect(() => {
     let c = false
-    fetch('/api/operator/dashboard', { headers })
+    apiFetch('/api/operator/dashboard')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Dash>
@@ -52,13 +52,13 @@ export function Dashboard() {
       .catch((e) => {
         if (!c) setErr(e instanceof Error ? e.message : 'error')
       })
-    fetch('/api/cards/reconciliation-pending', { headers })
+    apiFetch('/api/cards/reconciliation-pending')
       .then((r) => (r.ok ? (r.json() as Promise<Pending>) : null))
       .then((j) => {
         if (!c && j) setPending(j)
       })
       .catch(() => {})
-    fetch('/api/field-events?take=5', { headers })
+    apiFetch('/api/field-events?take=5')
       .then((r) => (r.ok ? (r.json() as Promise<{ total: number; items?: RecentAlarm[] }>) : null))
       .then((j) => {
         if (!c && j) {
@@ -67,7 +67,7 @@ export function Dashboard() {
         }
       })
       .catch(() => {})
-    fetch('/api/sip-modem', { headers })
+    apiFetch('/api/sip-modem')
       .then((r) => (r.ok ? (r.json() as Promise<SipModem>) : null))
       .then((j) => {
         if (!c && j) setSip(j)

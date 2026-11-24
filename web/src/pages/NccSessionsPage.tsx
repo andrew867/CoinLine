@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet, apiGetRaw, apiPostBareOk } from '../api/client'
+import { apiDownload, apiGet, apiPostBareOk } from '../api/client'
 
 type NccSessionRow = {
   id: string
@@ -99,14 +99,7 @@ export function NccSessionsPage() {
     setBusyId(id)
     setCaptureError('')
     try {
-      const response = await apiGetRaw(`/api/ncc/sessions/${id}/capture`)
-      if (!response.ok) throw new Error(`Capture download failed (HTTP ${response.status}).`)
-      const url = URL.createObjectURL(await response.blob())
-      const link = document.createElement('a')
-      link.href = url
-      link.download = 'coinline-ncc-redacted.pcapng'
-      link.click()
-      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+      await apiDownload(`/api/ncc/sessions/${id}/capture`, 'coinline-ncc-redacted.pcapng')
     } catch (e) {
       setCaptureError(e instanceof Error ? e.message : 'Capture download failed.')
     } finally {

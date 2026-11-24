@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Console = {
   customer: { id: string; name: string; code: string; createdAtUtc?: string }
@@ -23,7 +23,7 @@ export function CustomerDetail() {
     if (!id) return
     let c = false
     setErr(null)
-    fetch(`/api/operator/customers/${id}/console`, { headers })
+    apiFetch(`/api/operator/customers/${id}/console`)
       .then((r) => {
         if (r.status === 404) throw new Error('Not found')
         if (!r.ok) throw new Error(String(r.status))

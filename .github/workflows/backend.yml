@@ -27,6 +27,20 @@ jobs:
     name: dotnet build + test (.NET 9)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: coinline_auth_test
+          POSTGRES_PASSWORD: coinline_auth_test
+          POSTGRES_DB: coinline_auth_test
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U coinline_auth_test -d coinline_auth_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 15
     defaults:
       run:
         working-directory: backend
@@ -67,6 +81,7 @@ jobs:
         env:
           DOTNET_CLI_TELEMETRY_OPTOUT: "1"
           DOTNET_NOLOGO: "1"
+          COINLINE_POSTGRES_AUTH_TEST_CONNECTION: Host=127.0.0.1;Port=${{ job.services.postgres.ports[5432] }};Database=coinline_auth_test;Username=coinline_auth_test;Password=coinline_auth_test
 
       - name: Upload test results
         if: always()

@@ -22,8 +22,8 @@ permissions:
 
 jobs:
   build-and-test:
-    name: npm ci + build + vitest
-    runs-on: ubuntu-latest
+    name: Build, Vitest and browser workflow
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     defaults:
       run:
@@ -52,6 +52,23 @@ jobs:
         run: npm run test:unit
         env:
           CI: "true"
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Inspect a failed download in the console
+        run: npm run e2e -- e2e/failed-download.spec.ts
+        env:
+          CI: "true"
+
+      - name: Upload Playwright failure traces
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failed-download
+          path: web/test-results/**/trace.zip
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload build output
         if: success()

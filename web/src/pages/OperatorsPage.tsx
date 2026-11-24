@@ -1,8 +1,7 @@
 import type { FormEvent } from 'react'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { ErrorBanner } from '../components/AppStates'
-
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
+import { apiFetch, apiPostRaw } from '../api/client'
 
 type Account = {
   id: string
@@ -23,26 +22,32 @@ export function OperatorsPage() {
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
 
-  async function load() {
-    const r = await fetch('/api/auth/accounts', { headers })
-    if (!r.ok) throw new Error(String(r.status))
-    setRows((await r.json()) as Account[])
-  }
+  const load = useCallback(async () => {
+    setErr(null)
+    try {
+      const r = await apiFetch('/api/auth/accounts')
+      if (!r.ok) {
+        setErr(r.status === 401 ? 'Sign in again to view People.'
+          : r.status === 403 ? 'An administrator account is required to view People.'
+          : `Could not load People (HTTP ${r.status}). Try again.`)
+        return
+      }
+      setRows((await r.json()) as Account[])
+    } catch {
+      setErr('Could not read the People API response. Try again.')
+    }
+  }, [])
 
   useEffect(() => {
-    void load().catch((e) => setErr(e instanceof Error ? e.message : 'error'))
-  }, [])
+    void load()
+  }, [load])
 
   async function onCreate(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch('/api/auth/accounts', {
-        method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, displayName, password, role }),
-      })
+      const r = await apiPostRaw('/api/auth/accounts', { username, displayName, password, role })
       if (!r.ok) {
         const body = (await r.json().catch(() => null)) as { error?: string } | null
         throw new Error(body?.error ?? String(r.status))
@@ -60,17 +65,21 @@ export function OperatorsPage() {
 
   async function setEnabled(row: Account, enabled: boolean) {
     setErr(null)
-    const r = await fetch(`/api/auth/accounts/${row.id}`, {
-      method: 'PUT',
-      headers: { ...headers, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    })
-    if (!r.ok) {
-      const body = (await r.json().catch(() => null)) as { error?: string } | null
-      setErr(body?.error ?? 'Could not update that person')
-      return
+    try {
+      const r = await apiFetch(`/api/auth/accounts/${row.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      })
+      if (!r.ok) {
+        const body = (await r.json().catch(() => null)) as { error?: string } | null
+        setErr(body?.error ?? `Could not update that person (HTTP ${r.status}).`)
+        return
+      }
+      await load()
+    } catch {
+      setErr('Could not update that person. Try again.')
     }
-    await load()
   }
 
   return (
@@ -78,6 +87,7 @@ export function OperatorsPage() {
       <h1>People</h1>
       <p className="page-intro">People who can sign in. The lab account is operator.</p>
       {err && <ErrorBanner message={err} />}
+      {err && !rows && <button type="button" onClick={() => void load()}>Retry loading People</button>}
       <form onSubmit={(e) => void onCreate(e)} className="row-actions">
         <label>
           Username
@@ -106,11 +116,11 @@ export function OperatorsPage() {
             ))}
           </select>
         </label>
-        <button type="submit" disabled={saving}>
+        <button type="submit" disabled={saving || !rows}>
           {saving ? 'Saving…' : 'Add person'}
         </button>
       </form>
-      {!rows && <p>Loading…</p>}
+      {!rows && !err && <p>Loading…</p>}
       {rows && (
         <table>
           <thead>

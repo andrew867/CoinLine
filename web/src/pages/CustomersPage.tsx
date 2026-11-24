@@ -2,8 +2,8 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = { id: string; name: string; code: string; createdAtUtc?: string }
 
@@ -16,7 +16,7 @@ export function CustomersPage() {
 
   const load = () => {
     setErr(null)
-    fetch('/api/customers', { headers })
+    apiFetch('/api/customers')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>
@@ -34,9 +34,9 @@ export function CustomersPage() {
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch('/api/customers', {
+      const r = await apiFetch('/api/customers', {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name.trim(), code: code.trim() }),
       })
       if (!r.ok) throw new Error(`${r.status}`)

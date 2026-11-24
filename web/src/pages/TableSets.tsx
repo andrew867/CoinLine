@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -22,7 +22,7 @@ export function TableSets() {
   const [targetFirmwareVersionId, setTargetFirmwareVersionId] = useState('')
 
   function load() {
-    fetch('/api/tables/sets', { headers })
+    apiFetch('/api/tables/sets')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>
@@ -40,9 +40,9 @@ export function TableSets() {
     const trimmed = name.trim()
     if (!trimmed) return
     setErr(null)
-    const r = await fetch('/api/tables/sets', {
+    const r = await apiFetch('/api/tables/sets', {
       method: 'POST',
-      headers: { ...headers, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: trimmed, customerId: null, isDefault: false, targetFirmwareVersionId: targetFirmwareVersionId || null }),
     })
     if (!r.ok) {

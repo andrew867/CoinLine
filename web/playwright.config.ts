@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test'
 
+const previewUrl = 'http://127.0.0.1:4173'
+const externalUrl = process.env.PLAYWRIGHT_BASE_URL
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -7,12 +10,12 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   reporter: 'list',
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://localhost:5173',
-    trace: 'on-first-retry',
+    baseURL: externalUrl ?? (process.env.CI ? previewUrl : 'http://localhost:5173'),
+    trace: 'retain-on-failure',
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  webServer: process.env.CI
-    ? undefined
+  webServer: externalUrl ? undefined : process.env.CI
+    ? { command: 'npm run preview -- --host 127.0.0.1 --port 4173 --strictPort', url: previewUrl }
     : {
         command: 'npm run dev',
         url: 'http://localhost:5173',

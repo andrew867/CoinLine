@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { terminalStatusLabel } from '../components/StatusBadge'
+import { apiFetch } from '../api/client'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -32,7 +32,7 @@ export function TerminalsList() {
     if (family) query.set('terminalFamilyId', family)
     if (filters.search) query.set('q', filters.search)
     if (filters.region) query.set('regionCode', filters.region)
-    fetch('/api/terminals?' + query, { headers })
+    apiFetch('/api/terminals?' + query)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>

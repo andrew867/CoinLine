@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { apiGet } from '../api/client'
+import { apiFetch, apiGet } from '../api/client'
 import './InmateFeaturesPage.css'
 
 type Setting = boolean | number | string | null
@@ -19,7 +19,6 @@ type Draft = Omit<Row, 'id'> & { id?: string; revision?: number; settings: Recor
 type Errors = Record<string, string[]>
 type Failure = { error?: string; errors?: Errors }
 
-const headers = { 'Content-Type': 'application/json', 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 const route = '/inmate-features'
 const endpoint = '/api/inmate-features'
 
@@ -117,8 +116,8 @@ function InmateFeatureEditor({ id, schema, onSaved, onDeleted, onEdit }: {
     setBusy(true)
     setFailure({})
     try {
-      const response = await fetch(draft.id ? `${endpoint}/${draft.id}` : endpoint, {
-        method: draft.id ? 'PUT' : 'POST', headers, body: JSON.stringify(draft),
+      const response = await apiFetch(draft.id ? `${endpoint}/${draft.id}` : endpoint, {
+        method: draft.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draft),
       })
       if (!response.ok) {
         setFailure(await readFailure(response))
@@ -140,8 +139,8 @@ function InmateFeatureEditor({ id, schema, onSaved, onDeleted, onEdit }: {
     setBusy(true)
     setFailure({})
     try {
-      const response = await fetch(`${endpoint}/${draft.id}?confirm=true&revision=${draft.revision}`, {
-        method: 'DELETE', headers,
+      const response = await apiFetch(`${endpoint}/${draft.id}?confirm=true&revision=${draft.revision}`, {
+        method: 'DELETE',
       })
       if (response.ok) onDeleted()
       else setFailure(await readFailure(response))

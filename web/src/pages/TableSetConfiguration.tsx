@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
-import { apiGet, apiPost, apiPostRaw } from '../api/client'
+import { apiFetch, apiGet, apiPost, apiPostRaw } from '../api/client'
 import { AdvertisingSimulator } from './AdvertisingSimulator'
 import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback'
 import type { ExchangeFile } from './localDialingExchangeData'
@@ -125,7 +125,7 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
   useEffect(() => {
     if (!expanded) return
     const controller = new AbortController()
-    void fetch(endpoint, { signal: controller.signal })
+    void apiFetch(endpoint, { signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not load text advertising.')
         const data = await response.json() as AdvertisingSnapshot
@@ -170,13 +170,13 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
     setFeedback('')
     try {
       const { revision, sha256 } = snapshot
-      const response = await fetch(endpoint, {
+      const response = await apiFetch(endpoint, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slots, revision, sha256 }),
       })
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not save advertising.')
       setDirty(false)
       onSaved()
-      const latest = await fetch(endpoint)
+      const latest = await apiFetch(endpoint)
       if (!latest.ok) {
         setSnapshot(null)
         throw new Error('Advertising was saved. Refresh the page to load the updated record.')

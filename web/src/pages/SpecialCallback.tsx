@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { apiGet, apiPostRaw } from '../api/client'
+import { apiFetch, apiGet, apiPostRaw } from '../api/client'
 
 type Callback = {
   revision: number
@@ -12,8 +12,6 @@ type Callback = {
   returnedAtUtc: string | null
   cancelledAtUtc: string | null
 }
-
-const headers = { 'Content-Type': 'application/json', 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 function localInput(value: string | null | undefined) {
   if (!value) return ''
@@ -71,7 +69,7 @@ export function SpecialCallback({ terminalId }: { terminalId: string }) {
     try {
       const response = cancel
         ? await apiPostRaw(`${endpoint}/cancel`, { revision: callback?.revision })
-        : await fetch(endpoint, { method: 'PUT', headers, body: JSON.stringify({
+        : await apiFetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
           revision: callback?.revision ?? null, dueAtUtc: moment?.toISOString() ?? null,
           terminalClockOffsetMinutes: Number(offset), deliverAssignedTables: tables,
         }) })

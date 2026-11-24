@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type SearchResp = {
   query: string
@@ -30,7 +30,7 @@ export function GlobalSearch() {
         try {
           setErr(null)
           setSearching(true)
-          const r = await fetch(`/api/operator/search?q=${encodeURIComponent(q.trim())}&limit=12`, { headers })
+          const r = await apiFetch(`/api/operator/search?q=${encodeURIComponent(q.trim())}&limit=12`)
           if (!r.ok) throw new Error(String(r.status))
           const j = (await r.json()) as SearchResp
           if (!cancelled) setData(j)
