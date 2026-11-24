@@ -4,6 +4,13 @@ const keys = {
 }
 export type ScreenPermissions = Record<string, number>
 
+export const permissionOperation = { read: 1, update: 2, add: 4, delete: 8 } as const
+
+export function canPerform(screen: string, operation: number): boolean {
+  const profile = consoleSession.permissions()
+  return consoleSession.role() === 'Admin' || profile === null || ((profile[screen] ?? 0) & operation) === operation
+}
+
 export const consoleSession = {
   token: () => localStorage.getItem(keys.token),
   apiKey: () => localStorage.getItem(keys.apiKey),

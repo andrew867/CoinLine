@@ -5,6 +5,7 @@ import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
@@ -136,6 +137,8 @@ type GroupMembership = {
 type GroupSourcePhone = { id: string; displayName: string; terminalIdHex: string }
 
 function PhoneGroups({ terminalId }: { terminalId: string }) {
+  const canAdd = canPerform('memberships', op.add)
+  const canDelete = canPerform('memberships', op.delete)
   const [groups, setGroups] = useState<GroupMembership | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
@@ -158,7 +161,7 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
   }, [endpoint])
 
   async function save() {
-    if (!groups) return
+    if (!groups || (!canAdd && !canDelete)) return
     setBusy(true)
     setNotice('')
     setError('')
@@ -198,7 +201,7 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
   }
 
   async function copyGroups() {
-    if (!groups || !source) return
+    if (!groups || !source || !canAdd) return
     setBusy(true)
     setError('')
     setNotice('')
@@ -223,7 +226,7 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
       {notice && <p role="status">{notice}</p>}
       {groups && groups.available.length > 0 && (
         <>
-        <form className="row-actions" onSubmit={(event) => { event.preventDefault(); void findSource() }}>
+        {canAdd && <form className="row-actions" onSubmit={(event) => { event.preventDefault(); void findSource() }}>
           <label>Find a phone to copy groups from
             <input type="search" value={lookup} disabled={busy} onChange={event => {
               setLookup(event.target.value)
@@ -241,7 +244,7 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
             </label>
             <button type="button" disabled={busy || !source} onClick={() => void copyGroups()}>Review copied groups</button>
           </>)}
-        </form>
+        </form>}
         <form onSubmit={(event) => { event.preventDefault(); void save() }}>
           <fieldset disabled={busy}>
             <legend>Participating groups</legend>
@@ -251,7 +254,8 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
             {groups.available.map((group) => (
               <label key={group.id} style={{ display: 'block' }}>
                 <input type="checkbox" checked={selected.includes(group.id)}
-                  disabled={selected.length >= groups.limit && !selected.includes(group.id)}
+                  disabled={(groups.groupIds.includes(group.id) ? !canDelete : !canAdd)
+                    || (selected.length >= groups.limit && !selected.includes(group.id))}
                   onChange={(event) => {
                     setSelected(event.target.checked ? [...selected, group.id] : selected.filter((id) => id !== group.id))
                     setNotice('')
@@ -260,7 +264,7 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
             ))}
             {selected.length > 1 && (
               <label>Primary group
-                <select value={selected[0]} onChange={(event) => {
+                <select value={selected[0]} disabled={!canAdd || !canDelete} onChange={(event) => {
                   const group = event.target.value
                   setSelected([group, ...selected.filter((id) => id !== group)])
                   setNotice('')
@@ -272,7 +276,7 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
               </label>
             )}
           </fieldset>
-          <button type="submit" disabled={busy || selected.length > groups.limit || selected.join(',') === groups.groupIds.join(',')}>
+          <button type="submit" disabled={busy || (!canAdd && !canDelete) || selected.length > groups.limit || selected.join(',') === groups.groupIds.join(',')}>
             Save phone groups
           </button>
         </form>
@@ -552,7 +556,7 @@ export function TerminalDetail() {
       {familyNotice && <p role="status">{familyNotice}</p>}
       <TerminalIdentityPanel key={term.id} terminalId={term.id} wireId={term.terminalIdHex} family={term.terminalFamilyId} />
       <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />
-      <PhoneGroups key={`groups-${term.id}`} terminalId={term.id} />
+      {canPerform('memberships', op.read) && <PhoneGroups key={`groups-${term.id}`} terminalId={term.id} />}
 
       <h2>Phone session</h2>
       <div data-testid="ncc-sessions">

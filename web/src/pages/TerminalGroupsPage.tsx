@@ -2,11 +2,13 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../components/AppStates'
 import { apiFetch } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { GroupPhones } from './GroupPhones'
 
 type GroupFields = { name: string; code: string | null; description: string | null }
 type GroupRow = GroupFields & { id: string; customerId: string | null; terminalCount: number; revision: number }
 type Cust = { id: string; name: string; code: string }
+type GroupOption = Pick<GroupRow, 'id' | 'name'>
 
 async function saveGroup(path: string, method: 'POST' | 'PUT', details: GroupFields & { customerId?: string | null; revision?: number }) {
   const response = await apiFetch(path, {
@@ -18,30 +20,51 @@ async function saveGroup(path: string, method: 'POST' | 'PUT', details: GroupFie
 }
 
 export function TerminalGroupsPage() {
+  const canRead = canPerform('groups', op.read)
+  const canAdd = canPerform('groups', op.add)
+  const canUpdate = canPerform('groups', op.update)
+  const canDelete = canPerform('groups', op.delete)
+  const canReadMembers = canPerform('memberships', op.read)
+  const canReadCustomers = canPerform('customers', op.read)
   const [rows, setRows] = useState<GroupRow[] | null>(null)
+  const [options, setOptions] = useState<GroupOption[]>([])
   const [customers, setCustomers] = useState<Cust[]>([])
   const [customerId, setCustomerId] = useState('')
   const [name, setName] = useState('')
   const [code, setCode] = useState('')
   const [description, setDescription] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
   const [saving, setSaving] = useState(false)
   const [managing, setManaging] = useState<string | null>(null)
 
   async function load() {
-    const list = await apiFetch('/api/terminal-groups')
-    if (!list.ok) throw new Error(String(list.status))
-    setRows(await list.json() as GroupRow[])
+    if (canRead) {
+      const list = await apiFetch('/api/terminal-groups')
+      if (!list.ok) throw new Error(`Could not read phone groups (HTTP ${list.status}).`)
+      const current = await list.json() as GroupRow[]
+      setRows(current)
+      setOptions(current)
+    } else if (canReadMembers) {
+      const list = await apiFetch('/api/terminal-groups/membership-options')
+      if (!list.ok) throw new Error(`Could not read group choices (HTTP ${list.status}).`)
+      setOptions(await list.json() as GroupOption[])
+    }
   }
 
   useEffect(() => {
-    void apiFetch('/api/customers')
-      .then((r) => r.json() as Promise<Cust[]>)
-      .then((c) => {
-        setCustomers(c)
-        setCustomerId((prev) => prev || (c[0]?.id ?? ''))
-      })
-      .catch(() => {})
+    if (canReadCustomers && (canRead || canAdd)) {
+      void apiFetch('/api/customers')
+        .then((r) => {
+          if (!r.ok) throw new Error(String(r.status))
+          return r.json() as Promise<Cust[]>
+        })
+        .then((c) => {
+          setCustomers(c)
+          setCustomerId((prev) => prev || (c[0]?.id ?? ''))
+        })
+        .catch(() => {})
+    }
     void load().catch((e) => setErr(e instanceof Error ? e.message : 'error'))
   }, [])
 
@@ -49,6 +72,7 @@ export function TerminalGroupsPage() {
     e.preventDefault()
     setSaving(true)
     setErr(null)
+    setNotice('')
     try {
       await saveGroup('/api/terminal-groups', 'POST',
         { name, code, description, customerId: customerId || null })
@@ -56,6 +80,7 @@ export function TerminalGroupsPage() {
       setCode('')
       setDescription('')
       await load()
+      setNotice('Phone group added.')
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'create failed')
     } finally {
@@ -87,15 +112,16 @@ export function TerminalGroupsPage() {
     await load()
   }
 
-  const customerName = (id: string | null) => customers.find((c) => c.id === id)?.name ?? '—'
-  const managedGroup = rows?.find(group => group.id === managing)
+  const customerName = (id: string | null) => customers.find((c) => c.id === id)?.name ?? (id ? 'Assigned' : '—')
+  const managedGroup = options.find(group => group.id === managing)
 
   return (
     <div>
       <h1>Phone groups</h1>
       <p>A group is a named set of phones, such as one route or one shelter.</p>
       {err && <ErrorBanner message={err} />}
-      <form onSubmit={(e) => void onCreate(e)} className="row-actions">
+      {notice && <p role="status">{notice}</p>}
+      {canAdd && <form onSubmit={(e) => void onCreate(e)} className="row-actions">
         <label>
           Name
           <input value={name} onChange={(e) => setName(e.target.value)} required minLength={2} />
@@ -106,23 +132,24 @@ export function TerminalGroupsPage() {
         <label>Description
           <input value={description} onChange={e => setDescription(e.target.value)} />
         </label>
-        <label>
+        {canReadCustomers && <label>
           Customer
           <select value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+            <option value="">All customers</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
             ))}
           </select>
-        </label>
+        </label>}
         <button type="submit" disabled={saving}>
           {saving ? 'Saving…' : 'Add group'}
         </button>
-      </form>
-      {!rows && <p>Loading…</p>}
-      {rows && rows.length === 0 && <p>No groups yet.</p>}
-      {rows && rows.length > 0 && (
+      </form>}
+      {canRead && !rows && !err && <p>Loading…</p>}
+      {canRead && rows && rows.length === 0 && <p>No groups yet.</p>}
+      {canRead && rows && rows.length > 0 && (
         <table>
           <thead>
             <tr>
@@ -140,6 +167,9 @@ export function TerminalGroupsPage() {
                 key={`${g.id}-${g.revision}`}
                 group={g}
                 customer={customerName(g.customerId)}
+                canUpdate={canUpdate}
+                canDelete={canDelete}
+                canManage={canReadMembers}
                 onSave={(details) => update(g, details)}
                 onRemove={() => void remove(g.id)}
                 onManage={() => setManaging(g.id)}
@@ -148,7 +178,14 @@ export function TerminalGroupsPage() {
           </tbody>
         </table>
       )}
-      {managedGroup && <GroupPhones key={managedGroup.id} group={managedGroup} groups={rows ?? []} onSaved={load} />}
+      {!canRead && canReadMembers && <label>Manage group memberships
+        <select value={managing ?? ''} onChange={event => setManaging(event.target.value || null)}>
+          <option value="">Choose a phone group</option>
+          {options.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+        </select>
+      </label>}
+      {!canRead && !canReadMembers && !canAdd && <p>Read permission is required to select existing groups.</p>}
+      {canReadMembers && managedGroup && <GroupPhones key={managedGroup.id} group={managedGroup} groups={options} onSaved={load} />}
     </div>
   )
 }
@@ -156,12 +193,18 @@ export function TerminalGroupsPage() {
 function GroupEditor({
   group,
   customer,
+  canUpdate,
+  canDelete,
+  canManage,
   onSave,
   onRemove,
   onManage,
 }: {
   group: GroupRow
   customer: string
+  canUpdate: boolean
+  canDelete: boolean
+  canManage: boolean
   onSave: (details: GroupFields) => Promise<void>
   onRemove: () => void
   onManage: () => void
@@ -173,27 +216,27 @@ function GroupEditor({
   return (
     <tr>
       <td>
-        <input data-field-kind="mandatory" value={name} onChange={(e) => setName(e.target.value)} aria-label={`Name for ${group.name}`} />
+        <input data-field-kind="mandatory" value={name} readOnly={!canUpdate} onChange={(e) => setName(e.target.value)} aria-label={`Name for ${group.name}`} />
       </td>
       <td>
-        <input data-field-kind="key" value={code} onChange={e => setCode(e.target.value)} maxLength={6} aria-label={`Group ID for ${group.name}`} />
+        <input data-field-kind="key" value={code} readOnly={!canUpdate} onChange={e => setCode(e.target.value)} maxLength={6} aria-label={`Group ID for ${group.name}`} />
       </td>
       <td>
-        <input value={description} onChange={e => setDescription(e.target.value)} aria-label={`Description for ${group.name}`} />
+        <input value={description} readOnly={!canUpdate} onChange={e => setDescription(e.target.value)} aria-label={`Description for ${group.name}`} />
       </td>
       <td>{customer}</td>
       <td>
         {group.terminalCount}{' '}
-        <button type="button" className="quiet" onClick={onManage} aria-label={`Manage phones in ${group.name}`}>Manage</button>
+        <button type="button" className="quiet" disabled={!canManage} onClick={onManage} aria-label={`Manage phones in ${group.name}`}>Manage</button>
       </td>
       <td className="row-actions">
-        <button type="button" className="quiet" disabled={saving} onClick={() => {
+        <button type="button" className="quiet" disabled={saving || !canUpdate} onClick={() => {
           setSaving(true)
           void onSave({ name, code, description }).finally(() => setSaving(false))
         }}>
           Save group
         </button>
-        <button type="button" className="quiet" onClick={onRemove}>
+        <button type="button" className="quiet" disabled={!canDelete} onClick={onRemove}>
           Remove
         </button>
       </td>

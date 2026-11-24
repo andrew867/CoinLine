@@ -37,7 +37,7 @@ public static class OperatorPermissions
             ("Terminals", A, "Create"), ("Terminals", U, "SetFamily SetFirmware Update SetWireId"));
         Screen("inventory", "Phone inventory", ("TerminalInventory", R, "Get"), ("TerminalInventory", U, "Save"));
         Screen("memberships", "Phone group membership",
-            ("Terminals", R, "Groups"), ("TerminalGroups", R, "Phones"),
+            ("Terminals", R, "Groups"), ("TerminalGroups", R, "Phones MembershipOptions"),
             ("Terminals", A | D, "AssignGroup AssignGroups"), ("TerminalGroups", A | D, "EditPhones"));
         Screen("phone-status", "Terminal status",
             ("Terminals", R, "Events"), ("Terminals", U, "PostStatus"), ("FieldEvents", R, "List"),

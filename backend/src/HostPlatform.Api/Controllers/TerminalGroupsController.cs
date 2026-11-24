@@ -117,6 +117,11 @@ public sealed class TerminalGroupsController(HostPlatformDbContext db) : Control
             .OrderBy(phone => phone.TerminalIdHex).ThenBy(phone => phone.Id).ToListAsync(ct));
     }
 
+    [HttpGet("membership-options")]
+    public async Task<ActionResult<object>> MembershipOptions(CancellationToken ct) =>
+        Ok(await db.TerminalGroups.AsNoTracking().OrderBy(group => group.Name)
+            .Select(group => new { group.Id, group.Name }).ToListAsync(ct));
+
     [HttpPut("{id:guid}/phones")]
     public async Task<ActionResult<object>> EditPhones(Guid id, [FromBody] GroupPhoneEdit[] edits, CancellationToken ct)
     {

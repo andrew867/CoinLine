@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch, apiGet } from '../api/client'
 import { ErrorBanner } from '../components/AppStates'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 type Group = { id: string; name: string }
 type Phone = {
@@ -10,6 +11,9 @@ type Phone = {
 }
 
 export function GroupPhones({ group, groups, onSaved }: { group: Group; groups: Group[]; onSaved: () => Promise<void> }) {
+  const canAdd = canPerform('memberships', op.add)
+  const canDelete = canPerform('memberships', op.delete)
+  const canReadPhones = canPerform('phones', op.read)
   const [phones, setPhones] = useState<Phone[] | null>(null)
   const [edits, setEdits] = useState<Record<string, boolean>>({})
   const [source, setSource] = useState('')
@@ -30,7 +34,7 @@ export function GroupPhones({ group, groups, onSaved }: { group: Group; groups: 
   }, [endpoint])
 
   async function copyPhones() {
-    if (!phones || !source) return
+    if (!phones || !source || !canAdd) return
     setBusy(true)
     setError('')
     setMessage('')
@@ -57,7 +61,7 @@ export function GroupPhones({ group, groups, onSaved }: { group: Group; groups: 
   }
 
   async function save() {
-    if (!phones) return
+    if (!phones || (!canAdd && !canDelete)) return
     setBusy(true)
     setError('')
     setMessage('')
@@ -95,7 +99,7 @@ export function GroupPhones({ group, groups, onSaved }: { group: Group; groups: 
     {error && <ErrorBanner message={error} />}
     {message && <p role="status">{message}</p>}
     {phones && <>
-      <div className="row-actions">
+      {canAdd && <div className="row-actions">
         <label>Copy phones from group
           <select value={source} disabled={busy} onChange={event => setSource(event.target.value)}>
             <option value="">Choose a source group</option>
@@ -103,7 +107,7 @@ export function GroupPhones({ group, groups, onSaved }: { group: Group; groups: 
           </select>
         </label>
         <button type="button" disabled={busy || !source} onClick={() => void copyPhones()}>Review copied phones</button>
-      </div>
+      </div>}
       <div className="row-actions">
         <label>Find phones
           <input type="search" value={query} onChange={event => setQuery(event.target.value)} />
@@ -114,10 +118,10 @@ export function GroupPhones({ group, groups, onSaved }: { group: Group; groups: 
       {!!visible?.length && <table>
         <thead><tr><th>Phone</th><th>Terminal ID</th><th>Membership</th></tr></thead>
         <tbody>{visible.map(phone => <tr key={phone.id}>
-          <td><Link to={`/terminals/${phone.id}`}>{phone.displayName}</Link></td>
+          <td>{canReadPhones ? <Link to={`/terminals/${phone.id}`}>{phone.displayName}</Link> : phone.displayName}</td>
           <td>{phone.terminalIdHex}</td>
           <td><label><input type="checkbox" checked={edits[phone.id] ?? phone.member}
-            disabled={busy || (!phone.member && phone.atLimit)}
+            disabled={busy || (phone.member ? !canDelete : !canAdd || !phone.eligible || phone.atLimit)}
             aria-label={`Membership for ${phone.displayName} ${phone.terminalIdHex}`}
             onChange={event => {
               const pending = { ...edits }
@@ -126,10 +130,10 @@ export function GroupPhones({ group, groups, onSaved }: { group: Group; groups: 
               setEdits(pending)
               setMessage('')
             }} /> {phone.id in edits ? (edits[phone.id] ? 'Add' : 'Remove')
-              : phone.primary ? 'Primary' : phone.atLimit && !phone.member ? 'Group limit reached' : 'Member'}</label></td>
+              : phone.primary ? 'Primary' : phone.member ? 'Member' : phone.atLimit ? 'Group limit reached' : 'Not a member'}</label></td>
         </tr>)}</tbody>
       </table>}
-      <button type="button" disabled={busy || changes === 0} onClick={() => void save()}>
+      <button type="button" disabled={busy || changes === 0 || (!canAdd && !canDelete)} onClick={() => void save()}>
         Save {changes === 1 ? '1 membership change' : `${changes} membership changes`}
       </button>
     </>}

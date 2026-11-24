@@ -121,17 +121,28 @@ public sealed class PostgresAuthAccountTests
         using (var denied = await userClient.PutAsJsonAsync($"{groups}/{groupId}/phones",
             new[] { new { terminalId = phone.Id, revision = membershipRevision, member = false } }))
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-        using (var removed = await adminClient.PutAsJsonAsync(membershipPath,
-            new { groupIds = Array.Empty<Guid>(), revision = membershipRevision }))
+        using (var changed = await adminClient.PutAsJsonAsync(profilePath, new { revision = 1,
+            permissions = new Dictionary<string, int> { ["memberships"] = 1 | 8 } }))
+            changed.EnsureSuccessStatusCode();
+        await SignIn(userClient, user);
+        using (var denied = await userClient.GetAsync(groups))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        var choices = await userClient.GetFromJsonAsync<JsonElement>($"{groups}/membership-options");
+        var choice = Assert.Single(choices.EnumerateArray(), item => item.GetProperty("id").GetGuid() == groupId);
+        Assert.Equal(new[] { "id", "name" }, choice.EnumerateObject().Select(field => field.Name).Order().ToArray());
+        using (var read = await userClient.GetAsync($"{groups}/{groupId}/phones"))
+            read.EnsureSuccessStatusCode();
+        using (var removed = await userClient.PutAsJsonAsync($"{groups}/{groupId}/phones",
+            new[] { new { terminalId = phone.Id, revision = membershipRevision, member = false } }))
             removed.EnsureSuccessStatusCode();
-        using (var changed = await adminClient.PutAsJsonAsync(profilePath, new { revision = 1, permissions = new Dictionary<string, int>() }))
+        using (var changed = await adminClient.PutAsJsonAsync(profilePath, new { revision = 2, permissions = new Dictionary<string, int>() }))
             changed.EnsureSuccessStatusCode();
         await SignIn(userClient, user);
         using (var denied = await userClient.GetAsync(phones))
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using (var self = await userClient.GetAsync("/api/auth/me"))
             self.EnsureSuccessStatusCode();
-        using (var reset = await adminClient.PutAsJsonAsync(profilePath, new { revision = 2, permissions = (object?)null }))
+        using (var reset = await adminClient.PutAsJsonAsync(profilePath, new { revision = 3, permissions = (object?)null }))
             reset.EnsureSuccessStatusCode();
         await SignIn(userClient, user);
         using (var allowed = await userClient.GetAsync(phones))
