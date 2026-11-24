@@ -180,6 +180,42 @@ public sealed class NativeTableLayoutTests
     }
 
     [Fact]
+    public void Time_of_day_discounts_encode_the_day_group_payment_bits_and_embedded_discount_index()
+    {
+        var record = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(152)));
+        record[25] = 0xC8;
+        record[84] = 0x80;
+        record[94] = 0x7A;
+        var layout = NativeTableLayouts.Find(152, record)!;
+        Assert.Equal("Weekdays, period 1", layout.Sections.Single(section => section.Key == "period-0").Label);
+        Assert.Equal("Holidays, period 2", layout.Sections.Single(section => section.Key == "period-7").Label);
+        var changes = new Dictionary<string, string>
+        {
+            ["holiday-9.month"] = "2", ["holiday-9.day"] = "29",
+            ["period-0.endHour"] = "24", ["period-0.localIndex"] = "0", ["period-0.localPayment"] = "3",
+            ["period-7.startHour"] = "22", ["period-7.endHour"] = "2",
+            ["period-7.internationalIndex"] = "9", ["period-7.internationalPayment"] = "2"
+        };
+        var edited = layout.Apply(record, changes);
+        Assert.Equal(new byte[] { 2, 29 }, edited[19..21]);
+        Assert.Equal(new byte[] { 0, 0, 24, 0, 0xF0, 0, 0, 0 }, edited[21..29]);
+        Assert.Equal(new byte[] { 22, 0, 2, 0, 0, 0, 0, 0xA9 }, edited[77..85]);
+        Assert.Equal(record[85..], edited[85..]);
+        Assert.Equal(edited, layout.Apply(edited, new Dictionary<string, string> { ["period-0.local"] = "240" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(edited,
+            new Dictionary<string, string> { ["period-0.local"] = "240", ["period-0.localPayment"] = "1" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(edited,
+            new Dictionary<string, string> { ["period-0.endMinute"] = "1" }));
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(edited,
+            new Dictionary<string, string> { ["holiday-9.month"] = "4", ["holiday-9.day"] = "31" }));
+        var records = new Dictionary<int, byte[]> { [152] = edited };
+        Assert.Contains("MT93", Assert.Single(NativeTableSetReview.Build(records).Findings).Message);
+        var discountRates = Assert.Single(NativeTableLayouts.DraftTemplates(93), item => item.Profile != NativeTableLayouts.MultiPay);
+        records[93] = NativeTableLayouts.CreateDraftTemplate(discountRates);
+        Assert.Empty(NativeTableSetReview.Build(records).Findings);
+    }
+
+    [Fact]
     public void Older_card_service_codes_use_bcd_and_preserve_other_entries()
     {
         var record = new byte[661];

@@ -9,6 +9,7 @@ public static partial class NativeTableLayouts
     public const byte CallInRecord = 35;
     public const byte AnswerSupervisionRecord = 49;
     public const byte MessagingRecord = 68;
+    internal const byte TimeDiscountRecord = 152;
     private const int LaterAnswerSupervisionLength = 263;
     private const string Later = "Later packed profile";
     private static readonly (int, string)[] PaymentKinds =
@@ -22,6 +23,8 @@ public static partial class NativeTableLayouts
     private static readonly (int, string)[] MessagingTones = [.. KeypadDigits, (13, "A"), (14, "B"), (15, "C"), (0, "D")];
     private static readonly (int, string)[] NumberingDigits =
         [.. KeypadDigits, (16, "0 or 1"), (17, "Any decimal digit"), (18, "2 through 9"), (19, "0 or 2 through 9"), (20, "Any keypad digit")];
+    private static readonly (string Key, string Label)[] DiscountZones =
+        [("local", "Local"), ("intra", "Intra-area"), ("inter", "Inter-area"), ("international", "International")];
     private static readonly IReadOnlyDictionary<(byte, int), NativeTableLayout[]> Layouts = Build()
         .GroupBy(layout => (layout.Number, layout.Length)).ToDictionary(group => group.Key, group => group.ToArray());
 
@@ -340,16 +343,7 @@ public static partial class NativeTableLayouts
 
         yield return new NativeTableLayout(151, 604, Later, InternationalRating());
 
-        yield return new NativeTableLayout(152, 95, Later, [.. Rows("holiday", 10, i => $"Holiday {i + 1}", (i, key) =>
-            [Field($"{key}.month", "Month", 1 + i * 2, max: 12), Field($"{key}.day", "Day of month", 2 + i * 2, max: 31)]),
-            .. Rows("period", 8, i => $"Band {i / 2 + 1}, period {i % 2 + 1}", (i, key) =>
-            {
-                var offset = 21 + i * 8;
-                return [Hour($"{key}.startHour", "Starts at hour", offset), Minute($"{key}.startMinute", "Start minute", offset + 1),
-                    Hour($"{key}.endHour", "Ends at hour", offset + 2), Minute($"{key}.endMinute", "End minute", offset + 3),
-                    Field($"{key}.local", "Local discount index", offset + 4), Field($"{key}.intra", "Intra-area discount index", offset + 5),
-                    Field($"{key}.inter", "Inter-area discount index", offset + 6), Field($"{key}.international", "International discount index", offset + 7)];
-            })]);
+        yield return new NativeTableLayout(TimeDiscountRecord, 95, Later, TimeDiscountSections());
     }
 
     private static NativeTableSection[] CallScreenRules(int count) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>

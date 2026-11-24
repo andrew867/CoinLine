@@ -290,7 +290,8 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
           {!changingCardFamily && current.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
             && !replacedDiscountFields.has(field.key)
             && ((number !== 35 && number !== 94) || !field.key.startsWith('start.'))
-            && (number !== 35 || !field.key.startsWith('adjust.'))).map((field) => (
+            && (number !== 35 || !field.key.startsWith('adjust.'))
+            && (number !== 152 || !/^period-\d+\.(local|intra|inter|international)$/.test(field.key))).map((field) => (
             <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}

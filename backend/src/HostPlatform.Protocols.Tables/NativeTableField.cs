@@ -362,7 +362,7 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             _ => Sections
         };
         var fields = sections.SelectMany(s => s.Fields).ToDictionary(f => f.Key, StringComparer.Ordinal);
-        ValidateClockChanges(original, fields, changes);
+        ValidateOverlappingFields(original, fields, changes);
         foreach (var (key, value) in changes)
         {
             if (!fields.TryGetValue(key, out var field) || value == null)
@@ -377,24 +377,28 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             NativeTableLayouts.ValidateCarrierChanges(original, edited);
         if (Number == CodeDownloadWire.MessageType && !original.SequenceEqual(edited) && CodeDownloadWire.ConfigurationIssue(edited) is { } issue)
             throw new InvalidOperationException(issue);
+        if (Number == NativeTableLayouts.TimeDiscountRecord)
+            NativeTableLayouts.ValidateTimeDiscountChanges(original, edited);
         return edited;
     }
 
-    private static void ValidateClockChanges(ReadOnlySpan<byte> original, Dictionary<string, NativeTableField> fields,
+    private void ValidateOverlappingFields(ReadOnlySpan<byte> original, Dictionary<string, NativeTableField> fields,
         IReadOnlyDictionary<string, string> changes)
     {
-        foreach (var clock in fields.Values)
+        foreach (var whole in fields.Values)
         {
-            if (clock.Encoding is not (TableFieldEncoding.TerminalCalendar or TableFieldEncoding.TerminalTime)
-                || !changes.TryGetValue(clock.Key, out var time))
+            var packedTime = whole.Encoding is TableFieldEncoding.TerminalCalendar or TableFieldEncoding.TerminalTime;
+            var discountByte = Number == NativeTableLayouts.TimeDiscountRecord && whole.Encoding == TableFieldEncoding.UInt8
+                && whole.Key.StartsWith("period-", StringComparison.Ordinal);
+            if ((!packedTime && !discountByte) || !changes.TryGetValue(whole.Key, out var packed))
                 continue;
             foreach (var (key, value) in changes)
             {
-                if (key == clock.Key || !fields.TryGetValue(key, out var part)
-                    || part.Offset >= clock.Offset + clock.Width || part.Offset + part.Width <= clock.Offset)
+                if (key == whole.Key || !fields.TryGetValue(key, out var part)
+                    || part.Offset >= whole.Offset + whole.Width || part.Offset + part.Width <= whole.Offset)
                     continue;
-                if (clock.Read(original) != time || part.Read(original) != value)
-                    throw new InvalidOperationException($"Change either {clock.Label} or its individual fields in this save.");
+                if (whole.Read(original) != packed || part.Read(original) != value)
+                    throw new InvalidOperationException($"Change either {whole.Label} or its individual fields in this save.");
             }
         }
     }

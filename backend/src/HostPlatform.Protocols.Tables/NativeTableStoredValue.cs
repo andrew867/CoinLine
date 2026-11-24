@@ -9,9 +9,6 @@ public static partial class NativeTableLayouts
     private const int DiscountValuesOffset = 81;
     private const int UnitLimitsOffset = 161;
 
-    private static readonly (string Key, string Label)[] DiscountZones =
-        [("local", "Local"), ("intra", "Intra-area"), ("inter", "Inter-area"), ("international", "International")];
-
     private static NativeTableField EncodedKey(string key, string label, int offset) =>
         new(key, label, offset, CredentialHex, 8, Help: "Enter the 16 hexadecimal characters supplied for this firmware slot. Leave blank to keep the stored bytes.");
 
@@ -45,7 +42,7 @@ public static partial class NativeTableLayouts
                         _ => Field($"{prefix}Later", $"{label} inactive additional value", offset + 1)
                     });
                 }
-                sections.Add(Section($"discount-{index}", $"Stored-value discount {index + 1}", fields.ToArray()));
+                sections.Add(Section($"discount-{index}", $"Discount rate {index + 1}", fields.ToArray()));
             }
         }
         else

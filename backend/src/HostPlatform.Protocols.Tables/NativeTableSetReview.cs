@@ -79,6 +79,11 @@ public static class NativeTableSetReview
             }
         }
 
+        var discountSchedule = Get(records, NativeTableLayouts.TimeDiscountRecord, 95);
+        if (discountSchedule != null && NativeTableLayouts.UsesTimeDiscountRates(discountSchedule) && Get(records, 93, 225) == null)
+            findings.Add(new(NativeTableLayouts.TimeDiscountRecord,
+                "The scheduled discounts refer to MT93. This set relies on the phone's existing compatible discount rates."));
+
         return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings);
     }
 
