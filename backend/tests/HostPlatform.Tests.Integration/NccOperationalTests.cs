@@ -7,11 +7,13 @@ using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
 using HostPlatform.Api.Hosting;
+using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
 using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace HostPlatform.Tests.Integration;
@@ -122,7 +124,6 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var outbound = Message(KnownId, [85, .. Encoding.ASCII.GetBytes(outboundSecret)]);
         var clear = Control(NccControl.Clr);
         await using var link = await OpenAsync();
-        var started = DateTime.UtcNow;
         await link.Stream.WriteAsync(inbound);
         var ack = await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5));
         AssertAck(ack);
@@ -140,6 +141,14 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{sessionId}", Json);
         Assert.Equal(2, detail.GetProperty("frames").GetArrayLength());
 
+        using var scope = fx.Factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        var storedTimes = await db.NccSessionFrames.AsNoTracking()
+            .Where(frame => frame.NccSessionId == sessionId)
+            .OrderBy(frame => frame.Sequence)
+            .Select(frame => frame.CreatedAtUtc)
+            .ToListAsync();
+
         using var response = await fx.Client.GetAsync($"/api/ncc/sessions/{sessionId}/capture");
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         Assert.Equal("application/x-pcapng", response.Content.Headers.ContentType!.MediaType);
@@ -151,7 +160,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(-1, capture.AsSpan().IndexOf(Encoding.ASCII.GetBytes(outboundSecret)));
         Assert.Equal(-1, capture.AsSpan().IndexOf(Encoding.ASCII.GetBytes(sessionId.ToString())));
         var packets = new List<(uint Direction, byte Control, uint Length)>();
-        var previous = started.AddTicks(-10);
+        var captureTimes = new List<DateTime>();
         for (var offset = 0; offset < capture.Length;)
         {
             var type = ReadUInt(offset);
@@ -160,9 +169,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             if (type == 6)
             {
                 var timestamp = ((ulong)ReadUInt(offset + 12) << 32) | ReadUInt(offset + 16);
-                var recorded = DateTime.UnixEpoch.AddTicks(checked((long)timestamp * 10));
-                Assert.InRange(recorded, previous, DateTime.UtcNow);
-                previous = recorded;
+                captureTimes.Add(DateTime.UnixEpoch.AddTicks(checked((long)timestamp * TimeSpan.TicksPerMicrosecond)));
                 Assert.Equal(1u, ReadUInt(offset + 20));
                 Assert.Equal(0x00040002u, ReadUInt(offset + 32));
                 packets.Add((ReadUInt(offset + 36), capture[offset + 28], ReadUInt(offset + 24)));
@@ -172,6 +179,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
 
         Assert.Equal([(1u, inbound[1], (uint)inbound.Length), (2u, ack[1], (uint)ack.Length),
             (2u, outbound[1], (uint)outbound.Length), (1u, clear[1], (uint)clear.Length)], packets);
+        Assert.Equal(storedTimes.Select(time => time.AddTicks(-(time.Ticks % TimeSpan.TicksPerMicrosecond))), captureTimes);
 
         uint ReadUInt(int at) => BinaryPrimitives.ReadUInt32LittleEndian(capture.AsSpan(at, 4));
     }
