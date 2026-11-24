@@ -59,6 +59,8 @@ public class TableVersion : AuditableEntity
     public string? ValidationDiagnosticsJson { get; set; }
     /// <summary>Host-only screening descriptions, keyed by one-based slot.</summary>
     public string? ScreeningDescriptionsJson { get; set; }
+    /// <summary>Confirmed editor layout when the message type and length match more than one screening format.</summary>
+    public string? ScreeningLayoutProfile { get; set; }
 }
 
 public class TerminalTableAssignment : AuditableEntity

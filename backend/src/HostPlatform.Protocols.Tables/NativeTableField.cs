@@ -9,7 +9,8 @@ public enum TableFieldEncoding
     UInt8, Word, SignedWord, SignedLong, Flag, Bits, Text, Bcd, Dial, Bitmap, MessagingKey, DisplayText,
     KeypadDial, GraphicalKind, GraphicalText, GraphicalLink, GraphicalFlashRate, GraphicalIcon, CredentialBcd, HexBytes,
     TerminatedDisplayText, CardStandard, CardServiceCode, CredentialHex, BigEndianWord, BigEndianBits, SignedByte,
-    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd, TerminalCalendar, TerminalTime, RatePeriod, LocalDialingArea, ScreeningPattern
+    SmartDiscountMethod, UnsignedLong, PaddedCredentialBcd, TerminalCalendar, TerminalTime, RatePeriod, LocalDialingArea,
+    ScreeningPattern, CompactScreeningPattern
 }
 
 public sealed record TableFieldChoice(int Value, string Label);
@@ -37,7 +38,8 @@ public sealed record NativeTableField(
         TableFieldEncoding.CardStandard => "card-standard",
         TableFieldEncoding.SmartDiscountMethod => "discount-method",
         TableFieldEncoding.Text or TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText or TableFieldEncoding.Bcd or TableFieldEncoding.Dial
-            or TableFieldEncoding.KeypadDial or TableFieldEncoding.ScreeningPattern or TableFieldEncoding.HexBytes or TableFieldEncoding.CardServiceCode
+            or TableFieldEncoding.KeypadDial or TableFieldEncoding.ScreeningPattern or TableFieldEncoding.CompactScreeningPattern
+            or TableFieldEncoding.HexBytes or TableFieldEncoding.CardServiceCode
             or TableFieldEncoding.LocalDialingArea => "text",
         _ when Choices != null || TariffIndexOffset.HasValue => "select",
         _ => "number"
@@ -61,7 +63,8 @@ public sealed record NativeTableField(
         TableFieldEncoding.PaddedCredentialBcd => Size * 2,
         TableFieldEncoding.CardServiceCode => 3,
         TableFieldEncoding.LocalDialingArea => 3,
-        TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.ScreeningPattern or TableFieldEncoding.HexBytes
+        TableFieldEncoding.Dial or TableFieldEncoding.KeypadDial or TableFieldEncoding.ScreeningPattern
+            or TableFieldEncoding.CompactScreeningPattern or TableFieldEncoding.HexBytes
             or TableFieldEncoding.CredentialHex => Size * 2,
         _ => null
     };
@@ -118,6 +121,7 @@ public sealed record NativeTableField(
             TableFieldEncoding.Dial => ReadDigits(data, isDial: true, TextLimit ?? 0),
             TableFieldEncoding.KeypadDial => ReadDigits(data, isDial: true, TextLimit ?? 0, allowKeypad: true),
             TableFieldEncoding.ScreeningPattern => ReadDigits(data, isDial: true, TextLimit ?? 0, allowKeypad: true, wildcard: true),
+            TableFieldEncoding.CompactScreeningPattern => ReadDigits(data, isDial: true, TextLimit ?? 0, allowCompactLink: true, wildcard: true),
             TableFieldEncoding.Bitmap => IsBitmapScreen(record) ? Convert.ToBase64String(data) : null,
             _ when IsCredential => null,
             TableFieldEncoding.HexBytes => Convert.ToHexString(data),
@@ -172,6 +176,9 @@ public sealed record NativeTableField(
                 return;
             case TableFieldEncoding.ScreeningPattern:
                 WriteDigits(data, value, isDial: true, allowKeypad: true, wildcard: true);
+                return;
+            case TableFieldEncoding.CompactScreeningPattern:
+                WriteDigits(data, value, isDial: true, allowKeypad: false, wildcard: true, allowCompactLink: true);
                 return;
             case TableFieldEncoding.LocalDialingArea:
                 if (value.Length == 0)
@@ -278,26 +285,29 @@ public sealed record NativeTableField(
         }
     }
 
-    private void WriteDigits(Span<byte> data, string value, bool isDial, bool allowKeypad, bool wildcard = false)
+    private void WriteDigits(Span<byte> data, string value, bool isDial, bool allowKeypad, bool wildcard = false, bool allowCompactLink = false)
     {
         var limit = TextLimit ?? 0;
         if ((!isDial && value.Length != limit) || value.Length > limit
-            || value.Any(ch => !char.IsAsciiDigit(ch) && !(allowKeypad && ch is '*' or '#') && !(wildcard && ch == '?')))
-            throw Invalid(wildcard ? $"enter up to {limit} keypad digits or ? wildcards" : allowKeypad ? $"enter up to {limit} keypad digits (0 to 9, * or #)"
+            || value.Any(ch => !char.IsAsciiDigit(ch) && !(allowKeypad && ch is '*' or '#') && !(wildcard && ch == '?')
+                && !(allowCompactLink && ch == 'B')))
+            throw Invalid(allowCompactLink ? $"enter up to {limit} decimal digits, ? wildcards, or B link markers"
+                : wildcard ? $"enter up to {limit} keypad digits or ? wildcards" : allowKeypad ? $"enter up to {limit} keypad digits (0 to 9, * or #)"
                 : isDial ? $"enter up to {limit} decimal digits" : $"enter exactly {limit} decimal digits");
 
         var finalNibble = data[^1] & 15;
         data.Clear();
         for (var i = 0; i < value.Length; i++)
         {
-            var digit = value[i] switch { '0' when isDial => 10, '*' => 11, '#' => 12, '?' => 15, var ch => ch - '0' };
+            var digit = value[i] switch { '0' when isDial => 10, '*' or 'B' => 11, '#' => 12, '?' => 15, var ch => ch - '0' };
             data[i / 2] |= (byte)(digit << (i % 2 == 0 ? 4 : 0));
         }
         if (!isDial && limit % 2 != 0)
             data[^1] |= (byte)(finalNibble is 14 or 15 ? finalNibble : 14);
     }
 
-    private static string? ReadDigits(ReadOnlySpan<byte> data, bool isDial, int limit, bool allowKeypad = false, bool wildcard = false)
+    private static string? ReadDigits(ReadOnlySpan<byte> data, bool isDial, int limit, bool allowKeypad = false,
+        bool wildcard = false, bool allowCompactLink = false)
     {
         Span<char> output = stackalloc char[limit];
         for (var i = 0; i < limit; i++)
@@ -315,6 +325,11 @@ public sealed record NativeTableField(
             if (allowKeypad && digit is 11 or 12)
             {
                 output[i] = digit == 11 ? '*' : '#';
+                continue;
+            }
+            if (allowCompactLink && digit == 11)
+            {
+                output[i] = 'B';
                 continue;
             }
             if (digit > 9)

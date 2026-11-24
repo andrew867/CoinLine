@@ -4,15 +4,20 @@ public sealed record ScreeningSlotEdit(int Slot, string Action, string? Shortcut
 
 public static class CallScreeningWire
 {
-    public const int SlotLength = 17;
+    internal const int ExpandedSlotLength = 17;
+    internal const int CompactSlotLength = 12;
+    public const string CompactProfile = "Compact screening, 12 bytes per entry";
+    public const string ExpandedProfile = "Expanded screening, 17 bytes per entry";
     private const byte Translate = 0x40;
 
-    public static bool IsRecord(int number) => number is 59 or 92;
+    public static bool IsRecord(int number) => number is 24 or 59 or 92;
+    public static bool NeedsLayoutChoice(int number) => number == 59;
     public static bool SupportsSpeedDial(NativeTableLayout layout) => layout.Number == 92 && layout.Length == 3061;
 
-    internal static void Initialize(Span<byte> record)
+    internal static void Initialize(Span<byte> record, NativeTableLayout layout)
     {
-        for (var offset = 1; offset < record.Length; offset += SlotLength)
+        var slotLength = layout.Profile == CompactProfile ? CompactSlotLength : ExpandedSlotLength;
+        for (var offset = 1; offset < record.Length; offset += slotLength)
             record[offset + 2] = byte.MaxValue;
     }
 
@@ -20,8 +25,10 @@ public static class CallScreeningWire
         IReadOnlyDictionary<string, string> changes)
     {
         if (!IsRecord(layout.Number) || record.Length != layout.Length || record[0] != layout.Number)
-            throw new InvalidOperationException("Screening entries require a compatible MT59 or MT92 record.");
+            throw new InvalidOperationException("Choose a compatible call-screening record.");
 
+        var compact = layout.Profile == CompactProfile;
+        var slotLength = compact ? CompactSlotLength : ExpandedSlotLength;
         var seen = new HashSet<int>();
         foreach (var edit in edits)
         {
@@ -37,8 +44,8 @@ public static class CallScreeningWire
             if (conflict)
                 throw new InvalidOperationException($"Choose one action for screening slot {edit.Slot}.");
 
-            var offset = 1 + (edit.Slot - 1) * SlotLength;
-            var row = record.Slice(offset, SlotLength);
+            var offset = 1 + (edit.Slot - 1) * slotLength;
+            var row = record.Slice(offset, slotLength);
             if (edit.Action == "speedDial")
             {
                 if (!SupportsSpeedDial(layout))
@@ -47,6 +54,17 @@ public static class CallScreeningWire
                 layout.Sections[edit.Slot - 1].Fields[0].Write(record, pattern);
                 row[3] = 0;
                 row[13] = (byte)((row[13] & ~Translate) | (translated ? Translate : 0));
+            }
+            else if (compact)
+            {
+                row[4..].Clear();
+                if (edit.Action == "delete")
+                {
+                    row[0] = 0;
+                    row[1] &= 0xF0;
+                    row[2] = byte.MaxValue;
+                    row[3] &= 0x80;
+                }
             }
             else if (edit.Action == "blank")
                 row.Slice(3, 9).Clear();

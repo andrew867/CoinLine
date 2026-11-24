@@ -5,6 +5,57 @@ namespace HostPlatform.Tests.Unit;
 public sealed class CallScreeningWireTests
 {
     [Theory]
+    [InlineData(24, 60)]
+    [InlineData(59, 85)]
+    public void Compact_screening_uses_twelve_byte_slots_and_preserves_shared_flag_bits(int number, int count)
+    {
+        var layout = Assert.Single(NativeTableLayouts.DraftTemplates(number), item => item.Profile == CallScreeningWire.CompactProfile);
+        var bytes = NativeTableLayouts.CreateDraftTemplate(layout);
+        Assert.Equal(1 + count * 12, bytes.Length);
+        Assert.All(Enumerable.Range(0, count), slot => Assert.Equal(0xFF, bytes[3 + 12 * slot]));
+
+        var offset = 1 + 52 * 12;
+        bytes[offset] = 0xC3;
+        bytes[offset + 1] = 0xB9;
+        bytes[offset + 2] = 7;
+        bytes[offset + 3] = 0xA4;
+        bytes[offset + 4] = 0xB1;
+        bytes[offset + 5] = 0x20;
+        bytes[offset + 6] = 0xCD;
+        bytes[offset + 12] = 0x68;
+        Assert.Equal("B12", layout.Sections[52].Fields[0].Read(bytes));
+        Assert.Equal(bytes, layout.Apply(bytes, new Dictionary<string, string> { ["rule-52.pattern"] = "B12" }));
+
+        var edited = layout.Apply(bytes, new Dictionary<string, string>
+        {
+            ["rule-52.pattern"] = "90?", ["rule-52.classification"] = "4", ["rule-52.targetCdr"] = "true"
+        });
+        Assert.Equal(new byte[] { 0xC3, 0xB4, 7, 0xAC, 0x9A, 0xF0, 0, 0, 0, 0, 0, 0 }, edited[offset..(offset + 12)]);
+        Assert.Equal(bytes[..offset], edited[..offset]);
+        Assert.Equal(bytes[(offset + 12)..], edited[(offset + 12)..]);
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(bytes, new Dictionary<string, string> { ["rule-52.pattern"] = "*1" }));
+
+        var blanked = edited.ToArray();
+        CallScreeningWire.Apply(blanked, layout, [new(53, "blank")], new Dictionary<string, string>());
+        Assert.Equal(new byte[] { 0xC3, 0xB4, 7, 0xAC, 0, 0, 0, 0, 0, 0, 0, 0 }, blanked[offset..(offset + 12)]);
+        CallScreeningWire.Apply(blanked, layout, [new(53, "delete")], new Dictionary<string, string>());
+        Assert.Equal(new byte[] { 0, 0xB0, 0xFF, 0x80, 0, 0, 0, 0, 0, 0, 0, 0 }, blanked[offset..(offset + 12)]);
+        Assert.Equal(bytes[..offset], blanked[..offset]);
+        Assert.Equal(bytes[(offset + 12)..], blanked[(offset + 12)..]);
+    }
+
+    [Fact]
+    public void Same_type_and_length_require_an_explicit_mt59_profile()
+    {
+        var bytes = new byte[1021];
+        bytes[0] = 59;
+        Assert.Null(NativeTableLayouts.Find(59, bytes));
+        Assert.Equal(85, NativeTableLayouts.Find(59, bytes, CallScreeningWire.CompactProfile)!.Sections.Count);
+        Assert.Equal(60, NativeTableLayouts.Find(59, bytes, CallScreeningWire.ExpandedProfile)!.Sections.Count);
+        Assert.Null(NativeTableLayouts.Find(59, bytes, NativeTableLayouts.MultiPay));
+    }
+
+    [Theory]
     [InlineData(59, 60)]
     [InlineData(92, 60)]
     [InlineData(92, 180)]

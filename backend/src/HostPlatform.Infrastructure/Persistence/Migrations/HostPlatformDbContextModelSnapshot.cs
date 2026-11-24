@@ -3083,6 +3083,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("ScreeningDescriptionsJson")
                         .HasColumnType("text");
 
+                    b.Property<string>("ScreeningLayoutProfile")
+                        .HasColumnType("text");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 

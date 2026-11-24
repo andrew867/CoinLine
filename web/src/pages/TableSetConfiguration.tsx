@@ -22,7 +22,7 @@ const modes = ['Static', 'Flash', 'Alternate with next slot', 'Scroll in', 'Scro
 const panels: { name: string; fields: string; records: [number, string][] }[] = [
   { name: 'Text and display', fields: 'Advertising sequence, display timing, languages and graphical screens.', records: [[29, 'Text advertising'], [27, 'Visual prompts L1, older'], [28, 'Visual prompts L2, older'], [85, 'Visual prompts L1'], [86, 'Visual prompts L2'], [98, 'Visual prompts L3'], [99, 'Visual prompts L4'], [131, 'Graphical screens 1'], [132, 'Graphical screens 2'], [133, 'Graphical screens 3']] },
   { name: 'Terminal features and call setup', fields: 'Access numbers, terminal options, service timers, modem and answer supervision.', records: [[21, 'NCC terminal access'], [26, 'Feature and call options'], [30, 'User interface parameters'], [31, 'Installation and service'], [33, 'Modem parameters'], [49, 'Answer supervision'], [68, 'Audio-Gram messaging']] },
-  { name: 'Dialing, screening and service', fields: 'Key destinations, call restrictions, digit translation and screening patterns.', records: [[55, 'Quick Access Keys'], [58, 'Service Level Restrictions'], [59, 'Call screening, older'], [62, 'Numbering plan'], [92, 'Call-Screening List']] },
+  { name: 'Dialing, screening and service', fields: 'Key destinations, call restrictions, digit translation and screening patterns.', records: [[24, 'Universal Call Screening'], [55, 'Quick Access Keys'], [58, 'Service Level Restrictions'], [59, 'Expanded Call Screening'], [62, 'Numbering plan'], [92, 'Call-Screening List']] },
   { name: 'Rates and local dialing', fields: 'Tariff ladders, area and exchange classification, international rates and discounts.', records: [[73, 'Rate table'], ...segments(74, 8, 'Uncompressed'), [90, 'Uncompressed segment 9'], [91, 'Uncompressed segment 10'], ...segments(101, 15, 'Compressed'), ...segments(136, 14, 'Double-compressed'), [154, 'Double-compressed segment 15'], [155, 'Double-compressed segment 16'], [150, 'NPA set-based rating'], [151, 'International set-based rating'], [152, 'Holiday and time-of-day discounts']] },
   { name: 'Cards, coin and carriers', fields: 'Magnetic and calling card policies, smart cards, coin windows, carrier screens and promotions.', records: [[22, 'Card acceptance, older'], [134, 'Card acceptance'], [23, 'Carrier screens, older'], [135, 'Carrier screens'], [50, 'Coin validation'], [72, 'Spare table and e-purse'], [93, 'Smart-card parameters'], [95, 'Instant Win']] },
   { name: 'Reporting and code downloads', fields: 'Collection thresholds, call-in schedules and code-server parameters.', records: [[32, 'Communications statistics settings'], [34, 'Call and carrier statistics settings'], [35, 'Time and call-in settings'], [94, 'Remote code download settings']] },
@@ -43,10 +43,16 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
   const [panelIndex, setPanelIndex] = useState(Math.max(0, initialPanel))
   const [tableNumber, setTableNumber] = useState(initialPanel < 0 ? 29 : initialRecord)
   const [exchangeFile, setExchangeFile] = useState<ExchangeFile | null>(null)
+  const [importGeneration, setImportGeneration] = useState(0)
   const panel = panels[panelIndex]
   const record = panel.records.find(([number]) => number === tableNumber)!
   const version = versions.find((item) => item.tableNumber === tableNumber)
   const advertisingRevision = [26, 29, 30].map((number) => versions.find((item) => item.tableNumber === number)?.tableRevision ?? 0).join(':')
+
+  function onImported() {
+    setImportGeneration(generation => generation + 1)
+    onSaved()
+  }
 
   return (
     <section className="table-config-panel" aria-labelledby="config-heading">
@@ -81,16 +87,16 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
       ) : (
         <div key={`${setId}:${tableNumber}`}>
           <Suspense fallback={<p role="status">Loading record editor…</p>}>
-            <NativeTableEditor setId={setId} number={tableNumber} revision={version?.tableRevision ?? 0}
+            <NativeTableEditor key={importGeneration} setId={setId} number={tableNumber} revision={version?.tableRevision ?? 0}
               exchangeFile={exchangeFile} onExchangeFile={setExchangeFile}
               onSaved={onSaved} onDirty={onRecordDirty} />
           </Suspense>
           {!recordDirty && (version && draft ? (
             <details><summary>Import replacement record</summary>
-              <RecordImport setId={setId} draft={draft} version={version} versions={versions} onSaved={onSaved} record={record} />
+              <RecordImport setId={setId} draft={draft} version={version} versions={versions} onSaved={onImported} record={record} />
             </details>
           ) : !version && <RecordImport setId={setId} draft={draft} version={version}
-            versions={versions} onSaved={onSaved} record={record} />)}
+            versions={versions} onSaved={onImported} record={record} />)}
         </div>
       )}
     </section>

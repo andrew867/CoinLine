@@ -38,6 +38,7 @@ public static class DlogMessageTypeRegistry
         Add(21, "DLOG_MT_NCC_TERM_PARMS", "DLOG_MA_TAB_UPD_POTS", false);
         Add(22, "DLOG_MT_CARD_TABLE", "DLOG_MA_TAB_UPD_NOCD", false, "Earlier firmware wire type.");
         Add(23, "DLOG_MT_CARRIER_TABLE", "DLOG_MA_TAB_UPD", false, "Earlier firmware wire type.");
+        Add(24, "DLOG_MT_CALLSCRN_UNIVERSAL", "DLOG_MA_TAB_UPD", false, "Compact call-screening record.");
 
         Add(26, "DLOG_MT_FCONFIG_OPTS", "DLOG_MA_TAB_UPD_POTS", false);
         Add(27, "DLOG_MT_VIS_PROMPTS_L1", "DLOG_MA_TAB_UPD", false, "Earlier firmware wire type.");

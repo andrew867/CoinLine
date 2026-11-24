@@ -12,6 +12,53 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     [Fact]
+    public async Task Imported_mt59_requires_a_layout_and_keeps_it_after_an_edit()
+    {
+        using var set = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Compact screening editor test" });
+        set.EnsureSuccessStatusCode();
+        var id = (await set.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Screening test record", tableNumber = 59 });
+        definition.EnsureSuccessStatusCode();
+        var definitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var layout = NativeTableLayouts.DraftTemplates(59).Single(item => item.Profile == CallScreeningWire.CompactProfile);
+        var payload = NativeTableLayouts.CreateDraftTemplate(layout);
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = definitionId, tableRevision = 1, payloadBase64 = Convert.ToBase64String(payload), sortOrder = 0
+        });
+        imported.EnsureSuccessStatusCode();
+
+        var path = $"/api/tables/sets/{id}/records/59/fields";
+        var ambiguous = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.False(ambiguous.GetProperty("supported").GetBoolean());
+        Assert.Equal(2, ambiguous.GetProperty("profiles").GetArrayLength());
+        var selected = await _client.GetFromJsonAsync<JsonElement>($"{path}?profile={Uri.EscapeDataString(layout.Profile)}");
+        Assert.Equal(85, selected.GetProperty("sections").GetArrayLength());
+        var changes = new Dictionary<string, string>();
+        var edit = new { profile = layout.Profile, revision = 1, sha256 = selected.GetProperty("sha256"), changes };
+        using var unselected = await _client.PutAsJsonAsync(path, edit with { profile = null! });
+        Assert.Equal(HttpStatusCode.BadRequest, unselected.StatusCode);
+        using var noChange = await _client.PutAsJsonAsync(path, edit);
+        Assert.Equal(HttpStatusCode.NoContent, noChange.StatusCode);
+        var afterNoChange = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.False(afterNoChange.GetProperty("supported").GetBoolean());
+
+        changes["rule-84.pattern"] = "90?";
+        using var changed = await _client.PutAsJsonAsync(path, edit);
+        Assert.Equal(HttpStatusCode.NoContent, changed.StatusCode);
+        var reopened = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.Equal(layout.Profile, reopened.GetProperty("profile").GetString());
+        Assert.Single(reopened.GetProperty("profiles").EnumerateArray());
+        Assert.Equal("90?", reopened.GetProperty("sections")[84].GetProperty("fields")[0].GetProperty("value").GetString());
+        using var wrongLayout = await _client.PutAsJsonAsync(path, new
+        {
+            profile = CallScreeningWire.ExpandedProfile, revision = 2, sha256 = reopened.GetProperty("sha256"), changes
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, wrongLayout.StatusCode);
+    }
+
+
+    [Fact]
     public async Task Spare_table_template_saves_named_fields_and_byte_edits_without_exposing_credentials()
     {
         using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Spare table editor test" });

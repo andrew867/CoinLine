@@ -92,7 +92,7 @@ public static partial class NativeTableLayouts
         if (template.Number == 73)
             InitializeTerminalTariffs(bytes);
         if (CallScreeningWire.IsRecord(template.Number))
-            CallScreeningWire.Initialize(bytes);
+            CallScreeningWire.Initialize(bytes, template);
         return bytes;
     }
 
@@ -267,7 +267,9 @@ public static partial class NativeTableLayouts
         yield return Layout(73, 1192, TerminalTariffs(later: false));
         yield return new NativeTableLayout(73, 1192, Later, TerminalTariffs(later: true));
 
-        yield return Layout(59, 1021, CallScreenRules(60));
+        yield return new NativeTableLayout(24, 721, CallScreeningWire.CompactProfile, CompactCallScreenRules(60));
+        yield return new NativeTableLayout(59, 1021, CallScreeningWire.CompactProfile, CompactCallScreenRules(85));
+        yield return new NativeTableLayout(59, 1021, CallScreeningWire.ExpandedProfile, CallScreenRules(60));
         yield return Layout(92, 1021, CallScreenRules(60));
         yield return Layout(92, 3401, CallScreenRules(200));
         yield return new NativeTableLayout(92, 3061, Later, CallScreenRules(180, later: true));
@@ -339,7 +341,7 @@ public static partial class NativeTableLayouts
 
     private static NativeTableSection[] CallScreenRules(int count, bool later = false) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
     {
-        var offset = 1 + i * CallScreeningWire.SlotLength;
+        var offset = 1 + i * CallScreeningWire.ExpandedSlotLength;
         return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, ScreeningPattern, 8,
                 Help: "Use ? to match one digit at that position."),
             Select($"{key}.wildcards", "Trailing wildcard digits", offset + 3,
@@ -363,6 +365,31 @@ public static partial class NativeTableLayouts
                 Toggle($"{key}.targetCdr", "Collect target call detail", offset + 13, 8),
                 Toggle($"{key}.translated", "Translate screened number", offset + 13, 0x40)
             } : []];
+    });
+
+    private static NativeTableSection[] CompactCallScreenRules(int count) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
+    {
+        var offset = 1 + i * CallScreeningWire.CompactSlotLength;
+        var options = offset + 3;
+        return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, CompactScreeningPattern, 8,
+                Help: "Use ? to match one digit. B is the compact screening link marker."),
+            Bits($"{key}.classification", "Call classification", offset + 1, 15, [.. CallKinds, (14, "Electronic purse")]),
+            Field($"{key}.reference", "Rate or carrier reference", offset + 2, help: "Use 255 for no reference."),
+            Toggle($"{key}.free", "Free call", offset, 1),
+            Toggle($"{key}.answer", "Require answer supervision", offset, 2),
+            Toggle($"{key}.keypad", "Enable keypad", offset, 4),
+            Toggle($"{key}.fallback", "Use only in fallback service", offset, 8),
+            Toggle($"{key}.mute", "Mute transmitter", offset, 16),
+            Toggle($"{key}.preDialDelay", "Wait before dialing", offset, 32),
+            Toggle($"{key}.coinException", "Deny card payment", offset, 64),
+            Toggle($"{key}.featureGroupB", "Use Feature Group B", offset, 128),
+            Toggle($"{key}.denyModemData", "Deny message delivery service", options, 1),
+            Toggle($"{key}.denyDataPort", "Deny data-port calls", options, 2),
+            Toggle($"{key}.restrictedAccess", "Allow in restricted service", options, 4),
+            Toggle($"{key}.targetCdr", "Collect target call detail", options, 8),
+            Toggle($"{key}.prefix", "Enable prefix", options, 16),
+            Toggle($"{key}.emergency", "Enable emergency number handling", options, 32),
+            Toggle($"{key}.translated", "Translate screened number", options, 64)];
     });
 
     private static NativeTableSection[] CarrierRules(int count, int stride, int header, int cardCount) => [Section("selection", "Carrier selection",

@@ -4,12 +4,13 @@ export type ScreeningAction =
   | { slot: number; action: 'blank' | 'delete' }
   | { slot: number; action: 'speedDial'; shortcut: string; destination: string }
 
-export function ScreeningSlotActions({ slot, action, description, editable, supportsSpeedDial, onAction, onDescription }: {
+export function ScreeningSlotActions({ slot, action, description, editable, supportsSpeedDial, hasTrailingWildcards, onAction, onDescription }: {
   slot: number
   action?: ScreeningAction
   description: string
   editable: boolean
   supportsSpeedDial: boolean
+  hasTrailingWildcards: boolean
   onAction: (next?: ScreeningAction) => void
   onDescription: (next: string) => void
 }) {
@@ -43,7 +44,8 @@ export function ScreeningSlotActions({ slot, action, description, editable, supp
         </>}
       {action && <span role="status">
         {action.action === 'speedDial' ? `Staged speed dial ${action.shortcut}*${action.destination}.`
-          : action.action === 'blank' ? 'Number, description and wildcard count will be cleared.'
+          : action.action === 'blank' ? (hasTrailingWildcards
+            ? 'Number, description and wildcard count will be cleared.' : 'Number and description will be cleared.')
             : 'The entry settings will be reset and its slot retained.'}
       </span>}
     </div>}

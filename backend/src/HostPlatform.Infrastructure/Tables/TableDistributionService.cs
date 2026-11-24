@@ -33,7 +33,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         DependsOnTableDefinitionId = source.DependsOnTableDefinitionId,
         ValidationPassed = source.ValidationPassed,
         ValidationDiagnosticsJson = source.ValidationDiagnosticsJson,
-        ScreeningDescriptionsJson = source.ScreeningDescriptionsJson
+        ScreeningDescriptionsJson = source.ScreeningDescriptionsJson,
+        ScreeningLayoutProfile = source.ScreeningLayoutProfile
     };
 
     public IQueryable<Terminal> PhonesInScope(TableTargetScope scope)
@@ -235,7 +236,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         int? expectedRevision = null,
         string? expectedHash = null,
         bool createOnly = false,
-        string? screeningDescriptionsJson = null)
+        string? screeningDescriptionsJson = null,
+        string? screeningLayoutProfile = null)
     {
         var set = await db.TableSets.FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
                   ?? throw new InvalidOperationException("Table set not found.");
@@ -279,6 +281,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         version.ValidationPassed = ok;
         version.ValidationDiagnosticsJson = diag;
         version.ScreeningDescriptionsJson = screeningDescriptionsJson;
+        version.ScreeningLayoutProfile = screeningLayoutProfile;
         version.Checksum = checksum;
         if (existing == null)
             db.TableVersions.Add(version);
@@ -318,6 +321,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             version.ValidationPassed = source.ValidationPassed;
             version.ValidationDiagnosticsJson = source.ValidationDiagnosticsJson;
             version.ScreeningDescriptionsJson = source.ScreeningDescriptionsJson;
+            version.ScreeningLayoutProfile = source.ScreeningLayoutProfile;
         }
 
         destination.Version++;

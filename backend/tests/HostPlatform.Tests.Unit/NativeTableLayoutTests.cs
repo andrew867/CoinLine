@@ -5,11 +5,11 @@ namespace HostPlatform.Tests.Unit;
 public sealed class NativeTableLayoutTests
 {
     [Theory]
-    [InlineData(21, 18)] [InlineData(21, 40)] [InlineData(22, 661)] [InlineData(23, 678)] [InlineData(26, 72)]
+    [InlineData(21, 18)] [InlineData(21, 40)] [InlineData(22, 661)] [InlineData(23, 678)] [InlineData(24, 721)] [InlineData(26, 72)]
     [InlineData(27, 2801)] [InlineData(28, 2801)] [InlineData(30, 68)] [InlineData(31, 37)]
     [InlineData(32, 33)] [InlineData(33, 35)] [InlineData(34, 19)] [InlineData(35, 21)]
     [InlineData(49, 199)] [InlineData(49, 263)] [InlineData(50, 105)] [InlineData(55, 571)] [InlineData(58, 26)]
-    [InlineData(59, 1021)] [InlineData(62, 353)] [InlineData(68, 72)] [InlineData(72, 1001)]
+    [InlineData(62, 353)] [InlineData(68, 72)] [InlineData(72, 1001)]
     [InlineData(73, 1192)] [InlineData(74, 819)]
     [InlineData(85, 8001)] [InlineData(92, 1021)] [InlineData(92, 3061)] [InlineData(92, 3401)]
     [InlineData(94, 100)] [InlineData(95, 153)] [InlineData(101, 403)] [InlineData(131, 9224)] [InlineData(134, 1153)]

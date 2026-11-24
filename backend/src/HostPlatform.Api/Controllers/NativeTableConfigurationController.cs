@@ -27,7 +27,11 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                 ? NativeTableLayouts.DraftTemplates(number)
                     .Where(layout => firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expectedLength)
                         || (layout.Length == expectedLength && layout.Profile == firmware.NativeLayout))
-                    .Select(layout => new { layout.Profile, layout.Length }).ToArray() : [];
+                    .Select(layout => new
+                    {
+                        layout.Profile, layout.Length,
+                        screeningSlots = CallScreeningWire.IsRecord(number) ? (int?)layout.Sections.Count : null
+                    }).ToArray() : [];
             return Ok(new { supported = false, templates, reason = templates.Length == 0
                 ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
         }
@@ -36,7 +40,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
 
         var version = versions[0];
         var raw = TableDistributionService.GetEffectivePayload(version);
-        var (layout, error) = ResolveLayout(set, number, raw, profile);
+        var (layout, error) = ResolveLayout(set, number, raw, profile, version.ScreeningLayoutProfile);
         if (layout == null)
         {
             var profiles = NativeTableLayouts.Candidates(number, raw).Select(candidate => candidate.Profile).ToArray();
@@ -52,7 +56,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             supported = true,
             editable = set.Status == TableSetStatus.Draft,
             layout.Profile,
-            profiles = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId)?.VerifiedLengths.ContainsKey(number) == true
+            profiles = version.ScreeningLayoutProfile != null
+                || FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId)?.VerifiedLengths.ContainsKey(number) == true
                 ? [layout.Profile] : NativeTableLayouts.Candidates(number, raw).Select(candidate => candidate.Profile).ToArray(),
             layout.Length,
             revision = version.TableRevision,
@@ -118,7 +123,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         var sortOrder = await db.TableVersions.Where(v => v.TableSetId == id).Select(v => (int?)v.SortOrder).MaxAsync(ct) ?? -1;
         try
         {
-            await tables.UpsertVersionAsync(id, definition.Id, 1, bytes, sortOrder + 1, null, ct, createOnly: true);
+            await tables.UpsertVersionAsync(id, definition.Id, 1, bytes, sortOrder + 1, null, ct, createOnly: true,
+                screeningLayoutProfile: CallScreeningWire.NeedsLayoutChoice(number) ? template.Profile : null);
             return NoContent();
         }
         catch (DbUpdateConcurrencyException)
@@ -149,7 +155,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             return Conflict(new { error = "The record changed. Reopen the editor to load the latest version." });
 
         var raw = TableDistributionService.GetEffectivePayload(version);
-        var (layout, error) = ResolveLayout(set, number, raw, body.Profile);
+        var (layout, error) = ResolveLayout(set, number, raw, body.Profile, version.ScreeningLayoutProfile);
         if (layout == null)
             return BadRequest(new { error = error ?? "A native editor is unavailable for this wire profile." });
 
@@ -190,7 +196,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             if (!raw.AsSpan().SequenceEqual(updated) || screeningDescriptions != version.ScreeningDescriptionsJson)
                 await tables.UpsertVersionAsync(set.Id, version.TableDefinitionId, version.TableRevision + 1,
                     updated, version.SortOrder, version.DependsOnTableDefinitionId, ct, body.Revision, body.Sha256,
-                    screeningDescriptionsJson: screeningDescriptions);
+                    screeningDescriptionsJson: screeningDescriptions,
+                    screeningLayoutProfile: CallScreeningWire.NeedsLayoutChoice(number) ? layout.Profile : null);
             return NoContent();
         }
         catch (DbUpdateConcurrencyException)
@@ -204,14 +211,17 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     }
 
     private static (NativeTableLayout? Layout, string? Error) ResolveLayout(TableSet set, int number, byte[] data,
-        string? requestedProfile)
+        string? requestedProfile, string? savedProfile = null)
     {
+        if (savedProfile != null && requestedProfile != null && requestedProfile != savedProfile)
+            return (null, "This record has a confirmed screening layout. Import a matching record to use a different layout.");
+        var profile = savedProfile ?? requestedProfile;
         var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
         if (firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expected))
-            return (NativeTableLayouts.Find(number, data, requestedProfile), null);
+            return (NativeTableLayouts.Find(number, data, profile), null);
         if (data.Length != expected)
             return (null, $"The selected firmware uses {expected:N0} bytes for this record. Import the matching record to edit it.");
-        if (requestedProfile != null && requestedProfile != firmware.NativeLayout)
+        if (profile != null && profile != firmware.NativeLayout)
             return (null, "This layout does not match the set's target firmware.");
         return (NativeTableLayouts.Find(number, data, firmware.NativeLayout), null);
     }
@@ -240,7 +250,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         93 => "Stored-value parameters",
         CodeDownloadWire.MessageType => "Code download schedule",
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
-        59 or 92 => "Call screening",
+        24 or 59 or 92 => "Call screening",
         95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}",
         150 => "NPA set-based rating", 151 => "International set-based rating", 152 => "Holiday and time-of-day discounts",
         _ when NativeTableLayouts.IsLocalDialingRecord(number) => $"Local dialing segment MT{number}",

@@ -37,7 +37,7 @@ type Layout = {
   numberingPlan?: NumberingPlan | null
   spareBytes?: string | null
   screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean } | null
-} | { supported: false; reason: string; profiles?: string[]; templates?: { profile: string; length: number }[] }
+} | { supported: false; reason: string; profiles?: string[]; templates?: { profile: string; length: number; screeningSlots?: number | null }[] }
 
 type Props = {
   setId: string
@@ -246,7 +246,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       </label>}
       {layout.templates?.map((template) => (
         <button key={`${template.profile}:${template.length}`} type="button" disabled={busy} onClick={() => void initialize(template)}>
-          Start record for {template.profile}{(number === 59 || number === 92) ? ` (${(template.length - 1) / 17} wire slots)` : ''}
+          Start record for {template.profile}{template.screeningSlots != null ? ` (${template.screeningSlots} wire slots)` : ''}
         </button>
       ))}
       {message && <p role="status">{message}</p>}
@@ -398,6 +398,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
             action={screeningActions[screeningSlot]}
             description={screeningDescriptions[screeningSlot] ?? layout.screening.descriptions[screeningSlot] ?? ''}
             editable={layout.editable} supportsSpeedDial={layout.screening.supportsSpeedDial}
+            hasTrailingWildcards={current.fields.some(field => field.key.endsWith('.wildcards'))}
             onAction={action => stageScreeningAction(screeningSlot, action)}
             onDescription={value => describeScreeningSlot(screeningSlot, value)} />}
           {selectedKey != null && layout.editable && <div className="row-actions">
