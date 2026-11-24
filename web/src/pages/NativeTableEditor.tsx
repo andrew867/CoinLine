@@ -2,11 +2,12 @@ import { useEffect, useState } from 'react'
 import { NativeBitmapField } from './NativeBitmapField'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
+import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
 
 type Field = {
   key: string
   label: string
-  editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password' | 'password-hex'
+  editor: 'checkbox' | 'select' | 'text' | 'number' | 'bitmap' | 'password' | 'password-hex' | 'password-pin'
     | 'screen-kind' | 'screen-text' | 'screen-link' | 'flash-rate' | 'screen-icon' | 'card-standard' | 'discount-method'
   value: string | null
   min: number
@@ -30,6 +31,7 @@ type Layout = {
   sha256: string
   sections: Section[]
   numberingPlan?: NumberingPlan | null
+  spareBytes?: string | null
 } | { supported: false; reason: string; profiles?: string[]; templates?: { profile: string; length: number }[] }
 
 type Props = {
@@ -40,7 +42,7 @@ type Props = {
   onDirty: (dirty: boolean) => void
 }
 
-const isCredential = (field: Field) => field.editor === 'password' || field.editor === 'password-hex'
+const isCredential = (field: Field) => field.editor === 'password' || field.editor === 'password-hex' || field.editor === 'password-pin'
 
 export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }: Props) {
   const [layout, setLayout] = useState<Layout | null>(null)
@@ -48,7 +50,8 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   const [search, setSearch] = useState('')
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [ruleEdits, setRuleEdits] = useState<NumberingPlanChanges>({})
-  const [view, setView] = useState<'settings' | 'rules'>('settings')
+  const [byteEdits, setByteEdits] = useState<SpareByteEdits>({})
+  const [view, setView] = useState<'settings' | 'rules' | 'bytes'>('settings')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [reload, setReload] = useState(0)
@@ -94,20 +97,26 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
     if (value === field.value || (isCredential(field) && value === '')) delete updated[field.key]
     else updated[field.key] = value
     setEdits(updated)
-    onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0)
+    onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0)
     setMessage('')
   }
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
     if (!layout?.supported || !layout.editable) return
+    const byteEntries = Object.entries(byteEdits)
+    if (byteEntries.some(([, value]) => value.length !== 2)) {
+      setMessage('Enter two hexadecimal digits for each edited byte.')
+      return
+    }
     setBusy(true)
     setMessage('')
     try {
       const response = await fetch(endpoint, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision: layout.revision, sha256: layout.sha256, changes: edits, profile: layout.profile,
-          numberingPlan: Object.keys(ruleEdits).length ? ruleEdits : undefined }),
+          numberingPlan: Object.keys(ruleEdits).length ? ruleEdits : undefined,
+          spareBytes: byteEntries.length ? byteEntries.map(([offset, value]) => ({ offset: Number(offset), value: parseInt(value, 16) })) : undefined }),
       })
       if (!response.ok) {
         const body = await response.json().catch(() => null)
@@ -115,6 +124,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
       }
       setEdits({})
       setRuleEdits({})
+      setByteEdits({})
       onDirty(false)
       setMessage('Changes saved to this draft.')
       setReload((count) => count + 1)
@@ -144,10 +154,11 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   }
 
   function changeProfile(value: string) {
-    if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0)
+    if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0)
       && !window.confirm('Discard the unsaved changes and switch firmware profiles?')) return
     setEdits({})
     setRuleEdits({})
+    setByteEdits({})
     setView('settings')
     onDirty(false)
     setSectionKey('')
@@ -185,7 +196,10 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
   const current = sections.find((section) => section.key === sectionKey) ?? sections[0]
   const changed = Object.keys(edits).length
   const ruleChanges = Object.keys(ruleEdits).length > 0
+  const byteChanges = Object.keys(byteEdits).length
   const showingRules = layout.numberingPlan && view === 'rules'
+  const showingBytes = layout.spareBytes && view === 'bytes'
+  const showingSettings = !showingRules && !showingBytes
   const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
   const cardMainSection = current?.key.match(/^card-\d+(?=-(?:service|spill|stored-value|smart-issuers|smart-values)$)/)?.[0]
   const cardStandard = layout.sections.find((section) => section.key === cardMainSection)?.fields
@@ -217,6 +231,10 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
         <button type="button" aria-pressed={!showingRules} onClick={() => setView('settings')}>Settings</button>
         <button type="button" aria-pressed={!!showingRules} onClick={() => setView('rules')}>Numbering rules</button>
       </div>}
+      {layout.spareBytes && <div className="row-actions" role="group" aria-label="Spare table editor">
+        <button type="button" aria-pressed={showingSettings} onClick={() => setView('settings')}>Settings</button>
+        <button type="button" aria-pressed={!!showingBytes} onClick={() => setView('bytes')}>Byte grid</button>
+      </div>}
       {showingRules && layout.numberingPlan && <NumberingPlanEditor plan={layout.numberingPlan} changes={ruleEdits}
         editable={layout.editable && !busy} onChange={(group, rules) => {
           const updated = { ...ruleEdits }
@@ -226,7 +244,13 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
           onDirty(changed > 0 || Object.keys(updated).length > 0)
           setMessage('')
         }} />}
-      {!showingRules && settings.length > 1 && (
+      {showingBytes && layout.spareBytes && <SpareTableByteEditor bytes={layout.spareBytes} edits={byteEdits}
+        editable={layout.editable && !busy} onChange={(updated) => {
+          setByteEdits(updated)
+          onDirty(changed > 0 || Object.keys(updated).length > 0)
+          setMessage('')
+        }} />}
+      {showingSettings && settings.length > 1 && (
         <div className="table-config-selectors">
           {settings.length > 12 && <label>Find entry<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
           <label>Section or entry
@@ -237,7 +261,7 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
           </label>
         </div>
       )}
-      {!showingRules && current && (
+      {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
           <legend>{current.label}</legend>
           {changingKind && <p className="native-graphical-status">Save the screen type to load its editor.</p>}
@@ -270,9 +294,10 @@ export function NativeTableEditor({ setId, number, revision, onSaved, onDirty }:
       )}
       {layout.editable && (
         <div className="row-actions">
-          <button type="submit" disabled={(changed === 0 && !ruleChanges) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
+          <button type="submit" disabled={(changed === 0 && !ruleChanges && byteChanges === 0) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
           {changed > 0 && <span>{changed} {changed === 1 ? 'field changed' : 'fields changed'}</span>}
           {ruleChanges && <span>Numbering rules changed</span>}
+          {byteChanges > 0 && <span>{byteChanges} {byteChanges === 1 ? 'byte changed' : 'bytes changed'}</span>}
         </div>
       )}
       {message && <p className="native-table-feedback" role="status">{message}</p>}
@@ -314,7 +339,10 @@ function FieldInput({ field, value, dirty, onChange }: {
   const numeric = field.editor === 'number'
   const password = isCredential(field)
   const hex = field.editor === 'password-hex'
-  return (
+  const pin = field.editor === 'password-pin'
+  const clearingPin = pin && value === 'clear'
+  const passwordLength = pin ? `1,${field.maxLength}` : field.maxLength
+  const input = (
     <label className="native-table-field" data-dirty={dirty}>
       <span>{field.label}</span>
       {field.choices ? (
@@ -323,15 +351,24 @@ function FieldInput({ field, value, dirty, onChange }: {
           {field.choices.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
         </select>
       ) : (
-        <input type={password ? 'password' : numeric ? 'number' : 'text'} value={value} min={numeric && dirty ? field.min : undefined}
+        <input type={password ? 'password' : numeric ? 'number' : 'text'} value={clearingPin ? '' : value} min={numeric && dirty ? field.min : undefined}
           max={numeric && dirty ? field.max : undefined} step={numeric ? 1 : undefined}
           autoComplete={password ? 'new-password' : undefined} inputMode={password && !hex ? 'numeric' : undefined}
-          pattern={password && field.maxLength ? `[${hex ? '0-9A-Fa-f' : '0-9'}]{${field.maxLength}}` : undefined}
+          pattern={password && field.maxLength ? `[${hex ? '0-9A-Fa-f' : '0-9'}]{${passwordLength}}` : undefined}
           maxLength={field.maxLength ?? undefined} required={numeric && dirty}
-          onChange={(event) => onChange(event.target.value)} />
+          onChange={(event) => {
+            const next = event.target.value
+            if (!pin || /^[0-9]*$/.test(next)) onChange(next)
+          }} />
       )}
       {field.help && <small>{field.help}</small>}
       {field.value === null && !dirty && !password && <small>Stored characters are outside this editor’s format.</small>}
     </label>
   )
+  if (!pin) return input
+  return <div className="native-table-pin">
+    {input}
+    <button type="button" onClick={() => onChange(clearingPin ? '' : 'clear')}>{clearingPin ? 'Keep stored PIN' : 'Clear PIN'}</button>
+    {clearingPin && <small role="status">Saving will clear the PIN.</small>}
+  </div>
 }

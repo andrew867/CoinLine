@@ -84,6 +84,18 @@
 .numbering-digit { background: #f2f8f5; border-radius: 8px; padding: 4px 6px 8px; }
 .numbering-digit button { margin-inline: 8px; }
 .numbering-digits .row-actions { grid-column: 1 / -1; }
+.spare-table-editor > p { color: #526c61; font-size: .88rem; }
+.spare-table-scroll { max-width: 100%; overflow-x: auto; border: 1px solid #dce7e1; border-radius: 9px; }
+.spare-table-scroll table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font: .86rem Consolas, monospace; }
+.spare-table-scroll :is(th, td) { min-width: 2ch; padding: 3px; text-align: center; }
+.spare-table-scroll th { color: #305246; background: #f2f8f5; padding: 6px; }
+.spare-table-scroll th:first-child { position: sticky; left: 0; }
+.spare-table-scroll td { border-top: 1px solid #e8f0eb; }
+.spare-table-scroll input { box-sizing: content-box; width: 2.3ch; min-width: 0; padding: 4px; text-align: center; font: inherit; }
+.spare-table-scroll input[data-dirty='true'] { background: #e8f4ec; }
+.spare-table-scroll input[aria-invalid='true'] { border-color: #a23e3e; }
+.spare-table-protected { color: #526c61; background: #f2f8f5; }
+.native-table-pin :is(button, small[role='status']) { margin: 0 8px 5px; }
 .native-table-summary { display: flex; flex-wrap: wrap; gap: 9px; margin: 0; }
 .native-table-summary > div { min-width: 130px; padding: 8px 10px; border-radius: 8px; background: #eef6f1; }
 .native-table-summary dt { color: #526c61; font-size: .84rem; }

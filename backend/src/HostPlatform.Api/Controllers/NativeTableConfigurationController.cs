@@ -58,6 +58,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             sha256 = version.PayloadSha256Hex,
             numberingPlan = number == NumberingPlanWire.MessageType && NumberingPlanWire.Supports(raw)
                 ? NumberingPlanWire.Read(raw) : null,
+            spareBytes = number == SpareTableWire.MessageType ? SpareTableWire.Read(raw, layout) : null,
             sections = layout.Sections.Select(section => new
             {
                 section.Key,
@@ -156,6 +157,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                     return BadRequest(new { error = "Use one editor to change the dialing rules in this save." });
                 NumberingPlanWire.Apply(updated, body.NumberingPlan);
             }
+            if (body.SpareBytes != null)
+                SpareTableWire.Apply(updated, layout, body.Changes, body.SpareBytes);
             if (!raw.AsSpan().SequenceEqual(updated))
                 await tables.UpsertVersionAsync(set.Id, version.TableDefinitionId, version.TableRevision + 1,
                     updated, version.SortOrder, version.DependsOnTableDefinitionId, ct, body.Revision, body.Sha256);
@@ -189,13 +192,14 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         .Take(2).ToListAsync(ct);
 
     public sealed record NativeFieldEdits(int Revision, string Sha256, Dictionary<string, string> Changes, string? Profile,
-        NumberingPlanChanges? NumberingPlan = null);
+        NumberingPlanChanges? NumberingPlan = null, SpareBytePatch[]? SpareBytes = null);
     public sealed record NativeTemplate(string Profile, int Length);
 
     private static string TemplateName(int number) => number switch
     {
         22 or 134 => "Card acceptance",
         23 or 135 => "Carrier screens",
+        SpareTableWire.MessageType => "Spare table",
         93 => "Stored-value parameters",
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
         95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}", 152 => "Holiday and time-of-day discounts",

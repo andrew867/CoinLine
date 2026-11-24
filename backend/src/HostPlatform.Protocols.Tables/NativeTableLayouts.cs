@@ -45,7 +45,7 @@ public static partial class NativeTableLayouts
         };
     }
 
-    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord or 93 or 95 or >= 131 and <= 135 or 152
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or 55 or 58 or MessagingRecord or SpareTableWire.MessageType or 93 or 95 or >= 131 and <= 135 or 152
         ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
         : [];
 
@@ -229,19 +229,7 @@ public static partial class NativeTableLayouts
                 Field("sessionTimeout", "Overall session timeout (10 ms ticks)", 54, Word),
                 Field("lineReleaseDelay", "Line release delay (10 ms ticks)", 56, Word)));
 
-        yield return new NativeTableLayout(72, 1001, Later,
-            [Section("collection", "Stored-value collection",
-                Hour("collectionHours", "Collection offset hours", 32), Minute("collectionMinutes", "Collection offset minutes", 33),
-                Minute("retryMinutes", "Retry delay minutes", 34), Minute("retrySeconds", "Retry delay seconds", 35),
-                Field("dailyRecords", "Daily record collection threshold", 38, Word),
-                Field("immediateRecords", "Immediate record collection threshold", 44, Word),
-                Field("maxAttempts", "Primary collection attempts", 50),
-                DialField("primaryCollection", "Primary collection number", 53, 6),
-                DialField("alternateCollection", "Alternate collection number", 59, 6)),
-            Section("operator", "Alternate operator access",
-                Field("screenReference", "Call-screening entry reference", 345),
-                Field("spillTimeout", "Timeout before sending digits", 346),
-                Field("sessionTimeout", "Session timeout (seconds)", 349))]);
+        yield return new NativeTableLayout(SpareTableWire.MessageType, SpareTableWire.RecordLength, Later, SpareTableSections());
 
         yield return Layout(22, 661, []);
         yield return Layout(23, 678, CarrierRules(21, 32, 4, 20));

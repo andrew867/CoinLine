@@ -12,6 +12,46 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     [Fact]
+    public async Task Spare_table_template_saves_named_fields_and_byte_edits_without_exposing_credentials()
+    {
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Spare table editor test" });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}/records/72/fields";
+        var missing = await _client.GetFromJsonAsync<JsonElement>(path);
+        using var initialized = await _client.PostAsJsonAsync(path, missing.GetProperty("templates")[0]);
+        Assert.Equal(HttpStatusCode.NoContent, initialized.StatusCode);
+        var original = await _client.GetFromJsonAsync<JsonElement>(path);
+        var request = new
+        {
+            profile = original.GetProperty("profile"), revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["dailyCash"] = "4000000000", ["operatorPin"] = "258" },
+            spareBytes = new[] { new SpareBytePatch(1000, 0xDE) }
+        };
+        using var saved = await _client.PutAsJsonAsync(path, request);
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+
+        var result = await _client.GetFromJsonAsync<JsonElement>(path);
+        Assert.Equal(2, result.GetProperty("revision").GetInt32());
+        var bytes = result.GetProperty("spareBytes").GetString()!;
+        Assert.EndsWith("DE", bytes);
+        Assert.Equal("????????", bytes.Substring(698, 8));
+        var fields = result.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal("4000000000", fields["dailyCash"].GetProperty("value").GetString());
+        Assert.Equal(JsonValueKind.Null, fields["operatorPin"].GetProperty("value").ValueKind);
+
+        using var blocked = await _client.PutAsJsonAsync(path, new
+        {
+            profile = result.GetProperty("profile"), revision = result.GetProperty("revision"), sha256 = result.GetProperty("sha256"),
+            changes = new Dictionary<string, string>(), spareBytes = new[] { new SpareBytePatch(350, 0) }
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        using var stale = await _client.PutAsJsonAsync(path, request);
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+    }
+
+    [Fact]
     public async Task Stored_value_editor_masks_validation_keys_and_loads_the_selected_discount_method()
     {
         using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Stored-value parameter editor test" });
