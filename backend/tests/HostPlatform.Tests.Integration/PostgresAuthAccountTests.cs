@@ -12,16 +12,17 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace HostPlatform.Tests.Integration;
 
+[Collection("PostgreSQL integration")]
 public sealed class PostgresAuthAccountTests
 {
-    [PostgresAuthFact]
+    [PostgresIntegrationFact]
     public async Task Production_accounts_require_an_admin_operator_and_return_safe_fields()
     {
         var key = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
             .UseEnvironment("Production")
-            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresAuthFact.ConnectionVariable))
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false")
@@ -76,15 +77,15 @@ public sealed class PostgresAuthAccountTests
             client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", body.GetProperty("token").GetString());
         }
     }
+}
 
-    private sealed class PostgresAuthFact : FactAttribute
+internal sealed class PostgresIntegrationFact : FactAttribute
+{
+    public const string ConnectionVariable = "COINLINE_POSTGRES_AUTH_TEST_CONNECTION";
+
+    public PostgresIntegrationFact()
     {
-        public const string ConnectionVariable = "COINLINE_POSTGRES_AUTH_TEST_CONNECTION";
-
-        public PostgresAuthFact()
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
-                Skip = $"Set {ConnectionVariable} to an isolated PostgreSQL test database.";
-        }
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ConnectionVariable)))
+            Skip = $"Set {ConnectionVariable} to an isolated PostgreSQL test database.";
     }
 }

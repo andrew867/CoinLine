@@ -1343,6 +1343,55 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             Assert.Equal("Delivered", (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("status").GetString());
             Assert.Equal(originalAssignment, (await fx.Client.GetFromJsonAsync<JsonElement>(assignmentPath, Json)).GetProperty("tableSetId").GetGuid());
 
+            var delivered = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0];
+            Assert.True(delivered.GetProperty("canQueueFirmwareCancellation").GetBoolean());
+            var cancellationPath = $"{schedulePath}/{scheduleId}/clear-firmware";
+            using var cleared = await fx.Client.PostAsync(cancellationPath, null);
+            cleared.EnsureSuccessStatusCode();
+            var cancellation = await cleared.Content.ReadFromJsonAsync<JsonElement>(Json);
+            var cancellationBatch = cancellation.GetProperty("batchId").GetGuid();
+            var cancellationSet = cancellation.GetProperty("tableSetId").GetGuid();
+            var cancellationSchedule = cancellation.GetProperty("scheduleId").GetGuid();
+            var cancellationSchedulesPath = $"/api/tables/sets/{cancellationSet}/schedules";
+            using var duplicateClear = await fx.Client.PostAsync(cancellationPath, null);
+            Assert.Equal(HttpStatusCode.Conflict, duplicateClear.StatusCode);
+            Assert.False((await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0]
+                .GetProperty("canQueueFirmwareCancellation").GetBoolean());
+            Assert.Equal("Ready", (await fx.Client.GetFromJsonAsync<JsonElement>(cancellationSchedulesPath, Json))[0]
+                .GetProperty("status").GetString());
+            var disabled = expected.ToArray();
+            disabled[1] &= 0xFE;
+            try
+            {
+                await using (var callIn = await OpenAsync())
+                {
+                    await callIn.Stream.WriteAsync(Message(KnownId, [8]));
+                    AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                    var header = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                    Assert.Equal(new byte[] { 18 }, header.Data);
+                    await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+                    var parameters = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                    Assert.Equal(disabled, parameters.Data);
+                    await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | parameters.Control)));
+                    await callIn.Stream.WriteAsync(Message(KnownId, [14, 94]));
+                    AssertAck(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                    var end = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
+                    Assert.Equal(new byte[] { 13 }, end.Data);
+                    await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+                    await WaitBatchAsync(cancellationBatch, 2);
+                }
+                var cancellationDelivered = (await fx.Client.GetFromJsonAsync<JsonElement>(cancellationSchedulesPath, Json))[0];
+                Assert.Equal("Delivered", cancellationDelivered.GetProperty("status").GetString());
+                Assert.False(cancellationDelivered.GetProperty("canQueueFirmwareCancellation").GetBoolean());
+                using var staleClear = await fx.Client.PostAsync(cancellationPath, null);
+                Assert.Equal(HttpStatusCode.Conflict, staleClear.StatusCode);
+                Assert.Equal(originalAssignment, (await fx.Client.GetFromJsonAsync<JsonElement>(assignmentPath, Json)).GetProperty("tableSetId").GetGuid());
+            }
+            finally
+            {
+                using var cleanupCancellation = await fx.Client.PostAsync($"{cancellationSchedulesPath}/{cancellationSchedule}/cancel", null);
+            }
+
             using var rescheduled = await fx.Client.PostAsJsonAsync(schedulePath, selection, Json);
             rescheduled.EnsureSuccessStatusCode();
             scheduleId = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("id").GetGuid();

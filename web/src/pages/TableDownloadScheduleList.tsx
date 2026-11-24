@@ -16,6 +16,7 @@ type Schedule = {
   status: 'Scheduled' | 'Preparing' | 'Ready' | 'Delivering' | 'Retry pending' | 'Delivered' | 'Cancelled'
   lastBatchId: string | null
   lastError: string | null
+  canQueueFirmwareCancellation: boolean
 }
 
 export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
@@ -27,6 +28,7 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
   const [revision, setRevision] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [firmwareCancellation, setFirmwareCancellation] = useState<{ phone: string; batchId: string } | null>(null)
   const endpoint = setId ? `/api/tables/sets/${setId}/schedules`
     : '/api/tables/schedules' + (terminalId ? `?terminalId=${encodeURIComponent(terminalId)}` : '')
 
@@ -54,11 +56,32 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
     }
   }
 
+  async function clearFirmware(row: Schedule) {
+    setBusy(true)
+    setError('')
+    setFirmwareCancellation(null)
+    try {
+      const response = await apiPostBare(`/api/tables/sets/${row.tableSetId}/schedules/${row.id}/clear-firmware`)
+      const result = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(result?.error ?? 'Could not queue firmware cancellation.')
+      setFirmwareCancellation({ phone: row.phone, batchId: result.batchId })
+      setRevision(value => value + 1)
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Could not queue firmware cancellation.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <details>
       <summary>Scheduled downloads{rows ? ` (${rows.length})` : ''}</summary>
       <button type="button" disabled={busy} onClick={() => setRevision((value) => value + 1)}>Refresh schedules</button>
       {error && <p role="alert">{error}</p>}
+      {firmwareCancellation && <p role="status">
+        Firmware cancellation queued for {firmwareCancellation.phone}. The phone must acknowledge it on a subsequent call-in.
+        {' '}<Link to={`/downloads/${firmwareCancellation.batchId}`}>View cancellation batch</Link>
+      </p>}
       {rows?.length === 0 && <p>No scheduled downloads.</p>}
       {rows && rows.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
@@ -79,6 +102,8 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
                   {row.completedAtUtc && <time dateTime={row.completedAtUtc}>{new Date(row.completedAtUtc).toLocaleString()}</time>}
                   {row.status !== 'Delivering' && row.status !== 'Delivered' && row.status !== 'Cancelled' &&
                     <button type="button" disabled={busy} onClick={() => void cancel(row)}>Cancel download</button>}
+                  {row.canQueueFirmwareCancellation &&
+                    <button type="button" disabled={busy} onClick={() => void clearFirmware(row)}>Queue firmware cancellation</button>}
                 </td>
               </tr>
             ))}</tbody>

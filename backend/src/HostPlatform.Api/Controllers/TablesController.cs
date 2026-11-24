@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Data;
+using System.Security.Cryptography;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HostPlatform.Api.Audit;
@@ -476,6 +477,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     public async Task<ActionResult<object>> ListSchedules([FromRoute] Guid? id, [FromQuery] Guid? terminalId, CancellationToken ct)
     {
         var now = clock.GetUtcNow().UtcDateTime;
+        var completedFirmware = CompletedFirmwareSchedules();
         var schedules = await db.ScheduledTableDownloads.AsNoTracking()
             .Where(s => (!id.HasValue || s.TableSetId == id) && (!terminalId.HasValue || s.TerminalId == terminalId))
             .OrderBy(s => s.CompletedAtUtc != null || s.CancelledAtUtc != null)
@@ -491,10 +493,29 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                     : s.LastBatch == null ? "Preparing"
                     : s.LastBatch.Status == DownloadBatchStatus.Failed ? "Retry pending" : "Ready",
                 s.LastBatchId,
-                lastError = s.CancellationReason ?? (s.LastBatch == null ? null : s.LastBatch.LastError)
+                lastError = s.CancellationReason ?? (s.LastBatch == null ? null : s.LastBatch.LastError),
+                latestFirmwareRecord = s.Id == completedFirmware.Where(other => other.TerminalId == s.TerminalId)
+                    .OrderByDescending(other => other.CompletedAtUtc).ThenByDescending(other => other.CreatedAtUtc)
+                    .ThenByDescending(other => other.Id).Select(other => other.Id).FirstOrDefault()
+                    && !db.ScheduledTableDownloads.Any(other => other.TerminalId == s.TerminalId
+                        && other.CompletedAtUtc == null && other.CancelledAtUtc == null)
+                    ? s.TableSet!.Versions.Where(v => v.TableDefinition!.TableNumber == CodeDownloadWire.MessageType)
+                        .Select(v => v.TablePayload == null ? v.EmbeddedPayload : v.TablePayload.RawContent).FirstOrDefault()
+                    : null
             }).ToListAsync(ct);
-        return Ok(schedules);
+        return Ok(schedules.Select(s => new
+        {
+            s.Id, s.TerminalId, s.phone, s.TableSetId, s.tableSet,
+            s.AvailableAtUtc, s.PreparedAtUtc, s.StartedAtUtc, s.CompletedAtUtc, s.RecordNumbers,
+            s.status, s.LastBatchId, s.lastError,
+            canQueueFirmwareCancellation = s.latestFirmwareRecord != null && CodeDownloadWire.IsEnabled(s.latestFirmwareRecord)
+        }));
     }
+
+    private IQueryable<ScheduledTableDownload> CompletedFirmwareSchedules() =>
+        db.ScheduledTableDownloads.AsNoTracking().Where(s => s.CompletedAtUtc != null && s.CancelledAtUtc == null
+            && s.RecordNumbers == null && s.TableSet!.Versions.Count == 1
+            && s.TableSet.Versions.Any(v => v.TableDefinition!.TableNumber == CodeDownloadWire.MessageType));
 
     [HttpPost("sets/{id:guid}/schedules")]
     public async Task<ActionResult<object>> ScheduleForScope(Guid id, [FromBody] TableScopeScheduleDto body, CancellationToken ct)
@@ -605,6 +626,82 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The download status changed. Refresh the schedule." }); }
         return NoContent();
+    }
+
+    [HttpPost("sets/{id:guid}/schedules/{scheduleId:guid}/clear-firmware")]
+    public async Task<ActionResult> QueueFirmwareCancellation(Guid id, Guid scheduleId, CancellationToken ct)
+    {
+        try
+        {
+            if (!db.Database.IsRelational())
+                return await SaveFirmwareCancellationAsync(id, scheduleId, ct);
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var response = await SaveFirmwareCancellationAsync(id, scheduleId, ct);
+            if (response is OkObjectResult)
+                await transaction.CommitAsync(ct);
+            return response;
+        }
+        catch (Exception ex) when (ex.GetBaseException() is PostgresException
+            { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected or PostgresErrorCodes.UniqueViolation })
+        {
+            return Conflict(new { error = "The phone's schedule changed. Refresh and try again." });
+        }
+    }
+
+    private async Task<ActionResult> SaveFirmwareCancellationAsync(Guid id, Guid scheduleId, CancellationToken ct)
+    {
+        var schedule = await db.ScheduledTableDownloads.AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == scheduleId && s.TableSetId == id, ct);
+        if (schedule == null)
+            return NotFound();
+
+        var latest = await CompletedFirmwareSchedules().Where(s => s.TerminalId == schedule.TerminalId)
+            .OrderByDescending(s => s.CompletedAtUtc).ThenByDescending(s => s.CreatedAtUtc).ThenByDescending(s => s.Id)
+            .Select(s => s.Id).FirstOrDefaultAsync(ct);
+        if (latest != schedule.Id)
+            return Conflict(new { error = "Only the latest delivered firmware schedule can be cleared." });
+        if (await db.ScheduledTableDownloads.AnyAsync(s => s.TerminalId == schedule.TerminalId
+            && s.CompletedAtUtc == null && s.CancelledAtUtc == null, ct))
+            return Conflict(new { error = "This phone already has a pending delivery. Resolve it before clearing the firmware schedule." });
+
+        var source = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion)
+            .Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
+            .Include(s => s.Versions).ThenInclude(v => v.TablePayload).SingleAsync(s => s.Id == id, ct);
+        var original = TableDistributionService.CodeOnlyVersion(source.Versions);
+        if (original == null || !CodeDownloadWire.IsEnabled(TableDistributionService.GetEffectivePayload(original)))
+            return Conflict(new { error = "The delivered firmware record is already disabled or incomplete." });
+
+        var targets = await AssignmentTargetsAsync(source, new TableTargetScope("terminal", schedule.TerminalId), ct);
+        if (targets.SingleOrDefault() is not { Eligible: true })
+            return Conflict(new { error = "The phone no longer matches the firmware set's scope." });
+
+        var raw = CodeDownloadWire.Disable(TableDistributionService.GetEffectivePayload(original));
+        var sha = TablePayloadHasher.Sha256Hex(raw);
+        var version = TableDistributionService.CopyVersion(original);
+        version.EmbeddedPayload = null;
+        version.TablePayloadId = null;
+        version.TablePayload = new TablePayload { RawContent = raw, Sha256Hex = sha, LengthBytes = raw.Length };
+        version.PayloadSha256Hex = sha;
+        version.Checksum = SHA256.HashData(raw);
+        version.TableRevision++;
+
+        var now = clock.GetUtcNow().UtcDateTime;
+        var set = new TableSet
+        {
+            Name = "Firmware schedule cancellation",
+            CustomerId = source.CustomerId,
+            TargetFirmwareVersionId = source.TargetFirmwareVersionId,
+            Versions = [version]
+        };
+        TableDistributionService.MarkPublished(set, now);
+        db.TableSets.Add(set);
+        var cancellation = new ScheduledTableDownload { TerminalId = schedule.TerminalId, TableSetId = set.Id, AvailableAtUtc = now };
+        db.ScheduledTableDownloads.Add(cancellation);
+        var batch = tables.StageScheduledBatch(cancellation, [version], now);
+        ApiAudit.Write(db, HttpContext, "tables.set", "clear_firmware_schedule", id.ToString(),
+            new { scheduleId, cancellationScheduleId = cancellation.Id, cancellationSetId = set.Id }, schedule.TerminalId);
+        await db.SaveChangesAsync(ct);
+        return Ok(new { scheduleId = cancellation.Id, tableSetId = set.Id, batchId = batch.Id });
     }
 
     private static IReadOnlyList<TableVersion>? SelectScheduleRecords(TableSet set, string targetType, int[]? numbers)

@@ -11,6 +11,18 @@ public static class CodeDownloadWire
     internal static readonly NativeTableField TargetRom = new("targetRom", "Requested ROM revision", 19, TableFieldEncoding.Text, 7);
     internal static readonly NativeTableField TargetApp = new("targetApp", "Download application revision", 26, TableFieldEncoding.Text, 4);
 
+    public static bool IsEnabled(ReadOnlySpan<byte> record) =>
+        record.Length == RecordLength && record[0] == MessageType && (record[1] & 1) != 0;
+
+    public static byte[] Disable(ReadOnlySpan<byte> record)
+    {
+        if (!IsEnabled(record))
+            throw new InvalidOperationException("An enabled, complete MT94 record is required.");
+        var disabled = record.ToArray();
+        disabled[1] &= 0xFE;
+        return disabled;
+    }
+
     public static string? DeliveryIssue(ReadOnlySpan<byte> record, DateTime availableAt)
     {
         if (record.Length != RecordLength || record[0] != MessageType)
