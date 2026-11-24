@@ -8,7 +8,7 @@ public sealed class NativeTableLayoutTests
     [InlineData(21, 18)] [InlineData(21, 40)] [InlineData(22, 661)] [InlineData(23, 678)] [InlineData(26, 72)]
     [InlineData(27, 2801)] [InlineData(28, 2801)] [InlineData(30, 68)] [InlineData(31, 37)]
     [InlineData(32, 33)] [InlineData(33, 35)] [InlineData(34, 19)] [InlineData(35, 21)]
-    [InlineData(49, 199)] [InlineData(50, 105)] [InlineData(55, 571)] [InlineData(58, 26)]
+    [InlineData(49, 199)] [InlineData(49, 263)] [InlineData(50, 105)] [InlineData(55, 571)] [InlineData(58, 26)]
     [InlineData(59, 1021)] [InlineData(62, 353)] [InlineData(68, 72)] [InlineData(72, 1001)]
     [InlineData(73, 1192)] [InlineData(74, 819)]
     [InlineData(85, 8001)] [InlineData(92, 1021)] [InlineData(92, 3061)] [InlineData(92, 3401)]
@@ -60,6 +60,29 @@ public sealed class NativeTableLayoutTests
         Assert.All(cleared[13..19], value => Assert.Equal(0, value));
         Assert.Equal(updated[19..], cleared[19..]);
         Assert.Equal(129, layout.Apply(updated, new Dictionary<string, string> { ["adjust.year"] = "129" })[13]);
+    }
+
+    [Fact]
+    public void Later_answer_supervision_uses_twenty_digit_entries_and_preserves_reserved_bytes()
+    {
+        var template = Assert.Single(NativeTableLayouts.DraftTemplates(49));
+        var original = NativeTableLayouts.CreateDraftTemplate(template);
+        Assert.Equal(263, original.Length);
+        Assert.Equal(new byte[] { 49, 0, 0, 50, 0, 200, 0 }, original[..7]);
+        original[229] = 0x53;
+        original[230] = 0x11;
+        original[231] = 0xAE;
+        original[^1] = 0x5B;
+        var layout = NativeTableLayouts.Find(49, original)!;
+        var updated = layout.Apply(original, new Dictionary<string, string>
+        {
+            ["features"] = "128", ["circuitControl"] = "1", ["delay"] = "75", ["wink"] = "300",
+            ["pattern-15.digits"] = new string('1', 16) + "20*#", ["pattern-15.plan"] = "3", ["pattern-15.definition"] = "130"
+        });
+        Assert.Equal(new byte[] { 49, 128, 1, 75, 0, 44, 1 }, updated[..7]);
+        Assert.Equal(original[7..217], updated[7..217]);
+        Assert.Equal(new byte[] { 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x11, 0x2A, 0xBC, 3, 130 }, updated[217..229]);
+        Assert.Equal(original[229..], updated[229..]);
     }
 
     [Fact]

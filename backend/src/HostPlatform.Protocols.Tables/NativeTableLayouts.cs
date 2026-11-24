@@ -7,7 +7,9 @@ public static partial class NativeTableLayouts
 {
     public const string MultiPay = "MTR 1.9 packed";
     public const byte CallInRecord = 35;
+    public const byte AnswerSupervisionRecord = 49;
     public const byte MessagingRecord = 68;
+    private const int LaterAnswerSupervisionLength = 263;
     private const string Later = "Later packed profile";
     private static readonly (int, string)[] PaymentKinds =
         [(2, "No payment"), (3, "Coin"), (4, "Credit card"), (5, "Calling card"), (6, "Stored-value card"), (7, "Debit card")];
@@ -46,10 +48,15 @@ public static partial class NativeTableLayouts
         };
     }
 
-    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number) => number is 22 or 23 or CallInRecord or 55 or 58 or MessagingRecord
-        or SpareTableWire.MessageType or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or 152
-        ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
-        : [];
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number)
+    {
+        if (number == AnswerSupervisionRecord)
+            return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
+        return number is 22 or 23 or CallInRecord or 55 or 58 or MessagingRecord
+            or SpareTableWire.MessageType or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or 152
+            ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
+            : [];
+    }
 
     public static byte[] CreateDraftTemplate(NativeTableLayout template)
     {
@@ -69,6 +76,11 @@ public static partial class NativeTableLayouts
             bytes[7] = 1;
             bytes[10] = 5;
             bytes[12] = 30;
+        }
+        if (template.Number == AnswerSupervisionRecord)
+        {
+            bytes[3] = 50;
+            bytes[5] = 200;
         }
         return bytes;
     }
@@ -296,13 +308,28 @@ public static partial class NativeTableLayouts
             yield return Layout((byte)type, 819, [AreaCode(), .. Rows("exchange", 800, i => $"Exchange {200 + i}", (i, key) =>
                 [Field($"{key}.rate", "Rate index", 19 + i)])]);
 
-        yield return new NativeTableLayout(49, 199, Later, [Section("supervision", "Answer supervision timing",
+        yield return new NativeTableLayout(AnswerSupervisionRecord, 199, Later, [Section("supervision", "Answer supervision timing",
             Field("delay", "Delay before answer supervision (10 ms ticks)", 3, SignedWord, min: 0),
             Field("wink", "Maximum wink duration (10 ms ticks)", 5, SignedWord, min: 0)),
             .. Rows("pattern", 16, i => $"Dial pattern {i + 1}", (i, key) =>
                 [DialField($"{key}.digits", "Number pattern", 7 + i * 10, 6),
                  Field($"{key}.plan", "Numbering plan reference", 13 + i * 10),
                  Bits($"{key}.mode", "Supervision method code", 14 + i * 10, 7)])]);
+        yield return new NativeTableLayout(AnswerSupervisionRecord, LaterAnswerSupervisionLength, Later,
+            [Section("supervision", "Answer supervision timing",
+                Field("delay", "Delay before answer supervision (10 ms ticks)", 3, SignedWord, min: 0,
+                    help: "Delay for lines using polarity reversal to signal answer."),
+                Field("wink", "Maximum wink duration (10 ms ticks)", 5, SignedWord, min: 0,
+                    help: "Maximum duration of the brief polarity reversal on a wink-signaling line.")),
+             Section("control", "Line control",
+                Field("features", "Supervision feature flags", 1), Field("circuitControl", "Telephony circuit control code", 2)),
+             .. Rows("pattern", 16, i => $"Dial pattern {i + 1}", (i, key) =>
+             {
+                 var offset = 7 + i * 14;
+                 return [new NativeTableField($"{key}.digits", "Number pattern", offset, KeypadDial, 10),
+                     Field($"{key}.plan", "Numbering plan reference", offset + 10),
+                     Field($"{key}.definition", "Supervision definition code", offset + 11)];
+             })]);
 
         yield return new NativeTableLayout(CodeDownloadWire.MessageType, CodeDownloadWire.RecordLength, Later, CodeDownloadSections());
 
