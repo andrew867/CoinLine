@@ -213,6 +213,8 @@ public class HostPlatformDbContext : DbContext
             b.HasIndex(s => s.TerminalId).IsUnique()
                 .HasFilter("\"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
             b.HasIndex(s => new { s.TableSetId, s.AvailableAtUtc });
+            b.HasIndex(s => s.AvailableAtUtc)
+                .HasFilter("\"LastBatchId\" IS NULL AND \"NccSessionId\" IS NULL AND \"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
         });
 
         modelBuilder.Entity<DownloadBatch>(b =>

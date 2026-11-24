@@ -459,9 +459,70 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             throw new InvalidOperationException(ex.Message, ex);
         }
 
+        return (StageDownloadBatch(terminalId, tableSetId, ordered, scope, partialDefinitionIds,
+            trimmedKey, nccSessionId, retryCount), false);
+    }
+
+    public async Task<IReadOnlyList<TableVersion>> ReadScheduledRecordsAsync(ScheduledTableDownload schedule,
+        Terminal terminal, DateTime now, CancellationToken ct)
+    {
+        var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion)
+            .Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
+            .Include(s => s.Versions).ThenInclude(v => v.TablePayload)
+            .SingleOrDefaultAsync(s => s.Id == schedule.TableSetId && s.Status == TableSetStatus.Published, ct)
+            ?? throw new InvalidOperationException("The scheduled set is no longer published.");
+        CheckFirmwareTarget(set, terminal.FirmwareVersionId);
+        if (set.CustomerId is { } customer && !await db.Sites.AsNoTracking()
+            .AnyAsync(site => site.Id == terminal.SiteId && site.CustomerId == customer, ct))
+            throw new InvalidOperationException("The scheduled set belongs to a different customer.");
+
+        var records = schedule.RecordNumbers is { } numbers
+            ? SelectDataDownloadRecords(set.Versions.ToArray(), numbers)
+            : OrderVersionsForDownload(set.Versions.ToArray());
+        if (!HasCompleteDlogRecords(records))
+            throw new InvalidOperationException("The scheduled records are incomplete or have conflicting message types.");
+        if (records.Any(record => record.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
+        {
+            var code = CodeOnlyVersion(set.Versions) ??
+                throw new InvalidOperationException("Schedule firmware parameters in a dedicated set.");
+            if (CodeDownloadWire.DeliveryIssue(GetEffectivePayload(code), now) is { } issue)
+                throw new InvalidOperationException(issue);
+        }
+        var access = records.Where(record => record.TableDefinition!.TableNumber == 21).ToArray();
+        if (AccessRecordIssue(access, terminal.TerminalIdHex) is { } identityIssue)
+            throw new InvalidOperationException(identityIssue);
+        return records;
+    }
+
+    public DownloadBatch StageScheduledBatch(ScheduledTableDownload schedule, IReadOnlyList<TableVersion> records, DateTime now)
+    {
+        if (schedule.LastBatch is { Status: DownloadBatchStatus.Pending } pending)
+            return pending;
+        var definitions = schedule.RecordNumbers == null ? null : records.Select(record => record.TableDefinitionId).ToArray();
+        var batch = StageDownloadBatch(schedule.TerminalId, schedule.TableSetId, records,
+            definitions == null ? DownloadScope.Full : DownloadScope.Partial, definitions,
+            clientKey: null, nccSessionId: null, retryCount: schedule.LastBatch == null ? 0 : schedule.LastBatch.RetryCount + 1);
+        batch.ScheduleId = schedule.Id;
+        schedule.PreparedAtUtc ??= now;
+        schedule.LastBatch = batch;
+        return batch;
+    }
+
+    public static void StageScheduleCancellation(ScheduledTableDownload schedule, DateTime now, string reason)
+    {
+        schedule.CancelledAtUtc = now;
+        schedule.CancellationReason = reason;
+        schedule.Version++;
+        if (schedule.LastBatch is { Status: DownloadBatchStatus.Pending } batch)
+            CancelBatch(batch, reason);
+    }
+
+    private DownloadBatch StageDownloadBatch(Guid terminalId, Guid tableSetId, IReadOnlyList<TableVersion> ordered,
+        DownloadScope scope, IReadOnlyList<Guid>? partialDefinitionIds, string? clientKey, Guid? nccSessionId, int retryCount)
+    {
         var batch = new DownloadBatch
         {
-            ClientIdempotencyKey = trimmedKey,
+            ClientIdempotencyKey = clientKey,
             TerminalId = terminalId,
             TableSetId = tableSetId,
             NccSessionId = nccSessionId,
@@ -495,29 +556,21 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
                 "Per-item HostDownloadPhase tracks host orchestration; Completed/Succeeded requires terminal ACK validated under field conditions."
         }, JsonOpts);
         db.DownloadBatches.Add(batch);
-        return (batch, false);
+        return batch;
     }
 
     public async Task CancelDownloadAsync(Guid batchId, CancellationToken ct)
     {
-        if (await db.ScheduledTableDownloads.AsNoTracking().AnyAsync(s => s.LastBatchId == batchId &&
-            s.NccSession != null && s.NccSession.Status == NccSessionStatus.Active, ct))
-            throw new InvalidOperationException("Cancel the schedule between delivery attempts.");
         var b = await db.DownloadBatches.Include(x => x.Items).FirstOrDefaultAsync(x => x.Id == batchId, ct)
                 ?? throw new InvalidOperationException("Download batch not found.");
+        if (b.ScheduleId != null)
+            throw new InvalidOperationException("Cancel the scheduled download from its schedule.");
         if (b.Status == DownloadBatchStatus.Running && b.NccSessionId != null)
             throw new InvalidOperationException("The phone is receiving this batch. Try again after the call ends.");
         if (b.Status is DownloadBatchStatus.Completed or DownloadBatchStatus.Cancelled)
             throw new InvalidOperationException("Batch is already completed or cancelled.");
 
-        b.Status = DownloadBatchStatus.Cancelled;
-        b.LastError = "Cancelled by operator.";
-        foreach (var i in b.Items)
-        {
-            i.ItemStatus = DownloadBatchItemStatus.Cancelled;
-            i.LastAckStatus = "cancelled";
-            i.HostDownloadPhase = TableDownloadHostPhase.Cancelled;
-        }
+        CancelBatch(b, "Cancelled by operator.");
 
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException ex)
@@ -526,13 +579,25 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         }
     }
 
+    private static void CancelBatch(DownloadBatch b, string reason)
+    {
+        b.Status = DownloadBatchStatus.Cancelled;
+        b.LastError = reason;
+        foreach (var i in b.Items)
+        {
+            i.ItemStatus = DownloadBatchItemStatus.Cancelled;
+            i.LastAckStatus = "cancelled";
+            i.HostDownloadPhase = TableDownloadHostPhase.Cancelled;
+        }
+
+    }
+
     public async Task<DownloadBatch> RetryDownloadAsync(Guid batchId, CancellationToken ct)
     {
-        if (await db.ScheduledTableDownloads.AsNoTracking().AnyAsync(s => s.LastBatchId == batchId &&
-            s.CompletedAtUtc == null && s.CancelledAtUtc == null, ct))
-            throw new InvalidOperationException("An open schedule retries on the next eligible call-in.");
         var old = await db.DownloadBatches.AsNoTracking().FirstOrDefaultAsync(x => x.Id == batchId, ct)
                   ?? throw new InvalidOperationException("Download batch not found.");
+        if (old.ScheduleId != null)
+            throw new InvalidOperationException("Scheduled batches are retried through their schedule.");
         if (old.Status is not (DownloadBatchStatus.Failed or DownloadBatchStatus.Cancelled))
             throw new InvalidOperationException("Retry is only valid for failed or cancelled batches.");
 

@@ -21,6 +21,7 @@ type Detail = {
   id: string
   terminalId: string
   nccSessionId: string | null
+  scheduleId: string | null
   tableSetId: string
   tableSetName: string | null
   status: number
@@ -104,8 +105,8 @@ export function DownloadDetail() {
       } as Record<number, string>
     )[n] ?? String(n)
 
-  const canCancel = d.status === 0 || (d.status === 1 && !d.nccSessionId) || d.status === 5
-  const canRetry = d.status === 3 || d.status === 4
+  const canCancel = !d.scheduleId && (d.status === 0 || (d.status === 1 && !d.nccSessionId) || d.status === 5)
+  const canRetry = !d.scheduleId && (d.status === 3 || d.status === 4)
 
   return (
     <div>
@@ -118,6 +119,7 @@ export function DownloadDetail() {
         <strong>{statusLabel(d.status)}</strong> · Terminal <code>{d.terminalId}</code>
       </p>
       {d.nccSessionId && <p>NCC session <code>{d.nccSessionId}</code></p>}
+      {d.scheduleId && <p><Link to={`/table-sets/${d.tableSetId}`}>Manage scheduled download</Link></p>}
       <p>
         Set: {d.tableSetName ?? d.tableSetId} · Scope: {d.scope === 1 ? 'Partial' : 'Full'} · Retries: {d.retryCount}
       </p>

@@ -4,7 +4,7 @@ CoinLine stores table records as versioned binary payloads with SHA-256 hashes a
 
 A matched MT44 can start transfer of a published set. The host sends the MT18 header, paces fragments with link acknowledgments and records the terminal's MT14 result per table. The final MT13 acknowledgment completes the batch. Ten records completed this exchange in the firmware lab.
 
-An available scheduled full data set is eligible on a matched MT8 call-in, MT9 callback or MT44 table request. The host retains the latest attempt and makes an interrupted schedule available for another call. Scripted NCC tests cover MT8 and MT9 pickup, including recovery across an abrupt API restart on PostgreSQL.
+The host prepares an ordered batch at the scheduled time. The first eligible call claims the prepared batch and records acknowledgments on its original ID. A full data schedule is eligible on a matched MT8 call-in, MT9 callback or MT44 table request. The host keeps interrupted attempts in download history and creates a new attempt on the next eligible call. Pending prepared batches survive a restart.
 
 Scheduled record selections are delivered on MT8 or MT9. The host resolves the required records from the published source set, sends the selected records in dependency order and records the MT14 results before completing the schedule. A partial fleet schedule remains available for an eligible call while an MT44 request follows its normal selection rules.
 

@@ -9,9 +9,11 @@ type Schedule = {
   tableSetId: string
   tableSet: string
   availableAtUtc: string
+  preparedAtUtc: string | null
+  startedAtUtc: string | null
   completedAtUtc: string | null
   recordNumbers: number[] | null
-  status: 'Scheduled' | 'Ready' | 'Delivering' | 'Delivered' | 'Cancelled'
+  status: 'Scheduled' | 'Preparing' | 'Ready' | 'Delivering' | 'Retry pending' | 'Delivered' | 'Cancelled'
   lastBatchId: string | null
   lastError: string | null
 }
@@ -61,19 +63,21 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
       {rows && rows.length > 0 && (
         <div style={{ overflowX: 'auto' }}>
           <table>
-            <thead><tr><th>Phone</th>{!setId && <th>Table set</th>}<th>Records</th><th>Available from</th><th>Status</th><th>Delivery</th></tr></thead>
+            <thead><tr><th>Phone</th>{!setId && <th>Table set</th>}<th>Records</th><th>Prepare at</th><th>Prepared</th><th>Status</th><th>Delivery</th></tr></thead>
             <tbody>{rows.map((row) => (
               <tr key={row.id}>
                 <td><Link to={`/terminals/${row.terminalId}`}>{row.phone}</Link></td>
                 {!setId && <td><Link to={`/table-sets/${row.tableSetId}`}>{row.tableSet}</Link></td>}
                 <td>{row.recordNumbers?.map(number => `MT${number}`).join(', ') ?? 'All records'}</td>
                 <td><time dateTime={row.availableAtUtc}>{new Date(row.availableAtUtc).toLocaleString()}</time></td>
-                <td>{row.status}</td>
+                <td>{row.preparedAtUtc ? <time dateTime={row.preparedAtUtc}>{new Date(row.preparedAtUtc).toLocaleString()}</time> : 'Pending'}</td>
+                <td>{row.status === 'Ready' ? 'Ready for pickup' : row.status}</td>
                 <td>
-                  {row.lastBatchId && <Link to={`/downloads/${row.lastBatchId}`}>Last attempt</Link>}
+                  {row.lastBatchId && <Link to={`/downloads/${row.lastBatchId}`}>{row.startedAtUtc ? 'Last attempt' : 'Prepared batch'}</Link>}
+                  {row.startedAtUtc && <div>Started <time dateTime={row.startedAtUtc}>{new Date(row.startedAtUtc).toLocaleString()}</time></div>}
                   {row.lastError && <div>{row.lastError}</div>}
                   {row.completedAtUtc && <time dateTime={row.completedAtUtc}>{new Date(row.completedAtUtc).toLocaleString()}</time>}
-                  {(row.status === 'Scheduled' || row.status === 'Ready') &&
+                  {row.status !== 'Delivering' && row.status !== 'Delivered' && row.status !== 'Cancelled' &&
                     <button type="button" disabled={busy} onClick={() => void cancel(row)}>Cancel download</button>}
                 </td>
               </tr>

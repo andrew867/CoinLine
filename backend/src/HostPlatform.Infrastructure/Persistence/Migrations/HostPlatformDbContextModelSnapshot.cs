@@ -1418,6 +1418,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("RetryCount")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("ScheduleId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Scope")
                         .HasColumnType("integer");
 
@@ -2673,6 +2676,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<DateTime>("AvailableAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("CancellationReason")
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("CancelledAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2691,6 +2697,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid?>("NccSessionId")
                         .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.PrimitiveCollection<int[]>("RecordNumbers")
                         .HasColumnType("integer[]");
@@ -2716,6 +2725,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AvailableAtUtc")
+                        .HasFilter("\"LastBatchId\" IS NULL AND \"NccSessionId\" IS NULL AND \"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
 
                     b.HasIndex("LastBatchId");
 

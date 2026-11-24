@@ -141,6 +141,7 @@ builder.Services.AddSingleton<INccSessionOutbound, NccSessionOutboundHub>();
 builder.Services.AddSingleton<CraftLiveSocketWriter>();
 builder.Services.AddScoped<ICardAccountLedger, CardAccountLedger>();
 builder.Services.AddHostedService<HostPlatform.Api.Hosting.NccModemListenService>();
+builder.Services.AddHostedService<HostPlatform.Api.Hosting.ScheduledDownloadPreparationService>();
 builder.Services.Configure<HostPlatform.SipModem.SipModemOptions>(
     builder.Configuration.GetSection(HostPlatform.SipModem.SipModemOptions.SectionName));
 builder.Services.AddSingleton<HostPlatform.SipModem.SipModemHostedService>();

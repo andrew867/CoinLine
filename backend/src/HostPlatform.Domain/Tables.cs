@@ -93,9 +93,11 @@ public class ScheduledTableDownload : AuditableEntity
     public NccSession? NccSession { get; set; }
     public Guid? LastBatchId { get; set; }
     public DownloadBatch? LastBatch { get; set; }
+    public DateTime? PreparedAtUtc { get; set; }
     public DateTime? StartedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
     public DateTime? CancelledAtUtc { get; set; }
+    public string? CancellationReason { get; set; }
 }
 
 public class TableRecordUpdateRun : AuditableEntity
@@ -147,6 +149,8 @@ public class DownloadBatch : AuditableEntity
 {
     /// <summary>Optional operator-supplied key for idempotent download orchestration (same response when replayed).</summary>
     public string? ClientIdempotencyKey { get; set; }
+    /// <summary>Retains schedule ownership across delivery attempts.</summary>
+    public Guid? ScheduleId { get; set; }
 
     public Guid TerminalId { get; set; }
     public Terminal? Terminal { get; set; }

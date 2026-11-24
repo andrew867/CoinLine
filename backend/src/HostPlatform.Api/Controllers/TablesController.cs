@@ -483,13 +483,15 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             .Select(s => new
             {
                 s.Id, s.TerminalId, phone = s.Terminal!.DisplayName, s.TableSetId, tableSet = s.TableSet!.Name,
-                s.AvailableAtUtc, s.CompletedAtUtc, s.RecordNumbers,
+                s.AvailableAtUtc, s.PreparedAtUtc, s.StartedAtUtc, s.CompletedAtUtc, s.RecordNumbers,
                 status = s.CancelledAtUtc != null ? "Cancelled"
                     : s.CompletedAtUtc != null ? "Delivered"
                     : s.NccSession != null && s.NccSession.Status == NccSessionStatus.Active ? "Delivering"
-                    : s.AvailableAtUtc > now ? "Scheduled" : "Ready",
+                    : s.AvailableAtUtc > now ? "Scheduled"
+                    : s.LastBatch == null ? "Preparing"
+                    : s.LastBatch.Status == DownloadBatchStatus.Failed ? "Retry pending" : "Ready",
                 s.LastBatchId,
-                lastError = s.LastBatch == null ? null : s.LastBatch.LastError
+                lastError = s.CancellationReason ?? (s.LastBatch == null ? null : s.LastBatch.LastError)
             }).ToListAsync(ct);
         return Ok(schedules);
     }
@@ -561,10 +563,19 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         ids.ExceptWith(open.Select(s => s.TerminalId));
         if (ids.Count > 0)
         {
-            db.ScheduledTableDownloads.AddRange(ids.Select(terminalId => new ScheduledTableDownload
+            var scheduledRows = ids.Select(terminalId => new ScheduledTableDownload
             {
                 TerminalId = terminalId, TableSetId = id, AvailableAtUtc = ready, RecordNumbers = recordNumbers
-            }));
+            }).ToArray();
+            db.ScheduledTableDownloads.AddRange(scheduledRows);
+            if (ready <= now)
+            {
+                IReadOnlyList<TableVersion> ordered;
+                try { ordered = records ?? TableDistributionService.OrderVersionsForDownload(set.Versions.ToArray()); }
+                catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+                foreach (var schedule in scheduledRows)
+                    tables.StageScheduledBatch(schedule, ordered, now);
+            }
             ApiAudit.Write(db, HttpContext, "tables.set", "schedule_scope", id.ToString(),
                 new { body.TargetType, body.TargetId, body.RegionCode, body.GroupPattern, body.TimeAreaCode, body.ConfigurationId,
                     configurationRecordNumber = body.TargetType == "configuration-id" ? body.RecordNumbers?[0] : null, recordNumbers, ready, count = ids.Count });
@@ -580,7 +591,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     [HttpPost("sets/{id:guid}/schedules/{scheduleId:guid}/cancel")]
     public async Task<ActionResult> CancelSchedule(Guid id, Guid scheduleId, CancellationToken ct)
     {
-        var schedule = await db.ScheduledTableDownloads.Include(s => s.NccSession)
+        var schedule = await db.ScheduledTableDownloads.Include(s => s.NccSession).Include(s => s.LastBatch).ThenInclude(b => b!.Items)
             .FirstOrDefaultAsync(s => s.Id == scheduleId && s.TableSetId == id, ct);
         if (schedule == null)
             return NotFound();
@@ -589,8 +600,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         if (schedule.CompletedAtUtc != null || schedule.NccSession?.Status == NccSessionStatus.Active)
             return Conflict(new { error = "This download has completed or is being delivered." });
 
-        schedule.CancelledAtUtc = clock.GetUtcNow().UtcDateTime;
-        schedule.Version++;
+        TableDistributionService.StageScheduleCancellation(schedule, clock.GetUtcNow().UtcDateTime, "Cancelled by operator.");
         ApiAudit.Write(db, HttpContext, "tables.set", "cancel_schedule", id.ToString(), new { scheduleId }, schedule.TerminalId);
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The download status changed. Refresh the schedule." }); }

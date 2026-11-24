@@ -1076,6 +1076,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             }
             var batchSchedule = (await fx.Client.GetFromJsonAsync<JsonElement>($"{path}/schedules", Json))[0];
             Assert.Equal("Cancelled", batchSchedule.GetProperty("status").GetString());
+            var cancelledBatch = batchSchedule.GetProperty("lastBatchId").GetGuid();
+            await WaitBatchAsync(cancelledBatch, 4);
+            Assert.True(before.Add(cancelledBatch));
             Assert.True(before.SetEquals(await BatchIdsAsync()));
 
             using var restored = await fx.Client.PutAsJsonAsync($"{phone}/firmware", new { firmwareVersionId = firmware }, Json);
@@ -1300,7 +1303,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(HttpStatusCode.BadRequest, late.StatusCode);
         using var scheduled = await fx.Client.PostAsJsonAsync(schedulePath, selection, Json);
         scheduled.EnsureSuccessStatusCode();
-        var scheduleId = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("id").GetGuid();
+        var prepared = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0];
+        var scheduleId = prepared.GetProperty("id").GetGuid();
+        var preparedBatchId = prepared.GetProperty("lastBatchId").GetGuid();
         try
         {
             var before = await BatchIdsAsync();
@@ -1318,7 +1323,6 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
 
             var template = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(94)));
             var expected = NativeTableLayouts.Find(94, template)!.Apply(template, settings);
-            before = await BatchIdsAsync();
             await using (var callIn = await OpenAsync())
             {
                 await callIn.Stream.WriteAsync(Message(KnownId, [8]));
@@ -1334,7 +1338,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 var end = Decode(await ReadFrameAsync(callIn.Stream, TimeSpan.FromSeconds(5)));
                 Assert.Equal(new byte[] { 13 }, end.Data);
                 await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
-                await WaitNewBatchAsync(before, 2);
+                await WaitBatchAsync(preparedBatchId, 2);
             }
             Assert.Equal("Delivered", (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json))[0].GetProperty("status").GetString());
             Assert.Equal(originalAssignment, (await fx.Client.GetFromJsonAsync<JsonElement>(assignmentPath, Json)).GetProperty("tableSetId").GetGuid());
@@ -1354,6 +1358,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             var expiredSchedule = (await fx.Client.GetFromJsonAsync<JsonElement>(schedulePath, Json)).EnumerateArray()
                 .Single(row => row.GetProperty("id").GetGuid() == scheduleId);
             Assert.Equal("Cancelled", expiredSchedule.GetProperty("status").GetString());
+            await WaitBatchAsync(expiredSchedule.GetProperty("lastBatchId").GetGuid(), 4);
         }
         finally
         {
@@ -1404,7 +1409,8 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         using var scheduled = await fx.Client.PostAsJsonAsync($"{endpoint}/schedules", scoped, Json);
         scheduled.EnsureSuccessStatusCode();
-        var before = await BatchIdsAsync();
+        var prepared = (await fx.Client.GetFromJsonAsync<JsonElement>($"{endpoint}/schedules", Json))[0];
+        var preparedBatchId = prepared.GetProperty("lastBatchId").GetGuid();
 
         var wire = Convert.FromHexString(wireId);
         await using var link = await OpenAsync();
@@ -1422,7 +1428,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var end = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
         Assert.Equal(new byte[] { 13 }, end.Data);
         await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
-        await WaitNewBatchAsync(before, 2);
+        await WaitBatchAsync(preparedBatchId, 2);
         using var assignment = await fx.Client.GetAsync($"/api/terminals/{terminalId}/table-assignment");
         Assert.Equal(HttpStatusCode.NotFound, assignment.StatusCode);
     }
@@ -1453,6 +1459,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(0, (await duplicate.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("scheduled").GetInt32());
         var schedule = (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json))[0];
         Assert.Equal("Scheduled", schedule.GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, schedule.GetProperty("lastBatchId").ValueKind);
         var scheduleId = schedule.GetProperty("id").GetGuid();
         var before = await BatchIdsAsync();
 
@@ -1466,6 +1473,17 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             }
             Assert.True(before.SetEquals(await BatchIdsAsync()));
             fx.Factory.Clock.Advance(TimeSpan.FromHours(2));
+            var prepared = await WaitNewBatchAsync(before, 0);
+            var preparedId = prepared.GetProperty("id").GetGuid();
+            Assert.Equal(scheduleId, prepared.GetProperty("scheduleId").GetGuid());
+            Assert.Equal(JsonValueKind.Null, prepared.GetProperty("nccSessionId").ValueKind);
+            Assert.True(before.Add(preparedId));
+            schedule = (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json))[0];
+            Assert.Equal("Ready", schedule.GetProperty("status").GetString());
+            Assert.True(schedule.GetProperty("preparedAtUtc").GetDateTime() >= body.availableAtUtc.UtcDateTime);
+            Assert.Equal(JsonValueKind.Null, schedule.GetProperty("startedAtUtc").ValueKind);
+            using var cancelPrepared = await fx.Client.PostAsync($"/api/downloads/{preparedId}/cancel?confirm=true", null);
+            Assert.Equal(HttpStatusCode.BadRequest, cancelPrepared.StatusCode);
 
             // A due download must not appear on a rating or card authorization call.
             foreach (var request in new[]
@@ -1492,6 +1510,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 using var cancelBusy = await fx.Client.PostAsync($"{path}/{scheduleId}/cancel", null);
                 Assert.Equal(HttpStatusCode.Conflict, cancelBusy.StatusCode);
                 var activeBatchId = schedule.GetProperty("lastBatchId").GetGuid();
+                Assert.Equal(preparedId, activeBatchId);
                 using var cancelActiveBatch = await fx.Client.PostAsync($"/api/downloads/{activeBatchId}/cancel?confirm=true", null);
                 Assert.Equal(HttpStatusCode.BadRequest, cancelActiveBatch.StatusCode);
 
@@ -1500,9 +1519,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 AssertAck(await ReadFrameAsync(competing.Stream, TimeSpan.FromSeconds(5)));
                 Assert.Equal(new byte[] { 13 }, Decode(await ReadFrameAsync(competing.Stream, TimeSpan.FromSeconds(5))).Data);
             }
-            await WaitNewBatchAsync(before, 3);
+            await WaitBatchAsync(preparedId, 3);
             schedule = (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json))[0];
-            Assert.Equal("Ready", schedule.GetProperty("status").GetString());
+            Assert.Equal("Retry pending", schedule.GetProperty("status").GetString());
             Assert.NotEqual(JsonValueKind.Null, schedule.GetProperty("lastError").ValueKind);
             var failedBatchId = schedule.GetProperty("lastBatchId").GetGuid();
             using var manualRetry = await fx.Client.PostAsync($"/api/downloads/{failedBatchId}/retry?confirm=true", null);
@@ -1528,11 +1547,15 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 var end = Decode(await ReadFrameAsync(callback.Stream, TimeSpan.FromSeconds(5)));
                 Assert.Equal(new byte[] { 13 }, end.Data);
                 await callback.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
-                await WaitNewBatchAsync(before, 2);
+                var retry = await WaitNewBatchAsync(before, 2);
+                Assert.Equal(1, retry.GetProperty("retryCount").GetInt32());
+                Assert.Equal(scheduleId, retry.GetProperty("scheduleId").GetGuid());
             }
 
             schedule = (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json))[0];
             Assert.Equal("Delivered", schedule.GetProperty("status").GetString());
+            using var retryOld = await fx.Client.PostAsync($"/api/downloads/{preparedId}/retry?confirm=true", null);
+            Assert.Equal(HttpStatusCode.BadRequest, retryOld.StatusCode);
             var assignment = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/terminals/{terminalId}/table-assignment", Json);
             Assert.Equal(setId, assignment.GetProperty("tableSetId").GetGuid());
             Assert.Equal(previousSetId, assignment.GetProperty("previousTableSetId").GetGuid());
@@ -1543,9 +1566,13 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 body.targetType, body.targetId, body.terminalIds, availableAtUtc = (DateTimeOffset?)null
             }, Json);
             another.EnsureSuccessStatusCode();
-            var newSchedule = (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json))[0].GetProperty("id").GetGuid();
+            var newScheduledRow = (await fx.Client.GetFromJsonAsync<JsonElement>(path, Json))[0];
+            var newSchedule = newScheduledRow.GetProperty("id").GetGuid();
+            var cancelledPreparedId = newScheduledRow.GetProperty("lastBatchId").GetGuid();
+            Assert.True(delivered.Add(cancelledPreparedId));
             using var cancel = await fx.Client.PostAsync($"{path}/{newSchedule}/cancel", null);
             Assert.Equal(HttpStatusCode.NoContent, cancel.StatusCode);
+            await WaitBatchAsync(cancelledPreparedId, 4);
             var history = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/tables/schedules?terminalId={terminalId}", Json);
             Assert.Contains(history.EnumerateArray(), row =>
                 row.GetProperty("id").GetGuid() == newSchedule && row.GetProperty("status").GetString() == "Cancelled");
@@ -1956,6 +1983,11 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         using var different = await fx.Client.PostAsJsonAsync(schedule, Request([phone], [26]), Json);
         Assert.Equal(HttpStatusCode.Conflict, different.StatusCode);
 
+        var prepared = (await fx.Client.GetFromJsonAsync<JsonElement>(schedule, Json))[0];
+        var preparedBatchId = prepared.GetProperty("lastBatchId").GetGuid();
+        Assert.Equal("Ready", prepared.GetProperty("status").GetString());
+        var pending = await WaitBatchAsync(preparedBatchId, 0);
+        Assert.Equal(2, pending.GetProperty("timeline").GetArrayLength());
         var before = await BatchIdsAsync();
         await using (var install = await OpenAsync())
         {
@@ -1967,7 +1999,6 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             Assert.Equal(basisPayload[..NccConstants.MaxDataSize], (await ReadAsync(install)).Data);
         }
         await WaitNewBatchAsync(before, 3);
-        before = await BatchIdsAsync();
         await using (var callIn = await OpenAsync())
         {
             await callIn.Stream.WriteAsync(Message(Convert.FromHexString(wire), [8]));
@@ -1989,11 +2020,12 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             var end = await ReadAsync(callIn);
             Assert.Equal(new byte[] { 13 }, end.Data);
             await callIn.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
-            await WaitNewBatchAsync(before, 2);
+            await WaitBatchAsync(preparedBatchId, 2);
         }
 
         var delivered = (await fx.Client.GetFromJsonAsync<JsonElement>(schedule, Json))[0];
         Assert.Equal("Delivered", delivered.GetProperty("status").GetString());
+        Assert.Equal(preparedBatchId, delivered.GetProperty("lastBatchId").GetGuid());
         Assert.Equal(new[] { 26, 73 }, delivered.GetProperty("recordNumbers").Deserialize<int[]>());
         var assignment = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/terminals/{phone}/table-assignment", Json);
         Assert.Equal(basis, assignment.GetProperty("tableSetId").GetGuid());
@@ -2209,6 +2241,19 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         }
 
         throw new TimeoutException($"No new download batch with status {status}.");
+    }
+
+    private async Task<JsonElement> WaitBatchAsync(Guid id, int status)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < deadline)
+        {
+            var batch = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/downloads/{id}", Json);
+            if (batch.GetProperty("status").GetInt32() == status)
+                return batch;
+            await Task.Delay(100);
+        }
+        throw new TimeoutException($"Download batch {id} did not reach status {status}.");
     }
 
     private async Task<JsonElement> WaitSessionAsync(string frameHex, Guid? sessionId = null)

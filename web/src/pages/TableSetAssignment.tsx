@@ -406,7 +406,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
                 <option value="later">Prepare at a specific time</option>
               </select>
             </label>
-            {deliveryMode === 'later' && <label>Available from (local time)
+            {deliveryMode === 'later' && <label>Prepare at (local time)
               <input type="datetime-local" value={availableAt} disabled={busy} onChange={(event) => setAvailableAt(event.target.value)} />
             </label>}
             <button type="button" disabled={!eligible || busy || (deliveryMode === 'later' && !availableAt)} onClick={() => void assign()}>

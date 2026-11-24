@@ -873,77 +873,29 @@ internal sealed class NccLinkProcessor(
             return;
         }
 
-        var now = clock.GetUtcNow().UtcDateTime;
-        var scheduled = await db.ScheduledTableDownloads.Include(s => s.NccSession).Include(s => s.TableSet)
-            .FirstOrDefaultAsync(s => s.TerminalId == terminal.Id && s.AvailableAtUtc <= now
-                && s.CompletedAtUtc == null && s.CancelledAtUtc == null, stoppingToken);
-        var codeVersion = scheduled == null ? null : await tables.FindCodeOnlyVersionAsync(scheduled.TableSetId, stoppingToken);
-        if (!callIn && (codeVersion != null || scheduled?.RecordNumbers != null))
+        if (await TryStartScheduledBatchAsync(stream, terminalId, terminal, callIn, cashboxStatus))
+            return;
+
+        var queued = await db.DownloadBatches.Include(batch => batch.TableSet)
+            .Where(batch => batch.TerminalId == terminal.Id && batch.Status == DownloadBatchStatus.Pending && batch.ScheduleId == null)
+            .OrderBy(batch => batch.CreatedAtUtc).ThenBy(batch => batch.Id).FirstOrDefaultAsync(stoppingToken);
+        if (queued != null)
         {
-            scheduled = null;
-            codeVersion = null;
-        }
-        if (scheduled?.NccSession?.Status == NccSessionStatus.Active)
-        {
-            await SendInstallEndAsync(stream, terminalId);
+            await StartQueuedBatchAsync(stream, terminalId, terminal, queued, cashboxStatus);
             return;
         }
 
         Guid? tableSetId = null;
-        Guid[]? partialDefinitions = null;
-        var scheduleIssue = codeVersion == null ? null : CodeDownloadWire.DeliveryIssue(TableDistributionService.GetEffectivePayload(codeVersion), now);
-        if (scheduled?.RecordNumbers is { } selected)
+        if (!callIn)
+            tableSetId = await db.TerminalTableAssignments.AsNoTracking()
+                .Where(a => a.TerminalId == terminal.Id && a.TableSet!.Status == TableSetStatus.Published)
+                .Select(a => (Guid?)a.TableSetId).FirstOrDefaultAsync(stoppingToken);
+        else if (deliverAssignedTables)
         {
-            var versions = await db.TableVersions.AsNoTracking().Include(version => version.TableDefinition).Include(version => version.TablePayload)
-                .Where(version => version.TableSetId == scheduled.TableSetId).ToArrayAsync(stoppingToken);
-            try
-            {
-                partialDefinitions = TableDistributionService.SelectDataDownloadRecords(versions, selected)
-                    .Select(version => version.TableDefinitionId).ToArray();
-            }
-            catch (InvalidOperationException ex) { scheduleIssue = ex.Message; }
-        }
-        if (scheduled != null && scheduleIssue == null && await IsSetEligibleAsync(scheduled.TableSet, terminal, partialDefinitions))
-            tableSetId = scheduled.TableSetId;
-        else
-        {
-            if (scheduled != null)
-            {
-                scheduled.CancelledAtUtc = DateTime.UtcNow;
-                scheduled.Version++;
-                var audit = Audit("scheduled_download_ineligible", new { scheduleId = scheduled.Id, scheduled.TableSetId, reason = scheduleIssue }, terminal.Id);
-                try { await db.SaveChangesAsync(stoppingToken); }
-                catch (DbUpdateConcurrencyException)
-                {
-                    db.Entry(scheduled).State = EntityState.Detached;
-                    if (audit != null)
-                        db.Entry(audit).State = EntityState.Detached;
-                    // The schedule changed while eligibility was being checked.
-                    await SendInstallEndAsync(stream, terminalId);
-                    return;
-                }
-            }
-            scheduled = null;
-            partialDefinitions = null;
-            var queued = await db.DownloadBatches.Include(batch => batch.TableSet)
-                .Where(batch => batch.TerminalId == terminal.Id && batch.Status == DownloadBatchStatus.Pending)
-                .OrderBy(batch => batch.CreatedAtUtc).ThenBy(batch => batch.Id).FirstOrDefaultAsync(stoppingToken);
-            if (queued != null)
-            {
-                await StartQueuedBatchAsync(stream, terminalId, terminal, queued, cashboxStatus);
-                return;
-            }
-            if (!callIn)
-                tableSetId = await db.TerminalTableAssignments.AsNoTracking()
-                    .Where(a => a.TerminalId == terminal.Id && a.TableSet!.Status == TableSetStatus.Published)
-                    .Select(a => (Guid?)a.TableSetId).FirstOrDefaultAsync(stoppingToken);
-            else if (deliverAssignedTables)
-            {
-                var assigned = await db.TerminalTableAssignments.AsNoTracking().Where(a => a.TerminalId == terminal.Id)
-                    .Select(a => a.TableSet).FirstOrDefaultAsync(stoppingToken);
-                if (await IsSetEligibleAsync(assigned, terminal) && await tables.FindCodeOnlyVersionAsync(assigned!.Id, stoppingToken) == null)
-                    tableSetId = assigned.Id;
-            }
+            var assigned = await db.TerminalTableAssignments.AsNoTracking().Where(a => a.TerminalId == terminal.Id)
+                .Select(a => a.TableSet).FirstOrDefaultAsync(stoppingToken);
+            if (await IsSetEligibleAsync(assigned, terminal) && await tables.FindCodeOnlyVersionAsync(assigned!.Id, stoppingToken) == null)
+                tableSetId = assigned.Id;
         }
 
         if (tableSetId == null)
@@ -956,31 +908,17 @@ internal sealed class NccLinkProcessor(
         DownloadBatch? prepared = null;
         try
         {
-            if (scheduled != null)
-            {
-                scheduled.NccSessionId = _session.Id;
-                scheduled.StartedAtUtc = DateTime.UtcNow;
-                scheduled.Version++;
-            }
             var (batch, _) = await tables.PrepareDownloadBatchAsync(
-                terminal.Id,
-                tableSetId.Value,
-                partialDefinitions == null ? DownloadScope.Full : DownloadScope.Partial,
-                partialDefinitions,
+                terminal.Id, tableSetId.Value, DownloadScope.Full, null,
                 stoppingToken,
                 "ncc-install-" + _session.Id.ToString("N"),
                 nccSessionId: _session.Id);
             prepared = batch;
-            if (scheduled != null)
-                scheduled.LastBatch = batch;
             await db.SaveChangesAsync(stoppingToken);
             _batch = batch;
-            _scheduledDownload = scheduled;
         }
         catch (Exception ex)
         {
-            if (scheduled != null)
-                db.Entry(scheduled).State = EntityState.Detached;
             if (prepared != null && db.Entry(prepared).State == EntityState.Added)
             {
                 foreach (var item in prepared.Items.ToArray())
@@ -993,6 +931,73 @@ internal sealed class NccLinkProcessor(
         }
 
         await SendBatchAsync(stream, terminalId, terminal, _batch, cashboxStatus);
+    }
+
+    private async Task<bool> TryStartScheduledBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal,
+        bool callIn, byte[]? cashboxStatus)
+    {
+        // A call can arrive while background preparation is committing. Re-read and claim its batch if it won.
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var now = clock.GetUtcNow().UtcDateTime;
+            var schedule = await db.ScheduledTableDownloads.Include(s => s.NccSession).Include(s => s.TableSet)
+                .Include(s => s.LastBatch).ThenInclude(b => b!.Items)
+                .FirstOrDefaultAsync(s => s.TerminalId == terminal.Id && s.AvailableAtUtc <= now
+                    && s.CompletedAtUtc == null && s.CancelledAtUtc == null, stoppingToken);
+            if (schedule == null || (!callIn && (schedule.RecordNumbers != null
+                || await tables.FindCodeOnlyVersionAsync(schedule.TableSetId, stoppingToken) != null)))
+                return false;
+            if (schedule.NccSession?.Status == NccSessionStatus.Active)
+                break;
+
+            DownloadBatch? batch = null;
+            AuditEvent? audit = null;
+            try
+            {
+                try
+                {
+                    var records = await tables.ReadScheduledRecordsAsync(schedule, terminal, now, stoppingToken);
+                    batch = tables.StageScheduledBatch(schedule, records, now);
+                    batch.Status = DownloadBatchStatus.Running;
+                    batch.NccSessionId = _session.Id;
+                    schedule.NccSessionId = _session.Id;
+                    schedule.StartedAtUtc = now;
+                    schedule.Version++;
+                }
+                catch (InvalidOperationException ex)
+                {
+                    TableDistributionService.StageScheduleCancellation(schedule, now, ex.Message);
+                    audit = Audit("scheduled_download_ineligible", new { scheduleId = schedule.Id, schedule.TableSetId, reason = ex.Message }, terminal.Id);
+                }
+                await db.SaveChangesAsync(stoppingToken);
+            }
+            catch (DbUpdateException ex)
+            {
+                var changed = batch ?? schedule.LastBatch;
+                db.Entry(schedule).State = EntityState.Detached;
+                if (audit != null)
+                    db.Entry(audit).State = EntityState.Detached;
+                if (changed != null)
+                {
+                    foreach (var item in changed.Items.ToArray())
+                        db.Entry(item).State = EntityState.Detached;
+                    db.Entry(changed).State = EntityState.Detached;
+                }
+                logger.LogInformation(ex, "Scheduled download {ScheduleId} could not be claimed for session {SessionId}.", schedule.Id, _session.Id);
+                continue;
+            }
+
+            if (batch == null)
+                return false;
+            _installStarted = true;
+            _batch = batch;
+            _scheduledDownload = schedule;
+            await SendBatchAsync(stream, terminalId, terminal, batch, cashboxStatus);
+            return true;
+        }
+
+        await SendInstallEndAsync(stream, terminalId, cashboxStatus);
+        return true;
     }
 
     private async Task StartQueuedBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch queued,

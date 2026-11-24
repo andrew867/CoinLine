@@ -55,6 +55,7 @@ public sealed class DownloadsController(HostPlatformDbContext db, TableDistribut
             b.Id,
             b.TerminalId,
             b.NccSessionId,
+            b.ScheduleId,
             b.TableSetId,
             TableSetName = b.TableSet?.Name,
             b.Status,
