@@ -292,6 +292,8 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
 
     private static string? EligibilityIssue(TableSet source, TableSet? basis, Terminal phone, bool copy, bool scheduled)
     {
+        if (phone.DeactivatedAtUtc != null)
+            return "Terminal is deactivated.";
         var customerId = phone.Site!.CustomerId;
         if (copy && source.CustomerId is { } owner && owner != customerId)
             return "Outside the source set’s customer scope.";

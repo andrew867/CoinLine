@@ -59,6 +59,8 @@ public class Terminal : AuditableEntity
     public string TerminalIdHex { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public TerminalOperationalStatus Status { get; set; } = TerminalOperationalStatus.Provisioned;
+    public DateTime? DeactivatedAtUtc { get; set; }
+    public DateOnly? DeletionReviewDate { get; set; }
     public ICollection<TerminalEvent> Events { get; set; } = new List<TerminalEvent>();
 }
 

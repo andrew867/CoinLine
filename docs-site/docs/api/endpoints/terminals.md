@@ -7,6 +7,8 @@
 | GET | `/api/terminals` | List |
 | POST | `/api/terminals` | Create |
 | GET | `/api/terminals/{id}` | Detail |
+| GET | `/api/terminals/{id}/lifecycle` | Manager activity, lifecycle dates and current revision |
+| PUT | `/api/terminals/{id}/lifecycle` | Deactivate, amend deletion review date, or reactivate |
 | PUT | `/api/terminals/{id}` | Update |
 | GET | `/api/terminals/{id}/identity` | Read the current and previous NCC IDs, previous terminal type and the first matched contact since the ID change |
 | PUT | `/api/terminals/{id}/identity` | Change only the Manager's NCC ID with the current ID as a precondition |
@@ -52,6 +54,8 @@ On the cashbox endpoint, `statuses` contains one latest report per box. `isCurre
 For a special callback, supply the current `revision` or null when creating the first request. Supply `dueAtUtc` as an ISO 8601 timestamp with an offset, or null to request the earliest callback. Use `terminalClockOffsetMinutes` for a phone clock offset from UTC. Set `deliverAssignedTables` to opt into sending the current compatible assignment on return. The GET response wraps the record in `callback`, which is null before the first request. Cancellation takes the current `revision`. A stale revision returns HTTP 409.
 
 **Confirm flags:** several POST routes require `?confirm=true` — see Swagger.
+
+**Manager lifecycle:** use `active=true` or `active=false` on the terminal list to filter activity independently of reported operational status. To deactivate, PUT `active: false` and the observed `revision`; optionally supply a `deletionReviewDate` (YYYY-MM-DD), otherwise the initial date is 45 days from current UTC date. To reactivate, PUT `active: true` and the observed revision; this clears both dates. An open local NCC link or stale revision returns HTTP 409. An inactive terminal is excluded from new table deliveries and field request creation. The review date does not trigger record deletion.
 
 **UI:** `/terminals`, `/terminals/:id`
 

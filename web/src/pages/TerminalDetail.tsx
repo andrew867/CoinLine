@@ -3,6 +3,7 @@ import { TerminalInventoryPanel } from './TerminalInventoryPanel'
 import { TerminalIdentityPanel } from './TerminalIdentityPanel'
 import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 import { InmateAssignmentPanel } from './InmateAssignmentPanel'
+import { TerminalLifecyclePanel } from './TerminalLifecyclePanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
@@ -87,6 +88,8 @@ type Term = {
   status: number
   firmwareVersionId: string | null
   terminalFamilyId: string | null
+  deactivatedAtUtc?: string | null
+  deletionReviewDate?: string | null
 }
 
 type Assign = {
@@ -534,7 +537,7 @@ export function TerminalDetail() {
         Id: <code>{term.id}</code>
       </p>
       <p style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        Status:{' '}
+        {term.deactivatedAtUtc ? 'Inactive in Manager. Last reported status:' : 'Status:'}{' '}
         <StatusBadge
           label={terminalStatusLabel(term.status)}
           variant={terminalStatusVariant(term.status)}
@@ -555,6 +558,9 @@ export function TerminalDetail() {
         <button type="submit" disabled={savingFamily || familySelection === (term.terminalFamilyId ?? '')}>Save family</button>
       </form>
       {familyNotice && <p role="status">{familyNotice}</p>}
+      {canPerform('phone-lifecycle', op.read) && <TerminalLifecyclePanel key={`lifecycle-${term.id}`} terminalId={term.id}
+        onChanged={value => setTerm(current => current?.id === term.id ? { ...current,
+          deactivatedAtUtc: value.deactivatedAtUtc, deletionReviewDate: value.deletionReviewDate } : current)} />}
       <TerminalIdentityPanel key={term.id} terminalId={term.id} wireId={term.terminalIdHex} family={term.terminalFamilyId} />
       <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />
       {canPerform('inmate-assignments', op.read) && <InmateAssignmentPanel key={`inmate-${term.id}-${term.terminalFamilyId}`}

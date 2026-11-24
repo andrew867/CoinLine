@@ -32,8 +32,12 @@ public sealed class TerminalCallbacksController(HostPlatformDbContext db, TimePr
         if (moment < now || !DlogCallbackWire.CanEncode(moment) ||
             !DlogCallbackWire.CanEncode(moment.AddMinutes(input.TerminalClockOffsetMinutes)))
             return BadRequest(new { error = "Choose a future time within the terminal’s supported date range." });
-        if (!await db.Terminals.AnyAsync(phone => phone.Id == terminalId, ct))
+        var phone = await db.Terminals.AsNoTracking().Where(row => row.Id == terminalId)
+            .Select(row => new { row.DeactivatedAtUtc }).SingleOrDefaultAsync(ct);
+        if (phone == null)
             return NotFound();
+        if (phone.DeactivatedAtUtc != null)
+            return BadRequest(new { error = "Terminal is deactivated." });
 
         var saved = await db.TerminalCallbackRequests.SingleOrDefaultAsync(row => row.TerminalId == terminalId, ct);
         if (saved?.Version != input.Revision)

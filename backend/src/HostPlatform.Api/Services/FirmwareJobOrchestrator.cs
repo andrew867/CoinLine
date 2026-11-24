@@ -57,6 +57,8 @@ public sealed class FirmwareJobOrchestrator(
         bool simulationMode, CancellationToken ct)
     {
         HostPlatform.Firmware.FirmwareSafetyGate.EnsureSimulationOrThrow(simulationMode, executionPolicy.AllowLiveFlashing);
+        if (await db.Terminals.AsNoTracking().AnyAsync(phone => phone.Id == terminalId && phone.DeactivatedAtUtc != null, ct))
+            throw new InvalidOperationException("Terminal is deactivated.");
 
         if (!await IsCompatibleAsync(terminalId, packageId, ct))
             throw new InvalidOperationException("Terminal is incompatible with this firmware package (compatibility rules). HARDWARE_VALIDATION_REQUIRED.");

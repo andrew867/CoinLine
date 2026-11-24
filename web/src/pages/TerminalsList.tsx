@@ -16,6 +16,8 @@ type Row = {
   regionCode: string | null
   onCall: boolean
   lastSessionAtUtc: string | null
+  deactivatedAtUtc?: string | null
+  deletionReviewDate?: string | null
 }
 
 export function TerminalsList() {
@@ -24,7 +26,8 @@ export function TerminalsList() {
   const [family, setFamily] = useState('')
   const [search, setSearch] = useState('')
   const [region, setRegion] = useState('')
-  const [filters, setFilters] = useState({ search: '', region: '' })
+  const [activity, setActivity] = useState('')
+  const [filters, setFilters] = useState({ search: '', region: '', activity: '' })
 
   useEffect(() => {
     let c = false
@@ -32,6 +35,7 @@ export function TerminalsList() {
     if (family) query.set('terminalFamilyId', family)
     if (filters.search) query.set('q', filters.search)
     if (filters.region) query.set('regionCode', filters.region)
+    if (filters.activity) query.set('active', filters.activity)
     apiFetch('/api/terminals?' + query)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
@@ -57,8 +61,8 @@ export function TerminalsList() {
 
   function applySearch(event: FormEvent) {
     event.preventDefault()
-    const next = { search: search.trim(), region: region.trim() }
-    if (next.search === filters.search && next.region === filters.region) return
+    const next = { search: search.trim(), region: region.trim(), activity }
+    if (next.search === filters.search && next.region === filters.region && next.activity === filters.activity) return
     setFilters(next)
     setRows(null)
     setErr(null)
@@ -76,11 +80,14 @@ export function TerminalsList() {
         <label>Name or terminal ID<input value={search} onChange={event => setSearch(event.target.value)} /></label>
         <label>Region code<input value={region} maxLength={32} onChange={event => setRegion(event.target.value)} /></label>
         <TerminalFamilySelect value={family} onChange={filterFamily} emptyLabel="All families" />
+        <label>Manager activity<select value={activity} onChange={event => setActivity(event.target.value)}>
+          <option value="">All phones</option><option value="true">Active</option><option value="false">Inactive</option>
+        </select></label>
         <button type="submit">Apply filters</button>
       </form>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!rows && <p>Loading…</p>}
-      {rows && rows.length === 0 && <p>{family || filters.search || filters.region ? 'No matching phones.' : 'No terminals yet.'}</p>}
+      {rows && rows.length === 0 && <p>{family || filters.search || filters.region || filters.activity ? 'No matching phones.' : 'No terminals yet.'}</p>}
       {rows && rows.length > 0 && (
         <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
           <thead>
@@ -106,7 +113,7 @@ export function TerminalsList() {
                 <td>{r.regionCode ?? '—'}</td>
                 <td>{r.groupName ?? '—'}</td>
                 <td>{r.terminalFamilyLabel ?? 'Unknown'}</td>
-                <td>{terminalStatusLabel(r.status)}</td>
+                <td>{r.deactivatedAtUtc ? 'Inactive in Manager' : terminalStatusLabel(r.status)}</td>
                 <td>{r.onCall ? 'On a call' : r.lastSessionAtUtc ? new Date(r.lastSessionAtUtc).toLocaleString() : '—'}</td>
               </tr>
             ))}

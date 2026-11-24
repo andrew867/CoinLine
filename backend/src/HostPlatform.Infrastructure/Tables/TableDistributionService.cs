@@ -416,6 +416,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
 
         var terminal = await db.Terminals.AsNoTracking().FirstOrDefaultAsync(t => t.Id == terminalId, ct)
               ?? throw new InvalidOperationException("Terminal not found.");
+        if (terminal.DeactivatedAtUtc != null)
+            throw new InvalidOperationException("Terminal is deactivated.");
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion)
                 .FirstOrDefaultAsync(s => s.Id == tableSetId && s.Status == TableSetStatus.Published, ct)
             ?? throw new InvalidOperationException("Published table set not found.");
@@ -466,6 +468,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     public async Task<IReadOnlyList<TableVersion>> ReadScheduledRecordsAsync(ScheduledTableDownload schedule,
         Terminal terminal, DateTime now, CancellationToken ct)
     {
+        if (terminal.DeactivatedAtUtc != null)
+            throw new InvalidOperationException("Terminal is deactivated.");
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion)
             .Include(s => s.Versions).ThenInclude(v => v.TableDefinition)
             .Include(s => s.Versions).ThenInclude(v => v.TablePayload)
@@ -619,6 +623,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     {
         var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == terminalId, ct)
                        ?? throw new InvalidOperationException("Terminal not found.");
+        if (terminal.DeactivatedAtUtc != null)
+            throw new InvalidOperationException("Terminal is deactivated.");
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion)
             .FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
             ?? throw new InvalidOperationException("Table set not found.");
@@ -658,6 +664,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             .Include(x => x.PreviousTableSet).ThenInclude(s => s!.TargetFirmwareVersion)
             .FirstOrDefaultAsync(x => x.TerminalId == terminalId, ct)
                 ?? throw new InvalidOperationException("No table assignment for terminal.");
+        if (a.Terminal?.DeactivatedAtUtc != null)
+            throw new InvalidOperationException("Terminal is deactivated.");
         if (a.PreviousTableSetId is not { } prev)
             throw new InvalidOperationException("No previous table set recorded for rollback.");
         if (a.PreviousTableSet != null)

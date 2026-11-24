@@ -26,6 +26,8 @@ Profile changes revoke earlier sessions for the affected account. Unknown operat
 
 Phone group administration and membership are separate permissions. Membership Read permits a minimal group lookup at `GET /api/terminal-groups/membership-options` and reading membership records, without access to the full group administration list. Add and Delete membership grants permit only the corresponding changes; changing the primary group without changing the membership set requires both.
 
+The Terminal deactivation and reactivation profile has Read and Update operations. It is separate from the reported status and phone inventory permissions.
+
 Older API builds could return `500` for People when authorization had to challenge the caller without a registered default authentication scheme. The console displays the API status and offers a retry when the account list fails to load.
 
 Set `Security:OperatorTokenKey` to a deployment secret if operator sessions must survive API restarts or work across instances. A production API without a configured signing key generates one at startup. All instances sharing operator sessions must use the same signing key.

@@ -92,6 +92,61 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     private static readonly byte[] UnknownId = Convert.FromHexString("DAD1EAF010");
 
     [Fact]
+    public async Task Deactivated_phone_is_matched_and_closed_without_ack_then_reactivation_restores_contact()
+    {
+        var wireId = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+        Guid terminalId;
+        await using (var scope = fx.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var site = await db.Sites.FirstAsync();
+            var phone = new HostPlatform.Domain.Terminal { SiteId = site.Id, DisplayName = "Lifecycle fixture", TerminalIdHex = wireId };
+            db.Terminals.Add(phone);
+            await db.SaveChangesAsync();
+            terminalId = phone.Id;
+        }
+        var path = $"/api/terminals/{terminalId}/lifecycle";
+        var initial = await fx.Client.GetFromJsonAsync<JsonElement>(path);
+        var revision = initial.GetProperty("revision").GetInt32();
+        var id = Convert.FromHexString(wireId);
+        var first = Message(id, [84, 0x21]);
+        await using (var connected = await OpenAsync())
+        {
+            await connected.Stream.WriteAsync(first);
+            AssertAck(await ReadFrameAsync(connected.Stream, TimeSpan.FromSeconds(5)));
+            using var refused = await fx.Client.PutAsJsonAsync(path, new { active = false, revision });
+            Assert.Equal(HttpStatusCode.Conflict, refused.StatusCode);
+        }
+        await WaitSessionAsync(Convert.ToHexString(first));
+        using (var deactivate = await fx.Client.PutAsJsonAsync(path, new { active = false, revision }))
+        {
+            deactivate.EnsureSuccessStatusCode();
+            revision = (await deactivate.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("revision").GetInt32();
+        }
+
+        var blocked = Message(id, [84, 0x22]);
+        await using (var inactive = await OpenAsync())
+        {
+            await inactive.Stream.WriteAsync(blocked);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            Assert.Equal(0, await inactive.Stream.ReadAsync(new byte[64], timeout.Token));
+        }
+        var recorded = await WaitSessionAsync(Convert.ToHexString(blocked));
+        Assert.Equal(terminalId, recorded.GetProperty("terminalId").GetGuid());
+        Assert.Equal(1, recorded.GetProperty("status").GetInt32());
+
+        using (var reactivate = await fx.Client.PutAsJsonAsync(path, new { active = true, revision }))
+            reactivate.EnsureSuccessStatusCode();
+        var returned = Message(id, [84, 0x23]);
+        await using (var active = await OpenAsync())
+        {
+            await active.Stream.WriteAsync(returned);
+            AssertAck(await ReadFrameAsync(active.Stream, TimeSpan.FromSeconds(5)));
+        }
+        await WaitSessionAsync(Convert.ToHexString(returned));
+    }
+
+    [Fact]
     public async Task Known_id_is_stored_and_acked()
     {
         var sent = Message(KnownId, [84, 0x11, 0x22]);

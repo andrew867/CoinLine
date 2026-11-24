@@ -42,6 +42,8 @@ public static class OperatorPermissions
         Screen("phone-status", "Terminal status",
             ("Terminals", R, "Events"), ("Terminals", U, "PostStatus"), ("FieldEvents", R, "List"),
             ("Operator", R, "TerminalTimeline"));
+        Screen("phone-lifecycle", "Terminal deactivation and reactivation", ("TerminalLifecycle", R, "Get"),
+            ("TerminalLifecycle", U, "Save"));
         Screen("diagnostics", "Phone diagnostics",
             ("Terminals", R, "GetDiagnostics"), ("Terminals", A, "PostDiagnosticSnapshot"));
         Screen("customers", "Customers", ("Customers", R, "GetAll GetById"), ("Customers", A, "Create"),

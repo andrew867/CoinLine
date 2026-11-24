@@ -6,6 +6,14 @@
 
 **UI:** `/terminals`, `/terminals/new`
 
+## Deactivation and reactivation
+
+The phone detail page includes a Manager lifecycle panel. Deactivate an idle phone to record the date and a deletion review date; the default is 45 days from the current UTC date, and an operator can change it. The Phones list can filter active and inactive Manager records independently of the reported operational status.
+
+Inactive phones remain identifiable in session records, but new NCC dialogues are closed before acknowledgement. They are excluded from new table assignment previews, scheduled or selected-record rollouts and new download batches. Existing assignments, pending schedules and stored history are retained. Reactivation clears both lifecycle dates and allows normal contact again.
+
+Unlike the legacy Manager's automatic deletion on the specified date, CoinLine uses the grace date as a review date and does not automatically delete terminal or accounting records. Host deactivation does not remotely disable the terminal's hardware or guarantee that it stops attempting call-ins.
+
 ## Inmate terminal configuration
 
 For a phone registered with the Inmate terminal family, the phone detail page has an Inmate terminal configuration panel. Select a named Inmate Feature Configuration and enter the external Inmate Setup Configuration ID supplied by the institution's separate setup system. Either reference can be left unassigned.

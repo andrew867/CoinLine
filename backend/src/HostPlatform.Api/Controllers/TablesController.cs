@@ -977,7 +977,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         var phones = await selected.OrderBy(t => t.DisplayName).ThenBy(t => t.Id)
             .Select(t => new
             {
-                t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId,
+                t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId, t.DeactivatedAtUtc,
                 Report = matchVersion ? reports.Where(row => row.TerminalId == t.Id)
                     .OrderByDescending(row => row.CapturedAtUtc).ThenByDescending(row => row.Id)
                     .Select(row => row.RawPayload).FirstOrDefault() : null
@@ -986,7 +986,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         return phones.Where(t => !matchVersion || (t.Report != null && FieldEventCatalog.ReadControllerVersion(t.Report) == currentVersion))
             .Select(t =>
         {
-            var reason = set.CustomerId != null && t.CustomerId != set.CustomerId ? "Outside the set’s customer scope."
+            var reason = t.DeactivatedAtUtc != null ? "Terminal is deactivated."
+                : set.CustomerId != null && t.CustomerId != set.CustomerId ? "Outside the set’s customer scope."
                 : TableDistributionService.AccessRecordIssue(access, t.TerminalIdHex)
                     ?? TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId);
             return new AssignmentTarget(t.Id, t.DisplayName, t.SiteId, t.CustomerId, TerminalFamilies.Find(t.TerminalFamilyId)?.Label,

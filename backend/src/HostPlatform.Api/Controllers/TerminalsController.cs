@@ -35,6 +35,7 @@ public sealed class TerminalsController(
         [FromQuery] string? sortDir,
         [FromQuery] string? terminalFamilyId,
         [FromQuery] string? regionCode,
+        [FromQuery] bool? active,
         CancellationToken ct)
     {
         var query = db.Terminals.AsNoTracking().AsQueryable();
@@ -44,6 +45,8 @@ public sealed class TerminalsController(
             query = query.Where(t => db.Sites.Any(s => s.Id == t.SiteId && s.CustomerId == customerId.Value));
         if (status.HasValue)
             query = query.Where(t => (int)t.Status == status.Value);
+        if (active.HasValue)
+            query = query.Where(t => (t.DeactivatedAtUtc == null) == active.Value);
         if (!string.IsNullOrEmpty(terminalFamilyId))
             query = query.Where(t => t.TerminalFamilyId == terminalFamilyId);
         if (!string.IsNullOrWhiteSpace(regionCode))
@@ -72,6 +75,8 @@ public sealed class TerminalsController(
             t.DisplayName,
             t.TerminalIdHex,
             t.Status,
+            t.DeactivatedAtUtc,
+            t.DeletionReviewDate,
             t.FirmwareVersionId,
             t.TerminalFamilyId,
             t.TransportEndpointId,
@@ -130,6 +135,8 @@ public sealed class TerminalsController(
                 t.DisplayName,
                 t.TerminalIdHex,
                 status = t.Status,
+                t.DeactivatedAtUtc,
+                t.DeletionReviewDate,
                 t.FirmwareVersionId,
                 t.TerminalFamilyId,
                 terminalFamilyLabel = TerminalFamilies.Find(t.TerminalFamilyId)?.Label,
@@ -149,6 +156,8 @@ public sealed class TerminalsController(
         string DisplayName,
         string TerminalIdHex,
         TerminalOperationalStatus Status,
+        DateTime? DeactivatedAtUtc,
+        DateOnly? DeletionReviewDate,
         Guid? FirmwareVersionId,
         string? TerminalFamilyId,
         Guid? TransportEndpointId,
@@ -814,9 +823,12 @@ public sealed class TerminalsController(
     [HttpPost("{id:guid}/request-cdr-upload")]
     public async Task<ActionResult<object>> RequestCdrUpload(Guid id, [FromBody] TerminalFieldRequestDto? body, CancellationToken ct)
     {
-        var exists = await db.Terminals.AnyAsync(t => t.Id == id, ct);
-        if (!exists)
+        var phone = await db.Terminals.AsNoTracking().Where(t => t.Id == id)
+            .Select(t => new { t.DeactivatedAtUtc }).SingleOrDefaultAsync(ct);
+        if (phone == null)
             return NotFound();
+        if (phone.DeactivatedAtUtc != null)
+            return BadRequest(new { error = "Terminal is deactivated." });
 
         var req = new CdrUploadRequest
         {
@@ -837,9 +849,12 @@ public sealed class TerminalsController(
     [HttpPost("{id:guid}/request-table-reload")]
     public async Task<ActionResult<object>> RequestTableReload(Guid id, [FromBody] TerminalFieldRequestDto? body, CancellationToken ct)
     {
-        var exists = await db.Terminals.AnyAsync(t => t.Id == id, ct);
-        if (!exists)
+        var phone = await db.Terminals.AsNoTracking().Where(t => t.Id == id)
+            .Select(t => new { t.DeactivatedAtUtc }).SingleOrDefaultAsync(ct);
+        if (phone == null)
             return NotFound();
+        if (phone.DeactivatedAtUtc != null)
+            return BadRequest(new { error = "Terminal is deactivated." });
 
         var req = new RemoteTableReloadRequest
         {

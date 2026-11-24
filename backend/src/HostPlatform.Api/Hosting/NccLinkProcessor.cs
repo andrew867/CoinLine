@@ -239,7 +239,7 @@ internal sealed class NccLinkProcessor(
         _session.UpdatedAtUtc = DateTime.UtcNow;
         _session.UpdatedBy = Actor;
 
-        if (terminal != null)
+        if (terminal != null && terminal.DeactivatedAtUtc == null)
             outbound.Register(terminal.Id, _session.Id, packet.TerminalId.ToArray(),
                 (bytes, ct) => WriteCapturedFrameAsync(stream, bytes, ct));
 
@@ -263,6 +263,12 @@ internal sealed class NccLinkProcessor(
         catch (Exception ex)
         {
             logger.LogWarning(ex, "NCC frame was not stored.");
+        }
+
+        if (_session.TerminalId is { } boundTerminalId && await db.Terminals.AsNoTracking()
+                .AnyAsync(phone => phone.Id == boundTerminalId && phone.DeactivatedAtUtc != null, stoppingToken))
+        {
+            throw new IOException("NCC link closed before acknowledgement: terminal is deactivated.");
         }
 
         if (control)
