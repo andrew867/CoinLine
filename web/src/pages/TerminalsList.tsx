@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { terminalStatusLabel } from '../components/StatusBadge'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
@@ -9,6 +10,9 @@ type Row = {
   displayName: string
   terminalIdHex: string
   status: number
+  groupName: string | null
+  onCall: boolean
+  lastSessionAtUtc: string | null
 }
 
 export function TerminalsList() {
@@ -35,10 +39,10 @@ export function TerminalsList() {
 
   return (
     <div>
-      <h1>Terminals</h1>
+      <h1>Phones</h1>
       <p>
         <Link to="/terminals/new" data-testid="terminals-add-link">
-          Create terminal
+          Add a phone
         </Link>
       </p>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
@@ -50,7 +54,9 @@ export function TerminalsList() {
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
               <th>Name</th>
               <th>Hex id</th>
+              <th>Group</th>
               <th>Status</th>
+              <th>Last call</th>
             </tr>
           </thead>
           <tbody>
@@ -62,7 +68,9 @@ export function TerminalsList() {
                 <td>
                   <code>{r.terminalIdHex}</code>
                 </td>
-                <td>{r.status}</td>
+                <td>{r.groupName ?? '—'}</td>
+                <td>{terminalStatusLabel(r.status)}</td>
+                <td>{r.onCall ? 'On a call' : r.lastSessionAtUtc ? new Date(r.lastSessionAtUtc).toLocaleString() : '—'}</td>
               </tr>
             ))}
           </tbody>

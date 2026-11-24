@@ -254,6 +254,14 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Reconciliation")
                         .HasColumnType("integer");
 
+                    b.Property<byte[]>("RequestRaw")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<byte[]>("ResponseRaw")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
                     b.Property<DateTime>("StartedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2137,6 +2145,104 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("NccSessions");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.NccSessionFrame", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("NccSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<byte[]>("RawBytes")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<int>("Sequence")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TerminalIdHex")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("TerminalMatched")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NccSessionId", "Sequence");
+
+                    b.ToTable("NccSessionFrames");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.OperatorAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("OperatorAccounts");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.PaymentTransaction", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3907,6 +4013,17 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("TerminalId");
 
                     b.Navigation("Terminal");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.NccSessionFrame", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.NccSession", "NccSession")
+                        .WithMany()
+                        .HasForeignKey("NccSessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("NccSession");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.PaymentTransaction", b =>

@@ -9,5 +9,5 @@ public static class CraftTransportCapabilities
     public const bool DefaultSimulationExecution = true;
 
     public const string LiveAttachNotice =
-        "Live craft modem transport requires HARDWARE_VALIDATION_REQUIRED certification.";
+        "HARDWARE_VALIDATION_REQUIRED. Live craft writes opaque RequestRaw onto an active NCC socket when Craft:AllowLiveCraft and COINLINE_CRAFT_LIVE_ENABLED are on. Responses are not decoded.";
 }

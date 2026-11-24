@@ -6,8 +6,8 @@ namespace HostPlatform.Cards;
 /// </summary>
 public static class CardLedgerCapabilities
 {
-    public const bool DefaultSimulationMode = true;
+    public const bool DefaultSimulationMode = false;
 
     public const string LiveSettlementNotice =
-        "Non-simulation card settlement and live balance authority require HARDWARE_VALIDATION_REQUIRED certification.";
+        "Host ledger posts card payments and adjustments. Physical card writes stay off until HARDWARE_VALIDATION_REQUIRED.";
 }

@@ -16,6 +16,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<TerminalEvent> TerminalEvents => Set<TerminalEvent>();
     public DbSet<TerminalStatusRecord> TerminalStatusRecords => Set<TerminalStatusRecord>();
     public DbSet<NccSession> NccSessions => Set<NccSession>();
+    public DbSet<NccSessionFrame> NccSessionFrames => Set<NccSessionFrame>();
     public DbSet<NccFrameCapture> NccFrameCaptures => Set<NccFrameCapture>();
     public DbSet<CapturedHardwareSession> CapturedHardwareSessions => Set<CapturedHardwareSession>();
     public DbSet<DlogTransaction> DlogTransactions => Set<DlogTransaction>();
@@ -78,6 +79,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<FirmwareUpdateSafetyCheck> FirmwareUpdateSafetyChecks => Set<FirmwareUpdateSafetyCheck>();
     public DbSet<FirmwareUpdateStep> FirmwareUpdateSteps => Set<FirmwareUpdateStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<OperatorAccount> OperatorAccounts => Set<OperatorAccount>();
     public DbSet<SubsystemHeartbeat> SubsystemHeartbeats => Set<SubsystemHeartbeat>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -296,6 +298,13 @@ public class HostPlatformDbContext : DbContext
 
         modelBuilder.Entity<FirmwareUpdateStep>(b => b.HasOne(s => s.FirmwareUpdateJob).WithMany(j => j.Steps).HasForeignKey(s => s.FirmwareUpdateJobId));
 
+        modelBuilder.Entity<OperatorAccount>(b =>
+        {
+            b.HasIndex(a => a.Username).IsUnique();
+            b.Property(a => a.Username).HasMaxLength(64);
+            b.Property(a => a.DisplayName).HasMaxLength(120);
+        });
+
         modelBuilder.Entity<SubsystemHeartbeat>(b =>
         {
             b.HasKey(x => x.Subsystem);
@@ -334,6 +343,11 @@ public class HostPlatformDbContext : DbContext
         modelBuilder.Entity<TerminalEvent>(b => b.HasOne(e => e.Terminal).WithMany(t => t.Events).HasForeignKey(e => e.TerminalId));
         modelBuilder.Entity<TerminalStatusRecord>(b => b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId));
         modelBuilder.Entity<NccSession>(b => b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId));
+        modelBuilder.Entity<NccSessionFrame>(b =>
+        {
+            b.HasOne(f => f.NccSession).WithMany().HasForeignKey(f => f.NccSessionId);
+            b.HasIndex(f => new { f.NccSessionId, f.Sequence });
+        });
 
         modelBuilder.Entity<CapturedHardwareSession>(b =>
         {

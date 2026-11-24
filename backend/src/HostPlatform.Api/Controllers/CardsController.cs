@@ -29,10 +29,11 @@ public sealed class CardsController(
     public ActionResult<object> SimulationState() =>
         Ok(new
         {
-            simulationMode = _opts.SimulationMode,
+            simulationMode = false,
+            hostLedgerEnabled = true,
             physicalCardWritesDisabled = _opts.PhysicalCardWritesDisabled,
             banner =
-                "Simulation mode — ledger and reconciliation are lab scaffolding only; physical card writes are disabled until HARDWARE_VALIDATION_REQUIRED."
+                "The host ledger records card payments and call charges. Writing a physical card stays off."
         });
 
     [HttpGet("products")]
@@ -277,9 +278,6 @@ public sealed class CardsController(
     [HttpPost("accounts/{id:guid}/adjust-balance")]
     public async Task<ActionResult<object>> Adjust(Guid id, [FromBody] AdjustDto body, CancellationToken ct)
     {
-        if (!body.SimulationMode)
-            return Conflict(new { error = "SimulationMode required until HARDWARE_VALIDATION_REQUIRED (ledger placeholder)." });
-
         var reason = (body.Reason ?? "").Trim();
         if (reason.Length < 3)
             return BadRequest(new { error = "Audit reason required (min 3 characters)." });
@@ -312,7 +310,7 @@ public sealed class CardsController(
             CardAccountId = id,
             Delta = body.Delta,
             Reason = reason,
-            SimulationMode = body.SimulationMode
+            SimulationMode = false
         });
 
         ApiAudit.Write(db, HttpContext, "cards", "adjust_balance", $"CardAccount:{id}",
@@ -359,16 +357,13 @@ public sealed class CardsController(
         }
 
         var raw = string.IsNullOrWhiteSpace(body.RawPayloadJson) ? "{}" : body.RawPayloadJson!;
-        if (_opts.SimulationMode)
+        try
         {
-            try
-            {
-                ledger.ApplyPaymentAmount(account, product, body.Amount);
-            }
-            catch (InvalidOperationException ex)
-            {
-                return BadRequest(new { error = ex.Message });
-            }
+            ledger.ApplyPaymentAmount(account, product, body.Amount);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
 
         var tx = new PaymentTransaction
@@ -383,9 +378,9 @@ public sealed class CardsController(
         db.PaymentTransactions.Add(tx);
 
         ApiAudit.Write(db, HttpContext, "cards", "payment_transaction", $"PaymentTransaction:{tx.Id}",
-            new { body.CardAccountId, body.Amount, tx.ReportedCardType, balanceApplied = _opts.SimulationMode });
+            new { body.CardAccountId, body.Amount, tx.ReportedCardType, balanceApplied = true });
         await db.SaveChangesAsync(ct);
-        return Created($"/api/cards/transactions", new { tx.Id, appliedToBalance = _opts.SimulationMode });
+        return Created($"/api/cards/transactions", new { tx.Id, appliedToBalance = true });
     }
 
     [HttpGet("transactions")]
@@ -406,20 +401,48 @@ public sealed class CardsController(
             }).ToListAsync(ct));
     }
 
+    [HttpGet("reconciliation-pending")]
+    public async Task<ActionResult<object>> ReconciliationPending(CancellationToken ct)
+    {
+        var paymentAmounts = await db.PaymentTransactions.AsNoTracking()
+            .Where(t => t.Reconciliation == ReconciliationStatus.Unknown || t.Reconciliation == ReconciliationStatus.Pending)
+            .Select(t => t.Amount)
+            .ToListAsync(ct);
+        var callCount = await db.CallRecords.AsNoTracking()
+            .CountAsync(c => c.Reconciliation == ReconciliationStatus.Unknown || c.Reconciliation == ReconciliationStatus.Pending, ct);
+        return Ok(new
+        {
+            paymentCount = paymentAmounts.Count,
+            paymentTotal = paymentAmounts.Sum(),
+            callCount
+        });
+    }
+
     /// <summary>Recent reconciliation batches for operator UI — newest first.</summary>
     [HttpGet("reconciliation-batches")]
-    public async Task<ActionResult<IEnumerable<object>>> ListReconciliationBatches(CancellationToken ct) =>
-        Ok(await db.CardReconciliationBatches.AsNoTracking()
+    public async Task<ActionResult<IEnumerable<object>>> ListReconciliationBatches(CancellationToken ct)
+    {
+        var rows = await db.CardReconciliationBatches.AsNoTracking()
             .OrderByDescending(b => b.CreatedAtUtc)
             .Take(100)
-            .Select(b => new
+            .ToListAsync(ct);
+        return Ok(rows.Select(b =>
+        {
+            var summary = ReadBatchSummary(b.DetailJson);
+            return new
             {
                 b.Id,
                 status = b.Status,
                 b.CreatedAtUtc,
                 b.PostedAtUtc,
-                b.ClosedAtUtc
-            }).ToListAsync(ct));
+                b.ClosedAtUtc,
+                summary.PaymentCount,
+                summary.CallCount,
+                summary.PaymentTotal,
+                summary.CallTotal
+            };
+        }));
+    }
 
     [HttpPost("reconciliation-batches")]
     public async Task<ActionResult<object>> PostReconciliationBatch([FromBody] ReconciliationBatchCreateDto body, CancellationToken ct)
@@ -440,17 +463,22 @@ public sealed class CardsController(
     public async Task<ActionResult<object>> GetReconciliationBatch(Guid id, CancellationToken ct)
     {
         var b = await db.CardReconciliationBatches.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        return b == null
-            ? NotFound()
-            : Ok(new
-            {
-                b.Id,
-                status = b.Status,
-                b.DetailJson,
-                b.PostedAtUtc,
-                b.ClosedAtUtc,
-                b.CreatedAtUtc
-            });
+        if (b == null)
+            return NotFound();
+        var summary = ReadBatchSummary(b.DetailJson);
+        return Ok(new
+        {
+            b.Id,
+            status = b.Status,
+            b.DetailJson,
+            b.PostedAtUtc,
+            b.ClosedAtUtc,
+            b.CreatedAtUtc,
+            summary.PaymentCount,
+            summary.CallCount,
+            summary.PaymentTotal,
+            summary.CallTotal
+        });
     }
 
     [HttpPost("reconciliation-batches/{id:guid}/post")]
@@ -462,12 +490,39 @@ public sealed class CardsController(
         if (b.Status != CardReconciliationBatchStatus.Open)
             return Conflict(new { error = "Batch must be Open to post." });
 
+        var payments = await db.PaymentTransactions
+            .Where(t => t.Reconciliation == ReconciliationStatus.Unknown || t.Reconciliation == ReconciliationStatus.Pending)
+            .ToListAsync(ct);
+        var calls = await db.CallRecords
+            .Where(c => c.Reconciliation == ReconciliationStatus.Unknown || c.Reconciliation == ReconciliationStatus.Pending)
+            .ToListAsync(ct);
+        foreach (var payment in payments)
+            payment.Reconciliation = ReconciliationStatus.Matched;
+        foreach (var call in calls)
+            call.Reconciliation = ReconciliationStatus.Matched;
+
+        var callIds = calls.Select(c => c.Id).ToList();
+        var callTotal = callIds.Count == 0
+            ? 0m
+            : await db.RatingResults.Where(r => callIds.Contains(r.CallRecordId)).SumAsync(r => r.Amount, ct);
+        var paymentTotal = payments.Sum(p => p.Amount);
+
         b.Status = CardReconciliationBatchStatus.Posted;
         b.PostedAtUtc = DateTime.UtcNow;
+        b.DetailJson = JsonSerializer.Serialize(new
+        {
+            priorDetailJson = b.DetailJson,
+            paymentCount = payments.Count,
+            paymentTotal,
+            callCount = calls.Count,
+            callTotal,
+            paymentIds = payments.Select(p => p.Id),
+            callIds
+        });
         ApiAudit.Write(db, HttpContext, "cards", "reconciliation_batch_posted", $"CardReconciliationBatch:{id}",
-            new { from = CardReconciliationBatchStatus.Open, to = b.Status });
+            new { from = CardReconciliationBatchStatus.Open, to = b.Status, paymentCount = payments.Count, callCount = calls.Count });
         await db.SaveChangesAsync(ct);
-        return Ok(new { b.Id, b.Status });
+        return Ok(new { b.Id, b.Status, paymentCount = payments.Count, callCount = calls.Count, paymentTotal, callTotal });
     }
 
     [HttpPost("reconciliation-batches/{id:guid}/close")]
@@ -583,4 +638,32 @@ public sealed class CardsController(
     public sealed record ReconciliationExceptionDto(bool Confirm, string? Note);
 
     public sealed record CardWriteEventDto(Guid? CardAccountId, string? IntendedOperation, string? RawPayloadJson, bool SimulationMode);
+
+    private static BatchSummary ReadBatchSummary(string? detailJson)
+    {
+        if (string.IsNullOrWhiteSpace(detailJson))
+            return new BatchSummary(0, 0, 0, 0);
+        try
+        {
+            using var doc = JsonDocument.Parse(detailJson);
+            var root = doc.RootElement;
+            return new BatchSummary(
+                ReadInt(root, "paymentCount"),
+                ReadInt(root, "callCount"),
+                ReadDecimal(root, "paymentTotal"),
+                ReadDecimal(root, "callTotal"));
+        }
+        catch (JsonException)
+        {
+            return new BatchSummary(0, 0, 0, 0);
+        }
+    }
+
+    private static int ReadInt(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.TryGetInt32(out var n) ? n : 0;
+
+    private static decimal ReadDecimal(JsonElement root, string name) =>
+        root.TryGetProperty(name, out var value) && value.TryGetDecimal(out var n) ? n : 0;
+
+    private readonly record struct BatchSummary(int PaymentCount, int CallCount, decimal PaymentTotal, decimal CallTotal);
 }

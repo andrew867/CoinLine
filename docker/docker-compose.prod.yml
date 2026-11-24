@@ -1,7 +1,8 @@
 # Production-ish compose overlay — use with:
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml --profile prod up -d --build
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
-# Requires COINLINE_API_KEYS (comma-separated) for ApiKey auth mode.
+# Requires HOSTPLATFORM_API_KEYS or COINLINE_API_KEYS (comma-separated) for ApiKey auth mode.
+# When both are set, HOSTPLATFORM_API_KEYS is used.
 
 services:
   api:

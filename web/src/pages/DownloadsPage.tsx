@@ -21,9 +21,10 @@ type SetRow = { id: string; name: string; status: number }
 export function DownloadsPage() {
   const [search] = useSearchParams()
   const preTerm = search.get('terminal') ?? ''
+  const failedOnly = search.get('status') === 'failed'
   const [rows, setRows] = useState<Batch[] | null>(null)
-  const [terms, setTerms] = useState<Term[]>([])
-  const [sets, setSets] = useState<SetRow[]>([])
+  const [terms, setTerms] = useState<Term[] | null>(null)
+  const [sets, setSets] = useState<SetRow[] | null>(null)
   const [terminalId, setTerminalId] = useState(preTerm)
   const [tableSetId, setTableSetId] = useState('')
   const [err, setErr] = useState<string | null>(null)
@@ -75,6 +76,8 @@ export function DownloadsPage() {
     if (preTerm) setTerminalId(preTerm)
   }, [preTerm])
 
+  const visibleRows = (rows ?? []).filter((b) => (failedOnly ? b.status === 3 : true))
+
   async function startDownload(e: React.FormEvent) {
     e.preventDefault()
     setErr(null)
@@ -105,17 +108,22 @@ export function DownloadsPage() {
     <div>
       <h1>Download batches</h1>
       <p style={{ color: '#555' }}>
-        Batches stay in <strong>Running</strong> until terminal hardware ACKs exist (not implemented in this tranche). Use cancel to stop
-        orchestration.
+        A bound phone receives the batch on its next call. Batches stay <strong>Running</strong> until each table is acknowledged.
+        A missing or failed acknowledgement marks the batch Failed. Use cancel to stop a batch that is still running.
       </p>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
-      {terms.length === 0 && (
+      {terms && terms.length === 0 && (
         <p style={{ color: '#666' }}>
           No terminals yet — create one under <Link to="/terminals">Terminals</Link>.
         </p>
       )}
-      {sets.filter((s) => s.status === 1).length === 0 && (
-        <p style={{ color: '#a50' }}>No published table sets. Draft sets must be published (API/UI with confirm) before download.</p>
+      {sets && sets.filter((s) => s.status === 1).length === 0 && (
+        <p style={{ color: '#a50' }}>
+          No published table sets.{' '}
+          <Link to="/table-sets">
+            <button type="button">Open table sets</button>
+          </Link>
+        </p>
       )}
 
       <h2>Start download</h2>
@@ -129,7 +137,7 @@ export function DownloadsPage() {
             style={{ display: 'block', minWidth: 200 }}
           >
             <option value="">—</option>
-            {terms.map((t) => (
+            {(terms ?? []).map((t) => (
               <option key={t.id} value={t.id}>
                 {t.displayName}
               </option>
@@ -144,7 +152,7 @@ export function DownloadsPage() {
             onChange={(e) => setTableSetId(e.target.value)}
             style={{ display: 'block', minWidth: 200 }}
           >
-            {sets
+            {(sets ?? [])
               .filter((s) => s.status === 1)
               .map((s) => (
                 <option key={s.id} value={s.id}>
@@ -157,26 +165,44 @@ export function DownloadsPage() {
       </form>
 
       <h2>Recent batches</h2>
+      <p className="page-intro">
+        {failedOnly ? (
+          <>
+            Showing failed batches only.{' '}
+            <Link to="/downloads">Show all</Link>
+          </>
+        ) : (
+          <Link to="/downloads?status=failed">Show failed only</Link>
+        )}
+      </p>
       {!rows && <p>Loading…</p>}
-      {rows && rows.length === 0 && <p style={{ color: '#666' }}>No download batches yet.</p>}
-      {rows && rows.length > 0 && (
+      {rows && visibleRows.length === 0 && (
+        <p style={{ color: '#666' }}>{failedOnly ? 'No failed download batches.' : 'No download batches yet.'}</p>
+      )}
+      {rows && visibleRows.length > 0 && (
         <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
               <th>Id</th>
               <th>Status</th>
               <th>Scope</th>
+              <th>Retries</th>
+              <th>Last error</th>
               <th>Terminal</th>
             </tr>
           </thead>
           <tbody>
-            {rows.map((b) => (
+            {visibleRows.map((b) => (
               <tr key={b.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td>
                   <Link to={`/downloads/${b.id}`}>{b.id.slice(0, 8)}…</Link>
                 </td>
                 <td>{statusLabel(b.status)}</td>
                 <td>{b.scope === 1 ? 'Partial' : 'Full'}</td>
+                <td>{b.retryCount}</td>
+                <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {b.lastError ?? '—'}
+                </td>
                 <td>
                   <code>{b.terminalId.slice(0, 8)}…</code>
                 </td>

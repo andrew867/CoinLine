@@ -100,6 +100,13 @@ public class CallRecord : AuditableEntity
     public Guid? TerminalId { get; set; }
     public Terminal? Terminal { get; set; }
     public string DialedDigits { get; set; } = string.Empty;
+
+    /// <summary>Type 63 payload that produced this call. Empty when the call was not quoted on the modem socket.</summary>
+    public byte[] RequestRaw { get; set; } = Array.Empty<byte>();
+
+    /// <summary>Type 64 payload returned for this call. Empty when no response was built.</summary>
+    public byte[] ResponseRaw { get; set; } = Array.Empty<byte>();
+
     public RatingMode Mode { get; set; }
     public CallDisposition Disposition { get; set; }
     public DateTime StartedAtUtc { get; set; }

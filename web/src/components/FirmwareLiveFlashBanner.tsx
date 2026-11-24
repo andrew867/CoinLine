@@ -3,6 +3,7 @@ import { apiGet } from '../api/client'
 
 type Policy = {
   allowLiveFlashing: boolean
+  liveDlaEnabled?: boolean
   hardwareValidationNotice: string
 }
 
@@ -33,7 +34,8 @@ export function FirmwareLiveFlashBanner() {
     )
   }
 
-  if (pol.allowLiveFlashing) {
+  const bothOn = pol.allowLiveFlashing && !!pol.liveDlaEnabled
+  if (bothOn) {
     return (
       <div
         role="alert"
@@ -46,7 +48,7 @@ export function FirmwareLiveFlashBanner() {
           maxWidth: 960,
         }}
       >
-        <strong>Live firmware flashing is enabled in configuration</strong>
+        <strong>Live firmware flashing gates are both on</strong>
         <p style={{ margin: '6px 0 0', fontSize: 14, lineHeight: 1.4 }}>
           This is unsafe until DLA/XMODEM transport is certified — {pol.hardwareValidationNotice}
         </p>
@@ -68,8 +70,9 @@ export function FirmwareLiveFlashBanner() {
     >
       <strong>Live firmware update disabled</strong>
       <p style={{ margin: '6px 0 0', fontSize: 14, lineHeight: 1.4 }}>
-        Host runs simulation-only jobs by default (<code>Firmware:AllowLiveFlashing</code> is false). Modem flash and
-        XMODEM transfer remain <strong>HARDWARE_VALIDATION_REQUIRED</strong>. {pol.hardwareValidationNotice}
+        Host runs simulation-only jobs by default. AllowLiveFlashing is{' '}
+        {pol.allowLiveFlashing ? 'on' : 'off'}; live DLA is {pol.liveDlaEnabled ? 'on' : 'off'}. Modem flash remains{' '}
+        <strong>HARDWARE_VALIDATION_REQUIRED</strong>. {pol.hardwareValidationNotice}
       </p>
     </div>
   )

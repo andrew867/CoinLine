@@ -1,56 +1,93 @@
-import { Link, Outlet } from 'react-router-dom'
+import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { FirmwareLiveFlashBanner } from './FirmwareLiveFlashBanner'
 import { GlobalSearch } from './GlobalSearch'
-import { SimulationBanner } from './SimulationBanner'
 
-const links = [
-  ['/', 'Dashboard'],
-  ['/customers', 'Customers'],
-  ['/sites', 'Sites'],
-  ['/terminals', 'Terminals'],
-  ['/ncc-sessions', 'NCC Sessions'],
-  ['/ncc-frame-captures', 'NCC frame captures'],
-  ['/dlog', 'DLOG Transactions'],
-  ['/table-definitions', 'Table definitions'],
-  ['/table-versions', 'Table versions'],
-  ['/table-sets', 'Table sets'],
-  ['/downloads', 'Downloads'],
-  ['/uploads', 'Uploads'],
-  ['/rate-plans', 'Rate plans'],
-  ['/number-classes', 'Number classes'],
-  ['/rating-quote', 'Rating quote'],
-  ['/call-records', 'Call records'],
-  ['/card-products', 'Card Products'],
-  ['/card-accounts', 'Card Accounts'],
-  ['/craft', 'Craft Sessions'],
-  ['/firmware/packages', 'Firmware packages'],
-  ['/firmware/targets', 'Firmware targets'],
-  ['/firmware/versions', 'Firmware versions'],
-  ['/firmware/jobs', 'Firmware jobs'],
-  ['/audit', 'Audit Events'],
-  ['/status', 'Platform status'],
-  ['/settings', 'Settings'],
+const groups = [
+  {
+    title: 'Today',
+    links: [
+      ['/', 'Home'],
+      ['/terminals', 'Phones'],
+      ['/call-records', 'Calls'],
+      ['/downloads', 'Downloads'],
+      ['/field-events', 'Alarms'],
+    ],
+  },
+  {
+    title: 'Money',
+    links: [
+      ['/rate-plans', 'Rate plans'],
+      ['/rating-quote', 'Price a call'],
+      ['/card-accounts', 'Card accounts'],
+      ['/card-reconciliation', 'Reconciliation'],
+      ['/payment-transactions', 'Card payments'],
+    ],
+  },
+  {
+    title: 'Setup',
+    links: [
+      ['/customers', 'Customers'],
+      ['/sites', 'Sites'],
+      ['/terminal-groups', 'Phone groups'],
+      ['/table-sets', 'Table sets'],
+      ['/card-products', 'Card products'],
+      ['/operators', 'People'],
+    ],
+  },
+  {
+    title: 'Records',
+    links: [
+      ['/ncc-sessions', 'Phone sessions'],
+      ['/dlog', 'Message log'],
+      ['/uploads', 'Uploads'],
+      ['/audit', 'Audit'],
+    ],
+  },
+  {
+    title: 'More',
+    links: [
+      ['/craft', 'Technician craft'],
+      ['/firmware/packages', 'Firmware'],
+      ['/firmware/jobs', 'Firmware jobs'],
+      ['/table-definitions', 'Table definitions'],
+      ['/number-classes', 'Number classes'],
+      ['/ncc-frame-captures', 'Frame captures'],
+      ['/status', 'Platform status'],
+      ['/settings', 'Settings'],
+    ],
+  },
 ] as const
 
 export function Layout() {
+  const location = useLocation()
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', fontFamily: 'system-ui' }}>
-      <aside style={{ width: 260, borderRight: '1px solid #ddd', padding: 12 }}>
-        <div style={{ fontWeight: 700, marginBottom: 12 }}>CoinLine Management Console</div>
-        <p style={{ fontSize: 12, color: '#555', marginTop: -8, marginBottom: 12 }}>
-          Operator role (placeholder): headers send <code>X-Operator-Role: Admin</code> — wire to IdP / RBAC later.
-        </p>
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {links.map(([to, label]) => (
-            <Link key={to} to={to} style={{ textDecoration: 'none', color: '#0b5' }}>
-              {label}
-            </Link>
-          ))}
-        </nav>
+    <div className="shell">
+      <aside className="sidebar">
+        <p className="brand">CoinLine</p>
+        <p className="brand-note">Payphone manager</p>
+        {groups.map((group) => (
+          <div className="nav-group" key={group.title}>
+            <p className="nav-label">{group.title}</p>
+            {group.links.map(([to, label]) => (
+              <NavLink key={to} to={to} end={to === '/'}>
+                {label}
+              </NavLink>
+            ))}
+          </div>
+        ))}
+        <button
+          type="button"
+          className="sign-out"
+          onClick={() => {
+            localStorage.removeItem('coinline.token')
+            window.location.assign('/login')
+          }}
+        >
+          Sign out
+        </button>
       </aside>
-      <main style={{ flex: 1, padding: 16 }}>
-        <SimulationBanner />
-        <FirmwareLiveFlashBanner />
+      <main className="content">
+        {location.pathname.startsWith('/firmware') && <FirmwareLiveFlashBanner />}
         <GlobalSearch />
         <Outlet />
       </main>

@@ -1,6 +1,6 @@
 # Protocol components (implementation map)
 
-This page lists **CoinLine Server** protocol modules, where tests live, and where to find **fixtures** for integration checks. Descriptions cover observable on-wire behavior only — they do not describe proprietary terminal firmware contents.
+This page lists **CoinLine Server** protocol modules, where tests live, and where to find **fixtures** for integration checks. Wording is **customer-safe** — it does not describe proprietary terminal firmware contents.
 
 | Area | Code / library | Automated tests | Fixture root | Notes |
 |------|------------------|-----------------|--------------|--------|

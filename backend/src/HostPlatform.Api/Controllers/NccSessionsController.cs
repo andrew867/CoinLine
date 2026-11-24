@@ -1,3 +1,4 @@
+using HostPlatform.Api.Hosting;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Mvc;
@@ -7,7 +8,7 @@ namespace HostPlatform.Api.Controllers;
 
 [ApiController]
 [Route("api/ncc/sessions")]
-public sealed class NccSessionsController(HostPlatformDbContext db) : ControllerBase
+public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionOutbound outbound) : ControllerBase
 {
     /// <param name="includeArchived">When false (default), rows with <see cref="NccSessionStatus.Archived"/> are omitted.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -19,7 +20,7 @@ public sealed class NccSessionsController(HostPlatformDbContext db) : Controller
         if (!includeArchived)
             q = q.Where(s => s.Status != NccSessionStatus.Archived);
 
-        return Ok(await q
+        var rows = await q
             .OrderByDescending(s => s.StartedAtUtc)
             .Select(s => new
             {
@@ -30,7 +31,53 @@ public sealed class NccSessionsController(HostPlatformDbContext db) : Controller
                 s.StartedAtUtc,
                 s.EndedAtUtc,
                 LastFrameSampleHex = s.LastFrameSample == null ? null : Convert.ToHexString(s.LastFrameSample)
-            }).ToListAsync(ct));
+            }).ToListAsync(ct);
+
+        var bound = outbound.BoundSessionIds();
+        return Ok(rows.Select(s => new
+        {
+            s.Id,
+            s.TerminalId,
+            s.CorrelationId,
+            s.status,
+            s.StartedAtUtc,
+            s.EndedAtUtc,
+            s.LastFrameSampleHex,
+            socketBound = bound.Contains(s.Id)
+        }));
+    }
+
+    [HttpGet("{id:guid}")]
+    public async Task<ActionResult<object>> Get(Guid id, CancellationToken ct)
+    {
+        var s = await db.NccSessions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (s == null)
+            return NotFound();
+        var frames = await db.NccSessionFrames.AsNoTracking()
+            .Where(f => f.NccSessionId == id)
+            .OrderBy(f => f.Sequence)
+            .ToListAsync(ct);
+        var bound = outbound.TryDescribeBySession(id, out var link);
+        return Ok(new
+        {
+            s.Id,
+            s.TerminalId,
+            s.CorrelationId,
+            status = (int)s.Status,
+            s.StartedAtUtc,
+            s.EndedAtUtc,
+            socketBound = bound,
+            liveLink = bound
+                ? new { link.TerminalId, link.NccSessionId, link.TerminalIdHex }
+                : null,
+            frames = frames.Select(f => new
+            {
+                f.Sequence,
+                f.TerminalIdHex,
+                f.TerminalMatched,
+                rawHex = Convert.ToHexString(f.RawBytes)
+            })
+        });
     }
 
     /// <summary>Marks an active session as closed (idempotent for already-closed rows).</summary>

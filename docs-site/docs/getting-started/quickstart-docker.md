@@ -1,21 +1,16 @@
 # Quickstart (Docker)
 
-!!! note "Compose location"
-    Primary compose files live under `coinline/docker/` (see [Docker Compose](../operations/docker-compose.md)).
+From the repository root, run the lab stack.
 
-## Prerequisites
+```bash
+cd docker
+docker compose up -d --build
+```
 
-- Docker / Docker Compose
-- Ports **5432** (Postgres), **5006** (API), **5173** (optional UI via host networking)
+Compose starts PostgreSQL, the API, the console, and the worker. The API applies migrations at startup after PostgreSQL accepts TCP connections.
 
-## Typical flow
+1. Check API readiness at `http://localhost:5006/ready` and console readiness at `http://localhost:8080/ready`.
+2. Open `http://localhost:8080` and sign in with the seeded lab operator account described in the [Compose runbook](https://github.com/andrew867/CoinLine/blob/main/docker/README.md#checks).
+3. For a firmware lab call, start the emulator separately and point it to TCP port `4000` on the host. See [Lab setup](../field-validation/lab-setup.md).
 
-1. Start PostgreSQL (or use compose stack).
-2. Apply EF migrations (from dev container or host with `dotnet ef`).
-3. Run API image or `dotnet run` with connection string pointing at the DB.
-4. Run web dev server or serve static build behind reverse proxy.
-
-!!! danger "PRODUCTION GUARD REQUIRED"
-    Never expose Postgres or API admin routes without TLS, API keys, and network policy.
-
-See [Operations → Production deployment](../operations/production-deployment.md) for hardening.
+For host ports, persistent data, and the production overlay, see [Docker Compose](../operations/docker-compose.md).

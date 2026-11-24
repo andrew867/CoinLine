@@ -12,7 +12,7 @@ namespace HostPlatform.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/operator")]
-public sealed class OperatorController(HostPlatformDbContext db) : ControllerBase
+public sealed class OperatorController(HostPlatformDbContext db, Hosting.INccSessionOutbound outbound) : ControllerBase
 {
     [HttpGet("dashboard")]
     public async Task<ActionResult<object>> Dashboard(CancellationToken ct)
@@ -77,8 +77,8 @@ public sealed class OperatorController(HostPlatformDbContext db) : ControllerBas
             })
             .ToListAsync(ct);
 
-        var openNccSessions = await db.NccSessions.AsNoTracking()
-            .CountAsync(s => s.Status == NccSessionStatus.Active, ct);
+        // Live socket-bound links only — leftover Active DB rows after restart are not a call.
+        var openNccSessions = outbound.BoundSessionIds().Count;
 
         return Ok(new
         {
@@ -91,7 +91,7 @@ public sealed class OperatorController(HostPlatformDbContext db) : ControllerBas
             recentFirmwareJobs,
             recentAuditEvents = recentAudit,
             hardwareValidationNotice =
-                "Dashboard aggregates are host-side only — modem/NCC/DLOG paths remain HARDWARE_VALIDATION_REQUIRED until certified."
+                "Counts are host records. The lab listener on TCP rates a call and completes a table download when the phone acknowledges it. Live craft and firmware flash stay dual-gated and off by default."
         });
     }
 

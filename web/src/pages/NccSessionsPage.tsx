@@ -10,6 +10,7 @@ type NccSessionRow = {
   startedAtUtc: string
   endedAtUtc: string | null
   lastFrameSampleHex: string | null
+  socketBound?: boolean
 }
 
 function formatUtc(iso: string) {
@@ -97,9 +98,8 @@ export function NccSessionsPage() {
     <div>
       <h1>NCC sessions</h1>
       <p style={{ color: '#555', maxWidth: 720 }}>
-        Modem / NCC session records for DLOG correlation and captures. Status follows host persistence:{' '}
-        <strong>Active</strong> sessions count toward the operator dashboard; <strong>Closed</strong> ended normally;{' '}
-        <strong>Archived</strong> rows stay in history but are hidden from this list unless included below.
+        Modem / NCC session records for DLOG correlation and captures. <strong>Active</strong> is a stored row;
+        <strong> Socket bound</strong> means the management call is still open on this host right now.
       </p>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -131,6 +131,7 @@ export function NccSessionsPage() {
           <thead>
             <tr style={{ borderBottom: '1px solid #ccc' }}>
               <th align="left">Status</th>
+              <th align="left">Socket</th>
               <th align="left">Started (UTC)</th>
               <th align="left">Ended (UTC)</th>
               <th align="left">Correlation</th>
@@ -143,6 +144,7 @@ export function NccSessionsPage() {
             {rows.map((r) => (
               <tr key={r.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td>{statusLabel(r.status)}</td>
+                <td>{r.socketBound ? 'Bound' : '—'}</td>
                 <td>{formatUtc(r.startedAtUtc)}</td>
                 <td>{r.endedAtUtc ? formatUtc(r.endedAtUtc) : <em>—</em>}</td>
                 <td>

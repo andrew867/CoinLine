@@ -8,6 +8,7 @@ const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 type Detail = {
   id: string
   terminalId: string | null
+  terminalName: string | null
   nccSessionId: string | null
   direction: number
   messageType: number
@@ -58,93 +59,123 @@ export function DlogTransactionDetail() {
   if (err) return <p style={{ color: 'crimson' }}>{err}</p>
   if (!detail) return <p>No data.</p>
 
+  const title = fieldTitle(detail.messageType) ?? 'Stored message'
+  const fromPhone = fieldTitle(detail.messageType) != null
+
   return (
     <div>
       <p>
-        <Link to="/dlog">← DLOG list</Link>
+        <Link to={fromPhone ? '/field-events' : '/dlog'}>{fromPhone ? '← Alarms' : '← Message log'}</Link>
       </p>
-      <h1>DLOG transaction</h1>
+      <h1>{title}</h1>
+      <p className="page-intro">
+        {fromPhone
+          ? 'This is the message the phone sent. Documented alarm and cash fields are shown when the body is long enough; raw bytes stay authoritative.'
+          : 'This is a message stored from a phone session.'}
+      </p>
+      {(() => {
+        const fields = decodedFields(detail.decodedJson)
+        if (fields == null) return null
+        return (
+          <>
+            <h2>Decoded fields</h2>
+            <pre style={{ background: '#f6f8fa', padding: '0.75rem', overflow: 'auto', maxWidth: 720 }}>
+              {JSON.stringify(fields, null, 2)}
+            </pre>
+          </>
+        )
+      })()}
       {detail.isUnknownMessageType && (
-        <div
-          style={{
-            background: '#fff3cd',
-            border: '1px solid #ffc107',
-            padding: 12,
-            marginBottom: 12,
-            maxWidth: 720,
-          }}
-        >
-          <strong>Unknown message type</strong> — raw payload is still shown below. Extend the registry when the firmware
-          variant is confirmed (see COMPRESS_LCD / NPA table aliasing in docs).
-        </div>
+        <p role="status">This message type is not in the catalog. The raw bytes are still stored.</p>
       )}
       <dl style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 8, maxWidth: 720 }}>
-        <dt>ID</dt>
-        <dd>{detail.id}</dd>
-        <dt>Message type</dt>
+        <dt>When</dt>
+        <dd>{new Date(detail.capturedAtUtc).toLocaleString()}</dd>
+        <dt>Phone</dt>
         <dd>
-          {detail.messageType} — {detail.messageTypeName}
+          {detail.terminalId ? (
+            <Link to={`/terminals/${detail.terminalId}`}>{detail.terminalName || detail.terminalId}</Link>
+          ) : (
+            '—'
+          )}
         </dd>
         <dt>Direction</dt>
-        <dd>{detail.direction}</dd>
-        <dt>Processing status</dt>
-        <dd>{detail.processingStatus}</dd>
-        <dt>Immediate clear</dt>
-        <dd>{detail.immediateClear ? 'yes' : 'no'}</dd>
-        <dt>Terminal</dt>
-        <dd>{detail.terminalId ?? '—'}</dd>
-        <dt>NCC session</dt>
-        <dd>{detail.nccSessionId ?? '—'}</dd>
-        <dt>Session correlation</dt>
+        <dd>{detail.direction === 1 ? 'From the phone' : detail.direction === 2 ? 'To the phone' : 'Unknown'}</dd>
+        <dt>Status</dt>
+        <dd>{statusWord(detail.processingStatus)}</dd>
+        <dt>Session</dt>
         <dd>{detail.sessionCorrelationId ?? '—'}</dd>
-        <dt>Idempotency key</dt>
-        <dd style={{ wordBreak: 'break-all' }}>{detail.idempotencyKey}</dd>
-        <dt>Captured</dt>
-        <dd>{new Date(detail.capturedAtUtc).toISOString()}</dd>
       </dl>
 
-      <h2>Raw payload (hex)</h2>
+      <h2>Raw bytes</h2>
       <HexViewer hex={detail.rawPayloadHex} />
       <p>
-        <a href={`/api/dlog/transactions/${detail.id}/payload`} download={`dlog-${detail.id}.bin`}>
+        <a href={`/api/dlog/transactions/${detail.id}/payload`} download={`message-${detail.id}.bin`}>
           Download raw bytes
         </a>
       </p>
 
-      <h2>Decoded metadata (non-authoritative)</h2>
-      <pre style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, background: '#f6f8fa', padding: 12 }}>
-        {detail.decodedJson}
-      </pre>
-
-      <h2>Parse diagnostics</h2>
-      {detail.parseDiagnostics?.length ? (
-        <ul>
-          {detail.parseDiagnostics.map((d, i) => (
-            <li key={i} style={{ marginBottom: 8 }}>
-              <strong>{d.severity}</strong> {d.code}: {d.message}
-              {d.detail ? <div style={{ color: '#555', fontSize: 13 }}>{d.detail}</div> : null}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>None stored.</p>
-      )}
-
-      <h2>Correlation links</h2>
-      {detail.correlationLinks?.length ? (
-        <ul>
-          {detail.correlationLinks.map((l) => (
-            <li key={l.id}>
-              {l.linkRule} — request {l.requestTransactionId} ↔ response {l.responseTransactionId}
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <p>None.</p>
-      )}
-
-      <h2>Registry (reference)</h2>
-      <JsonPanel title="Message types" url="/api/dlog/message-types" />
+      <details>
+        <summary>Technical record</summary>
+        <dl style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 8, maxWidth: 720 }}>
+          <dt>Record id</dt>
+          <dd>{detail.id}</dd>
+          <dt>Message type</dt>
+          <dd>
+            {detail.messageType} — {detail.messageTypeName}
+          </dd>
+          <dt>Session id</dt>
+          <dd>{detail.nccSessionId ?? '—'}</dd>
+          <dt>Idempotency key</dt>
+          <dd style={{ wordBreak: 'break-all' }}>{detail.idempotencyKey}</dd>
+        </dl>
+        <h2>Notes</h2>
+          {detail.parseDiagnostics?.length ? (
+          <ul>
+            {detail.parseDiagnostics.map((d, i) => (
+              <li key={i} style={{ marginBottom: 8 }}>
+                {d.message}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p>None stored.</p>
+        )}
+        <JsonPanel title="Message catalog" url="/api/dlog/message-types" />
+      </details>
     </div>
   )
+}
+
+function decodedFields(decodedJson: string): unknown | null {
+  try {
+    const parsed = JSON.parse(decodedJson) as { fields?: unknown; Fields?: unknown }
+    return parsed.fields ?? parsed.Fields ?? null
+  } catch {
+    return null
+  }
+}
+
+function fieldTitle(messageType: number): string | null {
+  if (messageType === 7) return 'Alarm'
+  if (messageType === 10) return 'Phone status'
+  if (messageType === 16) return 'Alarm acknowledgement'
+  if (messageType === 38) return 'Cash box status'
+  if (messageType === 39) return 'Attention callback'
+  if (messageType >= 40 && messageType <= 47) {
+    if (messageType === 42) return 'Attention required (CDR upload)'
+    if (messageType === 44) return 'Attention required (tables)'
+    return 'Attention required'
+  }
+  if (messageType === 51) return 'Cash box collection'
+  if (messageType === 83) return 'Phone error'
+  return null
+}
+
+function statusWord(status: number): string {
+  if (status === 0) return 'Stored'
+  if (status === 1) return 'Decoded'
+  if (status === 2) return 'Linked'
+  if (status === 3) return 'Exported'
+  return 'Stored'
 }

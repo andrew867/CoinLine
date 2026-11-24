@@ -45,7 +45,14 @@ type Detail = {
   commands: CmdRow[]
   craftAuditTrail: AuditRow[]
   craftDiagnostics: DiagRow[]
+  liveLink?: { nccSessionId: string; terminalIdHex: string } | null
   hardwareValidationNotice?: string
+}
+
+type CraftPolicy = {
+  allowLiveCraft?: boolean
+  liveEnabled?: boolean
+  activeNccLinks?: number
 }
 
 /** Aligns with API command-type registry + name fallback (e.g. `ping` non-destructive). */
@@ -87,7 +94,9 @@ export function CraftSessionDetail() {
   const [commandTypeCode, setCommandTypeCode] = useState('')
   const [auditReason, setAuditReason] = useState('')
   const [deferSimulation, setDeferSimulation] = useState(false)
+  const [liveExecution, setLiveExecution] = useState(false)
   const [pendingDestructive, setPendingDestructive] = useState(false)
+  const [policy, setPolicy] = useState<CraftPolicy | null>(null)
 
   useEffect(() => {
     if (!sessionId) return
@@ -96,13 +105,15 @@ export function CraftSessionDetail() {
     setErr(null)
     ;(async () => {
       try {
-        const [d, tt] = await Promise.all([
+        const [d, tt, pol] = await Promise.all([
           apiGet<Detail>(`/api/craft/sessions/${sessionId}`),
           apiGet<CmdType[]>('/api/craft/command-types'),
+          apiGet<CraftPolicy>('/api/craft/execution-policy').catch(() => null),
         ])
         if (!c) {
           setData(d)
           setTypes(tt)
+          setPolicy(pol)
           setErr(null)
         }
       } catch (e) {
@@ -152,7 +163,7 @@ export function CraftSessionDetail() {
           commandTypeCode: commandTypeCode || null,
           confirmDestructive: destructive ? true : null,
           auditReason: destructive ? auditReason.trim() : null,
-          simulationExecution: null,
+          simulationExecution: liveExecution ? false : null,
           deferSimulation,
         }),
       })
@@ -172,6 +183,20 @@ export function CraftSessionDetail() {
     setSubmitErr(null)
     try {
       const r = await fetch(`/api/craft/commands/${cmdId}/simulate`, { method: 'POST', headers })
+      if (!r.ok) {
+        setSubmitErr(await r.text())
+        return
+      }
+      await refresh()
+    } catch (ex) {
+      setSubmitErr(ex instanceof Error ? ex.message : 'error')
+    }
+  }
+
+  async function executeLiveCommand(cmdId: string) {
+    setSubmitErr(null)
+    try {
+      const r = await fetch(`/api/craft/commands/${cmdId}/execute-live`, { method: 'POST', headers })
       if (!r.ok) {
         setSubmitErr(await r.text())
         return
@@ -215,7 +240,8 @@ export function CraftSessionDetail() {
     )
   if (!data) return <p role="status">Loading craft session…</p>
 
-  const { session, commands, craftAuditTrail, craftDiagnostics, hardwareValidationNotice } = data
+  const { session, commands, craftAuditTrail, craftDiagnostics, liveLink, hardwareValidationNotice } = data
+  const liveGatesOn = !!(policy?.allowLiveCraft && policy?.liveEnabled)
 
   return (
     <div>
@@ -227,6 +253,13 @@ export function CraftSessionDetail() {
         <p style={{ background: '#fff9e6', border: '1px solid #e6d69a', padding: 10, maxWidth: 720 }} role="note">
           {hardwareValidationNotice}
         </p>
+      )}
+      {liveLink ? (
+        <p role="status">
+          Active NCC link {liveLink.terminalIdHex} · session {liveLink.nccSessionId}
+        </p>
+      ) : (
+        <p style={{ color: '#666' }}>No active NCC link for this phone right now.</p>
       )}
       <p>
         Technician <strong>{session.technicianId}</strong> · Operator <strong>{session.operatorId}</strong>
@@ -291,8 +324,18 @@ export function CraftSessionDetail() {
         )}
         <label>
           <input type="checkbox" checked={deferSimulation} onChange={(e) => setDeferSimulation(e.target.checked)} /> Defer
-          simulation (stay Queued — simulate or cancel)
+          (stay Queued — simulate, execute live, or cancel)
         </label>
+        {liveGatesOn ? (
+          <label>
+            <input type="checkbox" checked={liveExecution} onChange={(e) => setLiveExecution(e.target.checked)} /> Live
+            write onto active NCC socket (opaque payload; dual-gated)
+          </label>
+        ) : (
+          <p style={{ color: '#666', fontSize: 13 }}>
+            Live craft gates are off (Craft:AllowLiveCraft + COINLINE_CRAFT_LIVE_ENABLED).
+          </p>
+        )}
         <button type="submit">Enqueue command</button>
       </form>
 
@@ -350,9 +393,15 @@ export function CraftSessionDetail() {
               <td>
                 {c.status === 0 && (
                   <>
-                    <button type="button" onClick={() => void simulateCommand(c.id)}>
-                      Simulate
-                    </button>{' '}
+                    {c.simulationExecution ? (
+                      <button type="button" onClick={() => void simulateCommand(c.id)}>
+                        Simulate
+                      </button>
+                    ) : (
+                      <button type="button" onClick={() => void executeLiveCommand(c.id)}>
+                        Execute live
+                      </button>
+                    )}{' '}
                     <button type="button" onClick={() => void cancelCommand(c.id)}>
                       Cancel
                     </button>

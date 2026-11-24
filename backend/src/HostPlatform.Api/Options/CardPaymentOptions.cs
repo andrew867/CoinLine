@@ -5,8 +5,8 @@ public sealed class CardPaymentOptions
 {
     public const string SectionName = "CardPayments";
 
-    /// <summary>When true, UI and APIs advertise simulation — no claim of live issuer or hardware writes.</summary>
-    public bool SimulationMode { get; set; } = true;
+    /// <summary>When true, the console shows the old simulation banner. The host ledger posts either way.</summary>
+    public bool SimulationMode { get; set; } = false;
 
     /// <summary>Host refuses non-simulated physical card write paths until cleared.</summary>
     public bool PhysicalCardWritesDisabled { get; set; } = true;

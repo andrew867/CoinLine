@@ -6,7 +6,7 @@ Terminal/modem → transport adapter (future) → ingest API → `DlogTransactio
 
 ## Table download
 
-Operator publishes set → assignment → download batch items queued → **terminal ACK path not fully implemented** — see `HARDWARE_VALIDATION_REQUIRED` in implementation notes.
+Operator publishes a set and assigns it. On the next bound session the listener sends one frame per item. A table-number acknowledgement completes that item. A missing or negative acknowledgement fails the batch.
 
 ## Rating
 

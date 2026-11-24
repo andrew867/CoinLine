@@ -13,7 +13,8 @@ namespace HostPlatform.Api.Controllers;
 public sealed class TerminalsController(
     HostPlatformDbContext db,
     TableDistributionService tables,
-    FirmwareJobOrchestrator firmwareOrchestrator) : ControllerBase
+    FirmwareJobOrchestrator firmwareOrchestrator,
+    Hosting.INccSessionOutbound outbound) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<object>> GetAll(
@@ -52,27 +53,87 @@ public sealed class TerminalsController(
             _ => asc ? query.OrderBy(t => t.DisplayName) : query.OrderByDescending(t => t.DisplayName)
         };
 
-        var projection = query.Select(t => new
-        {
+        var projection = query.Select(t => new TerminalListRow(
             t.Id,
             t.SiteId,
             t.DisplayName,
             t.TerminalIdHex,
             t.Status,
             t.FirmwareVersionId,
-            t.TransportEndpointId
-        });
+            t.TransportEndpointId,
+            t.TerminalGroupId,
+            t.TerminalGroup != null ? t.TerminalGroup.Name : null));
 
         var wantsPaging = page.HasValue || pageSize.HasValue;
         if (!wantsPaging)
-            return Ok(await projection.ToListAsync(ct));
+            return Ok(await WithSession(await projection.ToListAsync(ct), ct));
 
         var p = Math.Max(1, page ?? 1);
         var ps = Math.Clamp(pageSize ?? 50, 1, 200);
         var total = await query.CountAsync(ct);
-        var items = await projection.Skip((p - 1) * ps).Take(ps).ToListAsync(ct);
+        var items = await WithSession(await projection.Skip((p - 1) * ps).Take(ps).ToListAsync(ct), ct);
         return Ok(new { total, page = p, pageSize = ps, items });
     }
+
+    private async Task<List<object>> WithSession(List<TerminalListRow> rows, CancellationToken ct)
+    {
+        var ids = rows.Select(r => r.Id).ToList();
+        var marks = ids.ToDictionary(id => id, _ => (OnCall: false, Last: (DateTime?)null));
+        if (ids.Count > 0)
+        {
+            var sessions = await db.NccSessions.AsNoTracking()
+                .Where(s => s.TerminalId != null && ids.Contains(s.TerminalId.Value))
+                .Select(s => new { s.TerminalId, s.StartedAtUtc })
+                .ToListAsync(ct);
+            foreach (var session in sessions)
+            {
+                if (session.TerminalId is not { } id || !marks.TryGetValue(id, out var cur))
+                    continue;
+                var last = cur.Last;
+                if (last == null || session.StartedAtUtc > last)
+                    last = session.StartedAtUtc;
+                marks[id] = (cur.OnCall, last);
+            }
+
+            foreach (var id in ids)
+            {
+                if (!outbound.TryDescribe(id, out _))
+                    continue;
+                var cur = marks[id];
+                marks[id] = (true, cur.Last);
+            }
+        }
+
+        return rows.Select(t =>
+        {
+            var mark = marks[t.Id];
+            return (object)new
+            {
+                t.Id,
+                t.SiteId,
+                t.DisplayName,
+                t.TerminalIdHex,
+                status = t.Status,
+                t.FirmwareVersionId,
+                t.TransportEndpointId,
+                t.TerminalGroupId,
+                groupName = t.GroupName,
+                onCall = mark.OnCall,
+                lastSessionAtUtc = mark.Last
+            };
+        }).ToList();
+    }
+
+    private sealed record TerminalListRow(
+        Guid Id,
+        Guid SiteId,
+        string DisplayName,
+        string TerminalIdHex,
+        TerminalOperationalStatus Status,
+        Guid? FirmwareVersionId,
+        Guid? TransportEndpointId,
+        Guid? TerminalGroupId,
+        string? GroupName);
 
     [HttpPost]
     public async Task<ActionResult<object>> Create([FromBody] TerminalCreateDto body, CancellationToken ct)
@@ -101,6 +162,23 @@ public sealed class TerminalsController(
             }, e.Id);
         await db.SaveChangesAsync(ct);
         return Created($"/api/terminals/{e.Id}", new { e.Id });
+    }
+
+    [HttpPut("{id:guid}/group")]
+    public async Task<ActionResult<object>> AssignGroup(Guid id, [FromBody] AssignGroupDto body, CancellationToken ct)
+    {
+        var terminal = await db.Terminals.FirstOrDefaultAsync(t => t.Id == id, ct);
+        if (terminal == null)
+            return NotFound();
+        if (body.TerminalGroupId is { } groupId &&
+            !await db.TerminalGroups.AsNoTracking().AnyAsync(g => g.Id == groupId, ct))
+            return NotFound(new { error = "Unknown phone group." });
+        terminal.TerminalGroupId = body.TerminalGroupId;
+        await db.SaveChangesAsync(ct);
+        ApiAudit.Write(db, HttpContext, "terminals", "assign_group", $"Terminal:{terminal.Id}",
+            new { terminal.TerminalGroupId }, terminal.Id);
+        await db.SaveChangesAsync(ct);
+        return Ok(new { terminal.Id, terminal.TerminalGroupId });
     }
 
     [HttpGet("{id:guid}")]
@@ -305,8 +383,8 @@ public sealed class TerminalsController(
                     batch.Scope,
                     terminalId = id,
                     wasExisting,
-                    HARDWARE_VALIDATION_REQUIRED =
-                        "Host queues opaque blobs; terminal ACK / completion path not implemented in this tranche."
+                    note =
+                        "Batch is queued for the next bound session. Each item completes when the phone acknowledges that table."
                 }, id);
             await db.SaveChangesAsync(ct);
             var payload = new
@@ -344,6 +422,8 @@ public sealed class TerminalsController(
             return BadRequest(new { error = ex.Message });
         }
     }
+
+    public sealed record AssignGroupDto(Guid? TerminalGroupId);
 
     public sealed record TerminalCreateDto(
         Guid SiteId,
@@ -416,7 +496,7 @@ public sealed class TerminalsController(
             tableReloadRequests = tableReloads,
             cdrUploadRequests = cdrReqs,
             hardwareValidationNotice =
-                "Read-only host aggregates; modem/NCC/DLOG delivery and terminal ACK paths remain HARDWARE_VALIDATION_REQUIRED until certified."
+                "Snapshots, CDR-upload intents, and table-reload intents are stored on the host. They are not sent on the NCC socket. Table acknowledgement is the download batch."
         });
     }
 

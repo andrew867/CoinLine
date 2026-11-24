@@ -7,11 +7,14 @@ import { EmptyHint, ErrorBanner } from '../components/AppStates'
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type SiteOpt = { id: string; name: string; code: string }
+type GroupOpt = { id: string; name: string }
 
 export function TerminalCreatePage() {
   const nav = useNavigate()
   const [sites, setSites] = useState<SiteOpt[]>([])
+  const [groups, setGroups] = useState<GroupOpt[]>([])
   const [siteId, setSiteId] = useState('')
+  const [groupId, setGroupId] = useState('')
   const [displayName, setDisplayName] = useState('Bench terminal')
   const [terminalIdHex, setTerminalIdHex] = useState('E2E010203')
   const [err, setErr] = useState<string | null>(null)
@@ -24,6 +27,10 @@ export function TerminalCreatePage() {
         setSiteId((prev) => prev || s[0]?.id || '')
       })
       .catch(() => {})
+    void fetch('/api/terminal-groups', { headers })
+      .then((r) => r.json() as Promise<GroupOpt[]>)
+      .then(setGroups)
+      .catch(() => {})
   }, [])
 
   async function onSubmit(e: FormEvent) {
@@ -32,7 +39,7 @@ export function TerminalCreatePage() {
     try {
       const created = await apiPost<{ id: string }>('/api/terminals', {
         siteId,
-        terminalGroupId: null,
+        terminalGroupId: groupId || null,
         transportEndpointId: null,
         firmwareVersionId: null,
         terminalIdHex,
@@ -48,7 +55,7 @@ export function TerminalCreatePage() {
   return (
     <div>
       <p>
-        <Link to="/terminals">← Terminals</Link>
+        <Link to="/terminals">← Phones</Link>
       </p>
       <h1>Create terminal</h1>
       {sites.length === 0 && (
@@ -67,6 +74,17 @@ export function TerminalCreatePage() {
             {sites.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name} ({s.code})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Phone group
+          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} style={{ display: 'block', width: '100%' }}>
+            <option value="">No group</option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name}
               </option>
             ))}
           </select>

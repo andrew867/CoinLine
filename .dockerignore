@@ -1,0 +1,11 @@
+# Image build context is the coinline directory. Keep database files and host installs out of it.
+**/bin
+**/obj
+**/node_modules
+**/dist
+**/TestResults
+**/.git
+web/test-results
+web/playwright-report
+docs-site/site
+docker/data

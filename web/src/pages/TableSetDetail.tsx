@@ -125,7 +125,9 @@ export function TableSetDetail() {
       </p>
       <h2>Versions in this set</h2>
       {noVersions && (
-        <p style={{ color: '#666' }}>No versions yet — POST a table version via API or add seed data.</p>
+        <p style={{ color: '#666' }}>
+          No versions in this set yet. Add table versions from the versions list, then publish this set.
+        </p>
       )}
       <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 14 }}>
         <thead>

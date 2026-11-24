@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
@@ -16,28 +16,50 @@ type Row = {
 export function TableSets() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [name, setName] = useState('')
 
-  useEffect(() => {
-    let c = false
+  function load() {
     fetch('/api/tables/sets', { headers })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Row[]>
       })
-      .then((j) => {
-        if (!c) setRows(j)
-      })
-      .catch((e) => {
-        if (!c) setErr(e instanceof Error ? e.message : 'error')
-      })
-    return () => {
-      c = true
-    }
+      .then(setRows)
+      .catch((e) => setErr(e instanceof Error ? e.message : 'error'))
+  }
+
+  useEffect(() => {
+    load()
   }, [])
+
+  async function createSet(e: FormEvent) {
+    e.preventDefault()
+    const trimmed = name.trim()
+    if (!trimmed) return
+    setErr(null)
+    const r = await fetch('/api/tables/sets', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: trimmed, customerId: null, isDefault: false }),
+    })
+    if (!r.ok) {
+      setErr(String(r.status))
+      return
+    }
+    setName('')
+    load()
+  }
 
   return (
     <div>
       <h1>Table sets</h1>
+      <form onSubmit={(e) => void createSet(e)} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>
+        <label>
+          New set name
+          <input value={name} onChange={(e) => setName(e.target.value)} required style={{ display: 'block' }} />
+        </label>
+        <button type="submit">Create table set</button>
+      </form>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!rows && <p>Loading…</p>}
       {rows && rows.length === 0 && <p style={{ color: '#666' }}>No table sets yet.</p>}

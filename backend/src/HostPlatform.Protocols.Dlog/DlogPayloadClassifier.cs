@@ -81,13 +81,35 @@ public static class DlogPayloadClassifier
             });
         }
 
-        diagnostics.Add(new DlogParseDiagnosticEntry
+        object? fields = null;
+        var notes = "";
+        if (DlogFieldLayouts.TryDecodeFields(mt, raw, out var decoded, out var layoutNote))
         {
-            Severity = "Info",
-            Code = "PAYLOAD_LAYOUT",
-            Message = "Per-record body layout is defined in DLOGMSG.H / RATING.H per message type.",
-            Detail = "HARDWARE_VALIDATION_REQUIRED: structured field decode not applied without golden capture proof."
-        });
+            fields = decoded;
+            notes = layoutNote;
+            diagnostics.Add(new DlogParseDiagnosticEntry
+            {
+                Severity = "Info",
+                Code = "PAYLOAD_LAYOUT",
+                Message = layoutNote,
+                Detail = "Documented field layout applied. Raw bytes remain authoritative."
+            });
+        }
+        else
+        {
+            var shortBody = layoutNote.Length > 0;
+            diagnostics.Add(new DlogParseDiagnosticEntry
+            {
+                Severity = shortBody ? "Warning" : "Info",
+                Code = "PAYLOAD_LAYOUT",
+                Message = shortBody
+                    ? layoutNote
+                    : "The body is stored as raw bytes. No documented field layout is applied for this message type.",
+                Detail = shortBody
+                    ? "HARDWARE_VALIDATION_REQUIRED: capture is shorter than the documented body."
+                    : "HARDWARE_VALIDATION_REQUIRED: field layout is not applied."
+            });
+        }
 
         int? correlationKey = null;
         if (raw.Length > 1)
@@ -108,7 +130,8 @@ public static class DlogPayloadClassifier
             IsUnknownMessageType = !known,
             ImmediateClear = imm,
             CorrelationKey = correlationKey,
-            Notes = "",
+            Notes = notes,
+            Fields = fields,
             Diagnostics = diagnostics
         };
     }

@@ -48,6 +48,8 @@ public sealed class CallRecordsController(HostPlatformDbContext db) : Controller
             c.EndedAtUtc,
             c.Reconciliation,
             c.AppliedRatePlanVersionId,
+            requestRawHex = Convert.ToHexString(c.RequestRaw),
+            responseRawHex = Convert.ToHexString(c.ResponseRaw),
             results = c.Results.Select(r => new
             {
                 r.Id,

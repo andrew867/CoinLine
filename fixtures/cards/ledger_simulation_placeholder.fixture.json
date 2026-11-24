@@ -4,14 +4,14 @@
   "lineage": {
     "canonicality": "PLACEHOLDER",
     "mtrScope": "N_A",
-    "notes": "Simulation-gated balance mutations; live issuer settlement is uncertified by default."
+    "notes": "Host ledger posts balance changes. Physical card writes stay off."
   },
   "sourceEvidence": [
     "coinline/backend/src/HostPlatform.Cards/CardLedgerCapabilities.cs",
     "coinline/backend/src/HostPlatform.Infrastructure/Cards/CardAccountLedger.cs"
   ],
   "expectedParse": {
-    "defaultSimulation": true
+    "defaultSimulation": false
   },
   "expectedDiagnostics": []
 }

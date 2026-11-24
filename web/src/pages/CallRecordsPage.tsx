@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet } from '../api/client'
+import { dispositionWords, reconciliationWords } from '../callWords'
 
 type Row = {
   id: string
@@ -33,7 +34,7 @@ export function CallRecordsPage() {
       {loading && <p role="status">Loading…</p>}
       {!loading && err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!loading && !err && rows.length === 0 && (
-        <p role="status">No call records yet — POST /api/call-records or complete a rated call flow.</p>
+        <p role="status">No calls yet. A priced call appears here when a phone asks for a rate.</p>
       )}
       {!loading && !err && rows.length > 0 && (
         <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
@@ -51,8 +52,8 @@ export function CallRecordsPage() {
                 <td>
                   <Link to={`/call-records/${r.id}`}>{r.dialedDigits}</Link>
                 </td>
-                <td>{r.disposition}</td>
-                <td>{r.reconciliation}</td>
+                <td>{dispositionWords(r.disposition)}</td>
+                <td>{reconciliationWords(r.reconciliation)}</td>
                 <td>{r.startedAtUtc}</td>
               </tr>
             ))}

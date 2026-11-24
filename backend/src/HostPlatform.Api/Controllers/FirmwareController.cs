@@ -24,12 +24,14 @@ public sealed class FirmwareController(
 {
     /// <summary>UI / operators — surface whether live modem flashing is enabled (default false).</summary>
     [HttpGet("execution-policy")]
-    public ActionResult<object> ExecutionPolicy() =>
+    public ActionResult<object> ExecutionPolicy(
+        [FromServices] Microsoft.Extensions.Options.IOptions<HostPlatform.Firmware.DlTransportEnvironmentOptions> dlOpt) =>
         Ok(new
         {
             allowLiveFlashing = executionPolicy.AllowLiveFlashing,
+            liveDlaEnabled = dlOpt.Value.LiveDlaEnabled,
             hardwareValidationNotice =
-                "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only."
+                "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only. Live execute needs Firmware:AllowLiveFlashing and COINLINE_FIRMWARE_LIVE_DLA_ENABLED."
         });
 
     [AllowAnonymous]
@@ -301,6 +303,26 @@ public sealed class FirmwareController(
         try
         {
             await orchestrator.SimulateJobAsync(id, ct);
+            var j = await db.FirmwareUpdateJobs.AsNoTracking().Include(x => x.Steps).FirstAsync(x => x.Id == id, ct);
+            return Ok(new { j.Id, j.Status, steps = j.Steps.Count });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Dual-gated live DLA/XMODEM execute. Rejected unless Firmware:AllowLiveFlashing and
+    /// COINLINE_FIRMWARE_LIVE_DLA_ENABLED are both on. Default Compose leaves both off.
+    /// </summary>
+    [Authorize(Policy = Policies.RequireAdmin)]
+    [HttpPost("jobs/{id:guid}/execute-live")]
+    public async Task<ActionResult<object>> ExecuteLiveJob(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await orchestrator.ExecuteLiveJobAsync(id, observation: null, ct);
             var j = await db.FirmwareUpdateJobs.AsNoTracking().Include(x => x.Steps).FirstAsync(x => x.Id == id, ct);
             return Ok(new { j.Id, j.Status, steps = j.Steps.Count });
         }

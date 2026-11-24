@@ -98,6 +98,14 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             .Include(t => t.ParseDiagnostics)
             .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (x == null) return NotFound();
+        string? terminalName = null;
+        if (x.TerminalId is { } terminalId)
+        {
+            terminalName = await db.Terminals.AsNoTracking()
+                .Where(t => t.Id == terminalId)
+                .Select(t => t.DisplayName)
+                .FirstOrDefaultAsync(ct);
+        }
         var links = await db.DlogCorrelationLinks.AsNoTracking()
             .Where(l => l.RequestTransactionId == id || l.ResponseTransactionId == id)
             .Select(l => new { l.Id, l.RequestTransactionId, l.ResponseTransactionId, l.LinkRule })
@@ -106,6 +114,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
         {
             x.Id,
             x.TerminalId,
+            terminalName,
             x.NccSessionId,
             x.Direction,
             x.MessageType,

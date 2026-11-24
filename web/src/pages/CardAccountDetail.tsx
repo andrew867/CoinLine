@@ -63,7 +63,7 @@ export function CardAccountDetail() {
       await apiPost<{ balance: number }>(`/api/cards/accounts/${id}/adjust-balance`, {
         delta: Number(delta),
         reason,
-        simulationMode: true,
+        simulationMode: false,
       })
       setModal(false)
       await load()
@@ -85,10 +85,9 @@ export function CardAccountDetail() {
       {!loading && !err && !row && <p role="status">Not found.</p>}
       {!loading && !err && row && (
         <>
-          <p style={{ color: '#555' }}>
-            Balances are simulation ledger rows — not issuer authoritative funds without HARDWARE_VALIDATION_REQUIRED.
-          </p>
-          <dl style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 8 }}>
+          <p className="balance">{money(row.balance)}</p>
+          <p className="page-intro">This balance is the host ledger. Writing the amount onto a physical card stays off.</p>
+          <dl className="facts">
             <dt>Product</dt>
             <dd>{row.productCode}</dd>
             <dt>PAN display</dt>
@@ -121,14 +120,16 @@ export function CardAccountDetail() {
               <p style={{ color: '#666' }}>No ledger events yet.</p>
             )}
             {timeline && timeline.items.length > 0 && (
-              <ul style={{ fontSize: 13 }}>
-                {timeline.items.map((it, i) => (
-                  <li key={i} style={{ marginBottom: 8 }}>
-                    <pre style={{ margin: 0, fontSize: 11, background: '#f6f8fa', padding: 8, overflow: 'auto' }}>
-                      {JSON.stringify(it, null, 2)}
-                    </pre>
-                  </li>
-                ))}
+              <ul>
+                {timeline.items.map((it, i) => {
+                  const row = it as { title?: string; atUtc?: string; kind?: string }
+                  return (
+                    <li key={i}>
+                      {row.title ?? row.kind ?? 'Event'}
+                      {row.atUtc ? ` · ${new Date(row.atUtc).toLocaleString()}` : ''}
+                    </li>
+                  )
+                })}
               </ul>
             )}
           </section>
@@ -173,7 +174,7 @@ export function CardAccountDetail() {
                 }}
               >
                 <h2 style={{ marginTop: 0 }}>Balance adjustment</h2>
-                <p style={{ fontSize: 14 }}>Simulation-only until certification. Minimum 3-character audit reason.</p>
+                <p style={{ fontSize: 14 }}>The change is written to the host ledger. Give a reason of at least 3 characters.</p>
                 {adjErr && <p style={{ color: 'crimson' }}>{adjErr}</p>}
                 <label style={{ display: 'block', marginBottom: 8 }}>
                   Delta (negative allowed if product permits)
@@ -200,7 +201,7 @@ export function CardAccountDetail() {
                   <button type="submit" disabled={saving}>
                     {saving ? 'Saving…' : 'Apply'}
                   </button>
-                  <button type="button" onClick={() => setModal(false)}>
+                  <button type="button" className="quiet" onClick={() => setModal(false)}>
                     Cancel
                   </button>
                 </div>
@@ -211,4 +212,8 @@ export function CardAccountDetail() {
       )}
     </div>
   )
+}
+
+function money(amount: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
 }

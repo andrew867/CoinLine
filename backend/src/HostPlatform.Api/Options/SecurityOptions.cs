@@ -11,7 +11,10 @@ public sealed class SecurityOptions
     /// </summary>
     public HostAuthMode Mode { get; set; } = HostAuthMode.Development;
 
-    /// <summary>Shared secrets for field gateways / automation (prefer env <c>HOSTPLATFORM_API_KEYS</c> comma-list).</summary>
+    /// <summary>
+    /// Shared secrets for field gateways / automation.
+    /// A non-empty <c>HOSTPLATFORM_API_KEYS</c> list wins; otherwise <c>COINLINE_API_KEYS</c> (comma-separated) is used.
+    /// </summary>
     public string[] ApiKeys { get; set; } = [];
 
     /// <summary>Per-IP fixed window; 0 disables global limiting.</summary>

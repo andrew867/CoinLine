@@ -1,4 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { signIn } from './auth'
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page)
+})
 
 test('rate plans and quote pages render with MVP warnings', async ({ page }) => {
   await page.goto('/rate-plans')
@@ -6,7 +11,7 @@ test('rate plans and quote pages render with MVP warnings', async ({ page }) => 
   await expect(page.getByText(/not production parity/i)).toBeVisible()
 
   await page.goto('/rating-quote')
-  await expect(page.getByRole('heading', { name: 'Rating quote (test)' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Price a call' })).toBeVisible()
   await expect(page.getByText(/lab validation/i)).toBeVisible()
 })
 

@@ -111,7 +111,7 @@ public sealed class DownloadsController(HostPlatformDbContext db, TableDistribut
                 batch.Id,
                 batch.RetryCount,
                 batch.TerminalId,
-                HARDWARE_VALIDATION_REQUIRED = "Retry prepares host-side orchestration only; terminal ACK path not implemented in this tranche."
+                note = "Retry queues a new batch. The next bound session sends it."
             }, batch.TerminalId);
             await db.SaveChangesAsync(ct);
             return Created($"/api/downloads/{batch.Id}", new { batch.Id, batch.Status, batch.RetryCount });

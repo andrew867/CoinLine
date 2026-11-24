@@ -13,6 +13,8 @@ public static class SeedData
     {
         await EnsureDlogMessageTypesAsync(db, ct);
         await EnsureCraftCommandTypesSeedAsync(db, ct);
+        await EnsureLabOperatorAsync(db, ct);
+        await CloseDemoSessionAsync(db, ct);
 
         if (!enableDemoData)
         {
@@ -26,6 +28,7 @@ public static class SeedData
         {
             await EnsureRatingSeedAsync(db, ct);
             await EnsureCardSeedAsync(db, ct);
+            await EnsureLabInstallSetAsync(db, ct);
             return;
         }
 
@@ -129,8 +132,9 @@ public static class SeedData
         var nccSession = new NccSession
         {
             TerminalId = term.Id,
-            Status = NccSessionStatus.Active,
+            Status = NccSessionStatus.Closed,
             StartedAtUtc = DateTime.UtcNow.AddMinutes(-5),
+            EndedAtUtc = DateTime.UtcNow.AddMinutes(-4),
             CorrelationId = "ncc-seed",
             LastFrameSample = new byte[] { 0x02, 0x00, 0x05, 0x01, 0x02, 0x03, 0x04, 0x05, 0x03 }
         };
@@ -328,6 +332,94 @@ public static class SeedData
         await db.SaveChangesAsync(ct);
 
         await EnsureCardSeedAsync(db, ct);
+        await EnsureLabInstallSetAsync(db, ct);
+    }
+
+    /// <summary>
+    /// Lab install set for the demo terminal: short version bytes for types 21, 26, 31, 33, and 73.
+    /// Does not replace an assignment an operator already saved.
+    /// </summary>
+    private static async Task EnsureLabInstallSetAsync(HostPlatformDbContext db, CancellationToken ct)
+    {
+        var term = await db.Terminals.FirstOrDefaultAsync(t => t.TerminalIdHex == "0102030405", ct);
+        if (term == null)
+            return;
+
+        const string setName = "Lab install set";
+        var set = await db.TableSets.FirstOrDefaultAsync(s => s.Name == setName, ct);
+        if (set == null)
+        {
+            var customerId = await db.Sites.AsNoTracking()
+                .Where(s => s.Id == term.SiteId)
+                .Select(s => (Guid?)s.CustomerId)
+                .FirstOrDefaultAsync(ct);
+            set = new TableSet
+            {
+                Name = setName,
+                CustomerId = customerId,
+                IsDefault = false,
+                Status = TableSetStatus.Draft
+            };
+            db.TableSets.Add(set);
+            await db.SaveChangesAsync(ct);
+
+            var specs = new (int Number, string Name, int Order)[]
+            {
+                (21, "Terminal parameters", 0),
+                (26, "Feature configuration", 1),
+                (31, "Install parameters", 2),
+                (33, "Modem parameters", 3),
+                (73, "Rate table", 4)
+            };
+            foreach (var spec in specs)
+            {
+                var def = await db.TableDefinitions.FirstOrDefaultAsync(d => d.TableNumber == spec.Number, ct);
+                if (def == null)
+                {
+                    def = new TableDefinition
+                    {
+                        Name = spec.Name,
+                        TableNumber = spec.Number,
+                        Description = "Lab install payload. Short version bytes for the management call. Not a firmware image."
+                    };
+                    db.TableDefinitions.Add(def);
+                    await db.SaveChangesAsync(ct);
+                }
+
+                var raw = new byte[] { (byte)spec.Number, 0x01 };
+                var sha = TablePayloadHasher.Sha256Hex(raw);
+                var payload = new TablePayload
+                {
+                    RawContent = raw,
+                    Sha256Hex = sha,
+                    LengthBytes = raw.Length
+                };
+                db.TablePayloads.Add(payload);
+                await db.SaveChangesAsync(ct);
+                db.TableVersions.Add(new TableVersion
+                {
+                    TableSetId = set.Id,
+                    TableDefinitionId = def.Id,
+                    TableRevision = 1,
+                    TablePayloadId = payload.Id,
+                    PayloadSha256Hex = sha,
+                    SortOrder = spec.Order,
+                    ValidationPassed = true,
+                    Checksum = SHA256.HashData(raw)
+                });
+            }
+
+            await db.SaveChangesAsync(ct);
+            set.Status = TableSetStatus.Published;
+            set.PublishedAtUtc = DateTime.UtcNow;
+            set.PublishGeneration = 1;
+            await db.SaveChangesAsync(ct);
+        }
+
+        if (await db.TerminalTableAssignments.AnyAsync(a => a.TerminalId == term.Id, ct))
+            return;
+
+        await new TableDistributionService(db).AssignTableSetAsync(term.Id, set.Id, set.CustomerId, term.SiteId, ct);
     }
 
     /// <summary>Idempotent card rails catalog + lab account — safe alongside partial upgrades.</summary>
@@ -611,6 +703,37 @@ public static class SeedData
             });
         }
 
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task EnsureLabOperatorAsync(HostPlatformDbContext db, CancellationToken ct)
+    {
+        if (await db.OperatorAccounts.AnyAsync(a => a.Username == "operator", ct))
+            return;
+        var now = DateTime.UtcNow;
+        db.OperatorAccounts.Add(new OperatorAccount
+        {
+            Username = "operator",
+            DisplayName = "Lab operator",
+            PasswordHash = OperatorPassword.Hash("lab-operator"),
+            Role = OperatorRole.Admin,
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now,
+            CreatedBy = "seed",
+            UpdatedBy = "seed"
+        });
+        await db.SaveChangesAsync(ct);
+    }
+
+    private static async Task CloseDemoSessionAsync(HostPlatformDbContext db, CancellationToken ct)
+    {
+        var demo = await db.NccSessions.FirstOrDefaultAsync(
+            s => s.CorrelationId == "ncc-seed" && s.Status == NccSessionStatus.Active, ct);
+        if (demo == null)
+            return;
+        demo.Status = NccSessionStatus.Closed;
+        demo.EndedAtUtc ??= DateTime.UtcNow;
         await db.SaveChangesAsync(ct);
     }
 

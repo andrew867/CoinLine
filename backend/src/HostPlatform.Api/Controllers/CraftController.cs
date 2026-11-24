@@ -1,5 +1,7 @@
 using System.Text.Json;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Craft;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Craft;
 using HostPlatform.Infrastructure.Persistence;
@@ -9,13 +11,29 @@ using Microsoft.EntityFrameworkCore;
 namespace HostPlatform.Api.Controllers;
 
 /// <summary>
-/// Technician craft workflows — live terminal execution remains behind <see cref="ICraftSimulationTransport"/> (default: <see cref="CraftSimulationTransport"/>) unless proven.
+/// Technician craft workflows — simulation by default; live opaque writes require dual gates and an active NCC link.
 /// </summary>
 [ApiController]
 [Route("api/craft")]
-public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTransport craftSim) : ControllerBase
+public sealed class CraftController(
+    HostPlatformDbContext db,
+    ICraftSimulationTransport craftSim,
+    ICraftExecutionPolicy craftPolicy,
+    INccSessionOutbound outbound,
+    CraftLiveSocketWriter liveWriter) : ControllerBase
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
+
+    [HttpGet("execution-policy")]
+    public ActionResult<object> ExecutionPolicy() =>
+        Ok(new
+        {
+            allowLiveCraft = craftPolicy.AllowLiveCraft,
+            liveEnabled = craftPolicy.LiveEnabled,
+            activeNccLinks = outbound.ActiveLinks,
+            hardwareValidationNotice =
+                "Live craft writes opaque RequestRaw onto an active NCC socket. Both Craft:AllowLiveCraft and COINLINE_CRAFT_LIVE_ENABLED must be on. Response bytes are not decoded."
+        });
 
     [HttpGet("command-types")]
     public async Task<ActionResult<IEnumerable<object>>> CommandTypes(CancellationToken ct) =>
@@ -32,19 +50,54 @@ public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTr
             }).ToListAsync(ct));
 
     [HttpGet("sessions")]
-    public async Task<ActionResult<IEnumerable<object>>> Sessions(CancellationToken ct) =>
-        Ok(await db.CraftSessions.AsNoTracking()
+    public async Task<ActionResult<IEnumerable<object>>> Sessions(CancellationToken ct)
+    {
+        var rows = await db.CraftSessions.AsNoTracking()
             .OrderByDescending(s => s.StartedAtUtc)
             .Select(s => new
             {
                 s.Id,
                 s.TerminalId,
+                terminalName = s.Terminal != null ? s.Terminal.DisplayName : null,
                 s.TechnicianId,
                 s.OperatorId,
                 s.FieldNotes,
                 s.StartedAtUtc,
                 s.EndedAtUtc
-            }).ToListAsync(ct));
+            }).ToListAsync(ct);
+
+        return Ok(rows.Select(s => new
+        {
+            s.Id,
+            s.TerminalId,
+            s.terminalName,
+            s.TechnicianId,
+            s.OperatorId,
+            s.FieldNotes,
+            s.StartedAtUtc,
+            s.EndedAtUtc,
+            liveLink = outbound.TryDescribe(s.TerminalId, out var link)
+                ? new { link.NccSessionId, link.TerminalIdHex }
+                : null
+        }));
+    }
+
+    [HttpPost("sessions/{id:guid}/end")]
+    public async Task<ActionResult<object>> EndSession(Guid id, CancellationToken ct)
+    {
+        var s = await db.CraftSessions.FirstOrDefaultAsync(x => x.Id == id, ct);
+        if (s == null)
+            return NotFound();
+        if (s.EndedAtUtc.HasValue)
+            return Ok(new { s.Id, s.EndedAtUtc });
+
+        s.EndedAtUtc = DateTime.UtcNow;
+        AppendCraftAudit(db, id, "session_ended", new { s.TerminalId });
+        ApiAudit.Write(db, HttpContext, "craft", "session_end", $"CraftSession:{s.Id}",
+            new { s.TerminalId }, s.TerminalId);
+        await db.SaveChangesAsync(ct);
+        return Ok(new { s.Id, s.EndedAtUtc });
+    }
 
     [HttpPost("sessions")]
     public async Task<ActionResult<object>> StartSession([FromBody] SessionDto body, CancellationToken ct)
@@ -122,8 +175,11 @@ public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTr
             commands,
             craftAuditTrail = audit,
             craftDiagnostics = diag,
+            liveLink = outbound.TryDescribe(s.TerminalId, out var link)
+                ? new { link.NccSessionId, link.TerminalIdHex }
+                : null,
             hardwareValidationNotice =
-                "Craft transport on terminal is HARDWARE_VALIDATION_REQUIRED until NCC/DLOG integration is certified; RequestHex decodes to verbatim RequestRaw bytes."
+                "Craft defaults to host simulation (HARDWARE_VALIDATION_REQUIRED for field use). Live writes need Craft:AllowLiveCraft, COINLINE_CRAFT_LIVE_ENABLED, and an active NCC call. RequestHex is opaque; responses are not decoded."
         });
     }
 
@@ -166,12 +222,15 @@ public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTr
         }
 
         var simulation = body.SimulationExecution ?? cmdType?.DefaultSimulationOnly ?? true;
-        if (!simulation)
+        if (!simulation && !(craftPolicy.AllowLiveCraft && craftPolicy.LiveEnabled))
             return Conflict(new
             {
                 error = "Non-simulation craft execution not enabled — HARDWARE_VALIDATION_REQUIRED.",
-                detail = "Live NCC/DLOG transport must be certified before SimulationExecution=false."
+                detail = "Set Craft:AllowLiveCraft and COINLINE_CRAFT_LIVE_ENABLED=1 after certification."
             });
+
+        if (!simulation && raw.Length == 0)
+            return BadRequest(new { error = "Live craft write requires a non-empty RequestHex payload." });
 
         var cmd = new CraftCommand
         {
@@ -197,25 +256,46 @@ public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTr
         var defer = body.DeferSimulation == true;
         if (!defer)
         {
-            await craftSim.SimulateSuccessAsync(db, cmd, ct);
+            if (simulation)
+            {
+                await craftSim.SimulateSuccessAsync(db, cmd, ct);
 
-            AppendCraftAudit(db, id, "command_simulated_success",
-                new { cmd.Id, cmd.Status, note = "CraftSimulationTransport — not live modem/NCC." });
+                AppendCraftAudit(db, id, "command_simulated_success",
+                    new { cmd.Id, cmd.Status, note = "CraftSimulationTransport — not live modem/NCC." });
 
-            ApiAudit.Write(db, HttpContext, "craft", "command_simulated_complete", $"CraftCommand:{cmd.Id}",
-                new { cmd.CommandName, cmd.Status }, session.TerminalId);
+                ApiAudit.Write(db, HttpContext, "craft", "command_simulated_complete", $"CraftCommand:{cmd.Id}",
+                    new { cmd.CommandName, cmd.Status }, session.TerminalId);
+            }
+            else
+            {
+                try
+                {
+                    await liveWriter.ExecuteWriteAsync(db, cmd, session.TerminalId, ct);
+                    AppendCraftAudit(db, id, "command_live_write",
+                        new { cmd.Id, cmd.Status, note = "Opaque RequestRaw framed onto active NCC socket; no response decode." });
+                    ApiAudit.Write(db, HttpContext, "craft", "command_live_write", $"CraftCommand:{cmd.Id}",
+                        new { cmd.CommandName, cmd.Status }, session.TerminalId);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    AppendCraftAudit(db, id, "command_live_failed", new { cmd.Id, error = ex.Message });
+                    await db.SaveChangesAsync(ct);
+                    return Conflict(new { error = ex.Message, cmd.Id, cmd.Status });
+                }
+            }
 
             await db.SaveChangesAsync(ct);
         }
         else
         {
-            AppendCraftAudit(db, id, "command_queued_deferred", new { cmd.Id, note = "deferSimulation:true — run POST .../simulate or cancel." });
+            AppendCraftAudit(db, id, "command_queued_deferred",
+                new { cmd.Id, note = simulation ? "deferSimulation:true — run POST .../simulate or cancel." : "deferSimulation:true — run POST .../execute-live or cancel." });
             ApiAudit.Write(db, HttpContext, "craft", "command_deferred", $"CraftCommand:{cmd.Id}",
                 new { cmd.CommandName }, session.TerminalId);
             await db.SaveChangesAsync(ct);
         }
 
-        return Ok(new { cmd.Id, cmd.Status, deferred = defer, simulationMode = true });
+        return Ok(new { cmd.Id, cmd.Status, deferred = defer, simulationMode = simulation });
     }
 
     /// <summary>
@@ -229,6 +309,8 @@ public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTr
             return NotFound();
         if (cmd.Status != CraftCommandStatus.Queued)
             return Conflict(new { error = "Only Queued commands can be simulated via this endpoint.", cmd.Status });
+        if (!cmd.SimulationExecution)
+            return Conflict(new { error = "Use execute-live for non-simulation commands.", cmd.Status });
 
         await craftSim.SimulateSuccessAsync(db, cmd, ct);
         AppendCraftAudit(db, cmd.CraftSessionId, "command_simulated_success",
@@ -237,6 +319,48 @@ public sealed class CraftController(HostPlatformDbContext db, ICraftSimulationTr
             new { cmd.CommandName, cmd.Status }, cmd.CraftSession?.TerminalId);
         await db.SaveChangesAsync(ct);
         return Ok(new { cmd.Id, cmd.Status });
+    }
+
+    /// <summary>
+    /// Writes a deferred live craft command onto the terminal's active NCC socket.
+    /// Requires both live craft gates and a bound session.
+    /// </summary>
+    [HttpPost("commands/{id:guid}/execute-live")]
+    public async Task<ActionResult<object>> ExecuteLiveCommand(Guid id, CancellationToken ct)
+    {
+        if (!(craftPolicy.AllowLiveCraft && craftPolicy.LiveEnabled))
+            return Conflict(new
+            {
+                error = "Live craft is disabled — HARDWARE_VALIDATION_REQUIRED.",
+                detail = "Set Craft:AllowLiveCraft and COINLINE_CRAFT_LIVE_ENABLED=1."
+            });
+
+        var cmd = await db.CraftCommands.Include(c => c.CraftSession).FirstOrDefaultAsync(c => c.Id == id, ct);
+        if (cmd == null)
+            return NotFound();
+        if (cmd.Status != CraftCommandStatus.Queued)
+            return Conflict(new { error = "Only Queued commands can execute live.", cmd.Status });
+        if (cmd.SimulationExecution)
+            return Conflict(new { error = "Use simulate for simulation-mode commands.", cmd.Status });
+        if (cmd.CraftSession == null)
+            return Conflict(new { error = "Craft session missing." });
+
+        try
+        {
+            await liveWriter.ExecuteWriteAsync(db, cmd, cmd.CraftSession.TerminalId, ct);
+            AppendCraftAudit(db, cmd.CraftSessionId, "command_live_write",
+                new { cmd.Id, cmd.Status, note = "Opaque RequestRaw framed onto active NCC socket; no response decode." });
+            ApiAudit.Write(db, HttpContext, "craft", "command_live_write", $"CraftCommand:{cmd.Id}",
+                new { cmd.CommandName, cmd.Status }, cmd.CraftSession.TerminalId);
+            await db.SaveChangesAsync(ct);
+            return Ok(new { cmd.Id, cmd.Status });
+        }
+        catch (InvalidOperationException ex)
+        {
+            AppendCraftAudit(db, cmd.CraftSessionId, "command_live_failed", new { cmd.Id, error = ex.Message });
+            await db.SaveChangesAsync(ct);
+            return Conflict(new { error = ex.Message, cmd.Id, cmd.Status });
+        }
     }
 
     [HttpGet("commands/{id:guid}")]

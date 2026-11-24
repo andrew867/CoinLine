@@ -24,6 +24,8 @@ public sealed class DlogDecodedMetadata
     public bool ImmediateClear { get; init; }
     public int? CorrelationKey { get; init; }
     public string Notes { get; init; } = "";
+    /// <summary>Documented fields when a layout is applied (alarm, cash). Null when undecoded.</summary>
+    public object? Fields { get; init; }
     public IReadOnlyList<DlogParseDiagnosticEntry> Diagnostics { get; init; } = Array.Empty<DlogParseDiagnosticEntry>();
 }
 

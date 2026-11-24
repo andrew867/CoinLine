@@ -28,12 +28,57 @@ type DiagnosticsPayload = {
 
 const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
+function sessionWords(status: number): string {
+  return ({ 0: 'Active', 1: 'Closed', 2: 'Archived' } as Record<number, string>)[status] ?? 'Unknown'
+}
+
+function dispositionWords(status: number): string {
+  return (
+    ({
+      0: 'Unknown',
+      1: 'Completed',
+      2: 'Blocked',
+      3: 'Free call',
+      4: 'Emergency',
+      5: 'Failed',
+    } as Record<number, string>)[status] ?? 'Unknown'
+  )
+}
+
+function batchWords(status: number): string {
+  return (
+    ({
+      0: 'Pending',
+      1: 'Running',
+      2: 'Completed',
+      3: 'Failed',
+      4: 'Cancelled',
+      5: 'Preparing',
+    } as Record<number, string>)[status] ?? 'Unknown'
+  )
+}
+
+function phaseWords(name: string): string {
+  const known: Record<string, string> = {
+    Queued: 'Queued',
+    WaitingForAck: 'Waiting for acknowledgement',
+    SendingHeader: 'Sending header',
+    SendingPayload: 'Sending payload',
+    Completed: 'Completed',
+    Failed: 'Failed',
+    Retrying: 'Retrying',
+    Cancelled: 'Cancelled',
+  }
+  return known[name] ?? name
+}
+
 type Term = {
   id: string
   siteId: string
   displayName: string
   terminalIdHex: string
   status: number
+  terminalGroupId: string | null
 }
 
 type Assign = {
@@ -47,6 +92,30 @@ type Assign = {
 
 type SetRow = { id: string; name: string; status: number }
 
+type SessionRow = {
+  id: string
+  terminalId: string | null
+  correlationId: string
+  status: number
+  startedAtUtc: string
+  endedAtUtc: string | null
+}
+
+type CallRow = {
+  id: string
+  terminalId: string | null
+  dialedDigits: string
+  disposition: number
+  startedAtUtc: string
+}
+
+type BatchView = {
+  id: string
+  status: number
+  lastError: string | null
+  phases: string[]
+}
+
 type TimelineResp = {
   terminalId: string
   items: { kind: string; atUtc: string; title: string; refKey: string; detail: Record<string, unknown> }[]
@@ -55,6 +124,7 @@ type TimelineResp = {
 export function TerminalDetail() {
   const { id } = useParams()
   const [term, setTerm] = useState<Term | null>(null)
+  const [groups, setGroups] = useState<{ id: string; name: string }[]>([])
   const [assign, setAssign] = useState<Assign | null | undefined>(undefined)
   const [sets, setSets] = useState<SetRow[]>([])
   const [pick, setPick] = useState('')
@@ -64,6 +134,9 @@ export function TerminalDetail() {
   const [snapJson, setSnapJson] = useState('{}')
   const [timeline, setTimeline] = useState<TimelineResp | null>(null)
   const [tlErr, setTlErr] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<SessionRow[] | null>(null)
+  const [lastCall, setLastCall] = useState<CallRow | null>(null)
+  const [batches, setBatches] = useState<BatchView[]>([])
 
   useEffect(() => {
     if (!id) return
@@ -93,6 +166,9 @@ export function TerminalDetail() {
             if (pub) setPick(pub.id)
           }
         }
+
+        const groupsRes = await fetch('/api/terminal-groups', { headers })
+        if (groupsRes.ok && !c) setGroups((await groupsRes.json()) as { id: string; name: string }[])
 
         const dg = await fetch(`/api/terminals/${id}/diagnostics`, { headers })
         if (dg.ok && !c) setDiag((await dg.json()) as DiagnosticsPayload)
@@ -191,6 +267,48 @@ export function TerminalDetail() {
     }
   }
 
+  useEffect(() => {
+    if (!id) return
+    let cancel = false
+    ;(async () => {
+      const sessionsResp = await fetch('/api/ncc/sessions?includeArchived=true', { headers })
+      const callsResp = await fetch('/api/call-records', { headers })
+      const batchesResp = await fetch('/api/downloads', { headers })
+      if (cancel) return
+      const sessionRows = sessionsResp.ok ? ((await sessionsResp.json()) as SessionRow[]) : []
+      const mine = sessionRows.filter((s) => s.terminalId === id)
+      setSessions(mine)
+      const callRows = callsResp.ok ? ((await callsResp.json()) as CallRow[]) : []
+      setLastCall(callRows.find((c) => c.terminalId === id) ?? null)
+      const batchRows = batchesResp.ok
+        ? ((await batchesResp.json()) as { id: string; terminalId: string; status: number; lastError: string | null }[])
+        : []
+      const views: BatchView[] = []
+      for (const b of batchRows.filter((x) => x.terminalId === id).slice(0, 5)) {
+        const detail = await fetch('/api/downloads/' + b.id, { headers })
+        if (!detail.ok) {
+          views.push({ id: b.id, status: b.status, lastError: b.lastError, phases: [] })
+          continue
+        }
+        const body = (await detail.json()) as {
+          timeline?: { hostDownloadPhaseName?: string }[]
+        }
+        views.push({
+          id: b.id,
+          status: b.status,
+          lastError: b.lastError,
+          phases: (body.timeline ?? []).map((t) => phaseWords(t.hostDownloadPhaseName ?? '')),
+        })
+      }
+      if (!cancel) setBatches(views)
+    })().catch(() => {
+      if (!cancel) setSessions([])
+    })
+    return () => {
+      cancel = true
+    }
+  }, [id])
+
   if (!id) return <p>Missing id.</p>
   if (err && !term) return <p style={{ color: 'crimson' }}>{err}</p>
   if (!term) return <p>Loading…</p>
@@ -198,7 +316,7 @@ export function TerminalDetail() {
   return (
     <div>
       <p>
-        <Link to="/terminals">← Terminals</Link>
+        <Link to="/terminals">← Phones</Link>
       </p>
       <h1>{term.displayName}</h1>
       <p>
@@ -213,6 +331,67 @@ export function TerminalDetail() {
         />
       </p>
       <p>Terminal id (hex): {term.terminalIdHex}</p>
+      <label>
+        Phone group
+        <select
+          value={term.terminalGroupId ?? ''}
+          onChange={(e) => {
+            const terminalGroupId = e.target.value || null
+            void fetch(`/api/terminals/${term.id}/group`, {
+              method: 'PUT',
+              headers: { ...headers, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ terminalGroupId }),
+            }).then((r) => {
+              if (r.ok) setTerm({ ...term, terminalGroupId })
+            })
+          }}
+        >
+          <option value="">No group</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <h2>Phone session</h2>
+      <div data-testid="ncc-sessions">
+        {sessions === null && <p>Loading sessions…</p>}
+        {sessions && sessions.length === 0 && <p>No session yet.</p>}
+        {sessions && sessions.length > 0 && (
+          <ul>
+            {sessions.slice(0, 5).map((s) => (
+              <li key={s.id}>
+                {sessionWords(s.status)} · {s.correlationId} · {new Date(s.startedAtUtc).toLocaleString()}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <h2>Last rate</h2>
+      <div data-testid="last-rate">
+        {lastCall == null && <p>No rated call yet.</p>}
+        {lastCall && (
+          <p>
+            {lastCall.dialedDigits || 'empty number'} · {dispositionWords(lastCall.disposition)} ·{' '}
+            {new Date(lastCall.startedAtUtc).toLocaleString()}
+          </p>
+        )}
+      </div>
+
+      <h2>Downloads</h2>
+      <div data-testid="download-status">
+        {batches.length === 0 && <p>No download batch yet.</p>}
+        {batches.map((b) => (
+          <p key={b.id}>
+            <Link to={`/downloads/${b.id}`}>{batchWords(b.status)}</Link>
+            {b.phases.length > 0 ? ` · ${b.phases.join(', ')}` : ''}
+            {b.lastError ? ` · ${b.lastError}` : ''}
+          </p>
+        ))}
+      </div>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
 
       <h2>Table assignment</h2>
@@ -250,8 +429,7 @@ export function TerminalDetail() {
 
       <h2 style={{ marginTop: 24 }}>Field diagnostics</h2>
       <p style={{ color: '#555' }}>
-        Snapshots and host intents are persisted for technician workflows; modem/NCC execution stays simulation-first until
-        certified.
+        Snapshots, CDR-upload intents, and table-reload intents are stored here. They are not sent on the NCC socket.
       </p>
       {diag?.hardwareValidationNotice && (
         <p style={{ background: '#fff9e6', border: '1px solid #e6d69a', padding: 10, maxWidth: 720 }} role="note">
@@ -371,7 +549,7 @@ export function TerminalDetail() {
         <Link to={`/downloads?terminal=${encodeURIComponent(id)}`}>Open downloads for this terminal</Link>
       </p>
       <p>
-        <Link to={`/dlog?terminal=${encodeURIComponent(id)}`}>DLOG transactions (filter)</Link>
+        <Link to={`/dlog?terminal=${encodeURIComponent(id)}`}>Messages from this phone</Link>
       </p>
     </div>
   )

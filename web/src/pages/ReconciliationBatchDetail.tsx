@@ -9,6 +9,17 @@ type Detail = {
   postedAtUtc: string | null
   closedAtUtc: string | null
   createdAtUtc: string
+  paymentCount: number
+  callCount: number
+  paymentTotal: number
+  callTotal: number
+}
+
+const batchWords: Record<number, string> = {
+  0: 'Open',
+  1: 'Posted',
+  2: 'Closed',
+  3: 'Exception',
 }
 
 export function ReconciliationBatchDetail() {
@@ -101,27 +112,41 @@ export function ReconciliationBatchDetail() {
       {!loading && !err && row && (
         <>
           <p>
-            Status: <strong>{row.status}</strong> (0 Open, 1 Posted, 2 Closed, 3 Exception)
+            Status: <strong>{batchWords[row.status] ?? 'Unknown'}</strong>
           </p>
-          <pre style={{ background: '#f6f6f6', padding: 12, fontSize: 12 }}>{row.detailJson}</pre>
+          <div className="stat-grid">
+            <div className="stat">
+              <strong>{row.callCount}</strong>
+              <span>Calls matched · {money(row.callTotal)}</span>
+            </div>
+            <div className="stat">
+              <strong>{row.paymentCount}</strong>
+              <span>Card payments · {money(row.paymentTotal)}</span>
+            </div>
+          </div>
+          <p className="page-intro">
+            Opened {new Date(row.createdAtUtc).toLocaleString()}
+            {row.postedAtUtc ? ` · Posted ${new Date(row.postedAtUtc).toLocaleString()}` : ''}
+            {row.closedAtUtc ? ` · Closed ${new Date(row.closedAtUtc).toLocaleString()}` : ''}
+          </p>
           {actionErr && <p style={{ color: 'crimson' }}>{actionErr}</p>}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 12 }}>
+          <div className="row-actions">
             <button type="button" disabled={busy || row.status !== 0} onClick={postBatch}>
-              Post batch
-            </button>
-            <button
-              type="button"
-              disabled={busy || row.status === 2 || row.status === 3}
-              onClick={exceptionBatch}
-            >
-              Mark exception (confirm)
+              Match waiting items and post
             </button>
             <button type="button" disabled={busy || row.status !== 1} onClick={closeBatch}>
-              Close batch (confirmed)
+              Close batch
+            </button>
+            <button type="button" className="quiet" disabled={busy || row.status === 2 || row.status === 3} onClick={exceptionBatch}>
+              Mark as an exception
             </button>
           </div>
         </>
       )}
     </div>
   )
+}
+
+function money(amount: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount ?? 0)
 }

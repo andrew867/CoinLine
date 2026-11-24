@@ -1,3 +1,4 @@
+import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { apiGet } from '../api/client'
 
@@ -13,51 +14,131 @@ type Row = {
   sortOrder: number
 }
 
+const headers = { 'Content-Type': 'application/json', 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
+
 export function NumberClassesPage() {
   const [rows, setRows] = useState<Row[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [className, setClassName] = useState('')
+  const [pattern, setPattern] = useState('')
+  const [matchKind, setMatchKind] = useState(0)
+  const [isBlocked, setIsBlocked] = useState(false)
+  const [isFree, setIsFree] = useState(false)
+  const [isEmergency, setIsEmergency] = useState(false)
+  const [saving, setSaving] = useState(false)
+
+  async function load() {
+    setRows(await apiGet<Row[]>('/api/number-classes'))
+  }
 
   useEffect(() => {
     setLoading(true)
     setErr(null)
-    apiGet<Row[]>('/api/number-classes')
-      .then(setRows)
+    load()
       .catch((e) => setErr(e instanceof Error ? e.message : 'error'))
       .finally(() => setLoading(false))
   }, [])
 
+  async function onCreate(e: FormEvent) {
+    e.preventDefault()
+    setSaving(true)
+    setErr(null)
+    try {
+      const r = await fetch('/api/number-classes', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          customerId: null,
+          className: className.trim(),
+          pattern: pattern.trim(),
+          matchKind,
+          isBlocked,
+          isFree,
+          isEmergency,
+          sortOrder: 100,
+          confirm: isBlocked,
+        }),
+      })
+      if (!r.ok) {
+        const body = (await r.json().catch(() => null)) as { error?: string } | null
+        throw new Error(body?.error ?? String(r.status))
+      }
+      setClassName('')
+      setPattern('')
+      setIsBlocked(false)
+      setIsFree(false)
+      setIsEmergency(false)
+      await load()
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : 'Could not add that class')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const how = (kind: number) => (kind === 2 ? 'Exact' : kind === 1 ? 'Pattern' : 'Starts with')
+
   return (
     <div>
       <h1>Number classes</h1>
-      <p style={{ maxWidth: 720 }}>
-        Global and per-customer overrides apply <strong>before</strong> rate-plan rules. Blocked / free / emergency flags
-        are shown below. API: creating a <strong>blocked</strong> class requires <code>confirm: true</code>.
+      <p className="page-intro">
+        Blocked, free, and emergency numbers apply before the rate plan.
       </p>
+      {err && <p style={{ color: 'crimson' }}>{err}</p>}
+      <form onSubmit={(e) => void onCreate(e)} className="stack-form">
+        <label>
+          Name
+          <input value={className} onChange={(e) => setClassName(e.target.value)} required />
+        </label>
+        <label>
+          Digits
+          <input value={pattern} onChange={(e) => setPattern(e.target.value)} required />
+        </label>
+        <label>
+          Match
+          <select value={matchKind} onChange={(e) => setMatchKind(Number(e.target.value))}>
+            <option value={0}>Starts with</option>
+            <option value={2}>Exact</option>
+            <option value={1}>Pattern</option>
+          </select>
+        </label>
+        <label>
+          <input type="checkbox" checked={isBlocked} onChange={(e) => setIsBlocked(e.target.checked)} /> Blocked
+        </label>
+        <label>
+          <input type="checkbox" checked={isFree} onChange={(e) => setIsFree(e.target.checked)} /> Free
+        </label>
+        <label>
+          <input type="checkbox" checked={isEmergency} onChange={(e) => setIsEmergency(e.target.checked)} /> Emergency
+        </label>
+        <button type="submit" disabled={saving}>
+          {saving ? 'Saving…' : 'Add class'}
+        </button>
+      </form>
       {loading && <p role="status">Loading…</p>}
-      {!loading && err && <p style={{ color: 'crimson' }}>{err}</p>}
-      {!loading && !err && rows.length === 0 && (
-        <p role="status">No number classes — seed data or POST /api/number-classes.</p>
-      )}
-      {!loading && !err && rows.length > 0 && (
-        <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
+      {!loading && rows.length === 0 && <p role="status">No number classes yet.</p>}
+      {!loading && rows.length > 0 && (
+        <table>
           <thead>
-            <tr style={{ borderBottom: '1px solid #ccc' }}>
-              <th align="left">Class</th>
-              <th align="left">Pattern</th>
-              <th align="left">Blocked</th>
-              <th align="left">Free</th>
-              <th align="left">Emergency</th>
+            <tr>
+              <th>Class</th>
+              <th>Digits</th>
+              <th>Match</th>
+              <th>Blocked</th>
+              <th>Free</th>
+              <th>Emergency</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.id} style={{ borderBottom: '1px solid #eee' }}>
+              <tr key={r.id}>
                 <td>{r.className}</td>
                 <td>{r.pattern}</td>
-                <td>{r.isBlocked ? 'yes' : ''}</td>
-                <td>{r.isFree ? 'yes' : ''}</td>
-                <td>{r.isEmergency ? 'yes' : ''}</td>
+                <td>{how(r.matchKind)}</td>
+                <td>{r.isBlocked ? 'Yes' : ''}</td>
+                <td>{r.isFree ? 'Yes' : ''}</td>
+                <td>{r.isEmergency ? 'Yes' : ''}</td>
               </tr>
             ))}
           </tbody>
