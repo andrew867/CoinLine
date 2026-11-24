@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net.Sockets;
 
 namespace HostPlatform.Api.Hosting;
 
@@ -19,7 +18,8 @@ public interface INccSessionOutbound
 
     IReadOnlyCollection<Guid> BoundSessionIds();
 
-    void Register(Guid terminalId, Guid nccSessionId, byte[] terminalIdWire, NetworkStream stream);
+    void Register(Guid terminalId, Guid nccSessionId, byte[] terminalIdWire,
+        Func<ReadOnlyMemory<byte>, CancellationToken, Task> writeFrame);
 
     void Unregister(Guid nccSessionId);
 
@@ -58,14 +58,15 @@ public sealed class NccSessionOutboundHub : INccSessionOutbound
 
     public IReadOnlyCollection<Guid> BoundSessionIds() => _sessionToTerminal.Keys.ToArray();
 
-    public void Register(Guid terminalId, Guid nccSessionId, byte[] terminalIdWire, NetworkStream stream)
+    public void Register(Guid terminalId, Guid nccSessionId, byte[] terminalIdWire,
+        Func<ReadOnlyMemory<byte>, CancellationToken, Task> writeFrame)
     {
         ArgumentNullException.ThrowIfNull(terminalIdWire);
-        ArgumentNullException.ThrowIfNull(stream);
+        ArgumentNullException.ThrowIfNull(writeFrame);
         if (terminalIdWire.Length != Protocols.Ncc.NccConstants.TerminalIdSize)
             throw new ArgumentException("Terminal wire id must be 5 bytes.", nameof(terminalIdWire));
 
-        var entry = new Entry(nccSessionId, terminalIdWire.ToArray(), stream);
+        var entry = new Entry(nccSessionId, terminalIdWire.ToArray(), writeFrame);
         _byTerminal.AddOrUpdate(terminalId, entry, (_, _) => entry);
         _sessionToTerminal[nccSessionId] = terminalId;
     }
@@ -77,20 +78,12 @@ public sealed class NccSessionOutboundHub : INccSessionOutbound
         _byTerminal.TryRemove(terminalId, out _);
     }
 
-    public async Task WriteFramedAsync(Guid terminalId, ReadOnlyMemory<byte> framed, CancellationToken cancellationToken)
+    public Task WriteFramedAsync(Guid terminalId, ReadOnlyMemory<byte> framed, CancellationToken cancellationToken)
     {
         if (!_byTerminal.TryGetValue(terminalId, out var entry))
             throw new InvalidOperationException("No active NCC link for this terminal.");
 
-        await entry.Gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
-        {
-            await entry.Stream.WriteAsync(framed, cancellationToken).ConfigureAwait(false);
-        }
-        finally
-        {
-            entry.Gate.Release();
-        }
+        return entry.WriteFrame(framed, cancellationToken);
     }
 
     public bool TryGetTerminalWireId(Guid terminalId, out byte[] wireId)
@@ -105,11 +98,6 @@ public sealed class NccSessionOutboundHub : INccSessionOutbound
         return false;
     }
 
-    private sealed class Entry(Guid nccSessionId, byte[] terminalIdWire, NetworkStream stream)
-    {
-        public Guid NccSessionId { get; } = nccSessionId;
-        public byte[] TerminalIdWire { get; } = terminalIdWire;
-        public NetworkStream Stream { get; } = stream;
-        public SemaphoreSlim Gate { get; } = new(1, 1);
-    }
+    private sealed record Entry(Guid NccSessionId, byte[] TerminalIdWire,
+        Func<ReadOnlyMemory<byte>, CancellationToken, Task> WriteFrame);
 }

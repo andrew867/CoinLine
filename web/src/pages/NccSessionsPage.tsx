@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet, apiPostBareOk } from '../api/client'
+import { apiGet, apiGetRaw, apiPostBareOk } from '../api/client'
 
 type NccSessionRow = {
   id: string
@@ -47,6 +47,7 @@ export function NccSessionsPage() {
   const [err, setErr] = useState<string | null>(null)
   const [includeArchived, setIncludeArchived] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [captureError, setCaptureError] = useState('')
 
   const refresh = useCallback(async () => {
     setErr(null)
@@ -94,6 +95,25 @@ export function NccSessionsPage() {
     }
   }
 
+  async function downloadCapture(id: string) {
+    setBusyId(id)
+    setCaptureError('')
+    try {
+      const response = await apiGetRaw(`/api/ncc/sessions/${id}/capture`)
+      if (!response.ok) throw new Error(`Capture download failed (HTTP ${response.status}).`)
+      const url = URL.createObjectURL(await response.blob())
+      const link = document.createElement('a')
+      link.href = url
+      link.download = 'coinline-ncc-redacted.pcapng'
+      link.click()
+      window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    } catch (e) {
+      setCaptureError(e instanceof Error ? e.message : 'Capture download failed.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div>
       <h1>NCC sessions</h1>
@@ -118,6 +138,7 @@ export function NccSessionsPage() {
           {err}
         </p>
       )}
+      {captureError && <p role="alert" style={{ color: 'crimson' }}>{captureError}</p>}
       {!loading && !err && (
         <p style={{ fontSize: 14 }} data-testid="ncc-sessions-summary">
           {`${rows.length} session(s), ${openCount} active`}
@@ -165,6 +186,9 @@ export function NccSessionsPage() {
                   </code>
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
+                  <button type="button" disabled={busyId === r.id} onClick={() => void downloadCapture(r.id)}>
+                    Download redacted capture
+                  </button>{' '}
                   {r.status === 0 && (
                     <button
                       type="button"

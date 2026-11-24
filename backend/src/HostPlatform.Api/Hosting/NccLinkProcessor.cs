@@ -24,6 +24,7 @@ internal sealed class NccLinkProcessor(
     TableDistributionService tables,
     DlogTransactionEngine dlog,
     INccSessionOutbound outbound,
+    IServiceScopeFactory scopes,
     TimeProvider clock,
     ILogger logger,
     CancellationToken stoppingToken)
@@ -40,6 +41,9 @@ internal sealed class NccLinkProcessor(
 
     private NccSession _session = null!;
     private int _sequence;
+    private int _lastReceivedSequence;
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private readonly object _captureOrder = new();
     private byte _nextMessagePacketId;
     private NccWirePacket? _lastInboundMessage;
     private NccWirePacket? _lastTimeSync;
@@ -118,10 +122,23 @@ internal sealed class NccLinkProcessor(
                 if (n == 0)
                     break;
 
-                IReadOnlyList<NccStreamOrderedItem> items;
+                List<(NccStreamParsedFrame Parsed, NccSessionFrame? Frame)> arrivals;
                 try
                 {
-                    items = decoder.Feed(buf.AsSpan(0, n));
+                    // Reserve received frames before handling any of them, since one read can carry several.
+                    lock (_captureOrder)
+                    {
+                        arrivals = [];
+                        foreach (var item in decoder.Feed(buf.AsSpan(0, n)))
+                        {
+                            if (item is not NccStreamParsedFrame parsed || parsed.Frame.IsTruncated)
+                                continue;
+                            var accepted = parsed.Frame.Parse.Packet is { } candidate
+                                ? CaptureFrame(candidate.Control, parsed.Frame.RawBytes.Length, sentByHost: false)
+                                : null;
+                            arrivals.Add((parsed, accepted));
+                        }
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -129,16 +146,14 @@ internal sealed class NccLinkProcessor(
                     continue;
                 }
 
-                foreach (var item in items)
+                foreach (var (parsed, frame) in arrivals)
                 {
-                    if (item is not NccStreamParsedFrame parsed || parsed.Frame.IsTruncated)
-                        continue;
                     var parse = parsed.Frame.Parse;
                     if (!parse.Success || parse.Packet is not { } packet)
                     {
                         if (parse.Packet is { } retry && IsHeaderOnlyRetransmission(retry, parsed.Frame.RawBytes))
                         {
-                            await AcceptFrameAsync(stream, retry, parsed.Frame.RawBytes, headerOnlyRetry: true);
+                            await AcceptFrameAsync(stream, retry, parsed.Frame.RawBytes, frame!, headerOnlyRetry: true);
                             logger.LogInformation("NCC header-only retransmission acknowledged for session {SessionId}.", _session.Id);
                         }
                         else
@@ -149,7 +164,7 @@ internal sealed class NccLinkProcessor(
                         continue;
                     }
 
-                    await AcceptFrameAsync(stream, packet, parsed.Frame.RawBytes);
+                    await AcceptFrameAsync(stream, packet, parsed.Frame.RawBytes, frame!);
                     if ((packet.Control & NccControl.Clr) != 0)
                         return;
                 }
@@ -195,8 +210,10 @@ internal sealed class NccLinkProcessor(
         && packet.FrameEnd == NccConstants.FrameEnd
         && packet.Crc == NccCrc16.Compute(raw[..^3]);
 
-    private async Task AcceptFrameAsync(NetworkStream stream, NccWirePacket packet, byte[] raw, bool headerOnlyRetry = false)
+    private async Task AcceptFrameAsync(NetworkStream stream, NccWirePacket packet, byte[] raw, NccSessionFrame frame,
+        bool headerOnlyRetry = false)
     {
+        _lastReceivedSequence = frame.Sequence;
         var control = NccControl.IsControlPacket(packet.Control);
         var hex = control ? string.Empty : Convert.ToHexString(packet.TerminalId);
         var terminal = control ? null : await MatchTerminalAsync(hex);
@@ -223,20 +240,12 @@ internal sealed class NccLinkProcessor(
         _session.UpdatedBy = Actor;
 
         if (terminal != null)
-            outbound.Register(terminal.Id, _session.Id, packet.TerminalId.ToArray(), stream);
+            outbound.Register(terminal.Id, _session.Id, packet.TerminalId.ToArray(),
+                (bytes, ct) => WriteCapturedFrameAsync(stream, bytes, ct));
 
-        var frame = new NccSessionFrame
-        {
-            NccSessionId = _session.Id,
-            Sequence = ++_sequence,
-            TerminalIdHex = hex,
-            TerminalMatched = terminal != null,
-            RawBytes = recordedBytes,
-            CreatedAtUtc = DateTime.UtcNow,
-            UpdatedAtUtc = DateTime.UtcNow,
-            CreatedBy = Actor,
-            UpdatedBy = Actor
-        };
+        frame.TerminalIdHex = hex;
+        frame.TerminalMatched = terminal != null;
+        frame.RawBytes = recordedBytes;
         db.NccSessionFrames.Add(frame);
         Audit("frame_stored", new
         {
@@ -459,7 +468,7 @@ internal sealed class NccLinkProcessor(
                     _session.CorrelationId,
                     record[0],
                     true,
-                    $"{_sequence}:{i}",
+                    $"{_lastReceivedSequence}:{i}",
                     capturedAt,
                     _session.CorrelationId,
                     stoppingToken);
@@ -522,7 +531,7 @@ internal sealed class NccLinkProcessor(
                 Control = (byte)(NccControl.Ack | NccControl.PacketId(requestControl)),
                 TerminalId = new byte[NccConstants.TerminalIdSize]
             });
-            await stream.WriteAsync(ack, stoppingToken);
+            await WriteCapturedFrameAsync(stream, ack, stoppingToken);
         }
         catch (Exception ex)
         {
@@ -705,15 +714,63 @@ internal sealed class NccLinkProcessor(
             TerminalId = message.TerminalId,
             Data = message.Data
         });
-        return stream.WriteAsync(retry, stoppingToken).AsTask();
+        return WriteCapturedFrameAsync(stream, retry, stoppingToken);
     }
 
     private async Task<NccWirePacket> WriteMessageAsync(NetworkStream stream, byte[] terminalId, byte[] data)
     {
         var message = new NccWirePacket { Control = _nextMessagePacketId, TerminalId = terminalId, Data = data };
-        await stream.WriteAsync(NccFrameCodec.Encode(message), stoppingToken);
+        await WriteCapturedFrameAsync(stream, NccFrameCodec.Encode(message), stoppingToken);
         _nextMessagePacketId = NccControl.PacketId((byte)(_nextMessagePacketId + 1));
         return message;
+    }
+
+    private NccSessionFrame CaptureFrame(byte control, int wireLength, bool sentByHost)
+    {
+        lock (_captureOrder)
+        {
+            var now = DateTime.UtcNow;
+            return new NccSessionFrame
+            {
+                NccSessionId = _session.Id,
+                Sequence = ++_sequence,
+                SentByHost = sentByHost,
+                LinkControl = control,
+                WireLength = wireLength,
+                CreatedAtUtc = now,
+                UpdatedAtUtc = now,
+                CreatedBy = Actor,
+                UpdatedBy = Actor
+            };
+        }
+    }
+
+    private async Task WriteCapturedFrameAsync(NetworkStream stream, ReadOnlyMemory<byte> bytes, CancellationToken ct)
+    {
+        NccSessionFrame frame;
+        await _writeGate.WaitAsync(ct);
+        try
+        {
+            frame = CaptureFrame(bytes.Span[1], bytes.Length, sentByHost: true);
+            await stream.WriteAsync(bytes, ct);
+        }
+        finally
+        {
+            _writeGate.Release();
+        }
+
+        // Craft writes can arrive on a different request. The link's context stays with its reader.
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var traceDb = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            traceDb.NccSessionFrames.Add(frame);
+            await traceDb.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Sent NCC frame metadata was not stored.");
+        }
     }
 
     private async Task TryRateAsync(NetworkStream stream, NccWirePacket packet)
@@ -1091,7 +1148,7 @@ internal sealed class NccLinkProcessor(
         }
         if ((control & NccControl.Clr) != 0)
         {
-            await FailOutstandingAsync($"terminal cleared the call before install completed (session frame {_sequence})");
+            await FailOutstandingAsync($"terminal cleared the call before install completed (session frame {_lastReceivedSequence})");
             return;
         }
         if (inFlight == null || !matchesPending)
@@ -1107,7 +1164,7 @@ internal sealed class NccLinkProcessor(
         {
             if (transfer.Retransmissions >= MaxInstallRetransmissions)
             {
-                await FailOutstandingAsync($"terminal rejected the install frame (session frame {_sequence})");
+                await FailOutstandingAsync($"terminal rejected the install frame (session frame {_lastReceivedSequence})");
                 return;
             }
 

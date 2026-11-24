@@ -2223,12 +2223,18 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<byte?>("LinkControl")
+                        .HasColumnType("smallint");
+
                     b.Property<Guid>("NccSessionId")
                         .HasColumnType("uuid");
 
                     b.Property<byte[]>("RawBytes")
                         .IsRequired()
                         .HasColumnType("bytea");
+
+                    b.Property<bool>("SentByHost")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("Sequence")
                         .HasColumnType("integer");
@@ -2248,6 +2254,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("WireLength")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");

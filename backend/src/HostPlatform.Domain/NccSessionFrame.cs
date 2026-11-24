@@ -1,13 +1,16 @@
 namespace HostPlatform.Domain;
 
-/// <summary>One accepted NCC frame on a session. <see cref="NccSession.LastFrameSample"/> is only the latest copy.</summary>
+/// <summary>One accepted or sent NCC frame on a session.</summary>
 public class NccSessionFrame : AuditableEntity
 {
     public Guid NccSessionId { get; set; }
     public NccSession? NccSession { get; set; }
     public int Sequence { get; set; }
+    public bool SentByHost { get; set; }
+    public byte? LinkControl { get; set; }
+    public int? WireLength { get; set; }
 
-    /// <summary>Five-byte terminal id in uppercase hex. Empty for control frames, which carry no terminal id.</summary>
+    /// <summary>Five-byte terminal ID in uppercase hex for received message frames.</summary>
     public string TerminalIdHex { get; set; } = string.Empty;
 
     public bool TerminalMatched { get; set; }

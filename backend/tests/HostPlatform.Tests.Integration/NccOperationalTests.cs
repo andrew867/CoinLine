@@ -6,6 +6,7 @@ using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text;
 using System.Text.Json;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
 using HostPlatform.Protocols.Tables;
@@ -110,6 +111,69 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Contains(events, e => e.GetProperty("action").GetString() == "session_open");
         Assert.Contains(events, e => e.GetProperty("action").GetString() == "frame_stored");
         Assert.Contains(events, e => e.GetProperty("action").GetString() == "session_close");
+    }
+
+    [Fact]
+    public async Task Session_capture_keeps_direction_and_timing_and_omits_identifiers_and_payloads()
+    {
+        const string inboundSecret = "fixture-terminal-payload";
+        const string outboundSecret = "fixture-craft-payload";
+        var inbound = Message(KnownId, [84, .. Encoding.ASCII.GetBytes(inboundSecret)]);
+        var outbound = Message(KnownId, [85, .. Encoding.ASCII.GetBytes(outboundSecret)]);
+        var clear = Control(NccControl.Clr);
+        await using var link = await OpenAsync();
+        var started = DateTime.UtcNow;
+        await link.Stream.WriteAsync(inbound);
+        var ack = await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5));
+        AssertAck(ack);
+
+        var row = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/ncc/sessions", Json)).EnumerateArray()
+            .Single(session => session.GetProperty("socketBound").GetBoolean() &&
+                session.GetProperty("lastFrameSampleHex").GetString() == Convert.ToHexString(inbound));
+        var sessionId = row.GetProperty("id").GetGuid();
+        var terminalId = row.GetProperty("terminalId").GetGuid();
+        var links = fx.Factory.Services.GetRequiredService<INccSessionOutbound>();
+        await links.WriteFramedAsync(terminalId, outbound, CancellationToken.None);
+        Assert.Equal(outbound, await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        await link.Stream.WriteAsync(clear);
+        await WaitSessionAsync(Convert.ToHexString(clear), sessionId);
+        var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{sessionId}", Json);
+        Assert.Equal(2, detail.GetProperty("frames").GetArrayLength());
+
+        using var response = await fx.Client.GetAsync($"/api/ncc/sessions/{sessionId}/capture");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        Assert.Equal("application/x-pcapng", response.Content.Headers.ContentType!.MediaType);
+        Assert.Contains("coinline-ncc-redacted.pcapng", response.Content.Headers.ContentDisposition!.ToString());
+        Assert.True(response.Headers.CacheControl?.NoStore);
+        var capture = await response.Content.ReadAsByteArrayAsync();
+        Assert.Equal(-1, capture.AsSpan().IndexOf(KnownId));
+        Assert.Equal(-1, capture.AsSpan().IndexOf(Encoding.ASCII.GetBytes(inboundSecret)));
+        Assert.Equal(-1, capture.AsSpan().IndexOf(Encoding.ASCII.GetBytes(outboundSecret)));
+        Assert.Equal(-1, capture.AsSpan().IndexOf(Encoding.ASCII.GetBytes(sessionId.ToString())));
+        var packets = new List<(uint Direction, byte Control, uint Length)>();
+        var previous = started.AddTicks(-10);
+        for (var offset = 0; offset < capture.Length;)
+        {
+            var type = ReadUInt(offset);
+            var blockSize = checked((int)ReadUInt(offset + 4));
+            Assert.Equal((uint)blockSize, ReadUInt(offset + blockSize - 4));
+            if (type == 6)
+            {
+                var timestamp = ((ulong)ReadUInt(offset + 12) << 32) | ReadUInt(offset + 16);
+                var recorded = DateTime.UnixEpoch.AddTicks(checked((long)timestamp * 10));
+                Assert.InRange(recorded, previous, DateTime.UtcNow);
+                previous = recorded;
+                Assert.Equal(1u, ReadUInt(offset + 20));
+                Assert.Equal(0x00040002u, ReadUInt(offset + 32));
+                packets.Add((ReadUInt(offset + 36), capture[offset + 28], ReadUInt(offset + 24)));
+            }
+            offset += blockSize;
+        }
+
+        Assert.Equal([(1u, inbound[1], (uint)inbound.Length), (2u, ack[1], (uint)ack.Length),
+            (2u, outbound[1], (uint)outbound.Length), (1u, clear[1], (uint)clear.Length)], packets);
+
+        uint ReadUInt(int at) => BinaryPrimitives.ReadUInt32LittleEndian(capture.AsSpan(at, 4));
     }
 
     [Fact]
@@ -2055,7 +2119,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         throw new TimeoutException($"No new download batch with status {status}.");
     }
 
-    private async Task<JsonElement> WaitSessionAsync(string frameHex)
+    private async Task<JsonElement> WaitSessionAsync(string frameHex, Guid? sessionId = null)
     {
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (DateTime.UtcNow < deadline)
@@ -2066,6 +2130,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 var sample = row.GetProperty("lastFrameSampleHex").GetString();
                 if (sample != null
                     && sample.Contains(frameHex, StringComparison.OrdinalIgnoreCase)
+                    && (sessionId == null || sessionId == row.GetProperty("id").GetGuid())
                     && row.GetProperty("status").GetInt32() == 1)
                     return row;
             }

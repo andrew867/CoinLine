@@ -54,7 +54,7 @@ public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionO
         if (s == null)
             return NotFound();
         var frames = await db.NccSessionFrames.AsNoTracking()
-            .Where(f => f.NccSessionId == id)
+            .Where(f => f.NccSessionId == id && !f.SentByHost)
             .OrderBy(f => f.Sequence)
             .ToListAsync(ct);
         var bound = outbound.TryDescribeBySession(id, out var link);
@@ -78,6 +78,19 @@ public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionO
                 rawHex = Convert.ToHexString(f.RawBytes)
             })
         });
+    }
+
+    [HttpGet("{id:guid}/capture")]
+    [ResponseCache(NoStore = true)]
+    public async Task<IActionResult> Capture(Guid id, CancellationToken ct)
+    {
+        if (!await db.NccSessions.AnyAsync(session => session.Id == id, ct))
+            return NotFound();
+        var frames = await db.NccSessionFrames.AsNoTracking()
+            .Where(frame => frame.NccSessionId == id)
+            .OrderBy(frame => frame.Sequence)
+            .ToListAsync(ct);
+        return File(NccRedactedCapture.Write(frames), NccRedactedCapture.ContentType, NccRedactedCapture.FileName);
     }
 
     /// <summary>Marks an active session as closed (idempotent for already-closed rows).</summary>

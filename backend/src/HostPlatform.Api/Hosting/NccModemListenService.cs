@@ -92,7 +92,7 @@ public sealed class NccModemListenService(
         var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
         var tables = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
         var dlog = scope.ServiceProvider.GetRequiredService<DlogTransactionEngine>();
-        var processor = new NccLinkProcessor(db, tables, dlog, outbound, clock, logger, stoppingToken);
+        var processor = new NccLinkProcessor(db, tables, dlog, outbound, scopes, clock, logger, stoppingToken);
         await processor.RunAsync(client);
     }
 
