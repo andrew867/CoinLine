@@ -2,7 +2,7 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { ErrorBanner } from '../components/AppStates'
 import { apiFetch } from '../api/client'
-
+import { GroupPhones } from './GroupPhones'
 
 type GroupFields = { name: string; code: string | null; description: string | null }
 type GroupRow = GroupFields & { id: string; customerId: string | null; terminalCount: number; revision: number }
@@ -26,6 +26,7 @@ export function TerminalGroupsPage() {
   const [description, setDescription] = useState('')
   const [err, setErr] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [managing, setManaging] = useState<string | null>(null)
 
   async function load() {
     const list = await apiFetch('/api/terminal-groups')
@@ -87,6 +88,7 @@ export function TerminalGroupsPage() {
   }
 
   const customerName = (id: string | null) => customers.find((c) => c.id === id)?.name ?? '—'
+  const managedGroup = rows?.find(group => group.id === managing)
 
   return (
     <div>
@@ -140,11 +142,13 @@ export function TerminalGroupsPage() {
                 customer={customerName(g.customerId)}
                 onSave={(details) => update(g, details)}
                 onRemove={() => void remove(g.id)}
+                onManage={() => setManaging(g.id)}
               />
             ))}
           </tbody>
         </table>
       )}
+      {managedGroup && <GroupPhones key={managedGroup.id} group={managedGroup} groups={rows ?? []} onSaved={load} />}
     </div>
   )
 }
@@ -154,11 +158,13 @@ function GroupEditor({
   customer,
   onSave,
   onRemove,
+  onManage,
 }: {
   group: GroupRow
   customer: string
   onSave: (details: GroupFields) => Promise<void>
   onRemove: () => void
+  onManage: () => void
 }) {
   const [name, setName] = useState(group.name)
   const [code, setCode] = useState(group.code ?? '')
@@ -176,7 +182,10 @@ function GroupEditor({
         <input value={description} onChange={e => setDescription(e.target.value)} aria-label={`Description for ${group.name}`} />
       </td>
       <td>{customer}</td>
-      <td>{group.terminalCount}</td>
+      <td>
+        {group.terminalCount}{' '}
+        <button type="button" className="quiet" onClick={onManage} aria-label={`Manage phones in ${group.name}`}>Manage</button>
+      </td>
       <td className="row-actions">
         <button type="button" className="quiet" disabled={saving} onClick={() => {
           setSaving(true)

@@ -642,6 +642,87 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Group_phone_edits_respect_membership_limits_and_target_the_saved_members()
+    {
+        var site = (await _client.GetFromJsonAsync<JsonElement>("/api/sites"))[0].GetProperty("id").GetGuid();
+        var groups = new List<Guid>();
+        for (var index = 0; index <= 40; index++)
+            groups.Add(await Create("/api/terminal-groups", new { name = $"Group membership fixture {index}" }));
+        var source = groups[0];
+        var destination = groups[40];
+        var path = $"/api/terminal-groups/{destination}/phones";
+        var full = await CreatePhone("0000000624", source);
+        var movable = await CreatePhone("0000000625", source);
+        var candidate = await CreatePhone("0000000626", null);
+        var fullPath = $"/api/terminals/{full}/groups";
+        var limit = await _client.GetFromJsonAsync<JsonElement>(fullPath);
+        Assert.Equal(40, limit.GetProperty("limit").GetInt32());
+        using var forty = await _client.PutAsJsonAsync(fullPath,
+            new { groupIds = groups.Take(40).ToArray(), revision = limit.GetProperty("revision") });
+        forty.EnsureSuccessStatusCode();
+        var fullState = await forty.Content.ReadFromJsonAsync<JsonElement>();
+        using var fortyOne = await _client.PutAsJsonAsync(fullPath,
+            new { groupIds = groups, revision = fullState.GetProperty("revision") });
+        Assert.Equal(HttpStatusCode.BadRequest, fortyOne.StatusCode);
+
+        var sourceMembers = await _client.GetFromJsonAsync<JsonElement>($"/api/terminal-groups/{source}/phones?membersOnly=true");
+        Assert.Equal(new[] { full, movable }, sourceMembers.EnumerateArray().Select(row => row.GetProperty("id").GetGuid()));
+        Assert.All(sourceMembers.EnumerateArray(), row => Assert.True(row.GetProperty("primary").GetBoolean()));
+        var choices = await _client.GetFromJsonAsync<JsonElement>(path);
+        var fullRow = Find(choices, full);
+        var movableRow = Find(choices, movable);
+        var candidateRow = Find(choices, candidate);
+        Assert.True(fullRow.GetProperty("atLimit").GetBoolean());
+        using var blocked = await _client.PutAsJsonAsync(path, new[] { Edit(movableRow, true), Edit(fullRow, true) });
+        Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+        Assert.Equal(0, (await _client.GetFromJsonAsync<JsonElement>(path + "?membersOnly=true")).GetArrayLength());
+        using var missingChoice = await _client.PutAsJsonAsync(path,
+            new[] { new { terminalId = candidate, revision = candidateRow.GetProperty("revision") } });
+        Assert.Equal(HttpStatusCode.BadRequest, missingChoice.StatusCode);
+
+        using var added = await _client.PutAsJsonAsync(path, new[] { Edit(movableRow, true), Edit(candidateRow, true) });
+        added.EnsureSuccessStatusCode();
+        var members = await _client.GetFromJsonAsync<JsonElement>(path + "?membersOnly=true");
+        Assert.False(Find(members, movable).GetProperty("primary").GetBoolean());
+        Assert.True(Find(members, candidate).GetProperty("primary").GetBoolean());
+        var set = (await _client.GetFromJsonAsync<JsonElement>("/api/tables/sets")).EnumerateArray()
+            .First(row => row.GetProperty("isDefault").GetBoolean()).GetProperty("id").GetGuid();
+        var preview = await _client.GetFromJsonAsync<JsonElement>(
+            $"/api/tables/sets/{set}/assignment-preview?targetType=group&targetId={destination}");
+        Assert.Equal(new[] { movable, candidate }.Order(),
+            preview.GetProperty("targets").EnumerateArray().Select(row => row.GetProperty("id").GetGuid()).Order());
+
+        using var stale = await _client.PutAsJsonAsync(path, new[] { Edit(Find(members, candidate), false), Edit(movableRow, false) });
+        Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        Assert.Equal(2, (await _client.GetFromJsonAsync<JsonElement>(path + "?membersOnly=true")).GetArrayLength());
+        using var removedPrimary = await _client.PutAsJsonAsync($"/api/terminal-groups/{source}/phones",
+            new[] { Edit(Find(sourceMembers, movable), false, Find(members, movable).GetProperty("revision").GetInt32()) });
+        removedPrimary.EnsureSuccessStatusCode();
+        var retained = await _client.GetFromJsonAsync<JsonElement>(path + "?membersOnly=true");
+        Assert.True(Find(retained, movable).GetProperty("primary").GetBoolean());
+        using var removed = await _client.PutAsJsonAsync(path, new[] { Edit(Find(retained, candidate), false) });
+        removed.EnsureSuccessStatusCode();
+        Assert.Equal(movable, Assert.Single((await _client.GetFromJsonAsync<JsonElement>(path + "?membersOnly=true"))
+            .EnumerateArray()).GetProperty("id").GetGuid());
+
+        Task<Guid> CreatePhone(string terminalIdHex, Guid? terminalGroupId) => Create("/api/terminals",
+            new { displayName = $"Group membership phone {terminalIdHex[^2..]}", terminalIdHex, terminalGroupId, siteId = site, status = 0 });
+
+        async Task<Guid> Create(string route, object body)
+        {
+            using var response = await _client.PostAsJsonAsync(route, body);
+            response.EnsureSuccessStatusCode();
+            return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        }
+
+        static JsonElement Find(JsonElement rows, Guid id) => rows.EnumerateArray().Single(row => row.GetProperty("id").GetGuid() == id);
+        static object Edit(JsonElement row, bool member, int? revision = null) => new
+        {
+            terminalId = row.GetProperty("id").GetGuid(), revision = revision ?? row.GetProperty("revision").GetInt32(), member
+        };
+    }
+
+    [Fact]
     public async Task Publish_confirm_writes_tables_set_audit_event()
     {
         var cust = (await _client.GetFromJsonAsync<JsonElement>("/api/customers"))![0].GetProperty("id").GetGuid();

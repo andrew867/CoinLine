@@ -16,8 +16,6 @@ public sealed class TerminalsController(
     FirmwareJobOrchestrator firmwareOrchestrator,
     Hosting.INccSessionOutbound outbound) : ControllerBase
 {
-    private const int GroupLimit = 40;
-
     [HttpGet]
     public async Task<ActionResult<object>> GetAll(
         [FromQuery] Guid? siteId,
@@ -267,15 +265,15 @@ public sealed class TerminalsController(
         var available = await db.TerminalGroups.AsNoTracking()
             .Where(g => g.CustomerId == null || g.CustomerId == terminal.CustomerId || groupIds.Contains(g.Id))
             .OrderBy(g => g.Name).Select(g => new { g.Id, g.Name }).ToListAsync(ct);
-        return Ok(new { groupIds, revision = terminal.Version, limit = GroupLimit, available });
+        return Ok(new { groupIds, revision = terminal.Version, limit = TerminalGroup.MaxMembershipsPerTerminal, available });
     }
 
     [HttpPut("{id:guid}/groups")]
     public async Task<ActionResult<object>> AssignGroups(Guid id, [FromBody] AssignGroupsDto body, CancellationToken ct)
     {
         var groupIds = body.GroupIds;
-        if (groupIds.Length > GroupLimit)
-            return BadRequest(new { error = $"A phone can belong to up to {GroupLimit} groups." });
+        if (groupIds.Length > TerminalGroup.MaxMembershipsPerTerminal)
+            return BadRequest(new { error = $"A phone can belong to up to {TerminalGroup.MaxMembershipsPerTerminal} groups." });
         if (groupIds.Distinct().Count() != groupIds.Length)
             return BadRequest(new { error = "Select each phone group once." });
         var terminal = await db.Terminals.Include(t => t.Site).Include(t => t.AdditionalGroups)

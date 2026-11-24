@@ -43,6 +43,8 @@ On the cashbox endpoint, `statuses` contains one latest report per box. `isCurre
 
 **Phone groups** use `GET /api/terminal-groups` to list groups and `POST /api/terminal-groups` to create one. Set optional `code` to three to six letters or digits and use `description` for the operator description. To update these fields, send `name`, `code`, `description` and the current `revision` to `PUT /api/terminal-groups/{id}/details`. The existing name-only edit is available at `PUT /api/terminal-groups/{id}`.
 
+`GET /api/terminal-groups/{id}/phones` returns current members and eligible phones with their membership, limit and revision. Pass `membersOnly=true` to retrieve just the members. Send an array of `terminalId`, `revision` and explicit `member` values to `PUT /api/terminal-groups/{id}/phones` to apply only the listed changes. An invalid or stale change rejects the whole request.
+
 For a special callback, supply the current `revision` or null when creating the first request. Supply `dueAtUtc` as an ISO 8601 timestamp with an offset, or null to request the earliest callback. Use `terminalClockOffsetMinutes` for a phone clock offset from UTC. Set `deliverAssignedTables` to opt into sending the current compatible assignment on return. The GET response wraps the record in `callback`, which is null before the first request. Cancellation takes the current `revision`. A stale revision returns HTTP 409.
 
 **Confirm flags:** several POST routes require `?confirm=true` — see Swagger.

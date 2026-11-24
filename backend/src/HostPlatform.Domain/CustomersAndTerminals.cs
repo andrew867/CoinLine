@@ -18,6 +18,7 @@ public class Site : AuditableEntity
 
 public class TerminalGroup : AuditableEntity
 {
+    public const int MaxMembershipsPerTerminal = 40;
     public const string CodePattern = "[A-Za-z0-9]{3,6}";
     public string Name { get; set; } = string.Empty;
     public string? Code { get; set; }

@@ -132,6 +132,7 @@ type GroupMembership = {
   limit: number
   available: { id: string; name: string }[]
 }
+type GroupSourcePhone = { id: string; displayName: string; terminalIdHex: string }
 
 function PhoneGroups({ terminalId }: { terminalId: string }) {
   const [groups, setGroups] = useState<GroupMembership | null>(null)
@@ -139,6 +140,9 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState('')
   const [error, setError] = useState('')
+  const [lookup, setLookup] = useState('')
+  const [matches, setMatches] = useState<GroupSourcePhone[] | null>(null)
+  const [source, setSource] = useState('')
   const endpoint = `/api/terminals/${terminalId}/groups`
 
   useEffect(() => {
@@ -175,15 +179,74 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
     }
   }
 
+  async function findSource() {
+    setBusy(true)
+    setError('')
+    setNotice('')
+    setMatches(null)
+    setSource('')
+    try {
+      const search = new URLSearchParams({ q: lookup.trim(), pageSize: '50', sortDir: 'asc' })
+      const { items } = await apiGet<{ items: GroupSourcePhone[] }>(`/api/terminals?${search}`)
+      setMatches(items.filter(({ id }) => id !== terminalId))
+    } catch {
+      setError('Could not look up the source phone.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function copyGroups() {
+    if (!groups || !source) return
+    setBusy(true)
+    setError('')
+    setNotice('')
+    try {
+      const { groupIds } = await apiGet<GroupMembership>(`/api/terminals/${source}/groups`)
+      const available = new Set(groups.available.map(group => group.id))
+      const missing = groupIds.filter(id => !selected.includes(id))
+      const additions = missing.filter(id => available.has(id))
+      setSelected([...selected, ...additions])
+      setNotice(`${additions.length} groups added to the selection. ${missing.length - additions.length} unavailable for this phone.`)
+    } catch {
+      setError('Could not copy groups from the selected phone.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <details>
       <summary>Phone groups{groups ? ` (${groups.groupIds.length})` : ''}</summary>
       {error && <ErrorBanner message={error} />}
       {notice && <p role="status">{notice}</p>}
       {groups && groups.available.length > 0 && (
+        <>
+        <form className="row-actions" onSubmit={(event) => { event.preventDefault(); void findSource() }}>
+          <label>Find a phone to copy groups from
+            <input type="search" value={lookup} disabled={busy} onChange={event => {
+              setLookup(event.target.value)
+              setMatches(null)
+              setSource('')
+            }} />
+          </label>
+          <button type="submit" disabled={busy || !lookup.trim()}>Find source phone</button>
+          {matches && (matches.length === 0 ? <p>No matching phones.</p> : <>
+            <label>Source phone
+              <select value={source} disabled={busy} onChange={event => setSource(event.target.value)}>
+                <option value="">Choose a source phone</option>
+                {matches.map(phone => <option key={phone.id} value={phone.id}>{phone.displayName} · {phone.terminalIdHex}</option>)}
+              </select>
+            </label>
+            <button type="button" disabled={busy || !source} onClick={() => void copyGroups()}>Review copied groups</button>
+          </>)}
+        </form>
         <form onSubmit={(event) => { event.preventDefault(); void save() }}>
           <fieldset disabled={busy}>
             <legend>Participating groups</legend>
+            {selected.length > groups.limit && <p role="status">
+              {selected.length} selected. Uncheck groups to stay within the {groups.limit}-group limit.
+            </p>}
             {groups.available.map((group) => (
               <label key={group.id} style={{ display: 'block' }}>
                 <input type="checkbox" checked={selected.includes(group.id)}
@@ -208,8 +271,11 @@ function PhoneGroups({ terminalId }: { terminalId: string }) {
               </label>
             )}
           </fieldset>
-          <button type="submit" disabled={busy || selected.join(',') === groups.groupIds.join(',')}>Save phone groups</button>
+          <button type="submit" disabled={busy || selected.length > groups.limit || selected.join(',') === groups.groupIds.join(',')}>
+            Save phone groups
+          </button>
         </form>
+        </>
       )}
       {groups?.available.length === 0 && <p>No matching groups. <Link to="/terminal-groups">Manage phone groups</Link>.</p>}
     </details>
@@ -485,7 +551,7 @@ export function TerminalDetail() {
       </form>
       {familyNotice && <p role="status">{familyNotice}</p>}
       <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />
-      <PhoneGroups key={term.id} terminalId={term.id} />
+      <PhoneGroups key={`groups-${term.id}`} terminalId={term.id} />
 
       <h2>Phone session</h2>
       <div data-testid="ncc-sessions">
@@ -513,7 +579,7 @@ export function TerminalDetail() {
         )}
       </div>
 
-      <TerminalCashboxPanel key={id} terminalId={id} />
+      <TerminalCashboxPanel key={`cashbox-${id}`} terminalId={id} />
 
       <h2>Downloads</h2>
       <div data-testid="download-status">
@@ -528,7 +594,7 @@ export function TerminalDetail() {
       </div>
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
 
-      <SpecialCallback key={id} terminalId={id} />
+      <SpecialCallback key={`callback-${id}`} terminalId={id} />
       <h2>Table assignment</h2>
       {assign === undefined && <p>Loading assignment…</p>}
       {assign === null && <p>No assignment yet.</p>}
