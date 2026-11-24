@@ -1,3 +1,4 @@
+using System.Text.Json;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
@@ -59,6 +60,11 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             numberingPlan = number == NumberingPlanWire.MessageType && NumberingPlanWire.Supports(raw)
                 ? NumberingPlanWire.Read(raw) : null,
             spareBytes = number == SpareTableWire.MessageType ? SpareTableWire.Read(raw, layout) : null,
+            screening = CallScreeningWire.IsRecord(number) ? new
+            {
+                supportsSpeedDial = CallScreeningWire.SupportsSpeedDial(layout),
+                descriptions = ReadScreeningDescriptions(version.ScreeningDescriptionsJson)
+            } : null,
             sections = layout.Sections.Select(section => new
             {
                 section.Key,
@@ -162,9 +168,29 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             }
             if (body.SpareBytes != null)
                 SpareTableWire.Apply(updated, layout, body.Changes, body.SpareBytes);
-            if (!raw.AsSpan().SequenceEqual(updated))
+            var screeningDescriptions = version.ScreeningDescriptionsJson;
+            if (body.Screening is { } screening)
+            {
+                var actions = screening.Actions ?? [];
+                CallScreeningWire.Apply(updated, layout, actions, body.Changes);
+                var descriptions = ReadScreeningDescriptions(screeningDescriptions);
+                foreach (var (slot, description) in screening.Descriptions ?? [])
+                {
+                    if (slot < 1 || slot > layout.Sections.Count || description?.Length > 120)
+                        throw new InvalidOperationException("Choose a valid screening slot and a description of up to 120 characters.");
+                    if (string.IsNullOrWhiteSpace(description))
+                        descriptions.Remove(slot);
+                    else
+                        descriptions[slot] = description.Trim();
+                }
+                foreach (var action in actions.Where(action => action.Action is "blank" or "delete"))
+                    descriptions.Remove(action.Slot);
+                screeningDescriptions = descriptions.Count == 0 ? null : JsonSerializer.Serialize(descriptions);
+            }
+            if (!raw.AsSpan().SequenceEqual(updated) || screeningDescriptions != version.ScreeningDescriptionsJson)
                 await tables.UpsertVersionAsync(set.Id, version.TableDefinitionId, version.TableRevision + 1,
-                    updated, version.SortOrder, version.DependsOnTableDefinitionId, ct, body.Revision, body.Sha256);
+                    updated, version.SortOrder, version.DependsOnTableDefinitionId, ct, body.Revision, body.Sha256,
+                    screeningDescriptionsJson: screeningDescriptions);
             return NoContent();
         }
         catch (DbUpdateConcurrencyException)
@@ -194,8 +220,13 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         .AsNoTracking().Include(v => v.TablePayload).Where(v => v.TableSetId == set && v.TableDefinition!.TableNumber == number)
         .Take(2).ToListAsync(ct);
 
+    private static SortedDictionary<int, string> ReadScreeningDescriptions(string? json) =>
+        json == null ? [] : JsonSerializer.Deserialize<SortedDictionary<int, string>>(json) ?? [];
+
+    public sealed record ScreeningEdits(ScreeningSlotEdit[]? Actions, Dictionary<int, string?>? Descriptions);
     public sealed record NativeFieldEdits(int Revision, string Sha256, Dictionary<string, string> Changes, string? Profile,
-        NumberingPlanChanges? NumberingPlan = null, SpareBytePatch[]? SpareBytes = null, int[]? ClearQuickAccessKeys = null);
+        NumberingPlanChanges? NumberingPlan = null, SpareBytePatch[]? SpareBytes = null, int[]? ClearQuickAccessKeys = null,
+        ScreeningEdits? Screening = null);
     public sealed record NativeTemplate(string Profile, int Length);
 
     private static string TemplateName(int number) => number switch
@@ -209,6 +240,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         93 => "Stored-value parameters",
         CodeDownloadWire.MessageType => "Code download schedule",
         55 => "Quick access keys", 58 => "Service restrictions", NativeTableLayouts.MessagingRecord => "Optional messaging service",
+        59 or 92 => "Call screening",
         95 => "Instant Win", >= 131 and <= 133 => $"Graphical screens {number - 130}",
         150 => "NPA set-based rating", 151 => "International set-based rating", 152 => "Holiday and time-of-day discounts",
         _ when NativeTableLayouts.IsLocalDialingRecord(number) => $"Local dialing segment MT{number}",

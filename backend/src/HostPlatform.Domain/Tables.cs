@@ -57,6 +57,8 @@ public class TableVersion : AuditableEntity
     public bool ValidationPassed { get; set; } = true;
     /// <summary>JSON array of diagnostics; use HARDWARE_VALIDATION_REQUIRED for unproven layout checks.</summary>
     public string? ValidationDiagnosticsJson { get; set; }
+    /// <summary>Host-only screening descriptions, keyed by one-based slot.</summary>
+    public string? ScreeningDescriptionsJson { get; set; }
 }
 
 public class TerminalTableAssignment : AuditableEntity

@@ -4,6 +4,7 @@ import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, Graphic
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
 import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
 import { LocalDialingImport } from './LocalDialingImport'
+import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 
 type Field = {
@@ -35,6 +36,7 @@ type Layout = {
   sections: Section[]
   numberingPlan?: NumberingPlan | null
   spareBytes?: string | null
+  screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean } | null
 } | { supported: false; reason: string; profiles?: string[]; templates?: { profile: string; length: number }[] }
 
 type Props = {
@@ -50,6 +52,7 @@ type Props = {
 const quickAccessRecord = 55
 const isCredential = (field: Field) => field.editor === 'password' || field.editor === 'password-hex' || field.editor === 'password-pin'
 const quickAccessNumber = (section: Section) => Number(section.key.slice('key-'.length)) + 1
+const screeningNumber = (section: Section) => Number(section.key.slice('rule-'.length)) + 1
 
 export function NativeTableEditor({ setId, number, revision, exchangeFile, onExchangeFile, onSaved, onDirty }: Props) {
   const [layout, setLayout] = useState<Layout | null>(null)
@@ -60,12 +63,16 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const [byteEdits, setByteEdits] = useState<SpareByteEdits>({})
   const [quickAccessLayout, setQuickAccessLayout] = useState('10')
   const [clearedKeys, setClearedKeys] = useState<Set<number>>(new Set())
+  const [showAllScreeningSlots, setShowAllScreeningSlots] = useState(false)
+  const [screeningActions, setScreeningActions] = useState<Record<number, ScreeningAction>>({})
+  const [screeningDescriptions, setScreeningDescriptions] = useState<Record<number, string>>({})
   const [view, setView] = useState<'settings' | 'rules' | 'bytes'>('settings')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [reload, setReload] = useState(0)
   const [profile, setProfile] = useState('')
   const endpoint = `/api/tables/sets/${setId}/records/${number}/fields`
+  const hasScreeningChanges = Object.keys(screeningActions).length > 0 || Object.keys(screeningDescriptions).length > 0
 
   useEffect(() => {
     const request = new AbortController()
@@ -106,7 +113,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     if (value === field.value || (isCredential(field) && value === '')) delete updated[field.key]
     else updated[field.key] = value
     setEdits(updated)
-    onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0 || clearedKeys.size > 0)
+    onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0
+      || clearedKeys.size > 0 || hasScreeningChanges)
     setMessage('')
   }
 
@@ -123,6 +131,31 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     return slot != null && clearedKeys.has(Number(slot[1]) + 1)
   }
 
+  function controlledScreeningField(key: string) {
+    const field = /^rule-(\d+)\.(.+)$/.exec(key)
+    if (!field) return false
+    const action = screeningActions[Number(field[1]) + 1]
+    return !!action && (action.action !== 'speedDial' || ['pattern', 'wildcards', 'translated'].includes(field[2]))
+  }
+
+  function stageScreeningAction(slot: number, next?: ScreeningAction) {
+    const actions = { ...screeningActions }
+    if (next) actions[slot] = next
+    else delete actions[slot]
+    setScreeningActions(actions)
+    onDirty(Object.keys(actions).length > 0 || Object.keys(screeningDescriptions).length > 0 || Object.keys(edits).length > 0)
+    setMessage('')
+  }
+
+  function describeScreeningSlot(slot: number, value: string) {
+    const descriptions = { ...screeningDescriptions }
+    if (layout?.supported && value === (layout.screening?.descriptions[slot] ?? '')) delete descriptions[slot]
+    else descriptions[slot] = value
+    setScreeningDescriptions(descriptions)
+    onDirty(Object.keys(descriptions).length > 0 || Object.keys(screeningActions).length > 0 || Object.keys(edits).length > 0)
+    setMessage('')
+  }
+
   async function save(event: React.FormEvent) {
     event.preventDefault()
     if (!layout?.supported || !layout.editable) return
@@ -134,12 +167,13 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     setBusy(true)
     setMessage('')
     try {
-      const changes = Object.fromEntries(Object.entries(edits).filter(([key]) => !isClearingField(key)))
+      const changes = Object.fromEntries(Object.entries(edits).filter(([key]) => !isClearingField(key) && !controlledScreeningField(key)))
       const response = await fetch(endpoint, {
         method: 'PUT', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ revision: layout.revision, sha256: layout.sha256, changes, profile: layout.profile,
           numberingPlan: Object.keys(ruleEdits).length ? ruleEdits : undefined,
           clearQuickAccessKeys: clearedKeys.size ? [...clearedKeys] : undefined,
+          screening: hasScreeningChanges ? { actions: Object.values(screeningActions), descriptions: screeningDescriptions } : undefined,
           spareBytes: byteEntries.length ? byteEntries.map(([offset, value]) => ({ offset: Number(offset), value: parseInt(value, 16) })) : undefined }),
       })
       if (!response.ok) {
@@ -150,6 +184,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       setRuleEdits({})
       setByteEdits({})
       setClearedKeys(new Set())
+      setScreeningActions({})
+      setScreeningDescriptions({})
       onDirty(false)
       setMessage('Changes saved to this draft.')
       setReload((count) => count + 1)
@@ -180,12 +216,15 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   }
 
   function changeProfile(value: string) {
-    if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0 || clearedKeys.size > 0)
+    if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0
+      || clearedKeys.size > 0 || hasScreeningChanges)
       && !window.confirm('Discard the unsaved changes and switch firmware profiles?')) return
     setEdits({})
     setRuleEdits({})
     setByteEdits({})
     setClearedKeys(new Set())
+    setScreeningActions({})
+    setScreeningDescriptions({})
     setView('settings')
     onDirty(false)
     setSectionKey('')
@@ -207,7 +246,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       </label>}
       {layout.templates?.map((template) => (
         <button key={`${template.profile}:${template.length}`} type="button" disabled={busy} onClick={() => void initialize(template)}>
-          Start record for {template.profile}
+          Start record for {template.profile}{(number === 59 || number === 92) ? ` (${(template.length - 1) / 17} wire slots)` : ''}
         </button>
       ))}
       {message && <p role="status">{message}</p>}
@@ -216,14 +255,18 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
 
   const needle = search.trim().toLowerCase()
   const isQuickAccess = number === quickAccessRecord
+  const legacyScreeningView = !!layout.screening && layout.sections.length === 60
   const settings = layout.sections.filter((section) => (!layout.numberingPlan?.dial || !section.key.startsWith('dial-'))
-    && (!isQuickAccess || quickAccessLayout === '10' || quickAccessNumber(section) >= 6))
+    && (!isQuickAccess || quickAccessLayout === '10' || quickAccessNumber(section) >= 6)
+    && (!legacyScreeningView || showAllScreeningSlots || screeningNumber(section) <= 50))
   const sections = settings.filter((section) => !needle || section.label.toLowerCase().includes(needle)
+    || (layout.screening && (screeningDescriptions[screeningNumber(section)] ?? layout.screening.descriptions[screeningNumber(section)])
+      ?.toLowerCase().includes(needle))
     || section.fields.some((field) => field.label.toLowerCase().includes(needle) || field.help?.toLowerCase().includes(needle)
       || (field.editor !== 'bitmap' && !isCredential(field)
         && (field.value?.toLowerCase().includes(needle) || edits[field.key]?.toLowerCase().includes(needle)))))
   const current = sections.find((section) => section.key === sectionKey) ?? sections[0]
-  const changed = Object.keys(edits).filter(key => !isClearingField(key)).length
+  const changed = Object.keys(edits).filter(key => !isClearingField(key) && !controlledScreeningField(key)).length
   const ruleChanges = Object.keys(ruleEdits).length > 0
   const byteChanges = Object.keys(byteEdits).length
   const showingRules = layout.numberingPlan && view === 'rules'
@@ -245,6 +288,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     return field && effectiveValue(field)
   }
   const selectedKey = isQuickAccess && current ? quickAccessNumber(current) : null
+  const screeningSlot = layout.screening && current ? screeningNumber(current) : null
   const keyCleared = selectedKey != null && clearedKeys.has(selectedKey)
   const carrierReference = selectedKey != null && current && keyValue(current, 'free') === 'true' && keyValue(current, 'featureGroupB') === 'true'
   const displayFields = current?.showDisplayPreview ? current.fields
@@ -332,6 +376,12 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       )}
       {showingSettings && !isQuickAccess && settings.length > 1 && (
         <div className="table-config-selectors">
+          {legacyScreeningView && <label>Screening view
+            <select value={showAllScreeningSlots ? 'wire' : 'legacy'} onChange={event => setShowAllScreeningSlots(event.target.value === 'wire')}>
+              <option value="legacy">First 50 entries</option>
+              <option value="wire">All 60 wire slots</option>
+            </select>
+          </label>}
           {settings.length > 12 && <label>Find entry<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
           <label>Section or entry
             <select value={current?.key ?? ''} disabled={!current} onChange={(event) => setSectionKey(event.target.value)}>
@@ -344,6 +394,12 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
           <legend>{current.label}</legend>
+          {screeningSlot != null && layout.screening && <ScreeningSlotActions key={current.key} slot={screeningSlot}
+            action={screeningActions[screeningSlot]}
+            description={screeningDescriptions[screeningSlot] ?? layout.screening.descriptions[screeningSlot] ?? ''}
+            editable={layout.editable} supportsSpeedDial={layout.screening.supportsSpeedDial}
+            onAction={action => stageScreeningAction(screeningSlot, action)}
+            onDescription={value => describeScreeningSlot(screeningSlot, value)} />}
           {selectedKey != null && layout.editable && <div className="row-actions">
             <button type="button" className="quiet" onClick={() => toggleKeyClear(selectedKey)}>
               {keyCleared ? 'Undo clear' : 'Clear key'}
@@ -372,6 +428,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
             </figure>
           )}
           {!keyCleared && !changingCardFamily && current.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
+            && !controlledScreeningField(field.key)
             && !replacedDiscountFields.has(field.key)
             && ((number !== 35 && number !== 94) || !field.key.startsWith('start.'))
             && (number !== 35 || !field.key.startsWith('adjust.'))
@@ -384,11 +441,12 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       )}
       {layout.editable && (
         <div className="row-actions">
-          <button type="submit" disabled={(changed === 0 && !ruleChanges && byteChanges === 0 && clearedKeys.size === 0) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
+          <button type="submit" disabled={(changed === 0 && !ruleChanges && byteChanges === 0 && clearedKeys.size === 0 && !hasScreeningChanges) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
           {changed > 0 && <span>{changed} {changed === 1 ? 'field changed' : 'fields changed'}</span>}
           {ruleChanges && <span>Numbering rules changed</span>}
           {byteChanges > 0 && <span>{byteChanges} {byteChanges === 1 ? 'byte changed' : 'bytes changed'}</span>}
           {clearedKeys.size > 0 && <span>{clearedKeys.size} {clearedKeys.size === 1 ? 'key' : 'keys'} to clear</span>}
+          {hasScreeningChanges && <span>Screening changes staged</span>}
         </div>
       )}
       {message && <p className="native-table-feedback" role="status">{message}</p>}

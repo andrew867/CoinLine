@@ -32,7 +32,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         SortOrder = source.SortOrder,
         DependsOnTableDefinitionId = source.DependsOnTableDefinitionId,
         ValidationPassed = source.ValidationPassed,
-        ValidationDiagnosticsJson = source.ValidationDiagnosticsJson
+        ValidationDiagnosticsJson = source.ValidationDiagnosticsJson,
+        ScreeningDescriptionsJson = source.ScreeningDescriptionsJson
     };
 
     public IQueryable<Terminal> PhonesInScope(TableTargetScope scope)
@@ -233,7 +234,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         CancellationToken ct,
         int? expectedRevision = null,
         string? expectedHash = null,
-        bool createOnly = false)
+        bool createOnly = false,
+        string? screeningDescriptionsJson = null)
     {
         var set = await db.TableSets.FirstOrDefaultAsync(s => s.Id == tableSetId, ct)
                   ?? throw new InvalidOperationException("Table set not found.");
@@ -276,6 +278,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         version.DependsOnTableDefinitionId = dependsOnTableDefinitionId;
         version.ValidationPassed = ok;
         version.ValidationDiagnosticsJson = diag;
+        version.ScreeningDescriptionsJson = screeningDescriptionsJson;
         version.Checksum = checksum;
         if (existing == null)
             db.TableVersions.Add(version);
@@ -314,6 +317,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             version.DependsOnTableDefinitionId = change.DependencyId;
             version.ValidationPassed = source.ValidationPassed;
             version.ValidationDiagnosticsJson = source.ValidationDiagnosticsJson;
+            version.ScreeningDescriptionsJson = source.ScreeningDescriptionsJson;
         }
 
         destination.Version++;

@@ -55,7 +55,8 @@ public static partial class NativeTableLayouts
     {
         if (number == AnswerSupervisionRecord)
             return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
-        return IsLocalDialingRecord(number) || number is 22 or 23 or CallInRecord or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
+        return IsLocalDialingRecord(number) || CallScreeningWire.IsRecord(number)
+            || number is 22 or 23 or CallInRecord or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
             or SpareTableWire.MessageType or 73 or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or >= 150 and <= 152
             ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
             : [];
@@ -90,6 +91,8 @@ public static partial class NativeTableLayouts
         }
         if (template.Number == 73)
             InitializeTerminalTariffs(bytes);
+        if (CallScreeningWire.IsRecord(template.Number))
+            CallScreeningWire.Initialize(bytes);
         return bytes;
     }
 
@@ -267,7 +270,7 @@ public static partial class NativeTableLayouts
         yield return Layout(59, 1021, CallScreenRules(60));
         yield return Layout(92, 1021, CallScreenRules(60));
         yield return Layout(92, 3401, CallScreenRules(200));
-        yield return new NativeTableLayout(92, 3061, Later, CallScreenRules(180));
+        yield return new NativeTableLayout(92, 3061, Later, CallScreenRules(180, later: true));
         yield return Layout(93, 225, StoredValueSections([], later: false));
         yield return new NativeTableLayout(93, 225, Later, []);
 
@@ -334,10 +337,11 @@ public static partial class NativeTableLayouts
         yield return new NativeTableLayout(TimeDiscountRecord, 95, Later, TimeDiscountSections());
     }
 
-    private static NativeTableSection[] CallScreenRules(int count) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
+    private static NativeTableSection[] CallScreenRules(int count, bool later = false) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
     {
-        var offset = 1 + i * 17;
-        return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, KeypadDial, 8),
+        var offset = 1 + i * CallScreeningWire.SlotLength;
+        return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, ScreeningPattern, 8,
+                Help: "Use ? to match one digit at that position."),
             Select($"{key}.wildcards", "Trailing wildcard digits", offset + 3,
                 [.. Enumerable.Range(0, 15).Select(digits => (digits, digits.ToString())), (15, "Unlimited")]),
             Bits($"{key}.classification", "Call classification", offset + 1, 15, CallKinds),
@@ -353,7 +357,12 @@ public static partial class NativeTableLayouts
                 Help: "Leave this off for a Multi-pay route that should accept cards. The phone can reject card payment before requesting authorization."),
             Toggle($"{key}.featureGroupB", "Use Feature Group B", offset, 128),
             Toggle($"{key}.denyModemData", "Deny modem data service", offset + 13, 1),
-            Toggle($"{key}.denyDataPort", "Deny data-port calls", offset + 13, 2)];
+            Toggle($"{key}.denyDataPort", "Deny data-port calls", offset + 13, 2),
+            .. later ? new[] {
+                Toggle($"{key}.restrictedAccess", "Allow in configurable restricted service", offset + 13, 4),
+                Toggle($"{key}.targetCdr", "Collect target call detail", offset + 13, 8),
+                Toggle($"{key}.translated", "Translate screened number", offset + 13, 0x40)
+            } : []];
     });
 
     private static NativeTableSection[] CarrierRules(int count, int stride, int header, int cardCount) => [Section("selection", "Carrier selection",

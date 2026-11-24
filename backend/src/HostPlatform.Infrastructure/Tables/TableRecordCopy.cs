@@ -45,6 +45,7 @@ public static class TableRecordCopy
             mappedDefinitions.Add(version.TableDefinitionId, existing?.TableDefinitionId ?? version.TableDefinitionId);
             var action = existing == null ? "add"
                 : existing.ValidationPassed && existing.DependsOnTableDefinitionId == dependencyId
+                    && existing.ScreeningDescriptionsJson == version.ScreeningDescriptionsJson
                     && bytes.AsSpan().SequenceEqual(TableDistributionService.GetEffectivePayload(existing)) ? "keep" : "replace";
             if (action == "replace" && existing!.TableRevision == int.MaxValue)
                 throw new InvalidOperationException($"MT{number} has reached the maximum record revision.");
