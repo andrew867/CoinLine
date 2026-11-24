@@ -13,11 +13,6 @@ internal static class DlogFieldLayouts
 {
     // YMDHMS is six bytes: year, month, day, hour, minute, second.
     public const int YmdhmsBytes = 6;
-    public const int CashBoxNumLen = 4;
-    public const int CollectorIdLen = 3;
-    public const int NumberCoinTypes = 16;
-    public const int CashBoxStatusSpare = 8;
-    public const int CashBoxCollectionSpare = 8;
 
     // DHMS is four bytes: day, hour, minute, second.
     public const int DhmsBytes = 4;
@@ -36,18 +31,6 @@ internal static class DlogFieldLayouts
     public const int TerminalStatusLength = 11;
     public const int SoftwareVersionLength = 28;
 
-    // msg_type + YMDHMS + status + box_number + pcent_full + currency_value + num_coins + spare
-    public const int CashBoxStatusMinBytes =
-        1 + YmdhmsBytes + 1 + CashBoxNumLen + 1 + 4 + (2 * NumberCoinTypes) + CashBoxStatusSpare;
-
-    // Leading collection fields before the shared status tail (from time_stamp onward).
-    // msg_type + collection_status + collector_id + new_box_number + seq_num
-    public const int CashBoxCollectionPrefixBytes = 1 + 1 + CollectorIdLen + CashBoxNumLen + 2;
-
-    // Prefix + currency total + the same status tail as MT 38 (from time_stamp).
-    public const int CashBoxCollectionMinBytes =
-        CashBoxCollectionPrefixBytes + 4 + (CashBoxStatusMinBytes - 1);
-
     public static bool HasUploadTrailer(ReadOnlySpan<byte> data, bool allowWithoutEndData = false)
     {
         const int statusAndVersionLength = TerminalStatusLength + SoftwareVersionLength;
@@ -56,7 +39,7 @@ internal static class DlogFieldLayouts
 
         var tail = data[statusAndVersionLength..];
         return (allowWithoutEndData && tail.IsEmpty) || tail is [13]
-            || (tail.Length == CashBoxStatusMinBytes + 1 && tail is [38, .., 13]);
+            || (tail.Length == DlogCashboxWire.StatusLength + 1 && tail is [38, .., 13]);
     }
 
     public static bool TryDecodeFields(int messageType, ReadOnlySpan<byte> raw, out JsonObject fields, out string note)
@@ -217,63 +200,41 @@ internal static class DlogFieldLayouts
 
     private static bool TryDecodeCashBoxStatus(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
     {
-        if (raw.Length < CashBoxStatusMinBytes)
+        if (raw.Length < DlogCashboxWire.StatusLength || !DlogCashboxWire.TryReadStatus(raw[..DlogCashboxWire.StatusLength], out var status))
         {
-            note = $"Cash box status body needs at least {CashBoxStatusMinBytes} bytes.";
+            note = $"Cash box status body needs at least {DlogCashboxWire.StatusLength} bytes.";
             return false;
         }
-
-        var i = 1;
-        fields["timeStamp"] = FormatYmdhms(raw.Slice(i, YmdhmsBytes));
-        i += YmdhmsBytes;
-        fields["cashBoxStatus"] = raw[i++];
-        fields["boxNumberBcd"] = FormatBcd(raw.Slice(i, CashBoxNumLen));
-        i += CashBoxNumLen;
-        fields["percentFull"] = raw[i++];
-        fields["currencyValue"] = BinaryPrimitives.ReadInt32LittleEndian(raw.Slice(i, 4));
-        i += 4;
-        fields["coinCounts"] = ReadCoinCounts(raw.Slice(i, 2 * NumberCoinTypes));
+        WriteCashboxStatus(fields, status, raw.Slice(1, YmdhmsBytes));
         note = "Cash box status fields from the documented body. Coin counts are per coin type index.";
         return true;
     }
 
     private static bool TryDecodeCashBoxCollection(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
     {
-        if (raw.Length < CashBoxCollectionMinBytes)
+        if (raw.Length < DlogCashboxWire.CollectionLength || !DlogCashboxWire.TryReadCollection(raw[..DlogCashboxWire.CollectionLength], out var collection))
         {
-            note = $"Cash box collection body needs at least {CashBoxCollectionMinBytes} bytes.";
+            note = $"Cash box collection body needs at least {DlogCashboxWire.CollectionLength} bytes.";
             return false;
         }
-
-        var i = 1;
-        fields["collectionStatus"] = raw[i++];
-        fields["collectorIdBcd"] = FormatBcd(raw.Slice(i, CollectorIdLen));
-        i += CollectorIdLen;
-        fields["newBoxNumberBcd"] = FormatBcd(raw.Slice(i, CashBoxNumLen));
-        i += CashBoxNumLen;
-        fields["seqNum"] = BinaryPrimitives.ReadUInt16LittleEndian(raw.Slice(i, 2));
-        i += 2;
-        fields["totalCurrencyValue"] = BinaryPrimitives.ReadInt32LittleEndian(raw.Slice(i, 4));
-        i += 4;
-        fields["timeStamp"] = FormatYmdhms(raw.Slice(i, YmdhmsBytes));
-        i += YmdhmsBytes;
-        fields["cashBoxStatus"] = raw[i++];
-        fields["boxNumberBcd"] = FormatBcd(raw.Slice(i, CashBoxNumLen));
-        i += CashBoxNumLen;
-        fields["percentFull"] = raw[i++];
-        fields["currencyValue"] = BinaryPrimitives.ReadInt32LittleEndian(raw.Slice(i, 4));
-        i += 4;
-        fields["coinCounts"] = ReadCoinCounts(raw.Slice(i, 2 * NumberCoinTypes));
+        fields["collectionStatus"] = collection.Flags;
+        fields["collectorIdBcd"] = collection.CollectorId;
+        fields["newBoxNumberBcd"] = collection.NewBoxNumber;
+        fields["seqNum"] = collection.Sequence;
+        fields["totalCurrencyValue"] = collection.TotalMinorUnits;
+        WriteCashboxStatus(fields, collection.RemovedBox, raw.Slice(DlogCashboxWire.CollectionStatusOffset, YmdhmsBytes));
         note = "Cash box collection fields from the documented body. Coin counts are per coin type index.";
         return true;
     }
 
-    private static JsonArray ReadCoinCounts(ReadOnlySpan<byte> raw)
+    private static void WriteCashboxStatus(JsonObject fields, DlogCashboxWire.Status status, ReadOnlySpan<byte> clock)
     {
-        var arr = new JsonArray();
-        for (var i = 0; i < NumberCoinTypes; i++)
-            arr.Add(BinaryPrimitives.ReadUInt16LittleEndian(raw.Slice(i * 2, 2)));
-        return arr;
+        fields["timeStamp"] = FormatYmdhms(clock);
+        fields["cashBoxStatus"] = status.Flags;
+        fields["boxNumberBcd"] = status.BoxNumber;
+        fields["percentFull"] = status.PercentFull;
+        fields["currencyValue"] = status.BalanceMinorUnits;
+        fields["coinCounts"] = new JsonArray(status.CoinCounts.Select(count => (JsonNode?)JsonValue.Create(count)).ToArray());
     }
 
     public static DateTime? ReadClock(ReadOnlySpan<byte> time)
@@ -290,24 +251,4 @@ internal static class DlogFieldLayouts
         string.Create(CultureInfo.InvariantCulture,
             $"{raw[0]:D2}-{raw[1]:D2}-{raw[2]:D2} {raw[3]:D2}:{raw[4]:D2}:{raw[5]:D2}");
 
-    private static string FormatBcd(ReadOnlySpan<byte> raw)
-    {
-        Span<char> chars = stackalloc char[raw.Length * 2];
-        for (var i = 0; i < raw.Length; i++)
-        {
-            var b = raw[i];
-            chars[i * 2] = ToNibble((b >> 4) & 0xF);
-            chars[i * 2 + 1] = ToNibble(b & 0xF);
-        }
-
-        return new string(chars);
-    }
-
-    private static char ToNibble(int n) =>
-        n switch
-        {
-            <= 9 => (char)('0' + n),
-            <= 15 => (char)('A' + (n - 10)),
-            _ => '?'
-        };
 }

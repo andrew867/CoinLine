@@ -213,8 +213,10 @@ internal sealed class NccLinkProcessor(
         var uploadAttention = messageType == DlogCallDetailWire.UploadAttention && packet.Data.Length >= 2;
         var reports = DlogTerminalStatisticsWire.FindReports(packet.Data, out var truncatedReport);
         var statistics = reports.Count > 0 || truncatedReport;
+        var cashboxReports = DlogCashboxWire.FindReports(packet.Data, out var truncatedCashbox);
+        var hasCashboxCollection = false;
         // A rate request can carry a call record after its fixed-length header.
-        var recordedBytes = cardAuthorization || callDetails || statistics || messageType == 6 ||
+        var recordedBytes = cardAuthorization || callDetails || statistics || cashboxReports.Count > 0 || truncatedCashbox || messageType == 6 ||
             (rateRequest && packet.Data.Length > DlogRateWire.RequestLength) ? Array.Empty<byte>() : raw;
         _session.LastFrameSample = recordedBytes;
         _session.UpdatedAtUtc = DateTime.UtcNow;
@@ -267,6 +269,25 @@ internal sealed class NccLinkProcessor(
 
         var maintenanceRequest = DlogMaintenanceWire.HasRequestRecord(packet.Data);
         var callIn = packet.Data is [RoutineCallInMessageType] or [DlogCallbackWire.Return];
+        if (cashboxReports.Count > 0 || truncatedCashbox)
+        {
+            if (terminal == null || truncatedCashbox)
+                throw new IOException("Cashbox upload could not be acknowledged without a registered phone and complete records.");
+
+            try
+            {
+                foreach (var range in cashboxReports)
+                {
+                    var record = packet.Data[range];
+                    await dlog.IngestCashboxAsync(record, terminal.Id, _session.Id, _session.CorrelationId, stoppingToken);
+                    hasCashboxCollection |= record[0] == DlogCashboxWire.CollectionType;
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new IOException("Cashbox upload was not stored.", ex);
+            }
+        }
         if (statistics)
         {
             if (terminal == null || truncatedReport)
@@ -293,7 +314,7 @@ internal sealed class NccLinkProcessor(
             ? await StoreCallDetailsAsync(packet.Data, terminal) : [];
         if (terminal != null)
         {
-            _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn || callDetails || uploadAttention || statistics
+            _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn || callDetails || uploadAttention || statistics || cashboxReports.Count > 0
                 || packet.Data is [DlogTimeSyncWire.Request] or [TableDownloadRequestType, _, ..];
             // Give the terminal time to arm its reply timer after transmit completion.
             if (_firmwareDialogue)
@@ -304,7 +325,8 @@ internal sealed class NccLinkProcessor(
         if (headerOnlyRetry)
         {
             if (_lastDialogueReply is { } reply && ReferenceEquals(_lastInboundMessage, _lastDialogueRequest)
-                && reply.Data[0] is DlogCallDetailWire.Acknowledgement or DlogCallDetailWire.RequestUpload)
+                && (reply.Data[0] is DlogCallDetailWire.Acknowledgement or DlogCallDetailWire.RequestUpload ||
+                    _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]))
                 await SendDialogueReplyAsync(stream, packet, reply.Data, "call upload retry");
             return;
         }
@@ -313,6 +335,12 @@ internal sealed class NccLinkProcessor(
         {
             if (receipts.Length > 0)
                 await SendDialogueReplyAsync(stream, packet, receipts, "call detail");
+            return;
+        }
+
+        if (hasCashboxCollection && messageType == DlogCashboxWire.CollectionType)
+        {
+            await SendDialogueReplyAsync(stream, packet, [EndDataMessageType], "cashbox collection");
             return;
         }
 
@@ -364,11 +392,21 @@ internal sealed class NccLinkProcessor(
 
         if (terminal != null && (callIn || applicationType == TableDownloadRequestType && packet.Data.Length >= 2))
         {
+            byte[]? cashboxStatus = null;
+            if (applicationType == TableDownloadRequestType && (packet.Data[1] & DlogCashboxWire.StatusRequestFlag) != 0)
+            {
+                cashboxStatus = await TerminalCashboxAccounting.ReadCurrentStatusBytesAsync(db, terminal.Id, stoppingToken);
+                if (packet.Data[1] == DlogCashboxWire.StatusRequestFlag)
+                {
+                    await SendDialogueReplyAsync(stream, packet, InstallEndPayload(cashboxStatus), "cashbox status request");
+                    return;
+                }
+            }
             var returned = applicationType == DlogCallbackWire.Return ? await RecordCallbackReturnAsync(terminal.Id) : null;
             var continuation = callIn ? CallbackContinuation.CallIn : CallbackContinuation.Install;
-            if (returned == null && await TryOfferCallbackAsync(stream, terminal.Id, packet.TerminalId, continuation))
+            if (returned == null && await TryOfferCallbackAsync(stream, terminal.Id, packet.TerminalId, continuation, cashboxStatus: cashboxStatus))
                 return;
-            await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true);
+            await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true, cashboxStatus);
         }
     }
 
@@ -410,6 +448,9 @@ internal sealed class NccLinkProcessor(
             for (var i = 0; i < records.Count; i++)
             {
                 var record = records[i];
+                // Cashbox observations were committed before the link acknowledgement.
+                if (DlogCashboxWire.RecordLength(record[0]) > 0)
+                    continue;
                 await dlog.IngestAsync(
                     record,
                     DlogDirection.TerminalToHost,
@@ -552,7 +593,7 @@ internal sealed class NccLinkProcessor(
     }
 
     private async Task<bool> TryOfferCallbackAsync(NetworkStream stream, Guid terminalId, byte[] wireId,
-        CallbackContinuation continuation, byte[]? acknowledgement = null)
+        CallbackContinuation continuation, byte[]? acknowledgement = null, byte[]? cashboxStatus = null)
     {
         if (_callbackOffer != null)
             return true;
@@ -575,7 +616,7 @@ internal sealed class NccLinkProcessor(
             ? schedule
             : [.. acknowledgement.AsSpan(..^1), .. schedule, EndDataMessageType];
         var message = await WriteMessageAsync(stream, wireId, payload);
-        _callbackOffer = new CallbackOffer(request, due, message, continuation);
+        _callbackOffer = new CallbackOffer(request, due, message, continuation, cashboxStatus);
         _callbackOffered = true;
         return true;
     }
@@ -617,7 +658,8 @@ internal sealed class NccLinkProcessor(
             return;
         var terminal = await db.Terminals.AsNoTracking().SingleOrDefaultAsync(phone => phone.Id == offer.Request.TerminalId, stoppingToken);
         if (terminal != null)
-            await StartInstallAsync(stream, offer.Frame.TerminalId, terminal, offer.Continuation == CallbackContinuation.CallIn);
+            await StartInstallAsync(stream, offer.Frame.TerminalId, terminal, offer.Continuation == CallbackContinuation.CallIn,
+                cashboxStatus: offer.CashboxStatus);
     }
 
     private async Task<TerminalCallbackRequest?> RecordCallbackReturnAsync(Guid terminalId)
@@ -649,7 +691,8 @@ internal sealed class NccLinkProcessor(
 
     private enum CallbackContinuation { TimeSync, CallIn, Install, ManagementReply }
 
-    private sealed record CallbackOffer(TerminalCallbackRequest Request, DateTime DueAtUtc, NccWirePacket Frame, CallbackContinuation Continuation)
+    private sealed record CallbackOffer(TerminalCallbackRequest Request, DateTime DueAtUtc, NccWirePacket Frame,
+        CallbackContinuation Continuation, byte[]? CashboxStatus)
     {
         public int Retransmissions { get; set; }
     }
@@ -758,7 +801,7 @@ internal sealed class NccLinkProcessor(
     }
 
     private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn,
-        bool deliverAssignedTables = false)
+        bool deliverAssignedTables = false, byte[]? cashboxStatus = null)
     {
         if (_installStarted)
         {
@@ -830,7 +873,7 @@ internal sealed class NccLinkProcessor(
                 .OrderBy(batch => batch.CreatedAtUtc).ThenBy(batch => batch.Id).FirstOrDefaultAsync(stoppingToken);
             if (queued != null)
             {
-                await StartQueuedBatchAsync(stream, terminalId, terminal, queued);
+                await StartQueuedBatchAsync(stream, terminalId, terminal, queued, cashboxStatus);
                 return;
             }
             if (!callIn)
@@ -848,7 +891,7 @@ internal sealed class NccLinkProcessor(
 
         if (tableSetId == null)
         {
-            await SendInstallEndAsync(stream, terminalId);
+            await SendInstallEndAsync(stream, terminalId, cashboxStatus);
             return;
         }
 
@@ -892,10 +935,11 @@ internal sealed class NccLinkProcessor(
             return;
         }
 
-        await SendBatchAsync(stream, terminalId, terminal, _batch);
+        await SendBatchAsync(stream, terminalId, terminal, _batch, cashboxStatus);
     }
 
-    private async Task StartQueuedBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch queued)
+    private async Task StartQueuedBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch queued,
+        byte[]? cashboxStatus)
     {
         _installStarted = true;
         queued.Status = DownloadBatchStatus.Running;
@@ -912,11 +956,11 @@ internal sealed class NccLinkProcessor(
             return;
         }
         _batch = queued;
-        await SendBatchAsync(stream, terminalId, terminal, queued, queuedByOperator: true);
+        await SendBatchAsync(stream, terminalId, terminal, queued, cashboxStatus, queuedByOperator: true);
     }
 
     private async Task SendBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch batch,
-        bool queuedByOperator = false)
+        byte[]? cashboxStatus, bool queuedByOperator = false)
     {
         var items = await db.DownloadBatchItems
             .Include(i => i.TableVersion)!.ThenInclude(v => v!.TableDefinition)
@@ -932,12 +976,13 @@ internal sealed class NccLinkProcessor(
             if (versions.Any(version => version.TableDefinition?.TableNumber == CodeDownloadWire.MessageType) ||
                 !await IsSetEligibleAsync(batch.TableSet, terminal, definitions))
             {
-                await RejectBatchBeforeSendAsync(stream, terminalId, items, "The queued records no longer match the phone or its configuration.");
+                await RejectBatchBeforeSendAsync(stream, terminalId, items,
+                    "The queued records no longer match the phone or its configuration.", cashboxStatus);
                 return;
             }
         }
 
-        await StartFirmwareTableTransferAsync(stream, terminalId, items);
+        await StartFirmwareTableTransferAsync(stream, terminalId, items, cashboxStatus);
     }
 
     private async Task<bool> IsSetEligibleAsync(TableSet? set, Terminal terminal, Guid[]? partialDefinitions = null)
@@ -956,18 +1001,20 @@ internal sealed class NccLinkProcessor(
         return TableDistributionService.AccessRecordIssue(await query.Take(2).ToListAsync(stoppingToken), terminal.TerminalIdHex) == null;
     }
 
-    private async Task StartFirmwareTableTransferAsync(NetworkStream stream, byte[] terminalId, List<DownloadBatchItem> items)
+    private async Task StartFirmwareTableTransferAsync(NetworkStream stream, byte[] terminalId, List<DownloadBatchItem> items,
+        byte[]? cashboxStatus)
     {
         if (items.Any(item => item.TableVersion == null) ||
             !TableDistributionService.HasCompleteDlogRecords(items.Select(item => item.TableVersion!)))
         {
             await RejectBatchBeforeSendAsync(stream, terminalId, items,
-                "The download must contain complete DLOG table records with matching message types.");
+                "The download must contain complete DLOG table records with matching message types.", cashboxStatus);
             return;
         }
 
         var transfer = new FirmwareTableTransfer(terminalId);
-        transfer.Frames.Enqueue(new FirmwareTableFrame([TableUpdateMessageType]));
+        transfer.Frames.Enqueue(new FirmwareTableFrame(cashboxStatus == null
+            ? [TableUpdateMessageType] : [TableUpdateMessageType, .. cashboxStatus]));
         foreach (var item in items)
         {
             var payload = TableDistributionService.GetEffectivePayload(item.TableVersion!);
@@ -983,7 +1030,7 @@ internal sealed class NccLinkProcessor(
     }
 
     private async Task RejectBatchBeforeSendAsync(NetworkStream stream, byte[] terminalId,
-        List<DownloadBatchItem> items, string reason)
+        List<DownloadBatchItem> items, string reason, byte[]? cashboxStatus)
     {
         foreach (var item in items)
         {
@@ -992,7 +1039,7 @@ internal sealed class NccLinkProcessor(
             item.ErrorDetail = reason;
         }
         await FinishBatchAsync(reason);
-        await SendInstallEndAsync(stream, terminalId);
+        await SendInstallEndAsync(stream, terminalId, cashboxStatus);
     }
 
     private async Task SendNextFirmwareTableFrameAsync(NetworkStream stream, FirmwareTableTransfer transfer)
@@ -1077,11 +1124,14 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task SendInstallEndAsync(NetworkStream stream, byte[] terminalId)
+    private static byte[] InstallEndPayload(byte[]? cashboxStatus) => cashboxStatus == null
+        ? [EndDataMessageType] : [TableUpdateMessageType, .. cashboxStatus, EndDataMessageType];
+
+    private async Task SendInstallEndAsync(NetworkStream stream, byte[] terminalId, byte[]? cashboxStatus = null)
     {
         try
         {
-            await WriteMessageAsync(stream, terminalId, [EndDataMessageType]);
+            await WriteMessageAsync(stream, terminalId, InstallEndPayload(cashboxStatus));
         }
         catch (Exception ex)
         {

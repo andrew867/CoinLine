@@ -1,5 +1,6 @@
 import { SpecialCallback } from './SpecialCallback'
 import { TerminalInventoryPanel } from './TerminalInventoryPanel'
+import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
@@ -512,6 +513,8 @@ export function TerminalDetail() {
           </p>
         )}
       </div>
+
+      <TerminalCashboxPanel key={id} terminalId={id} />
 
       <h2>Downloads</h2>
       <div data-testid="download-status">

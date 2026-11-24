@@ -447,6 +447,145 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Cashbox_quarter_call_round_trip_separates_quote_deposit_and_collection_across_reconnects()
+    {
+        const string wireId = "0000000961";
+        var wire = Convert.FromHexString(wireId);
+        var seed = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
+            .Single(row => row.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        using var phone = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId = seed.GetProperty("siteId").GetGuid(), displayName = "Cashbox quarter fixture", terminalIdHex = wireId, status = 0
+        }, Json);
+        phone.EnsureSuccessStatusCode();
+        var terminalId = (await phone.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var cashboxPath = $"/api/terminals/{terminalId}/cashbox";
+        var setId = await CreateRateTableSetAsync("Cashbox combined request fixture");
+        using var queue = await fx.Client.PostAsJsonAsync($"/api/terminals/{terminalId}/downloads", new { tableSetId = setId }, Json);
+        queue.EnsureSuccessStatusCode();
+        var queued = (await queue.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var tableBatches = await BatchIdsAsync();
+
+        var rateRequest = DlogRateWire.EncodeRequest("5551212", international: true);
+        var quote = await ExchangeAsync(rateRequest);
+        Assert.Equal(DlogRateWire.MessageTypeResponse, quote[0]);
+        var quotedCents = BinaryPrimitives.ReadUInt16LittleEndian(quote.AsSpan(4));
+        Assert.Equal(2, quotedCents);
+
+        var cdr = TerminalCallDetail(61, 0x0246, 0x33);
+        rateRequest.AsSpan(3, 10).CopyTo(cdr.AsSpan(2));
+        BinaryPrimitives.WriteInt32LittleEndian(cdr.AsSpan(13), 25);
+        BinaryPrimitives.WriteInt32LittleEndian(cdr.AsSpan(17), quotedCents);
+        var status = new byte[57];
+        status[0] = 38;
+        byte[] terminalTime = [126, 11, 24, 12, 0, 0];
+        terminalTime.CopyTo(status, 1);
+        terminalTime.CopyTo(cdr, 25);
+        Convert.FromHexString("00001001").CopyTo(status, 8);
+        status[12] = 17;
+        BinaryPrimitives.WriteInt32LittleEndian(status.AsSpan(13), 75);
+        BinaryPrimitives.WriteUInt16LittleEndian(status.AsSpan(23), 3);
+        status[^1] = 0x32;
+        byte[] callAndStatus = [.. cdr, .. status, 13];
+        Assert.Equal(new byte[] { 5, 0x46, 0x02 }, await ExchangeAsync(callAndStatus));
+        Assert.Equal(new byte[] { 5, 0x46, 0x02 }, await ExchangeAsync(callAndStatus));
+
+        byte[] requestStatus = [44, 0x80];
+        byte[] expectedStatus = [18, .. status, 13];
+        await using (var restore = await OpenAsync())
+        {
+            await restore.Stream.WriteAsync(Message(wire, requestStatus));
+            AssertAck(await ReadFrameAsync(restore.Stream, TimeSpan.FromSeconds(5)));
+            var reply = Decode(await ReadFrameAsync(restore.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(expectedStatus, reply.Data);
+            await restore.Stream.WriteAsync(HeaderOnlyRetransmission(wire, 0));
+            AssertAck(await ReadFrameAsync(restore.Stream, TimeSpan.FromSeconds(5)));
+            var replay = Decode(await ReadFrameAsync(restore.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(reply.Control | NccControl.ReTrans, replay.Control);
+            Assert.Equal(reply.Data, replay.Data);
+            await restore.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | reply.Control)));
+        }
+
+        var collection = new byte[71];
+        collection[0] = 51;
+        Convert.FromHexString("00001002").CopyTo(collection, 5);
+        BinaryPrimitives.WriteUInt16LittleEndian(collection.AsSpan(9), 0x0247);
+        BinaryPrimitives.WriteInt32LittleEndian(collection.AsSpan(11), 75);
+        status.AsSpan(1).CopyTo(collection.AsSpan(15));
+        collection[19] = 2;
+        Assert.Equal(new byte[] { 13 }, await ExchangeAsync([.. collection, 13]));
+        collection[^1] ^= 1;
+        Assert.Equal(new byte[] { 13 }, await ExchangeAsync(collection));
+        Assert.Equal(new byte[] { 5, 0x46, 0x02 }, await ExchangeAsync(callAndStatus));
+        Assert.Equal(new byte[] { 13 }, await ExchangeAsync(requestStatus));
+
+        var ledger = await fx.Client.GetFromJsonAsync<JsonElement>(cashboxPath, Json);
+        var observed = Assert.Single(ledger.GetProperty("statuses").EnumerateArray());
+        Assert.False(observed.GetProperty("isCurrent").GetBoolean());
+        Assert.Equal(75, observed.GetProperty("status").GetProperty("balanceMinorUnits").GetInt32());
+        var counted = Assert.Single(ledger.GetProperty("collections").EnumerateArray());
+        Assert.Equal("00001001", counted.GetProperty("boxNumber").GetString());
+        Assert.Equal("00001002", counted.GetProperty("newBoxNumber").GetString());
+        Assert.Equal(75, counted.GetProperty("totalMinorUnits").GetInt32());
+        Assert.Equal(3, counted.GetProperty("coinCounts")[3].GetInt32());
+        Assert.False(counted.TryGetProperty("collectorId", out _));
+        var uploads = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+        var cdrRow = Assert.Single(uploads.EnumerateArray(), row => row.GetProperty("terminalId") is { ValueKind: JsonValueKind.String } id &&
+            id.GetGuid() == terminalId && row.GetProperty("isTerminalCallDetail").GetBoolean());
+        var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/uploads/{cdrRow.GetProperty("id").GetGuid()}", Json);
+        var terminalCall = detail.GetProperty("records")[0].GetProperty("terminalCall");
+        Assert.Equal(25, terminalCall.GetProperty("amountCollected").GetInt32());
+        Assert.Equal((int)quotedCents, terminalCall.GetProperty("amountCharged").GetInt32());
+        Assert.True(tableBatches.SetEquals(await BatchIdsAsync()));
+        var stillPending = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/downloads/{queued}", Json);
+        Assert.Equal(0, stillPending.GetProperty("status").GetInt32());
+
+        // A combined collection can revise an earlier report if the phone changes the box again before clearing it.
+        var combinedCollection = collection.ToArray();
+        combinedCollection[1] = 1;
+        BinaryPrimitives.WriteUInt16LittleEndian(combinedCollection.AsSpan(9), 0x0248);
+        BinaryPrimitives.WriteInt32LittleEndian(combinedCollection.AsSpan(11), 100);
+        Assert.Equal(new byte[] { 13 }, await ExchangeAsync(combinedCollection));
+        var revisedLedger = await fx.Client.GetFromJsonAsync<JsonElement>(cashboxPath, Json);
+        var revised = Assert.Single(revisedLedger.GetProperty("collections").EnumerateArray());
+        Assert.True(revised.GetProperty("isSummed").GetBoolean());
+        Assert.Equal(100, revised.GetProperty("totalMinorUnits").GetInt32());
+        Assert.Equal(75, revised.GetProperty("removedBoxBalanceMinorUnits").GetInt32());
+
+        var replacement = new byte[57];
+        replacement[0] = 38;
+        terminalTime.CopyTo(replacement, 1);
+        replacement[5] = 2;
+        replacement[6] = 1;
+        Convert.FromHexString("00001002").CopyTo(replacement, 8);
+        await using (var statusUpload = await OpenAsync())
+        {
+            await statusUpload.Stream.WriteAsync(Message(wire, [.. replacement, 13]));
+            AssertAck(await ReadFrameAsync(statusUpload.Stream, TimeSpan.FromSeconds(5)));
+        }
+        await using var combined = await OpenAsync();
+        await combined.Stream.WriteAsync(Message(wire, [44, 0x82]));
+        AssertAck(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5)));
+        var header = Decode(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5)));
+        byte[] expectedHeader = [18, .. replacement];
+        Assert.Equal(expectedHeader, header.Data);
+        Assert.Equal(1, (await fx.Client.GetFromJsonAsync<JsonElement>($"/api/downloads/{queued}", Json)).GetProperty("status").GetInt32());
+        await combined.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+        Assert.Equal(73, Decode(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5))).Data[0]);
+        Assert.True(tableBatches.SetEquals(await BatchIdsAsync()));
+
+        async Task<byte[]> ExchangeAsync(byte[] request)
+        {
+            await using var call = await OpenAsync();
+            await call.Stream.WriteAsync(Message(wire, request));
+            AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+            var response = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+            await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | response.Control)));
+            return response.Data;
+        }
+    }
+
+    [Fact]
     public async Task Terminal_statistics_are_decoded_and_saved_before_link_acknowledgement()
     {
         var tablesBefore = await BatchIdsAsync();

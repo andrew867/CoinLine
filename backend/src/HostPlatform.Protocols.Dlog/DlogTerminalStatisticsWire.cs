@@ -34,7 +34,7 @@ public static class DlogTerminalStatisticsWire
     public static int StatusRecordLength(byte type) => type switch
     {
         10 => DlogFieldLayouts.TerminalStatusLength,
-        38 => DlogFieldLayouts.CashBoxStatusMinBytes,
+        DlogCashboxWire.StatusType => DlogCashboxWire.StatusLength,
         60 => DlogFieldLayouts.SoftwareVersionLength,
         _ => 0
     };
