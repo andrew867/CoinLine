@@ -369,6 +369,88 @@ public sealed class NativeTableLayoutTests
         Assert.Contains("Include MT23", missing.Message);
     }
 
+    [Theory]
+    [InlineData(23, 4, 32)]
+    [InlineData(135, 10, 33)]
+    public void Carrier_defaults_are_identifiers_and_conflicting_duplicates_resolve_to_the_first_row(int type, int header, int stride)
+    {
+        var carriers = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(type)));
+        var features = new byte[72];
+        features[0] = 26;
+        features[1] = 2;
+        var records = new Dictionary<int, byte[]> { [26] = features, [type] = carriers };
+        carriers[1] = 180;
+        carriers[2] = 0;
+        carriers[3] = 181;
+        carriers[header + (type == 135 ? 33 : 21) * stride] = 180;
+        if (type == 135)
+            carriers[9] = 182;
+
+        var missing = NativeTableSetReview.Build(records).Findings;
+        Assert.Equal(type == 135 ? 3 : 2, missing.Count);
+        Assert.Contains(missing, item => item.Message.Contains("primary carrier reference 180"));
+        Assert.Contains(missing, item => item.Message.Contains("credit-card carrier reference 181"));
+        Assert.DoesNotContain(missing, item => item.Message.Contains("coin carrier reference 0"));
+        var layout = NativeTableLayouts.Find(type, carriers)!;
+        var edits = new Dictionary<string, string> { ["carrier-2.reference"] = "180", ["carrier-3.reference"] = "181" };
+        if (type == 135)
+            edits["carrier-4.reference"] = "182";
+        var corrected = layout.Apply(carriers, edits);
+        records[type] = corrected;
+        Assert.Empty(NativeTableSetReview.Build(records).Findings);
+        Assert.Equal(corrected, layout.Apply(corrected, new Dictionary<string, string>()));
+
+        records[type] = layout.Apply(corrected, new Dictionary<string, string>
+        {
+            ["carrier-6.reference"] = "180", ["carrier-6.acceptCash"] = "true"
+        });
+        var duplicate = Assert.Single(NativeTableSetReview.Build(records).Findings);
+        Assert.Contains("reference 180", duplicate.Message);
+        Assert.Contains("first matching row (2)", duplicate.Message);
+        Assert.Equal(255, corrected[header + 6 * stride]);
+    }
+
+    [Fact]
+    public void Free_feature_group_b_screening_is_not_reported_as_a_missing_free_rate_sentinel()
+    {
+        var screening = new byte[3401];
+        screening[0] = 92;
+        screening[1] = 0x81;
+        screening[2] = 0x29;
+        screening[3] = 182;
+        screening[5] = 0x12;
+        var records = new Dictionary<int, byte[]> { [92] = screening };
+        Assert.Empty(NativeTableSetReview.Build(records).Findings);
+        screening[1] = 1;
+        Assert.Contains("index 255", Assert.Single(NativeTableSetReview.Build(records).Findings).Message);
+    }
+
+    [Fact]
+    public void Lab_acknowledged_carrier_profile_keeps_its_digest_and_edits_only_the_selected_payment_bit()
+    {
+        var draft = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(23)));
+        var layout = NativeTableLayouts.Find(23, draft)!;
+        var record = layout.Apply(draft, new Dictionary<string, string>
+        {
+            ["primary"] = "0", ["coinDefault"] = "0", ["cardDefault"] = "0",
+            ["carrier-0.reference"] = "0", ["carrier-0.acceptCash"] = "true", ["carrier-0.card-0"] = "true"
+        });
+        Assert.Equal("b2f343b1bd2dca414cf27345c817e51ca9d95b325acf85a36aeefda022e8770b",
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(record)).ToLowerInvariant());
+        Assert.Equal(record, layout.Apply(record, new Dictionary<string, string>()));
+        var features = new byte[72];
+        features[0] = 26;
+        features[1] = 2;
+        Assert.Empty(NativeTableSetReview.Build(new Dictionary<int, byte[]> { [23] = record, [26] = features }).Findings);
+
+        var changed = layout.Apply(record, new Dictionary<string, string> { ["carrier-0.acceptCash"] = "false" });
+        var expected = record.ToArray();
+        expected[31] &= 0xFB;
+        Assert.Equal(expected, changed);
+        Assert.Contains("acceptance turned off", Assert.Single(NativeTableSetReview.Build(
+            new Dictionary<int, byte[]> { [23] = changed, [26] = features }).Findings).Message);
+    }
+
     [Fact]
     public void Payment_and_advertising_edits_only_change_their_bytes_and_bits()
     {

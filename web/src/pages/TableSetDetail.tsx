@@ -239,7 +239,10 @@ export function TableSetDetail() {
             {d.provisioning.onHookAdvertising !== null && <div><dt>On-hook advertising</dt><dd>{d.provisioning.onHookAdvertising ? 'Enabled' : 'Disabled'}</dd></div>}
           </dl>
           {d.provisioning.findings.length > 0 && <ul>{d.provisioning.findings.map((finding) => (
-            <li key={`${finding.tableNumber}:${finding.message}`}>MT{finding.tableNumber} · {finding.message}</li>
+            <li key={`${finding.tableNumber}:${finding.message}`}>MT{finding.tableNumber} · {finding.message}
+              {canReadRecords && !recordDirty && d.versions.some(version => version.tableNumber === finding.tableNumber) &&
+                <> <Link to={`/table-sets/${id}?record=${finding.tableNumber}#config-heading`}>Review MT{finding.tableNumber}</Link></>}
+            </li>
           ))}</ul>}
         </section>
       )}

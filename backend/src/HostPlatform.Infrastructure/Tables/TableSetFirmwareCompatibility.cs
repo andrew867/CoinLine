@@ -54,8 +54,55 @@ public static class TableSetFirmwareCompatibility
                     yield return new(NumberingPlanWire.MessageType, finding.Blocking, finding.Message);
             foreach (var finding in ReviewServiceScreening(verifiedRecords, later))
                 yield return finding;
+            foreach (var finding in ReviewCarrierRoutes(verifiedRecords, later))
+                yield return finding;
             foreach (var finding in ReviewMultiPayRates(verifiedRecords, later))
                 yield return finding;
+        }
+    }
+
+    private static IReadOnlyList<TableFirmwareFinding> ReviewCarrierRoutes(IReadOnlyDictionary<int, byte[]> records, bool later)
+    {
+        const int freeFeatureGroupB = 0x81;
+        const int informationKey = 0x40;
+        const int deniedCall = 11;
+        var carrierType = later ? 135 : 23;
+        var header = later ? 10 : 4;
+        var stride = later ? 33 : 32;
+        var count = later ? 33 : 21;
+        var findings = new List<TableFirmwareFinding>();
+        var dependencies = new SortedSet<int>();
+        records.TryGetValue(carrierType, out var carriers);
+        var references = new HashSet<byte>();
+        if (carriers != null)
+            for (var offset = header; offset < header + count * stride; offset += stride)
+                references.Add(carriers[offset]);
+
+        if (records.TryGetValue(92, out var screening))
+            for (var offset = 1; offset < screening.Length; offset += 17)
+                if ((screening[offset] & freeFeatureGroupB) == freeFeatureGroupB &&
+                    (screening[offset + 1] & 15) != deniedCall && (screening[offset + 4] >> 4) != 0)
+                    ReviewReference(92, $"Screening rule {(offset - 1) / 17 + 1}", screening[offset + 2]);
+
+        if (records.TryGetValue(55, out var keys))
+            for (var offset = 1; offset < keys.Length; offset += QuickAccessKeyWire.SlotLength)
+                if ((keys[offset] & (freeFeatureGroupB | informationKey)) == freeFeatureGroupB &&
+                    (keys[offset + 1] & 15) != deniedCall && (keys[offset + 3] >> 4) != 0)
+                    ReviewReference(55, $"Quick-access key {(offset - 1) / QuickAccessKeyWire.SlotLength + 1}", keys[offset + 2]);
+
+        if (dependencies.Count > 0)
+            findings.Add(new(carrierType, false, $"{string.Join(", ", dependencies.Select(number => $"MT{number}"))} select Feature Group B carrier references. This set relies on the terminal's existing MT{carrierType} record."));
+        return findings;
+
+        void ReviewReference(int number, string label, byte reference)
+        {
+            // No carrier is a supported selection, and zero can represent the local exchange.
+            if (reference is 0 or byte.MaxValue)
+                return;
+            if (carriers == null)
+                dependencies.Add(number);
+            else if (!references.Contains(reference))
+                findings.Add(new(number, false, $"{label} selects Feature Group B carrier reference {reference}, which is missing from MT{carrierType}. This field is a carrier identifier, not a tariff index or row position."));
         }
     }
 

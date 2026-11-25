@@ -15,7 +15,7 @@ public static partial class NativeTableLayouts
     private enum CardDataKind { Magnetic, StoredValue, Unknown }
 
     private static NativeTableField CarrierReference(string key, string label, int offset) =>
-        Field(key, label, offset, help: "Use 255 when no carrier is selected here.");
+        Field(key, label, offset, help: "Match the carrier reference, not its row number. Use 255 when no carrier is selected here.");
 
     private static void InitializePaymentRecord(Span<byte> record)
     {

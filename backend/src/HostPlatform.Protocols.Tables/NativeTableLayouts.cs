@@ -394,7 +394,7 @@ public static partial class NativeTableLayouts
             var offset = header + i * stride;
             var prompt = offset + 3 + (cardCount + 7) / 8;
             var control = prompt + 20;
-            return [Field($"{key}.reference", "Carrier reference", offset, help: "Use 255 for an unused carrier row."),
+            return [Field($"{key}.reference", "Carrier reference", offset, help: "Identifier used by card ranges and route selections. Use a distinct reference for each carrier, or 255 for an unused row."),
                 Digits($"{key}.access", "Carrier number", offset + 1, 2, 4),
                 new NativeTableField($"{key}.name", "Display name", prompt, DisplayText, 20),
                 Toggle($"{key}.promptNumber", "Ask for the destination number", control, 1),

@@ -34,3 +34,22 @@ it('blocks publishing an invalid numbering plan and opens the affected editor di
   fireEvent.click(review)
   expect(await screen.findByRole('heading', { name: 'Configuration editor MT62' })).toBeVisible()
 })
+
+it('links a nonblocking provisioning finding to the matching carrier editor', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 3, 'table-records': 3 })
+  vi.mocked(apiGet).mockResolvedValue([])
+  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ id: 'set-fixture', name: 'Fixture set', status: 0,
+    revision: 1, optionalRecordRemovals: [], firmwareFindings: [], provisioning: {
+      operatingType: 'Multi-pay', acceptedCoinSlots: null, configuredCardRanges: null, onHookAdvertising: null,
+      findings: [{ tableNumber: 135, message: 'Carrier reference 180 is assigned to different rows.' }],
+    }, versions: [{ id: 'record-135', tableNumber: 135, tableRevision: 1, definitionName: 'Carrier screens',
+      payloadLengthBytes: 1109, payloadSha256Hex: 'fixture-hash', validationPassed: true, configurationId: null, warnings: [] }] }))
+
+  render(<MemoryRouter initialEntries={['/table-sets/set-fixture']}>
+    <Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes>
+  </MemoryRouter>)
+
+  expect(await screen.findByText(/reference 180 is assigned to different rows/)).toBeVisible()
+  fireEvent.click(screen.getByRole('link', { name: 'Review MT135' }))
+  expect(await screen.findByRole('heading', { name: 'Configuration editor MT135' })).toBeVisible()
+})

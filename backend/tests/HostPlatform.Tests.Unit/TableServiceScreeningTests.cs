@@ -65,6 +65,48 @@ public sealed class TableServiceScreeningTests
         Assert.All(unset, item => Assert.False(item.Blocking));
     }
 
+    [Theory]
+    [InlineData(FirmwareTableProfiles.MultiPay200, 200, 23)]
+    [InlineData(FirmwareTableProfiles.LaterMultiPay180, 180, 135)]
+    public void Free_feature_group_b_routes_reference_carrier_identifiers_not_tariffs_or_row_positions(string profile, int slots, int carrierType)
+    {
+        var screening = Record(92, 1 + slots * 17);
+        screening[1] = 0x81;
+        screening[2] = 0x29;
+        screening[3] = 200;
+        Number(screening, 1, 0x12);
+        var keys = Record(55, 571);
+        keys[1] = 0x81;
+        keys[2] = 0x29;
+        keys[3] = 201;
+        keys[4] = 0x34;
+        var carriers = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(carrierType)));
+        // Bytes beyond the final carrier row are not selectable carrier identifiers.
+        carriers[carrierType == 23 ? 4 + 21 * 32 : 10 + 33 * 33] = 200;
+        var missing = Review(profile, screening, keys, carriers);
+        Assert.Equal(2, missing.Length);
+        Assert.All(missing, item => Assert.False(item.Blocking));
+        Assert.Contains(missing, item => item.TableNumber == 92 && item.Message.Contains("reference 200"));
+        Assert.Contains(missing, item => item.TableNumber == 55 && item.Message.Contains("reference 201"));
+
+        var partial = Assert.Single(Review(profile, screening, keys));
+        Assert.Equal(carrierType, partial.TableNumber);
+        Assert.False(partial.Blocking);
+        Assert.Contains("MT55, MT92", partial.Message);
+
+        var layout = NativeTableLayouts.Find(carrierType, carriers)!;
+        carriers = layout.Apply(carriers, new Dictionary<string, string>
+        {
+            ["carrier-3.reference"] = "200", ["carrier-5.reference"] = "201"
+        });
+        Assert.Empty(Review(profile, screening, keys, carriers));
+
+        screening[3] = 255;
+        keys[1] = 0xC1; // Information-only key.
+        keys[3] = 202;
+        Assert.Empty(Review(profile, screening, keys));
+    }
+
     [Fact]
     public void Card_reload_defaults_to_entry_one_and_reports_the_dependency_without_blocking_optional_service()
     {

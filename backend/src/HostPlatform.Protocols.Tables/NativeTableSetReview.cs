@@ -74,8 +74,8 @@ public static class NativeTableSetReview
                     findings.Add(new(cardNumber, $"Card ranges select a carrier. Include MT{carrierNumber} or verify that the phone’s installed carrier record accepts those ranges."));
             }
 
-            if (carriers != null && features?[1] is 2 or 3)
-                ReviewCoinCarriers(carriers, later, findings);
+            if (carriers != null)
+                ReviewCarrierSelections(carriers, later, features?[1], findings);
         }
 
         if (screenings != null)
@@ -83,7 +83,7 @@ public static class NativeTableSetReview
             for (var i = 0; i < 200; i++)
             {
                 var row = screenings.AsSpan(1 + 17 * i, 17);
-                if ((row[0] & 1) != 0 && row[2] != byte.MaxValue && (row[4] & 0xF0) != 0)
+                if ((row[0] & 0x89) == 1 && row[2] != byte.MaxValue && (row[4] & 0xF0) != 0)
                     findings.Add(new(92, $"Screening rule {i + 1} is marked free. Rate index 255 selects the unrated free-call branch on this profile."));
             }
         }
@@ -113,22 +113,46 @@ public static class NativeTableSetReview
         return -1;
     }
 
-    private static void ReviewCoinCarriers(ReadOnlySpan<byte> carriers, bool later, List<TableReviewFinding> findings)
+    private static void ReviewCarrierSelections(ReadOnlySpan<byte> carriers, bool later, byte? operatingType,
+        List<TableReviewFinding> findings)
     {
         const int acceptsCoin = 4;
-        (int Offset, string Name)[] defaults = later
-            ? [(2, "Default"), (5, "Intra-area"), (8, "Local")]
-            : [(2, "Default")];
-        foreach (var (position, name) in defaults)
+        var header = later ? 10 : 4;
+        var stride = later ? 33 : 32;
+        var count = later ? 33 : 21;
+        var firstRows = new Dictionary<byte, int>();
+        var reportedDuplicates = new HashSet<byte>();
+        for (var offset = header; offset < header + count * stride; offset += stride)
         {
-            var reference = carriers[position];
+            var reference = carriers[offset];
             if (reference == byte.MaxValue)
                 continue;
-            var offset = FindCarrier(carriers, reference, later);
-            if (offset < 0)
-                findings.Add(new(carriers[0], $"{name} coin carrier reference {reference} is missing from the carrier record."));
-            else if ((carriers[offset + (later ? 28 : 27)] & acceptsCoin) == 0)
-                findings.Add(new(carriers[0], $"{name} coin carrier reference {reference} has coin and stored-value acceptance turned off."));
+            if (!firstRows.TryAdd(reference, offset) &&
+                !carriers.Slice(firstRows[reference], stride).SequenceEqual(carriers.Slice(offset, stride)) &&
+                reportedDuplicates.Add(reference))
+                findings.Add(new(carriers[0], $"Carrier reference {reference} is assigned to different rows. The terminal selects the first matching row ({(firstRows[reference] - header) / stride}). Give distinct carriers distinct references."));
+        }
+
+        for (var position = 1; position < header; position += 3)
+        {
+            var zone = position switch { 4 => "Intra-area", 7 => "Local", _ => "Default" };
+            for (var kind = 0; kind < 3; kind++)
+            {
+                var name = kind switch { 0 => "primary", 1 => "coin", _ => "credit-card" };
+                if ((kind == 1 && operatingType == 1) || (kind == 2 && operatingType == 3))
+                    continue;
+                var reference = carriers[position + kind];
+                if (reference == byte.MaxValue)
+                    continue;
+                if (!firstRows.TryGetValue(reference, out var offset))
+                {
+                    // Zero can select the local exchange without an explicit carrier row.
+                    if (reference != 0)
+                        findings.Add(new(carriers[0], $"{zone} {name} carrier reference {reference} is missing from the carrier record."));
+                }
+                else if (kind == 1 && operatingType is 2 or 3 && (carriers[offset + (later ? 28 : 27)] & acceptsCoin) == 0)
+                    findings.Add(new(carriers[0], $"{zone} coin carrier reference {reference} has coin and stored-value acceptance turned off."));
+            }
         }
     }
 }
