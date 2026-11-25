@@ -1,6 +1,6 @@
 # Audio-Gram and Asterisk
 
-Audio-Gram is an optional telephone messaging feature. A compatible payphone can offer a voice messaging service when an eligible outgoing call encounters busy or unanswered ringing. If the caller accepts, the phone contacts a separate service through its telephone line. CoinLine provisions the terminal and collects its reports; it is not the messaging switch or a voicemail server.
+Audio-Gram is an optional telephone messaging feature. A compatible payphone can offer a voice messaging service when an eligible outgoing call encounters busy or unanswered ringing. If the caller accepts, the phone contacts a separate service through its telephone line. The CoinLine NCC host provisions the terminal and collects its reports. The separate Asterisk service handles audio recording and delivery.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ Asterisk
     +-- Service access: compatible Audio-Gram adapter
 ```
 
-An existing compatible service can replace the adapter in this diagram. It must support the phone's Audio-Gram protocol, authorization, payment decisions, voice messaging and delivery. Asterisk can provide call routing, media and call progress. Its standard voicemail application is not a substitute for the terminal-specific service conversation.
+An existing compatible service can replace the adapter in this diagram. It must support the phone's Audio-Gram protocol, authorization, payment decisions, voice messaging and delivery. Asterisk can provide call routing, media and call progress. The included local AGI implements recording and delivery after a trusted handoff; it is not an implementation of the terminal-specific authorization conversation.
 
 ### Compatibility and evidence
 
@@ -26,7 +26,7 @@ An existing compatible service can replace the adapter in this diagram. It must 
 | MT68 transport | An isolated NCC fixture received the exact 72 bytes and returned MT14 to the original selected download batch. |
 | MT69 reporting | A separate fixture uploaded the 213-byte statistics record and CoinLine decoded it. |
 | Terminal support | Audio-Gram is conditional in the older firmware profile. Inspected older builds disable it; the later documented Multi-pay profile does not include MT68. A matching size is not proof that a build enables the feature. |
-| Asterisk and messaging service | The examples in this guide are proposed lab routing, not a tested service implementation. A compatible adapter and feature-enabled terminal are still needed for an end-to-end test. |
+| Asterisk and messaging service | A local AGI recording and delivery core is included, with a persistent message spool, atomic Asterisk call files and distinct playback outcomes. Its media and spool tests use synthetic files and AGI replies. Live Asterisk, the terminal-specific authorization conversation and a feature-enabled terminal remain separate acceptance gates. |
 
 Check the installed firmware and terminal requirements before creating an assignment. Do not add MT68 to an incompatible production set just because another terminal recognizes the record.
 
@@ -110,6 +110,28 @@ exten => 7003,1,Hangup(21)
 When a compatible service is installed, replace the `7003` rejection with the optional `Dial(PJSIP/audiogram-adapter,30)` and final hangup from the downloadable fragment. Asterisk then dials the adapter's configured contact; the 30-second limit applies to establishing that call, not to the Audio-Gram transaction after answer. The adapter remains responsible for the conversation. Do not add `Answer()` before the busy or ringing routes, and do not send artificial service authorization tones.
 
 The sample follows the official Asterisk [PJSIP configuration examples](https://docs.asterisk.org/Configuration/Channel-Drivers/SIP/Configuring-res_pjsip/res_pjsip-Configuration-Examples/), [PJSIP dialing guide](https://docs.asterisk.org/Configuration/Channel-Drivers/SIP/Configuring-res_pjsip/Dialing-PJSIP-Channels/), [Dial](https://docs.asterisk.org/Asterisk_22_Documentation/API_Documentation/Dialplan_Applications/Dial/), [Ringing](https://docs.asterisk.org/Asterisk_22_Documentation/API_Documentation/Dialplan_Applications/Ringing/) and [Busy](https://docs.asterisk.org/Asterisk_22_Documentation/API_Documentation/Dialplan_Applications/Busy/) application documentation.
+
+### Local AGI recording and delivery
+
+The repository's `services/audiogram/coinline_audiogram_agi.py` is a Python 3.10+ AGI script with no third-party Python dependencies. It implements the voice-message portion of a service: record ordinary mono WAV audio, validate its duration, store a persistent SQLite message entry, submit an Asterisk call file, and play the message after the intended local recipient answers. An incomplete playback is not counted as delivery. Asterisk handles the configured no-answer call attempts and retry interval.
+
+The service is deliberately independent of the terminal's protected initiation and authorization conversation. It does not interpret card data, service keys, payment requests or arbitrary caller-provided destination digits. The only destinations accepted are preconfigured local Asterisk extensions. Do not route extension `7003` to this script or grant a terminal authorization just to reach the recording service. A compatible, authorized protocol component must make that handoff, with the final recipient on an approved local route. That component remains to be validated against an enabled firmware build.
+
+To evaluate the included recording and delivery core on an isolated Asterisk host:
+
+1. Install `services/audiogram/coinline_audiogram_agi.py` in Asterisk's AGI script directory with execute permission. Copy `services/audiogram/audiogram.example.json` to `/etc/coinline/audiogram.json` and keep the configuration private. The sample is disabled until `enabled` is explicitly set to `true`.
+2. Create the configured private data and staging directories and Asterisk's archive directory if absent. The Asterisk service account must be able to read and write them; the recording data directory should not be web-accessible. The staging and outgoing call-file directories must be on the same filesystem. Do not replace Asterisk's existing outgoing directory or its permissions.
+3. Include the sample dialplan. Configure the optional `audiogram-lab-recipient` endpoint on the private lab network and ensure extension `7005` routes only to it, with no PSTN fallback. Give a separate trusted lab originating endpoint access to `coinline-audiogram-record-test`. That context is not included from the gateway or public context.
+4. Dial `7004` from the trusted test endpoint. Asterisk answers and plays a recording beep. Speak for at least the configured minimum duration, then press `#` or hang up. The service validates the saved WAV and queues a local delivery. Answer the recipient endpoint and listen to the entire playback.
+5. Inspect the script's status output. It distinguishes recording, queued, playing, delivered and incomplete states from the Asterisk call-file archive outcome. Asterisk reporting a completed call does not by itself prove that the message played completely.
+
+```sh
+python3 /var/lib/asterisk/agi-bin/coinline_audiogram_agi.py /etc/coinline/audiogram.json status
+```
+
+If a recording persists but call-file placement failed, run the same command with `enqueue MESSAGE_ID` after correcting the directory or permissions. A stable call-file name prevents requeueing a message already present in outgoing or the archive. Do not automatically resubmit an incomplete or expired delivery; review its message and Asterisk status first. Recording files remain private for the operator's retention policy. No external delivery, real payment, or production legacy authorization is included in this lab core.
+
+The implementation follows the official Asterisk [AGI](https://docs.asterisk.org/Asterisk_22_Documentation/API_Documentation/Dialplan_Applications/AGI/), [RECORD FILE](https://docs.asterisk.org/Asterisk_22_Documentation/API_Documentation/AGI_Commands/record_file/), [STREAM FILE](https://docs.asterisk.org/Asterisk_22_Documentation/API_Documentation/AGI_Commands/stream_file/) and [call-file spool](https://docs.asterisk.org/Configuration/Interfaces/Asterisk-Call-Files/) interfaces. The repository tests run with fake media and temporary local directories; no Asterisk instance or external telephone call is needed in CI.
 
 ### Analog supervision and media
 
