@@ -18,6 +18,8 @@ import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
 import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
+import { VisualPromptWorksheet } from './VisualPromptWorksheet'
+import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
 
 type Field = {
   key: string
@@ -82,7 +84,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const [showAllScreeningSlots, setShowAllScreeningSlots] = useState(false)
   const [screeningActions, setScreeningActions] = useState<Record<number, ScreeningAction>>({})
   const [screeningDescriptions, setScreeningDescriptions] = useState<Record<number, string>>({})
-  const [view, setView] = useState<'settings' | 'rules' | 'bytes'>('settings')
+  const [view, setView] = useState<'settings' | 'rules' | 'bytes' | 'prompts'>('settings')
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [reload, setReload] = useState(0)
@@ -178,6 +180,13 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   async function save(event: React.FormEvent) {
     event.preventDefault()
     if (!layout?.supported || !canEdit) return
+    if (visualPromptRowCount(number, layout.length) !== null) {
+      const invalid = Object.entries(edits).find(([, text]) => !authorableDisplayText(text, 20))
+      if (invalid) {
+        setMessage(`Wire row ${invalid[0].match(/^prompt-(\d+)\.text$/)?.[1] ?? ''} exceeds 20 cells or contains an unsupported glyph.`)
+        return
+      }
+    }
     const byteEntries = Object.entries(byteEdits)
     if (byteEntries.some(([, value]) => value.length !== 2)) {
       setMessage('Enter two hexadecimal digits for each edited byte.')
@@ -292,7 +301,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const byteChanges = Object.keys(byteEdits).length
   const showingRules = layout.numberingPlan && view === 'rules'
   const showingBytes = layout.spareBytes && view === 'bytes'
-  const showingSettings = !showingRules && !showingBytes
+  const promptCount = visualPromptRowCount(number, layout.length)
+  const worksheetRows = promptCount !== null ? promptRows(layout.sections, promptCount) : null
+  const showingPrompts = worksheetRows !== null && view === 'prompts'
+  const showingSettings = !showingRules && !showingBytes && !showingPrompts
   const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
   const cardMainSection = current?.key.match(/^card-\d+(?=-(?:service|spill|stored-value|smart-issuers|smart-values)$)/)?.[0]
   const cardStandard = layout.sections.find((section) => section.key === cardMainSection)?.fields
@@ -389,6 +401,20 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         <button type="button" aria-pressed={showingSettings} onClick={() => setView('settings')}>Settings</button>
         <button type="button" aria-pressed={!!showingBytes} onClick={() => setView('bytes')}>Byte grid</button>
       </div>}
+      {worksheetRows && <div className="row-actions" role="group" aria-label="Visual prompt editor">
+        <button type="button" aria-pressed={!showingPrompts} onClick={() => setView('settings')}>Individual messages</button>
+        <button type="button" aria-pressed={showingPrompts} onClick={() => setView('prompts')}>Visual prompt worksheet</button>
+      </div>}
+      {showingPrompts && worksheetRows && <VisualPromptWorksheet key={`${number}:${layout.revision}:${layout.sha256}`}
+        number={number} rows={worksheetRows} edits={edits} editable={canEdit && !busy}
+        onStage={changes => {
+          const updated = stagePromptChanges(worksheetRows, edits, changes)
+          setEdits(updated); onDirty(Object.keys(updated).length > 0); setMessage('')
+        }}
+        onUndo={key => {
+          const updated = { ...edits }; delete updated[key]
+          setEdits(updated); onDirty(Object.keys(updated).length > 0); setMessage('')
+        }} />}
       {exchangeSegment && areaField && <LocalDialingImport segment={exchangeSegment} editable={canEdit && !busy}
         exchangeFile={exchangeFile} onExchangeFile={onExchangeFile} stage={fields => {
         const updated = { ...edits }
