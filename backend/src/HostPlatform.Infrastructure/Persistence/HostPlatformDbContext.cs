@@ -13,6 +13,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<TerminalGroupMembership> TerminalGroupMemberships => Set<TerminalGroupMembership>();
     public DbSet<FirmwareVersion> FirmwareVersions => Set<FirmwareVersion>();
     public DbSet<InmateFeatureConfiguration> InmateFeatureConfigurations => Set<InmateFeatureConfiguration>();
+    public DbSet<CarrierLibraryEntry> CarrierLibraryEntries => Set<CarrierLibraryEntry>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
@@ -143,6 +144,15 @@ public class HostPlatformDbContext : DbContext
             b.Property(c => c.SettingsJson).HasColumnType("jsonb");
             b.Property(c => c.Version).IsConcurrencyToken();
             b.HasIndex(c => c.NameKey).IsUnique();
+        });
+        modelBuilder.Entity<CarrierLibraryEntry>(b =>
+        {
+            b.Property(c => c.Code).HasMaxLength(6);
+            b.Property(c => c.CodeKey).HasMaxLength(6);
+            b.Property(c => c.Description).HasMaxLength(80);
+            b.Property(c => c.RowPayload).HasColumnType("bytea");
+            b.Property(c => c.Version).IsConcurrencyToken();
+            b.HasIndex(c => new { c.TableNumber, c.CodeKey }).IsUnique();
         });
         modelBuilder.Entity<TableSet>(b =>
         {
