@@ -516,6 +516,8 @@ public sealed class TerminalsController(
                 if (!IsWireId(wireId))
                     return BadRequest(new { error = "Enter the five-byte terminal ID as ten hexadecimal digits." });
                 wireId = wireId.ToUpperInvariant();
+                if (await db.TerminalIdentityCutoverItems.AnyAsync(row => row.TerminalId == id && row.FinishedAtUtc == null, ct))
+                    return Conflict(new { error = "This phone has an unresolved identity cutover. Review its job before editing." });
                 if (await WireIdTaken(wireId, id, ct))
                     return DuplicateWireId();
             }
@@ -564,9 +566,10 @@ public sealed class TerminalsController(
         });
 
     private static bool IsWireId(string? value) => value is { Length: 10 } && value.All(Uri.IsHexDigit);
-    private Task<bool> WireIdTaken(string wireId, Guid exclude, CancellationToken ct) =>
-        db.Terminals.AnyAsync(t => t.Id != exclude && t.TerminalIdHex.ToUpper() == wireId, ct);
-    private ConflictObjectResult DuplicateWireId() => Conflict(new { error = "Another phone already uses this terminal ID." });
+    private async Task<bool> WireIdTaken(string wireId, Guid exclude, CancellationToken ct) =>
+        await db.Terminals.AnyAsync(t => t.Id != exclude && t.TerminalIdHex.ToUpper() == wireId, ct) ||
+        await db.TerminalIdentityCutoverItems.AnyAsync(row => row.FinishedAtUtc == null && row.TargetWireId == wireId, ct);
+    private ConflictObjectResult DuplicateWireId() => Conflict(new { error = "Another phone already uses this terminal ID or it is reserved by an unresolved cutover." });
     private ConflictObjectResult ChangedTerminal() => Conflict(new { error = "The phone record changed. Reload and try again." });
     private static bool TerminalWriteConflict(Exception ex) => ex is DbUpdateConcurrencyException ||
         (ex as PostgresException ?? ex.InnerException as PostgresException)?.SqlState == PostgresErrorCodes.SerializationFailure;
