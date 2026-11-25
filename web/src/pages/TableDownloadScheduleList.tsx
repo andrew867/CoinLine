@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostBare } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 type Schedule = {
   id: string
@@ -47,6 +48,7 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
   }, [endpoint, refresh, revision])
 
   async function cancel(row: Schedule) {
+    if (!canPerform('downloads', op.update)) return
     setBusy(true)
     setError('')
     try {
@@ -62,6 +64,7 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
   }
 
   async function clearFirmware(row: Schedule) {
+    if (!canPerform('firmware-jobs', op.update)) return
     setBusy(true)
     setError('')
     setFirmwareCancellation(null)
@@ -112,9 +115,9 @@ export function TableDownloadScheduleList({ setId, terminalId, refresh = 0 }: {
                   {row.startedAtUtc && <div>Started <time dateTime={row.startedAtUtc}>{new Date(row.startedAtUtc).toLocaleString()}</time></div>}
                   {row.lastError && <div>{row.lastError}</div>}
                   {row.completedAtUtc && <time dateTime={row.completedAtUtc}>{new Date(row.completedAtUtc).toLocaleString()}</time>}
-                  {row.status !== 'Delivering' && row.status !== 'Delivered' && row.status !== 'Cancelled' &&
+                  {canPerform('downloads', op.update) && row.status !== 'Delivering' && row.status !== 'Delivered' && row.status !== 'Cancelled' &&
                     <button type="button" disabled={busy} onClick={() => void cancel(row)}>Cancel download</button>}
-                  {row.canQueueFirmwareCancellation &&
+                  {canPerform('firmware-jobs', op.update) && row.canQueueFirmwareCancellation &&
                     <button type="button" disabled={busy} onClick={() => void clearFirmware(row)}>Queue firmware cancellation</button>}
                 </td>
               </tr>

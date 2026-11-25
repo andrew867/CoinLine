@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { apiFetch, apiGet, apiPost, apiPostRaw } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { AdvertisingSimulator } from './AdvertisingSimulator'
 import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback'
 import type { ExchangeFile } from './localDialingExchangeData'
@@ -47,6 +48,8 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
   const panel = panels[panelIndex]
   const record = panel.records.find(([number]) => number === tableNumber)!
   const version = versions.find((item) => item.tableNumber === tableNumber)
+  const canWriteRecord = draft && canPerform('table-records', version ? op.update : op.add)
+  const canImport = canWriteRecord && (version != null || canPerform('table-definitions', op.read))
   const advertisingRevision = [26, 29, 30].map((number) => versions.find((item) => item.tableNumber === number)?.tableRevision ?? 0).join(':')
 
   function onImported() {
@@ -83,7 +86,7 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
       </div>
       <p className="page-intro">{panel.fields}</p>
       {tableNumber === 29 ? (
-        <AdvertisingEditor key={setId} setId={setId} draft={draft} revision={advertisingRevision} onSaved={onSaved} onDirty={onRecordDirty} />
+        <AdvertisingEditor key={setId} setId={setId} draft={canWriteRecord} revision={advertisingRevision} onSaved={onSaved} onDirty={onRecordDirty} />
       ) : (
         <div key={`${setId}:${tableNumber}`}>
           <Suspense fallback={<p role="status">Loading record editor…</p>}>
@@ -91,11 +94,11 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
               exchangeFile={exchangeFile} onExchangeFile={setExchangeFile}
               onSaved={onSaved} onDirty={onRecordDirty} />
           </Suspense>
-          {!recordDirty && (version && draft ? (
+          {!recordDirty && canImport && (version ? (
             <details><summary>Import replacement record</summary>
               <RecordImport setId={setId} draft={draft} version={version} versions={versions} onSaved={onImported} record={record} />
             </details>
-          ) : !version && <RecordImport setId={setId} draft={draft} version={version}
+          ) : <RecordImport setId={setId} draft={draft} version={version}
             versions={versions} onSaved={onImported} record={record} />)}
         </div>
       )}
@@ -165,7 +168,7 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (!snapshot || blockChanged) return
+    if (!draft || !snapshot || blockChanged) return
     setBusy(true)
     setFeedback('')
     try {
@@ -250,18 +253,22 @@ function RecordImport({ setId, draft, version, versions, onSaved, record: [numbe
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (!file) return
+    if (!draft || !file || !canPerform('table-records', version ? op.update : op.add)) return
     setFeedback('')
     setBusy(true)
     try {
       if (file.size > 65535) throw new Error('The record must be at most 65,535 bytes.')
       const bytes = new Uint8Array(await file.arrayBuffer())
       if (bytes.length <= 2 || bytes[0] !== number) throw new Error(`Choose a complete binary record beginning with MT${number}.`)
-      const definitions = await apiGet<Definition[]>('/api/tables/definitions')
-      const definitionId = version?.tableDefinitionId ?? definitions.find((item) => item.tableNumber === number &&
-        (number !== 30 || item.name === name))?.id ?? (await apiPost<{ id: string }>('/api/tables/definitions', {
-        name, tableNumber: number,
-      })).id
+      let definitionId = version?.tableDefinitionId
+      if (!definitionId) {
+        const definitions = await apiGet<Definition[]>('/api/tables/definitions')
+        definitionId = definitions.find((item) => item.tableNumber === number && (number !== 30 || item.name === name))?.id
+        if (!definitionId) {
+          if (!canPerform('table-definitions', op.add)) throw new Error('This table definition is missing. Ask an operator with definition creation permission to register it.')
+          definitionId = (await apiPost<{ id: string }>('/api/tables/definitions', { name, tableNumber: number })).id
+        }
+      }
       const response = await apiPostRaw('/api/tables/versions', {
         tableSetId: setId, tableDefinitionId: definitionId, tableRevision: (version?.tableRevision ?? 0) + 1,
         payloadBase64: btoa(Array.from(bytes, (value) => String.fromCharCode(value)).join('')),

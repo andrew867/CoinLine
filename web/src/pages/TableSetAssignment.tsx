@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiGetRaw, apiPostRaw } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 
 const RecordUpdateRollouts = lazy(async () => ({ default: (await import('./RecordUpdateRollouts')).RecordUpdateRollouts }))
@@ -86,6 +87,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [beginWithTerminalId, setBeginWithTerminalId] = useState('')
   const [rolloutRefresh, setRolloutRefresh] = useState(0)
   const [resultSets, setResultSets] = useState<UpdatedSet[]>([])
+  const canAssign = canPerform('table-assignments', op.update)
+  const canSchedule = canPerform('downloads', op.add)
+  const canReadRollouts = canPerform('table-records', op.read)
+  const canUpdateRecords = canPerform('table-records', op.update)
   const choices = new Map((optionalRecords ?? []).map((record) => [record.tableNumber, { name: record.name, removable: true, copyable: false }]))
   for (const record of versions) {
     if (record.tableNumber === 94) continue
@@ -207,6 +212,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   }
 
   async function updateRecords(apply: boolean) {
+    if (!canReadRollouts || (apply && !canUpdateRecords)) return
     setBusy(true)
     setFeedback('')
     setResultSets([])
@@ -239,6 +245,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
 
   async function assign() {
     const scheduled = deliveryMode !== 'assignment'
+    if (scheduled ? !canSchedule : !canAssign) return
     const selected = deliveryMode === 'later' ? new Date(availableAt) : null
     if (selected && (!Number.isFinite(selected.getTime()) || selected.getTime() <= Date.now())) {
       setFeedback('Choose a future date and time.')
@@ -303,8 +310,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             else clearReview()
           }}>
             <option value="set">Assign full set</option>
-            <option value="records">Update selected records</option>
-            <option value="schedule-records">Schedule selected records</option>
+            {canReadRollouts && <option value="records">Update selected records</option>}
+            {canSchedule && <option value="schedule-records">Schedule selected records</option>}
           </select>
         </label>}
         <label>{schedulesOnly ? 'Schedule by' : 'Assign by'}
@@ -469,7 +476,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           {phone.reason ? <p>{phone.reason}</p> : <p>{phone.changes.map(({ tableNumber, action, required }) =>
             `${changeLabels[action]} MT${tableNumber}${required ? ' (required)' : ''}`).join(', ')}</p>}
         </li>)}</ul>
-        {(updatePreview.changeCount > 0 || (updatePreview.rolloutId && updatePreview.targets.length > 0)) &&
+        {canUpdateRecords && (updatePreview.changeCount > 0 || (updatePreview.rolloutId && updatePreview.targets.length > 0)) &&
           <button type="button" disabled={busy} onClick={() => void updateRecords(true)}>
             {updatePreview.rolloutId ? 'Start rollout' : `Update ${updatePreview.changeCount} ${updatePreview.changeCount === 1 ? 'phone' : 'phones'}`}
         </button>}
@@ -498,14 +505,14 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             <label>Delivery
               <select value={deliveryMode} disabled={busy} onChange={(event) => setMode(event.target.value)}>
                 {!schedulesOnly && <option value="assignment">Assign for explicit table requests</option>}
-                <option value="now">Prepare now for the next call-in</option>
-                <option value="later">Prepare at a specific time</option>
+                {canSchedule && <option value="now">Prepare now for the next call-in</option>}
+                {canSchedule && <option value="later">Prepare at a specific time</option>}
               </select>
             </label>
             {deliveryMode === 'later' && <label>Prepare at (local time)
               <input type="datetime-local" value={availableAt} disabled={busy} onChange={(event) => setAvailableAt(event.target.value)} />
             </label>}
-            <button type="button" disabled={!eligible || busy || (deliveryMode === 'later' && !availableAt) ||
+            <button type="button" disabled={(deliveryMode === 'assignment' ? !canAssign : !canSchedule) || !eligible || busy || (deliveryMode === 'later' && !availableAt) ||
               (allocateFirmwareWindow && !firmwareAllocation)} onClick={() => void assign()}>
               {deliveryMode === 'assignment' ? 'Assign to' : 'Schedule for'} {eligible} {eligible === 1 ? 'phone' : 'phones'}
             </button>
@@ -516,8 +523,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       {resultSets.length > 0 && <ul aria-label="Resulting table sets">{resultSets.map((set) => <li key={set.id}>
         <Link to={`/table-sets/${set.id}`}>{set.name}</Link>
       </li>)}</ul>}
-      {!codeOnly && <Suspense fallback={null}><RecordUpdateRollouts setId={setId} refresh={rolloutRefresh} /></Suspense>}
-      <TableDownloadScheduleList setId={setId} refresh={scheduleRefresh} />
+      {!codeOnly && canReadRollouts && <Suspense fallback={null}><RecordUpdateRollouts setId={setId} refresh={rolloutRefresh} /></Suspense>}
+      {canPerform('downloads', op.read) && <TableDownloadScheduleList setId={setId} refresh={scheduleRefresh} />}
     </section>
   )
 }

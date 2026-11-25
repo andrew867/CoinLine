@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 
 type Row = {
@@ -21,8 +22,10 @@ export function TableVersions() {
   const setFilter = search.get('set') ?? ''
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const canRead = canPerform('table-records', op.read)
 
   useEffect(() => {
+    if (!canRead) return
     let c = false
     const q = setFilter ? `?tableSetId=${encodeURIComponent(setFilter)}` : ''
     setErr(null)
@@ -40,7 +43,9 @@ export function TableVersions() {
     return () => {
       c = true
     }
-  }, [setFilter])
+  }, [setFilter, canRead])
+
+  if (!canRead) return <p role="alert">You do not have permission to view table versions.</p>
 
   return (
     <div>
@@ -56,7 +61,7 @@ export function TableVersions() {
         </p>
       )}
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
-      {!rows && <p>Loading…</p>}
+      {!rows && !err && <p>Loading…</p>}
       {rows && rows.length === 0 && <p style={{ color: '#666' }}>No table versions match this filter.</p>}
       {rows && rows.length > 0 && (
         <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 14 }}>

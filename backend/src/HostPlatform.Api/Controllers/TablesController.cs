@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Authorization;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
@@ -89,6 +90,17 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
     [HttpPost("versions")]
     public async Task<ActionResult<object>> CreateVersion([FromBody] TableVersionCreateDto body, CancellationToken ct)
     {
+        var mayAdd = OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Add);
+        var mayUpdate = OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Update);
+        TableVersion? current = null;
+        if (!mayAdd || !mayUpdate)
+        {
+            current = await db.TableVersions.AsNoTracking().FirstOrDefaultAsync(v =>
+                v.TableSetId == body.TableSetId && v.TableDefinitionId == body.TableDefinitionId, ct);
+            if (current == null ? !mayAdd : !mayUpdate)
+                return Forbid();
+        }
+
         byte[] raw;
         try
         {
@@ -108,7 +120,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 raw,
                 body.SortOrder,
                 body.DependsOnTableDefinitionId,
-                ct);
+                ct, expectedRevision: mayAdd ? null : current?.TableRevision,
+                expectedHash: mayAdd ? null : current?.PayloadSha256Hex, createOnly: !mayUpdate);
             return Created($"/api/tables/versions/{v.Id}", new
             {
                 v.Id,
@@ -180,6 +193,11 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 s.PublishedAtUtc,
                 s.PublishGeneration
             }).ToListAsync(ct));
+
+    [HttpGet("firmware-options")]
+    public async Task<ActionResult<object>> FirmwareOptions(CancellationToken ct) =>
+        Ok(await db.FirmwareVersions.AsNoTracking().OrderBy(version => version.Label)
+            .Select(version => new { version.Id, version.Label, version.BuildId }).ToListAsync(ct));
 
     [HttpPost("sets")]
     public async Task<ActionResult<object>> CreateSet([FromBody] TableSetDto body, CancellationToken ct)
@@ -329,6 +347,9 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         try
         {
             var version = SingleAdvertisingVersion(set);
+            if (!OperatorPermissions.Allows(HttpContext, "table-records",
+                    version == null ? PermissionOperation.Add : PermissionOperation.Update))
+                return Forbid();
             if (body.Revision.HasValue && (body.Revision != (version?.TableRevision ?? 0) ||
                 !string.Equals(body.Sha256, version?.PayloadSha256Hex, StringComparison.OrdinalIgnoreCase)))
                 return Conflict(new { error = "Advertising changed. Reopen the editor to load the latest version." });

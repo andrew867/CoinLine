@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch, apiPostRaw } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { NativeBitmapField } from './NativeBitmapField'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
@@ -74,6 +75,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const [reload, setReload] = useState(0)
   const [profile, setProfile] = useState('')
   const endpoint = `/api/tables/sets/${setId}/records/${number}/fields`
+  const canInitialize = canPerform('table-records', op.add)
+  const canEdit = !!layout?.supported && layout.editable && canPerform('table-records', op.update)
   const hasScreeningChanges = Object.keys(screeningActions).length > 0 || Object.keys(screeningDescriptions).length > 0
 
   useEffect(() => {
@@ -90,6 +93,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   }, [endpoint, revision, reload, profile])
 
   function edit(field: Field, value: string) {
+    if (!canEdit) return
     const updated = { ...edits }
     if (field.editor === 'screen-kind' && value !== field.value && layout?.supported) {
       const screen = layout.sections.find((section) => section.fields.includes(field))?.graphicalScreenIndex
@@ -160,7 +164,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (!layout?.supported || !layout.editable) return
+    if (!layout?.supported || !canEdit) return
     const byteEntries = Object.entries(byteEdits)
     if (byteEntries.some(([, value]) => value.length !== 2)) {
       setMessage('Enter two hexadecimal digits for each edited byte.')
@@ -200,6 +204,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   }
 
   async function initialize(template: { profile: string; length: number }) {
+    if (!canInitialize) return
     setBusy(true)
     setMessage('')
     try {
@@ -244,7 +249,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           {layout.profiles.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
       </label>}
-      {layout.templates?.map((template) => (
+      {canInitialize && layout.templates?.map((template) => (
         <button key={`${template.profile}:${template.length}`} type="button" disabled={busy} onClick={() => void initialize(template)}>
           Start record for {template.profile}{template.screeningSlots != null ? ` (${template.screeningSlots} wire slots)` : ''}
         </button>
@@ -304,6 +309,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       <header className="native-table-header">
         <div><strong>{layout.profile}</strong><span>{layout.length.toLocaleString()} bytes · Revision {layout.revision}</span></div>
         {!layout.editable && <span>Published record</span>}
+        {layout.editable && !canEdit && <span>Read-only access</span>}
       </header>
       {number >= 131 && number <= 133 && (
         <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />
@@ -325,7 +331,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         <button type="button" aria-pressed={showingSettings} onClick={() => setView('settings')}>Settings</button>
         <button type="button" aria-pressed={!!showingBytes} onClick={() => setView('bytes')}>Byte grid</button>
       </div>}
-      {exchangeSegment && areaField && <LocalDialingImport segment={exchangeSegment} editable={layout.editable && !busy}
+      {exchangeSegment && areaField && <LocalDialingImport segment={exchangeSegment} editable={canEdit && !busy}
         exchangeFile={exchangeFile} onExchangeFile={onExchangeFile} stage={fields => {
         const updated = { ...edits }
         for (const field of [areaField, ...exchangeFields]) {
@@ -338,7 +344,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         setMessage('')
       }} />}
       {showingRules && layout.numberingPlan && <NumberingPlanEditor plan={layout.numberingPlan} changes={ruleEdits}
-        editable={layout.editable && !busy} onChange={(group, rules) => {
+        editable={canEdit && !busy} onChange={(group, rules) => {
           const updated = { ...ruleEdits }
           if (JSON.stringify(rules) === JSON.stringify(layout.numberingPlan?.[group])) delete updated[group]
           else updated[group] = rules
@@ -347,7 +353,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           setMessage('')
         }} />}
       {showingBytes && layout.spareBytes && <SpareTableByteEditor bytes={layout.spareBytes} edits={byteEdits}
-        editable={layout.editable && !busy} onChange={(updated) => {
+        editable={canEdit && !busy} onChange={(updated) => {
           setByteEdits(updated)
           onDirty(changed > 0 || Object.keys(updated).length > 0)
           setMessage('')
@@ -395,16 +401,16 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         </div>
       )}
       {showingSettings && current && (
-        <fieldset className="native-table-fields" disabled={!layout.editable || busy}>
+        <fieldset className="native-table-fields" disabled={!canEdit || busy}>
           <legend>{current.label}</legend>
           {screeningSlot != null && layout.screening && <ScreeningSlotActions key={current.key} slot={screeningSlot}
             action={screeningActions[screeningSlot]}
             description={screeningDescriptions[screeningSlot] ?? layout.screening.descriptions[screeningSlot] ?? ''}
-            editable={layout.editable} supportsSpeedDial={layout.screening.supportsSpeedDial}
+            editable={canEdit} supportsSpeedDial={layout.screening.supportsSpeedDial}
             hasTrailingWildcards={current.fields.some(field => field.key.endsWith('.wildcards'))}
             onAction={action => stageScreeningAction(screeningSlot, action)}
             onDescription={value => describeScreeningSlot(screeningSlot, value)} />}
-          {selectedKey != null && layout.editable && <div className="row-actions">
+          {selectedKey != null && canEdit && <div className="row-actions">
             <button type="button" className="quiet" onClick={() => toggleKeyClear(selectedKey)}>
               {keyCleared ? 'Undo clear' : 'Clear key'}
             </button>
@@ -445,7 +451,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           ))}
         </fieldset>
       )}
-      {layout.editable && (
+      {canEdit && (
         <div className="row-actions">
           <button type="submit" disabled={(changed === 0 && !ruleChanges && byteChanges === 0 && clearedKeys.size === 0 && !hasScreeningChanges) || busy}>{busy ? 'Saving…' : 'Save record'}</button>
           {changed > 0 && <span>{changed} {changed === 1 ? 'field changed' : 'fields changed'}</span>}

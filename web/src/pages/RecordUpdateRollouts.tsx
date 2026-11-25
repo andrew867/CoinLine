@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 type Rollout = {
   id: string
@@ -34,6 +35,7 @@ export function RecordUpdateRollouts({ setId, refresh }: { setId: string; refres
   }, [endpoint, refresh, reload])
 
   async function control(run: Rollout, decision: 'retry' | 'skip' | 'stop') {
+    if (!canPerform('table-records', op.update)) return
     setBusy(true)
     setNotice('')
     setError('')
@@ -67,11 +69,11 @@ export function RecordUpdateRollouts({ setId, refresh }: { setId: string; refres
         <p>{run.processed} of {run.total} phones processed. {run.changedCount} updated, {run.skippedCount} skipped.</p>
         <p>Paused at <Link to={`/terminals/${run.blockedPhone.id}`}>{run.blockedPhone.name}</Link> ({run.blockedPhone.wireId}).</p>
         {run.failureReason && <p>{run.failureReason}</p>}
-        <div className="row-actions">
+        {canPerform('table-records', op.update) && <div className="row-actions">
           <button type="button" disabled={busy} onClick={() => void control(run, 'retry')}>Retry phone</button>
           <button type="button" disabled={busy} onClick={() => void control(run, 'skip')}>Skip phone</button>
           <button type="button" disabled={busy} onClick={() => void control(run, 'stop')}>Stop rollout</button>
-        </div>
+        </div>}
       </div>)}
     </section>
   )

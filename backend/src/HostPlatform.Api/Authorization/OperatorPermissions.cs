@@ -53,10 +53,11 @@ public static class OperatorPermissions
             ("TerminalGroups", U, "Rename UpdateDetails"), ("TerminalGroups", D, "Delete"));
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
-            ("Tables", A, "CreateSet CloneSet"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"));
+            ("Tables", A, "CreateSet CloneSet"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
+            ("Tables", A | U, "FirmwareOptions"));
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
-            ("Tables", R, "Versions Advertising"), ("Tables", A, "CreateVersion"), ("Tables", U, "SaveAdvertising"),
+            ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Apply Continue"));
         Screen("table-assignments", "Table assignments",
@@ -117,7 +118,9 @@ public static class OperatorPermissions
             {
                 supported |= operations;
                 foreach (var action in actions.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-                    Rules.Add((controller, action), new Rule(key, operations, key == "memberships" && operations == (A | D)));
+                    Rules.Add((controller, action), new Rule(key, operations,
+                        (key == "memberships" && operations == (A | D)) ||
+                        ((key == "table-sets" || key == "table-records") && operations == (A | U))));
             }
             Screens.Add(new PermissionScreen(key, label, supported));
         }

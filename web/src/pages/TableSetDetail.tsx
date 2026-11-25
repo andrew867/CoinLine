@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiFetch, apiPost, apiPostBareOk, apiPut } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { TableSetAssignment } from './TableSetAssignment'
 import type { FirmwareSchedule } from './TableSetAssignment'
 import { TableSetConfiguration } from './TableSetConfiguration'
 import { TableRecordCopy } from './TableRecordCopy'
+import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilyReview } from './TerminalFamilyReview'
 import './TableSetConfiguration.css'
@@ -65,9 +67,13 @@ export function TableSetDetail() {
   const [targetEdit, setTargetEdit] = useState<string | null>(null)
   const [savingTarget, setSavingTarget] = useState(false)
   const [recordDirty, setRecordDirty] = useState(false)
+  const canRead = canPerform('table-sets', op.read)
+  const canUpdate = canPerform('table-sets', op.update)
+  const canAdd = canPerform('table-sets', op.add)
+  const canReadRecords = canPerform('table-records', op.read)
 
   const load = () => {
-    if (!id) return
+    if (!id || !canRead) return
     setErr(null)
     apiFetch(`/api/tables/sets/${id}`)
       .then((r) => {
@@ -85,11 +91,11 @@ export function TableSetDetail() {
     setTargetEdit(null)
     setRecordDirty(false)
     load()
-  }, [id])
+  }, [id, canRead])
 
   async function saveTarget(e: React.FormEvent) {
     e.preventDefault()
-    if (!d || targetEdit == null || recordDirty) return
+    if (!canUpdate || !d || targetEdit == null || recordDirty) return
     setSavingTarget(true)
     setErr(null)
     try {
@@ -104,7 +110,7 @@ export function TableSetDetail() {
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    if (!id) return
+    if (!id || !canUpdate) return
     setErr(null)
     try {
       await apiPut(`/api/tables/sets/${id}`, {
@@ -119,7 +125,7 @@ export function TableSetDetail() {
   }
 
   async function publish() {
-    if (!id) return
+    if (!id || !canUpdate) return
     if (
       !window.confirm(
         'Publish this table set? Published sets affect which payloads terminals may download (validate on bench — HARDWARE_VALIDATION_REQUIRED).'
@@ -137,7 +143,7 @@ export function TableSetDetail() {
 
   async function clone(event: React.FormEvent) {
     event.preventDefault()
-    if (!id) return
+    if (!id || !canAdd) return
     setCopying(true)
     setErr(null)
     try {
@@ -152,6 +158,7 @@ export function TableSetDetail() {
   }
 
   if (!id) return <p>Missing id.</p>
+  if (!canRead) return <p role="alert">You do not have permission to view table sets.</p>
   if (!d) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
 
   const draft = d.status !== 1
@@ -175,7 +182,7 @@ export function TableSetDetail() {
           </>
         )}
       </p>
-      {draft && (
+      {draft && canUpdate && (
         <form onSubmit={save} style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
           <label>
             Name{' '}
@@ -188,7 +195,7 @@ export function TableSetDetail() {
           </button>
         </form>
       )}
-      {!draft && (
+      {!draft && canAdd && (
         <form className="table-config-selectors" onSubmit={(event) => void clone(event)}>
           <label>Draft copy name<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
           <button type="submit" disabled={copying || !name.trim()}>Make draft copy</button>
@@ -196,10 +203,10 @@ export function TableSetDetail() {
       )}
       <section className="table-config-panel" aria-labelledby="firmware-target-heading">
         <h2 id="firmware-target-heading">Firmware compatibility</h2>
-        {draft ? (
+        {draft && canUpdate ? (
           <form className="table-config-selectors" onSubmit={(event) => void saveTarget(event)}>
             <FirmwareVersionSelect label="Target firmware" value={targetSelection} onChange={setTargetEdit}
-              emptyLabel="No firmware target" disabled={savingTarget} />
+              emptyLabel="No firmware target" disabled={savingTarget} optionsPath="/api/tables/firmware-options" />
             <button type="submit" disabled={!targetChanged || savingTarget || recordDirty}>Save target</button>
           </form>
         ) : <p>Target firmware <strong>{d.targetFirmware ?? 'Any'}</strong></p>}
@@ -230,15 +237,16 @@ export function TableSetDetail() {
           ))}</ul>}
         </section>
       )}
-      {draft && <TableRecordCopy key={d.id} setId={d.id} revision={d.revision} customerId={d.customerId}
+      {draft && canUpdate && <TableRecordCopy key={d.id} setId={d.id} revision={d.revision} customerId={d.customerId}
         disabled={recordDirty || targetChanged} onSaved={load} />}
-      <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
-        versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />
-      {!draft && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
+      {canReadRecords && <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
+        versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />}
+      {!draft && canPerform('table-assignments', op.read) && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
         codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} firmwareSchedule={d.firmwareSchedule} />}
-      <p>
+      {!draft && !canPerform('table-assignments', op.read) && canPerform('downloads', op.read) && <TableDownloadScheduleList setId={id} />}
+      {canReadRecords && <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>
-      </p>
+      </p>}
       <h2>Versions in this set</h2>
       {noVersions && (
         <p style={{ color: '#666' }}>
@@ -262,7 +270,7 @@ export function TableSetDetail() {
             {d.versions.map((v) => (
               <tr key={v.id} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
                 <td>{v.definitionName}</td>
-                <td>{draft && v.tableNumber !== 94
+                <td>{draft && canUpdate && v.tableNumber !== 94
                   ? <ConfigurationIdField key={v.tableRevision} setId={d.id} record={v} disabled={recordDirty || targetChanged} onSaved={load} />
                   : v.configurationId ?? 'None'}</td>
                 <td>{v.tableRevision}</td>
