@@ -18,6 +18,8 @@ public sealed class CardPaymentOptions
 public sealed class LabCardAuthorizationOptions
 {
     public bool Enabled { get; set; }
+    /// <summary>Separate opt-in for synthetic ledger posting from a matched uploaded call record.</summary>
+    public bool SettleUploadedCalls { get; set; }
     public LabCardBinding[] Bindings { get; set; } = [];
 }
 
@@ -27,4 +29,6 @@ public sealed class LabCardBinding
     public Guid CardAccountId { get; set; }
     /// <summary>Exact fictional lab destination, not an external payment route.</summary>
     public string Destination { get; set; } = "";
+    /// <summary>Explicit lab terminal clock offset from UTC, required for settlement matching.</summary>
+    public int? TerminalClockOffsetMinutes { get; set; }
 }

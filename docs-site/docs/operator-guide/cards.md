@@ -29,7 +29,20 @@ Supply these application configuration keys in the API process environment rathe
 
 Use subsequent integer indexes for additional independent bindings. No actual payment credentials are configuration inputs. The designated fixture is recognized only for the configured phone and route. Authorization attempts in **Card payments** show the outcome, reason, phone, quote and eligible synthetic account. Older redacted requests with no stored decision display **Outcome unavailable**. The payment ledger is displayed separately. No synthetic approval creates a debit, payment transaction, or claim of completed service, and reconnect retries do not create a second decision for the same quote.
 
-This is a magstripe authorization testing path only. Smartcard contact tests, application compatibility, stored-value transactions, actual call-detail upload and settlement remain distinct validation gates.
+This is a magstripe testing path only. Smartcard contact tests, application compatibility and stored-value transactions remain distinct validation gates.
+
+### Optional synthetic CDR settlement
+
+The synthetic provider may also post a simulated ledger entry after it receives a matching complete call-detail upload. This is off by default, separate from authorization. Use only the isolated provider and an explicitly configured clock offset:
+
+| Key | Value |
+| --- | --- |
+| `CardPayments__LabAuthorization__SettleUploadedCalls` | `true` (default `false`) |
+| `CardPayments__LabAuthorization__Bindings__0__TerminalClockOffsetMinutes` | The lab terminal's documented offset from UTC, including zero for a UTC clock |
+
+Posting requires PostgreSQL, a uniquely matched persisted approval, exact phone/route/account and call sequence, plausible call-start time, credit-card classification, positive duration within the quoted first period, and an explicit positive reported MT53 charge equal to the original paid quote. Missing amount, older MT4, unanswered records, mismatches, ambiguous approvals, insufficient balance, and unsupported longer calls do not post. CDR metadata is stored even if settlement is not eligible. Duplicate uploads or distinct records claiming an already used approval cannot double debit. The account balance, adjustment, transaction and CDR receipt marker are committed together, and the resulting simulated payment remains pending reconciliation. Do not enable concurrent manual adjustments for the same isolated test account during the trial.
+
+No real payment processor, real card data, or physical card writing is involved. Fixture validation is separate from actual terminal CDR collection and native settlement acceptance.
 
 ## Isolated synthetic terminal acceptance
 

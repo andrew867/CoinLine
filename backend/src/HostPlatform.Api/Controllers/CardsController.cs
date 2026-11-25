@@ -34,6 +34,7 @@ public sealed class CardsController(
             hostLedgerEnabled = true,
             runtimeAuthorizationProviderRegistered = registrations.IsService(typeof(INccCardAuthorizationProvider)),
             labAuthorizationEnabled = _opts.LabAuthorization?.Enabled == true,
+            labSettlementEnabled = _opts.LabAuthorization?.Enabled == true && _opts.LabAuthorization.SettleUploadedCalls,
             physicalCardWritesDisabled = _opts.PhysicalCardWritesDisabled,
             banner =
                 "The host ledger records card payments and call charges. Writing a physical card stays off."
@@ -392,16 +393,21 @@ public sealed class CardsController(
         var q = db.PaymentTransactions.AsNoTracking().AsQueryable();
         if (cardAccountId.HasValue)
             q = q.Where(t => t.CardAccountId == cardAccountId.Value);
-        return Ok(await q.OrderByDescending(t => t.CreatedAtUtc).Take(500)
+        var rows = await q.OrderByDescending(t => t.CreatedAtUtc).Take(500)
             .Select(t => new
             {
-                t.Id,
-                t.CardAccountId,
-                t.Amount,
-                reconciliation = t.Reconciliation,
-                reportedCardType = t.ReportedCardType,
-                t.CreatedAtUtc
-            }).ToListAsync(ct));
+                t.Id, t.CardAccountId, t.Amount, reconciliation = t.Reconciliation,
+                reportedCardType = t.ReportedCardType, t.CreatedAtUtc
+            }).ToListAsync(ct);
+        var resources = rows.Select(row => row.Id.ToString()).ToArray();
+        var synthetic = (await db.AuditEvents.AsNoTracking()
+            .Where(row => row.Category == "cards" && row.Action == "synthetic_cdr_settlement" && resources.Contains(row.Resource))
+            .Select(row => row.Resource).ToListAsync(ct)).ToHashSet();
+        return Ok(rows.Select(row => new
+        {
+            row.Id, row.CardAccountId, row.Amount, row.reconciliation, row.reportedCardType, row.CreatedAtUtc,
+            source = synthetic.Contains(row.Id.ToString()) ? "synthetic_cdr" : "unclassified"
+        }));
     }
 
     /// <summary>Redacted authorization observations and decisions, not settled payments.</summary>

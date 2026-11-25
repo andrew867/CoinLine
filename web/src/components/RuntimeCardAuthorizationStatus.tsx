@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiGet } from '../api/client'
 
-type State = { runtimeAuthorizationProviderRegistered?: boolean; labAuthorizationEnabled?: boolean; physicalCardWritesDisabled: boolean }
+type State = { runtimeAuthorizationProviderRegistered?: boolean; labAuthorizationEnabled?: boolean; labSettlementEnabled?: boolean; physicalCardWritesDisabled: boolean }
 
 export function RuntimeCardAuthorizationStatus() {
   const [state, setState] = useState<State | null>(null)
@@ -26,6 +26,7 @@ export function RuntimeCardAuthorizationStatus() {
       </p>
       <p style={{ margin: '6px 0 0', color: '#475569', fontSize: 14 }}>
         Card accounts and reader tests are separate from runtime authorization.
+        {state?.labSettlementEnabled && ' Synthetic CDR ledger posting is enabled for this isolated lab; payment reconciliation remains separate.'}
         {state?.physicalCardWritesDisabled && ' Physical card writes are disabled.'}
       </p>
     </section>

@@ -17,6 +17,7 @@ test('shows authorization decisions independently from recorded payments', async
     { ...common, id: 'attempt-unknown', outcome: 'unknown', provider: 'unrecorded' },
   ]
   let loaded = 0
+  let posted = false
   await page.route('**/*', async route => {
     const request = route.request()
     const url = new URL(request.url())
@@ -30,7 +31,10 @@ test('shows authorization decisions independently from recorded payments', async
       loaded++
       return route.fulfill({ json: attempts })
     }
-    if (url.pathname === '/api/cards/transactions') return route.fulfill({ json: [] })
+    if (url.pathname === '/api/cards/transactions') return route.fulfill({ json: posted ? [{
+      id: 'fixture-payment', cardAccountId: 'fixture-test-account', amount: -0.05, reconciliation: 1,
+      reportedCardType: 1, createdAtUtc: common.createdAtUtc, source: 'synthetic_cdr',
+    }] : [] })
     if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
       openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
     return route.fulfill({ status: 404 })
@@ -57,4 +61,11 @@ test('shows authorization decisions independently from recorded payments', async
   await expect(approved).toBeVisible()
   await expect.poll(() => loaded).toBeGreaterThan(beforeRefresh)
   await expect(page.getByText('No payment transactions recorded.')).toBeVisible()
+  posted = true
+  await page.getByRole('button', { name: 'Refresh payment history' }).click()
+  const ledger = page.getByRole('region', { name: 'Payment ledger entries' })
+  const entry = ledger.getByRole('row').filter({ hasText: 'Simulated call-detail posting' })
+  await expect(entry).toContainText('-0.05')
+  await expect(entry).toContainText('Pending')
+  await expect(approved).toBeVisible()
 })
