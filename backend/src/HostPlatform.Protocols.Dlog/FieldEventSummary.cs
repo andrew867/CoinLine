@@ -41,51 +41,61 @@ public static class FieldEventSummary
         public string Summary => Name == null ? $"Unlisted alarm {Number}" : $"{Name} (alarm {Number})";
     }
 
-    private static string? AlarmName(int number) => number switch
+    private static readonly IReadOnlyDictionary<int, string> AlarmNames = new SortedDictionary<int, string>
     {
-        0 => "Handset fault",
-        1 => "Telephony not responding",
-        8 => "Power interruption",
-        9 => "Display not responding",
-        10 => "Voice prompts unavailable",
-        12 => "Card reader blocked",
-        16 => "Call record checksum fault",
-        17 => "Statistics checksum fault",
-        18 => "Table checksum fault",
-        19 => "Other data checksum fault",
-        20 => "Call record store full",
-        21 => "EEPROM fault",
-        22 => "Memory lost",
-        23 => "Memory hardware fault",
-        24 => "Access cover open",
-        25 => "Stuck keypad keys",
-        26 => "Phone removed from mount",
-        27 => "Cash box threshold reached",
-        28 => "Cash box cover open",
-        29 => "Cash box removed",
-        30 => "Cash box full",
-        31 => "Coin jam",
-        32 => "Coin escrow jam",
-        33 => "Coin validator fault",
-        34 => "Line check failed",
-        35 => "Data call failed",
-        99 => "Fault cleared",
-        _ => null
+        [0] = "Handset fault",
+        [1] = "Telephony not responding",
+        [8] = "Power interruption",
+        [9] = "Display not responding",
+        [10] = "Voice prompts unavailable",
+        [12] = "Card reader blocked",
+        [16] = "Call record checksum fault",
+        [17] = "Statistics checksum fault",
+        [18] = "Table checksum fault",
+        [19] = "Other data checksum fault",
+        [20] = "Call record store full",
+        [21] = "EEPROM fault",
+        [22] = "Memory lost",
+        [23] = "Memory hardware fault",
+        [24] = "Access cover open",
+        [25] = "Stuck keypad keys",
+        [26] = "Phone removed from mount",
+        [27] = "Cash box threshold reached",
+        [28] = "Cash box cover open",
+        [29] = "Cash box removed",
+        [30] = "Cash box full",
+        [31] = "Coin jam",
+        [32] = "Coin escrow jam",
+        [33] = "Coin validator fault",
+        [34] = "Line check failed",
+        [35] = "Data call failed",
+        [99] = "Fault cleared",
     };
+
+    private static readonly IReadOnlyDictionary<int, string> MaintenanceNames = new SortedDictionary<int, string>
+    {
+        [996] = "Technician entered maintenance mode",
+        [997] = "Coin service unavailable",
+        [998] = "Card reader service unavailable",
+        [999] = "Terminal out of service",
+    };
+
+    private static string? AlarmName(int number) => AlarmNames.GetValueOrDefault(number);
+
+    public sealed record CodeReference(int Code, string Description);
+
+    public static IReadOnlyList<CodeReference> AlarmReference() =>
+        AlarmNames.Select(entry => new CodeReference(entry.Key, entry.Value)).ToArray();
+
+    public static IReadOnlyList<CodeReference> MaintenanceReference() =>
+        MaintenanceNames.Select(entry => new CodeReference(entry.Key, entry.Value)).ToArray();
 
     private static string? FormatMaintenance(JsonObject fields)
     {
         if (!TryInt(fields["opcode"], out var opcode))
             return null;
 
-        var label = opcode switch
-        {
-            996 => "Technician entered maintenance mode",
-            997 => "Coin service unavailable",
-            998 => "Card reader service unavailable",
-            999 => "Terminal out of service",
-            _ => null
-        };
+        var label = MaintenanceNames.GetValueOrDefault(opcode);
         return label == null ? $"Unlisted maintenance opcode {opcode}" : $"{label} (opcode {opcode})";
     }
 

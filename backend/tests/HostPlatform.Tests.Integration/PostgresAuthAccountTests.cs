@@ -63,6 +63,9 @@ public sealed class PostgresAuthAccountTests
         await SignIn(adminClient, admin);
         using (var catalog = await adminClient.GetAsync("/api/auth/permission-catalog"))
             catalog.EnsureSuccessStatusCode();
+        var eventReference = await adminClient.GetFromJsonAsync<JsonElement>("/api/field-events/reference");
+        Assert.Contains(eventReference.GetProperty("alarms").EnumerateArray(), row =>
+            row.GetProperty("code").GetInt32() == 22 && row.GetProperty("description").GetString() == "Memory lost");
         const string groups = "/api/terminal-groups";
         const string phones = "/api/terminals";
         var profilePath = $"/api/auth/accounts/{user.Id}/permissions";
@@ -85,6 +88,8 @@ public sealed class PostgresAuthAccountTests
         using (var allowed = await userClient.GetAsync(phones))
             Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
         using (var denied = await userClient.GetAsync("/api/field-events"))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.GetAsync("/api/field-events/reference"))
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using (var denied = await userClient.GetAsync("/api/auth/accounts"))
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);

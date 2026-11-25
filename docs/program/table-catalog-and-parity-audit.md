@@ -252,6 +252,15 @@ The family checklist was verified with Playwright and isolated PostgreSQL. An op
 
 The source check included the archived WinHelp project, RTF topics and screen references for call screening, quick-access keys, service levels, advertising, carrier screens and rating. CoinLine uses those workflows in its own interface. The archive confirms the desktop screen responsibilities and does not establish that each server setting has a terminal wire field.
 
+### Host alarm and maintenance catalogues
+
+Terminal status includes a searchable reference for the alarm numbers and maintenance opcodes that CoinLine currently decodes. The reference and report summaries share the same built-in descriptions, so adding a recognized value does not require maintaining a separate WebUI list. Unknown received values remain visible as numeric codes. This is host-side reference data, not a terminal download table.
+
+| Workflow | Editor | Encoding / storage | Terminal ACK | Behavior verification |
+| --- | --- | --- | --- | --- |
+| Alarm number and maintenance opcode catalogue | Searchable, read-only built-in reference. Operator-authored descriptions and alarm severity classification remain pending. | Existing decoded code and canonical description; no persistent operator overrides yet. | Not applicable to host reference configuration. | Reference-to-summary consistency and WebUI search/error coverage. |
+| Alarm and maintenance destination rules | Pending, including default and per-code overrides scoped by region, group or phone. | Pending; the legacy routing precedence and destination transport require separate evidence. | Not applicable to host routing configuration. | Pending. |
+
 ### Interrupted transfer evidence
 
 The NCC download timeline distinguishes a missing fragment link acknowledgement from a missing MT14 table acknowledgement. If a transfer stops before the next record, those records are marked not sent, not terminal-rejected. A missing end-of-data link acknowledgement fails the batch without erasing earlier table acknowledgements. A controlled TCP graphical-set fixture exercises the 9,224-byte MT131 record followed by MT132 and MT133, covering missing link and table acknowledgements and an explicit table rejection. The browser workflow opens the failed phone download and identifies both the actual missing acknowledgement and a subsequent unsent record. This does not establish new firmware behavior acceptance.

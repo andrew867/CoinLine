@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api/client'
+import { FieldEventReference } from './FieldEventReference'
 import './FieldEventsPage.css'
 
 const categories = {
@@ -184,6 +185,7 @@ export function FieldEventsPage() {
           </ol>
         )}
       </section>
+      <FieldEventReference />
     </div>
   )
 }

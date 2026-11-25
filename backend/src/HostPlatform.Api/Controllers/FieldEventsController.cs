@@ -10,6 +10,13 @@ namespace HostPlatform.Api.Controllers;
 [Route("api/field-events")]
 public sealed class FieldEventsController(HostPlatformDbContext db) : ControllerBase
 {
+    [HttpGet("reference")]
+    public ActionResult<object> Reference() => Ok(new
+    {
+        alarms = FieldEventSummary.AlarmReference(),
+        maintenance = FieldEventSummary.MaintenanceReference()
+    });
+
     [HttpGet]
     public async Task<ActionResult<object>> List([FromQuery] int take = 100, [FromQuery] Guid? terminalId = null,
         CancellationToken ct = default)
