@@ -55,6 +55,7 @@ public sealed class PostgresSyntheticAuthorizationTests
             .UseSetting("Observability:MetricsEnabled", "false")
             .UseSetting("Platform:Seed:EnableDemoData", "false")
             .UseSetting("Ncc:Listen", "1")
+            .UseSetting("Ncc:LoopbackOnly", "true")
             .UseSetting("Ncc:Port", port.ToString())
             .UseSetting("CardPayments:LabAuthorization:Enabled", "true")
             .UseSetting("CardPayments:LabAuthorization:SettleUploadedCalls", "true")
