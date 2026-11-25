@@ -67,7 +67,7 @@ public static class NativeTableSetReview
                     if (offset < 0)
                         findings.Add(new(cardNumber, $"Card range {index + 1} selects carrier reference {row[32]}, which is missing from the carrier record."));
                     else if ((carriers[offset + 3 + index / 8] & (1 << (index % 8))) == 0)
-                        findings.Add(new(cardNumber, $"Card range {index + 1} selects carrier reference {row[32]}. Enable this range in that carrier’s acceptance list."));
+                        findings.Add(new(cardNumber, $"Card range {index + 1} selects carrier reference {row[32]}, which does not accept that range. Review the intended carrier acceptance list and MT26 alternate routing policy separately from card authorization."));
                 }
 
                 if (carriers == null && usesCarrierReference)
@@ -75,7 +75,7 @@ public static class NativeTableSetReview
             }
 
             if (carriers != null)
-                ReviewCarrierSelections(carriers, later, features?[1], findings);
+                ReviewCarrierSelections(carriers, later, features?[1], features?[49], findings);
         }
 
         if (screenings != null)
@@ -118,7 +118,7 @@ public static class NativeTableSetReview
         return -1;
     }
 
-    private static void ReviewCarrierSelections(ReadOnlySpan<byte> carriers, bool later, byte? operatingType,
+    private static void ReviewCarrierSelections(ReadOnlySpan<byte> carriers, bool later, byte? operatingType, byte? rerouteFlags,
         List<TableReviewFinding> findings)
     {
         const int acceptsCoin = 4;
@@ -156,7 +156,12 @@ public static class NativeTableSetReview
                         findings.Add(new(carriers[0], $"{zone} {name} carrier reference {reference} is missing from the carrier record."));
                 }
                 else if (kind == 1 && operatingType is 2 or 3 && (carriers[offset + (later ? 28 : 27)] & acceptsCoin) == 0)
-                    findings.Add(new(carriers[0], $"{zone} coin carrier reference {reference} has coin and stored-value acceptance turned off."));
+                {
+                    var routing = rerouteFlags.HasValue && (rerouteFlags.Value & 1) != 0
+                        ? " MT26 permits alternate carrier routing for coins; this review does not establish a working alternate carrier."
+                        : " MT26 does not permit alternate carrier routing for coins.";
+                    findings.Add(new(carriers[0], $"{zone} coin carrier reference {reference} has coin and stored-value acceptance turned off.{routing}"));
+                }
             }
         }
     }

@@ -181,7 +181,7 @@ public sealed class CardMasterController(HostPlatformDbContext db) : ControllerB
         var record = CardMasterWire.Expand(number, row);
         return CardMasterWire.Sections(number, row).Select(section => new { section.Key, section.Label,
             fields = section.Fields.Select(field => new { field.Key, field.Label, field.Editor, min = field.LowerBound, max = field.UpperBound,
-                maxLength = field.TextLimit, field.Choices, field.Help, value = field.Read(record), targetMapping = CardMasterWire.IsMappingField(field.Key) }) });
+                maxLength = field.TextLimit, field.Choices, field.Help, field.IsSpare, value = field.Read(record), targetMapping = CardMasterWire.IsMappingField(field.Key) }) });
     }
 
     private void Audit(string action, CardMasterDefinition entry) => ApiAudit.Write(db, HttpContext, "card_master", action, entry.Id.ToString(),

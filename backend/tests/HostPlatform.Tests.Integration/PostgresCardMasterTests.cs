@@ -42,9 +42,23 @@ public sealed class PostgresCardMasterTests
             var code = "M" + Guid.NewGuid().ToString("N")[..3];
             var changes = new Dictionary<string, string> { ["card-0.format"] = "1", ["card-0.start"] = "000001", ["card-0.end"] = "000003",
                 ["card-0.reference"] = "17", ["card-0.carrier"] = "7" };
+            if (number == 134)
+            {
+                changes["card-0.spare.control.bit7"] = "true";
+                changes["card-0.spare.spillTerminator.bit7"] = "true";
+            }
             using var created = await client.PostAsJsonAsync("/api/card-master", new { code, name = "Synthetic master card", tableNumber = number, changes });
             Assert.Equal(HttpStatusCode.Created, created.StatusCode);
-            var master = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("entry");
+            var detail = await created.Content.ReadFromJsonAsync<JsonElement>();
+            if (number == 134)
+            {
+                var spare = detail.GetProperty("sections").EnumerateArray()
+                    .SelectMany(section => section.GetProperty("fields").EnumerateArray())
+                    .Single(field => field.GetProperty("key").GetString() == "card-0.spare.control.bit7");
+                Assert.True(spare.GetProperty("isSpare").GetBoolean());
+                Assert.Equal("true", spare.GetProperty("value").GetString());
+            }
+            var master = detail.GetProperty("entry");
             var masterId = master.GetProperty("id").GetGuid();
             var rev = master.GetProperty("revision").GetInt32();
             var masterRow = CardMasterWire.Edit(number, CardMasterWire.Empty(number), changes);
@@ -126,10 +140,14 @@ public sealed class PostgresCardMasterTests
             // A direct edit detaches only the edited slot, not the other linked entry.
             var fieldsPath = $"/api/tables/sets/{clone}/records/{number}/fields";
             var fields = await client.GetFromJsonAsync<JsonElement>(fieldsPath);
+            var directChanges = number == 134 ? new Dictionary<string, string> { ["card-0.spare.control.bit7"] = "false" }
+                : new Dictionary<string, string> { ["card-0.reference"] = "19" };
             using (var edited = await client.PutAsJsonAsync(fieldsPath, new { revision = fields.GetProperty("revision").GetInt32(),
                 sha256 = fields.GetProperty("sha256").GetString(), profile = fields.GetProperty("profile").GetString(),
-                changes = new Dictionary<string, string> { ["card-0.reference"] = "19" } })) edited.EnsureSuccessStatusCode();
-            var editedCards = movedExpected.Cards.ToArray(); editedCards[1 + 31] = 19;
+                changes = directChanges })) edited.EnsureSuccessStatusCode();
+            var editedCards = movedExpected.Cards.ToArray();
+            if (number == 134) editedCards[34] &= 0x7F;
+            else editedCards[1 + 31] = 19;
             await Check(clone, editedCards, movedExpected.Carriers, new[] { 9 }, rev);
 
             using (var published = await client.PostAsync($"/api/tables/sets/{draft.Id}/publish?confirm=true", null)) published.EnsureSuccessStatusCode();
@@ -147,13 +165,15 @@ public sealed class PostgresCardMasterTests
                     new TerminalTableAssignment { TerminalId = skippedPhone.Id, TableSetId = draft.Id, SiteId = site.Id, CustomerId = customer.Id });
                 await db.SaveChangesAsync();
             }
+            var revisedChanges = new Dictionary<string, string> { ["card-0.reference"] = "18", ["card-0.carrier"] = "9" };
+            if (number == 134) revisedChanges["card-0.spare.spillTerminator.bit7"] = "false";
             using (var revised = await client.PutAsJsonAsync($"/api/card-master/{masterId}", new { code, name = "Synthetic master card", tableNumber = number, revision = rev,
-                changes = new Dictionary<string, string> { ["card-0.reference"] = "18", ["card-0.carrier"] = "9" } })) revised.EnsureSuccessStatusCode();
+                changes = revisedChanges })) revised.EnsureSuccessStatusCode();
             var usage = await client.GetFromJsonAsync<JsonElement>($"/api/card-master/{masterId}/usage");
             Assert.Equal(2, usage.GetProperty("outdatedAssignedPhones").GetInt32());
             Assert.Equal(3, usage.GetProperty("configurations").GetArrayLength());
             await Check(draft.Id, movedExpected.Cards, movedExpected.Carriers, new[] { 1, 9 }, rev);
-            var newMaster = CardMasterWire.Edit(number, masterRow, new Dictionary<string, string> { ["card-0.reference"] = "18", ["card-0.carrier"] = "9" });
+            var newMaster = CardMasterWire.Edit(number, masterRow, revisedChanges);
 
             var rolloutPath = $"/api/card-master/{masterId}/rollout";
             await SignIn(read);

@@ -19,9 +19,10 @@ public static partial class NativeTableLayouts
                 Digits("terminalNumber", "Terminal wire ID", 1, 5, 10),
                 DialField("primary", "Primary manager number", 6, 10),
                 DialField("alternate", "Alternate manager number", 16, 10)),
-             Section("adsi", "ADSI identifiers",
+             Section("adsi", "ADSI identifiers", [
                  new NativeTableField("cadId", "CAD identifier", 26, HexBytes, 4, Help: "Eight hexadecimal digits from the service configuration."),
-                 new NativeTableField("cpeId", "CPE identifier", 30, HexBytes, 4, Help: "Eight hexadecimal digits from the service configuration."))]);
+                 new NativeTableField("cpeId", "CPE identifier", 30, HexBytes, 4, Help: "Eight hexadecimal digits from the service configuration."),
+                 .. SpareBytes("spare", 34, 14)])]);
 
         yield return Layout(26, 72, FeatureSections(later: false));
         yield return new NativeTableLayout(26, 72, Later, FeatureSections(later: true));
@@ -128,7 +129,8 @@ public static partial class NativeTableLayouts
                 Field("incomingRate", "Incoming call rate index", 10, help: "255 selects free incoming calls."),
                 Toggle("operatorToToll", "Convert operator calls to toll calls", 27, 1),
                 Toggle("tollToOperator", "Convert toll calls to operator calls", 27, 2)
-            })]),
+            }),
+            .. (!later ? SpareBytes("spare", 11, 5) : [])]),
         Section("routing", "Operator and carrier routing", [
             Toggle("automatedCardService", "Allow automated card service", 5, 1), Toggle("routeManualEntry", "Route manual card entry through the operator network", 5, 2),
             Toggle("alternateOperator", "Allow alternate operator service", 5, 16), Toggle("stripLeadingDigit", "Strip a leading zero or one", 5, 32),
@@ -138,6 +140,12 @@ public static partial class NativeTableLayouts
             Field("operatorReference", "Operator screening reference", 53, max: later ? 180 : 200,
                 help: "One-based MT92 entry. Zero is unset; select a valid access number when alternate operator service is enabled."),
             .. (later ? LaterRouting() : [])]),
+        Section("carrierReroute", "Carrier payment rerouting", [
+            CarrierReroute("rerouteCoin", "Permit alternate carrier routing for coins", 1),
+            CarrierReroute("rerouteCredit", "Permit alternate carrier routing for credit cards", 2),
+            CarrierReroute("rerouteStoredValue", "Permit alternate carrier routing for stored-value cards", 4),
+            CarrierReroute("rerouteCallingCard", "Permit alternate carrier routing for calling cards", 8),
+            .. SpareFlags("spare.carrierReroute", "Carrier reroute control", 49, 0xF0)]),
         Section("dataPort", "Data port",
             Field("dataDisplayDelay", "Connected data display delay (seconds)", 9),
             Toggle("dataPortEnabled", "Enable data port calls", 54, 1), Toggle("dataPortMute", "Mute handset transmitter immediately", 54, 2),
@@ -162,6 +170,10 @@ public static partial class NativeTableLayouts
                 Toggle("blockUnratedCarrier", "Block unrated carrier calls", 8, 32), Toggle("recordCardCharges", "Record rated credit card charges in call records", 8, 64),
                 Toggle("forceElevenDigitLocal", "Use 11-digit local dialing", 8, 128) } : [])])
     ];
+
+    private static NativeTableField CarrierReroute(string key, string label, int mask) =>
+        new(key, label, 49, Flag, Mask: mask,
+            Help: "If the selected carrier does not accept this payment type, permit the configured alternate route instead of blocking the call. This does not change carrier acceptance or authorization.");
 
     private static NativeTableField[] LaterLanguages()
     {
