@@ -260,6 +260,8 @@ The NCC download timeline distinguishes a missing fragment link acknowledgement 
 
 An ordinary assigned install set transfers on MT44. A due scheduled download can also transfer on a routine MT8 call-in or MT9 callback. A runtime authorization or quote exchange returns its application reply after the NCC link ACK. The terminal can then acknowledge and clear the call.
 
+A graphical cold INSTALL exposed an important distinction: a previously queued graphics-only selection was acknowledged in full, but the firmware reported installation error 34 because the rest of its assigned configuration had not been delivered. A retry without that pending partial received and acknowledged all eighteen assigned records, and the graphical terminal reported completed installation. Install and memory-loss reason bits now take precedence over queued or scheduled work. Only after the full exchange is confirmed can an older partial selection be cancelled for exact version coverage; different versions and future deliveries remain pending. This corrective regression is independent of the graphical firmware's physical acceptance matrix.
+
 | Runtime dialogue | Current coverage | Remaining work |
 | --- | --- | --- |
 | MT63 real-time rate request → MT64 | The published host plan supplies the quote. Prior OEM firmware accepted, displayed and cleared an actual quote. | Broader plan and firmware profiles remain to be exercised. |

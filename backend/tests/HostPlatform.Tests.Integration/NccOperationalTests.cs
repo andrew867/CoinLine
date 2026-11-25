@@ -789,7 +789,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             AssertAck(await ReadFrameAsync(statusUpload.Stream, TimeSpan.FromSeconds(5)));
         }
         await using var combined = await OpenAsync();
-        await combined.Stream.WriteAsync(Message(wire, [44, 0x82]));
+        await combined.Stream.WriteAsync(Message(wire, [44, 0x81]));
         AssertAck(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5)));
         var header = Decode(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5)));
         byte[] expectedHeader = [18, .. replacement];
@@ -1016,7 +1016,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         {
             await using (var call = await OpenAsync())
             {
-                await call.Stream.WriteAsync(Message(id, [44, 2]));
+                await call.Stream.WriteAsync(Message(id, [44, 1]));
                 AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
                 var begin = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
                 Assert.Equal(new byte[] { 18 }, begin.Data);
@@ -3188,7 +3188,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         try
         {
             await using var call = await OpenAsync();
-            var request = trigger == 8 ? new byte[] { 8 } : new byte[] { 44, 2 };
+            var request = trigger == 8 ? new byte[] { 8 } : new byte[] { 44, 1 };
             await call.Stream.WriteAsync(Message(KnownId, request));
             AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
             var header = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));

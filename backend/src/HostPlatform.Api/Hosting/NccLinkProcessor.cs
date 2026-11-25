@@ -34,7 +34,7 @@ internal sealed class NccLinkProcessor(
     private const byte EndDataMessageType = 13;
     private const byte TableAckMessageType = 14;
     private const byte TableUpdateMessageType = 18;
-    private const byte TableDownloadRequestType = 44;
+    private const byte TableDownloadRequestType = DlogTableRequestWire.MessageType;
     private const byte RoutineCallInMessageType = 8;
     private const int MaxInstallRetransmissions = 2;
     private static readonly TimeSpan AckWait = TimeSpan.FromSeconds(20);
@@ -54,6 +54,7 @@ internal sealed class NccLinkProcessor(
     private DownloadBatch? _batch;
     private ScheduledTableDownload? _scheduledDownload;
     private bool _installStarted;
+    private bool _mandatoryFullInstall;
     private bool _firmwareDialogue;
     private readonly Dictionary<int, DownloadBatchItem> _waiting = new();
     private FirmwareTableTransfer? _firmwareTables;
@@ -418,11 +419,13 @@ internal sealed class NccLinkProcessor(
                     return;
                 }
             }
+            var mandatoryFull = applicationType == TableDownloadRequestType && DlogTableRequestWire.RequiresFullAssignment(packet.Data[1]);
             var returned = applicationType == DlogCallbackWire.Return ? await RecordCallbackReturnAsync(terminal.Id) : null;
-            var continuation = callIn ? CallbackContinuation.CallIn : CallbackContinuation.Install;
+            var continuation = callIn ? CallbackContinuation.CallIn : mandatoryFull ? CallbackContinuation.FullInstall : CallbackContinuation.Install;
             if (returned == null && await TryOfferCallbackAsync(stream, terminal.Id, packet.TerminalId, continuation, cashboxStatus: cashboxStatus))
                 return;
-            await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true, cashboxStatus);
+            await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true, cashboxStatus,
+                mandatoryFull);
         }
     }
 
@@ -730,7 +733,7 @@ internal sealed class NccLinkProcessor(
         var terminal = await db.Terminals.AsNoTracking().SingleOrDefaultAsync(phone => phone.Id == offer.Request.TerminalId, stoppingToken);
         if (terminal != null)
             await StartInstallAsync(stream, offer.Frame.TerminalId, terminal, offer.Continuation == CallbackContinuation.CallIn,
-                cashboxStatus: offer.CashboxStatus);
+                cashboxStatus: offer.CashboxStatus, mandatoryFull: offer.Continuation == CallbackContinuation.FullInstall);
     }
 
     private async Task<TerminalCallbackRequest?> RecordCallbackReturnAsync(Guid terminalId)
@@ -760,7 +763,7 @@ internal sealed class NccLinkProcessor(
         return true;
     }
 
-    private enum CallbackContinuation { TimeSync, CallIn, Install, ManagementReply }
+    private enum CallbackContinuation { TimeSync, CallIn, Install, FullInstall, ManagementReply }
 
     private sealed record CallbackOffer(TerminalCallbackRequest Request, DateTime DueAtUtc, NccWirePacket Frame,
         CallbackContinuation Continuation, byte[]? CashboxStatus)
@@ -920,7 +923,7 @@ internal sealed class NccLinkProcessor(
     }
 
     private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn,
-        bool deliverAssignedTables = false, byte[]? cashboxStatus = null)
+        bool deliverAssignedTables = false, byte[]? cashboxStatus = null, bool mandatoryFull = false)
     {
         if (_installStarted)
         {
@@ -935,16 +938,21 @@ internal sealed class NccLinkProcessor(
             return;
         }
 
-        if (await TryStartScheduledBatchAsync(stream, terminalId, terminal, callIn, cashboxStatus))
-            return;
-
-        var queued = await db.DownloadBatches.Include(batch => batch.TableSet)
-            .Where(batch => batch.TerminalId == terminal.Id && batch.Status == DownloadBatchStatus.Pending && batch.ScheduleId == null)
-            .OrderBy(batch => batch.CreatedAtUtc).ThenBy(batch => batch.Id).FirstOrDefaultAsync(stoppingToken);
-        if (queued != null)
+        // A cold install or memory recovery cannot use a previously queued
+        // subset or a different scheduled configuration as its starting set.
+        if (!mandatoryFull)
         {
-            await StartQueuedBatchAsync(stream, terminalId, terminal, queued, cashboxStatus);
-            return;
+            if (await TryStartScheduledBatchAsync(stream, terminalId, terminal, callIn, cashboxStatus))
+                return;
+
+            var queued = await db.DownloadBatches.Include(batch => batch.TableSet)
+                .Where(batch => batch.TerminalId == terminal.Id && batch.Status == DownloadBatchStatus.Pending && batch.ScheduleId == null)
+                .OrderBy(batch => batch.CreatedAtUtc).ThenBy(batch => batch.Id).FirstOrDefaultAsync(stoppingToken);
+            if (queued != null)
+            {
+                await StartQueuedBatchAsync(stream, terminalId, terminal, queued, cashboxStatus);
+                return;
+            }
         }
 
         Guid? tableSetId = null;
@@ -978,6 +986,7 @@ internal sealed class NccLinkProcessor(
             prepared = batch;
             await db.SaveChangesAsync(stoppingToken);
             _batch = batch;
+            _mandatoryFullInstall = mandatoryFull;
         }
         catch (Exception ex)
         {
@@ -1380,6 +1389,9 @@ internal sealed class NccLinkProcessor(
         _batch.UpdatedAtUtc = DateTime.UtcNow;
         try
         {
+            CoveredPartialWork? covered = null;
+            AuditEvent? cancellationAudit = null;
+            var retryCovered = false;
             if (_scheduledDownload is { } schedule)
             {
                 schedule.NccSessionId = null;
@@ -1390,9 +1402,41 @@ internal sealed class NccLinkProcessor(
                     await tables.StageDeliveredAssignmentAsync(schedule, _batch.CompletedAtUtc.Value, CancellationToken.None);
                 }
             }
+            if (_mandatoryFullInstall && _batch.Status == DownloadBatchStatus.Completed)
+            {
+                try
+                {
+                    covered = await tables.StageCoveredPartialDownloadsAsync(_batch, CancellationToken.None);
+                    if (covered.HasChanges)
+                        cancellationAudit = Audit("partial_downloads_superseded", CoveredDetail(_batch, covered), _batch.TerminalId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogWarning(ex, "Could not review redundant partial work during full install completion.");
+                    retryCovered = true;
+                }
+            }
             try
             {
                 await db.SaveChangesAsync(CancellationToken.None);
+            }
+            catch (Exception ex) when (covered?.HasChanges == true && (ex is DbUpdateException ||
+                ex.GetBaseException() is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected }))
+            {
+                // A worker or operator may have changed older pending work.
+                // Preserve the completed full install, then review fresh rows.
+                foreach (var batch in covered.Batches)
+                {
+                    foreach (var item in batch.Items.ToArray())
+                        db.Entry(item).State = EntityState.Detached;
+                    db.Entry(batch).State = EntityState.Detached;
+                }
+                foreach (var redundantSchedule in covered.Schedules)
+                    db.Entry(redundantSchedule).State = EntityState.Detached;
+                if (cancellationAudit != null)
+                    db.Entry(cancellationAudit).State = EntityState.Detached;
+                await db.SaveChangesAsync(CancellationToken.None);
+                retryCovered = true;
             }
             catch (DbUpdateException ex) when (_scheduledDownload != null &&
                 (ex is DbUpdateConcurrencyException || ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
@@ -1403,10 +1447,42 @@ internal sealed class NccLinkProcessor(
                     entry.State = EntityState.Detached;
                 await db.SaveChangesAsync(CancellationToken.None);
             }
+            if (retryCovered)
+                await RetryCoveredPartialReviewAsync(_batch.Id);
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Install batch status was not stored.");
+        }
+    }
+
+    private static object CoveredDetail(DownloadBatch installation, CoveredPartialWork covered) => new
+    {
+        installationBatchId = installation.Id,
+        cancelledBatchIds = covered.Batches.Select(batch => batch.Id).ToArray(),
+        cancelledScheduleIds = covered.Schedules.Select(schedule => schedule.Id).ToArray()
+    };
+
+    private async Task RetryCoveredPartialReviewAsync(Guid installationId)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var freshDb = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var freshTables = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
+            var installation = await freshDb.DownloadBatches.Include(batch => batch.Items)
+                .SingleAsync(batch => batch.Id == installationId, CancellationToken.None);
+            var covered = await freshTables.StageCoveredPartialDownloadsAsync(installation, CancellationToken.None);
+            if (!covered.HasChanges)
+                return;
+            ApiAudit.Write(freshDb, null, "ncc", "partial_downloads_superseded", _session.Id.ToString(),
+                CoveredDetail(installation, covered), installation.TerminalId);
+            await freshDb.SaveChangesAsync(CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            // A new pickup or operator change has precedence over cleanup.
+            logger.LogWarning(ex, "Redundant partial downloads were left for a later eligible call.");
         }
     }
 

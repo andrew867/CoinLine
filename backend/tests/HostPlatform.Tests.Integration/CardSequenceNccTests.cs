@@ -66,7 +66,7 @@ public sealed class CardSequenceNccTests(NccListenFixture fx) : IClassFixture<Nc
         {
             await tcp.ConnectAsync(IPAddress.Loopback, fx.Port);
             var stream = tcp.GetStream();
-            await stream.WriteAsync(Packet(0, [44, 2]));
+            await stream.WriteAsync(Packet(0, [44, 1]));
             AssertAck(await Read(stream));
             var start = await Read(stream);
             Assert.Equal(new byte[] { 18 }, start.Data);
