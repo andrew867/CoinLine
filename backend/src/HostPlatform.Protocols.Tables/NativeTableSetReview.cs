@@ -89,9 +89,14 @@ public static class NativeTableSetReview
         }
 
         var discountSchedule = Get(records, NativeTableLayouts.TimeDiscountRecord, 95);
-        if (discountSchedule != null && NativeTableLayouts.UsesTimeDiscountRates(discountSchedule) && Get(records, 93, 225) == null)
-            findings.Add(new(NativeTableLayouts.TimeDiscountRecord,
-                "The scheduled discounts refer to MT93. This set relies on the phone's existing compatible discount rates."));
+        if (discountSchedule != null)
+        {
+            if (NativeTableLayouts.UsesTimeDiscountRates(discountSchedule) && Get(records, 93, 225) == null)
+                findings.Add(new(NativeTableLayouts.TimeDiscountRecord,
+                    "The scheduled discounts refer to MT93. This set relies on the phone's existing compatible discount rates."));
+            foreach (var finding in NativeTableLayouts.TimeDiscountScheduleFindings(discountSchedule))
+                findings.Add(new(NativeTableLayouts.TimeDiscountRecord, finding));
+        }
 
         var messaging = Get(records, MessagingServiceWire.MessageType, MessagingServiceWire.RecordLength);
         if (messaging != null)
