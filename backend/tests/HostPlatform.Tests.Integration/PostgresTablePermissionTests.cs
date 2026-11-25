@@ -35,6 +35,10 @@ public sealed class PostgresTablePermissionTests
         var assigner = Account("table-assignments", 2);
         var reader = Account("table-assignments", 1);
         var recordUpdater = Account("table-records", 2);
+        var libraryReader = Account("table-records", 1);
+        libraryReader.PermissionProfileJson = JsonSerializer.Serialize(new Dictionary<string, int> { ["table-records"] = 1 });
+        var usageReader = Account("table-records", 1);
+        usageReader.PermissionProfileJson = JsonSerializer.Serialize(new Dictionary<string, int> { ["table-records"] = 1, ["table-assignments"] = 1 });
         var unrelated = Account("phones", 1);
         var region = "fixture-" + Guid.NewGuid().ToString("N")[..10];
         var customer = new Customer { Name = "Fixture customer", Code = Guid.NewGuid().ToString("N")[..8] };
@@ -51,7 +55,7 @@ public sealed class PostgresTablePermissionTests
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
-            db.AddRange(scheduler, assigner, reader, recordUpdater, unrelated, phone, other, set,
+            db.AddRange(scheduler, assigner, reader, recordUpdater, libraryReader, usageReader, unrelated, phone, other, set,
                 new TerminalInventory { TerminalId = phone.Id, Details = new() { RegionCode = region, TimeAreaCode = "Q9" } },
                 new TerminalInventory { TerminalId = other.Id, Details = new() { RegionCode = "outside-" + region } });
             await db.SaveChangesAsync();
@@ -104,12 +108,30 @@ public sealed class PostgresTablePermissionTests
             targetType = "terminal", targetId = phone.Id, sourceRevision = set.Version, copyRecords = new[] { 29 }, removeRecords = Array.Empty<int>()
         })) Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using (var denied = await client.GetAsync("/api/tables/versions")) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await client.GetAsync("/api/tables/configuration-library")) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using (var denied = await client.GetAsync(previewPath)) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
 
         await SignIn(reader);
         using (var response = await client.GetAsync(previewPath)) Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         using (var denied = await client.PostAsJsonAsync($"{setPath}/assignments", request)) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using (var denied = await client.PostAsJsonAsync($"{setPath}/schedules", request)) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        await SignIn(libraryReader);
+        const string libraryPath = "/api/tables/configuration-library";
+        var library = await client.GetFromJsonAsync<JsonElement>($"{libraryPath}?tableSetId={set.Id}&number=29&status=published");
+        var libraryRow = Assert.Single(library.GetProperty("items").EnumerateArray());
+        Assert.Equal(set.Name, libraryRow.GetProperty("setName").GetString());
+        Assert.Equal(advertising.Length, libraryRow.GetProperty("payloadLengthBytes").GetInt32());
+        Assert.True(libraryRow.GetProperty("nativeLayoutKnown").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, libraryRow.GetProperty("assignedPhoneCount").ValueKind);
+        Assert.False(library.GetProperty("canReadAssignment").GetBoolean());
+        var libraryOptions = await client.GetFromJsonAsync<JsonElement>($"{libraryPath}/options");
+        Assert.Contains(libraryOptions.GetProperty("sets").EnumerateArray(), row => row.GetProperty("id").GetGuid() == set.Id);
+        using (var denied = await client.GetAsync("/api/tables/sets")) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await client.GetAsync("/api/terminals")) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        await SignIn(usageReader);
+        var usage = await client.GetFromJsonAsync<JsonElement>($"{libraryPath}?tableSetId={set.Id}&number=29");
+        Assert.Equal(1, Assert.Single(usage.GetProperty("items").EnumerateArray()).GetProperty("assignedPhoneCount").GetInt32());
+        Assert.True(usage.GetProperty("canReadAssignment").GetBoolean());
         await SignIn(unrelated);
         using (var denied = await client.GetAsync(scopePath + "terminal")) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using (var denied = await client.GetAsync(previewPath)) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);

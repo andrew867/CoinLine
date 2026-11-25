@@ -46,6 +46,7 @@ export function mayOpenScreen(path: string, role: string | null, permissions: Sc
   if (role === 'Admin' || permissions === null) return true
   if (path === '/terminal-groups') return ((permissions.groups ?? 0) | (permissions.memberships ?? 0)) !== 0
   if (path === '/terminals/new') return ((permissions.phones ?? 0) & 4) !== 0
+  if (path === '/table-versions') return ((permissions['table-records'] ?? 0) & 1) !== 0
   const root = Object.keys(screenByPath).find((base) => path === base || (base !== '/' && path.startsWith(base + '/')))
   return root === undefined || (permissions[screenByPath[root]] ?? 0) !== 0
 }
@@ -78,6 +79,7 @@ const groups = [
       ['/sites', 'Sites'],
       ['/terminal-groups', 'Phone groups'],
       ['/table-sets', 'Table sets'],
+      ['/table-versions', 'Configuration library'],
       ['/carrier-library', 'Carrier library'],
       ['/card-master', 'Card Master List'],
       ['/quick-access-customers', 'Quick Access Customers'],
