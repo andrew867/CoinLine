@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch, apiGet, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
+import { readDownloadReviews } from '../api/downloadReviews'
 import { TerminalDetail } from './TerminalDetail'
 
 vi.mock('../api/client', () => ({
@@ -93,6 +94,27 @@ it('uses the narrow assignment lookup and permits an assignment without table-se
     tableSetId: set.id, customerId: null, siteId: null,
   }))
   expect(apiGet).not.toHaveBeenCalledWith('/api/tables/sets')
+})
+
+it('offers the exact assigned-set schedule shortcut after a successful manager assignment', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { phones: 1, 'table-assignments': 3, 'table-sets': 1, downloads: 4 })
+  const next = { ...set, id: 'next-fixture-set', name: 'Next fixture set' }
+  let changed = false
+  mockReads({ [`${phonePath}/table-assignment-options`]: [next] })
+  vi.mocked(apiFetch).mockImplementation(async path => {
+    if (path === phonePath) return Response.json(phone)
+    if (path === `${phonePath}/table-assignment`) return Response.json(changed
+      ? { ...assignment, tableSetId: next.id, tableSetName: next.name } : assignment)
+    throw new Error(`Unexpected request ${path}`)
+  })
+  vi.mocked(apiPostRaw).mockImplementation(async () => { changed = true; return Response.json({}) })
+  renderPhone()
+  await screen.findByRole('option', { name: 'Next fixture set (published)' })
+  fireEvent.click(screen.getByRole('button', { name: 'Assign set' }))
+  const link = await screen.findByRole('link', { name: 'Preview download for this phone' })
+  await waitFor(() => expect(link).toHaveAttribute('href', '/table-sets/next-fixture-set?schedulePhone=fixture-phone#table-assignment-heading'))
+  expect(readDownloadReviews()).toEqual([{ terminalId: phone.id, tableSetId: next.id, reason: 'assignment' }])
+  expect(apiPostRaw).toHaveBeenCalledTimes(1)
 })
 
 it('excludes incompatible published sets from defaults and shows the reason for a stale rejected assignment', async () => {

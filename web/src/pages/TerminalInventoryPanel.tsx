@@ -101,7 +101,7 @@ function InventoryInput({ field, value, onChange, disabled }: {
   </label>
 }
 
-export function TerminalInventoryPanel({ terminalId }: { terminalId: string }) {
+export function TerminalInventoryPanel({ terminalId, onSaved }: { terminalId: string; onSaved?: () => void }) {
   const endpoint = `/api/terminals/${terminalId}/inventory`
   const canUpdate = canPerform('inventory', op.update)
   const [saved, setSaved] = useState<Inventory | null>(null)
@@ -155,6 +155,7 @@ export function TerminalInventoryPanel({ terminalId }: { terminalId: string }) {
       setSaved({ ...saved, ...(data as SavedProfile) })
       setEditing(false)
       setNotice('Terminal inventory saved.')
+      if (data.revision !== saved.revision) onSaved?.()
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : 'Could not save terminal inventory.')
     } finally {

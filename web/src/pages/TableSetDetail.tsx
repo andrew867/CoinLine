@@ -61,6 +61,7 @@ export function TableSetDetail() {
   const [searchParams] = useSearchParams()
   const initialRecord = Number(searchParams.get('record') ?? 29)
   const initialFamily = searchParams.get('family') ?? ''
+  const initialSchedulePhone = searchParams.get('schedulePhone') ?? ''
   const [d, setD] = useState<Detail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -253,8 +254,8 @@ export function TableSetDetail() {
         disabled={recordDirty || targetChanged} onSaved={load} />}
       {canReadRecords && <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
         versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />}
-      {!draft && canPreviewScope && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
-        codeOnly={codeOnly} firmwareSchedule={d.firmwareSchedule} />}
+      {!draft && canPreviewScope && <TableSetAssignment key={`assignment:${id}:${initialSchedulePhone}`} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
+        codeOnly={codeOnly} firmwareSchedule={d.firmwareSchedule} initialSchedulePhone={initialSchedulePhone} />}
       {!draft && !canPreviewScope && canPerform('downloads', op.read) && <TableDownloadScheduleList setId={id} />}
       {canReadRecords && <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>

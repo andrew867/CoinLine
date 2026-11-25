@@ -3,6 +3,7 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch, apiGet, apiGetRaw, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
+import { readDownloadReviews, rememberDownloadReview } from '../api/downloadReviews'
 import { TableSetAssignment } from './TableSetAssignment'
 import { TableSetDetail } from './TableSetDetail'
 
@@ -12,6 +13,51 @@ afterEach(() => {
   cleanup()
   vi.resetAllMocks()
   consoleSession.clear()
+})
+
+it('opens an exact phone in full-download mode without scheduling until confirmed and resolves the matching review', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 1, 'table-assignments': 3, downloads: 4 })
+  rememberDownloadReview({ terminalId: 'review-phone', tableSetId: 'review-set', reason: 'assignment' })
+  rememberDownloadReview({ terminalId: 'other-phone', tableSetId: 'review-set', reason: 'inventory' })
+  vi.mocked(apiGet).mockImplementation(async path => (path === '/api/tables/scope-options?targetType=terminal'
+    ? [{ id: 'review-phone', displayName: 'Review phone' }] : []) as never)
+  vi.mocked(apiGetRaw).mockResolvedValue(Response.json({ targets: [{ id: 'review-phone', displayName: 'Review phone', eligible: true, reason: null }] }))
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ scheduled: 1, alreadyScheduled: 0 }))
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ id: 'review-set', name: 'Review set', status: 1, revision: 1, optionalRecordRemovals: [], firmwareFindings: [], versions: [] }))
+  render(<MemoryRouter initialEntries={['/table-sets/review-set?schedulePhone=review-phone#table-assignment-heading']}>
+    <Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes>
+  </MemoryRouter>)
+  await screen.findByRole('option', { name: 'Review phone' })
+  expect(screen.getByLabelText('Phone')).toHaveValue('review-phone')
+  expect(apiPostRaw).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Preview phones' }))
+  expect(await screen.findByRole('button', { name: 'Schedule for 1 phone' })).toBeVisible()
+  expect(screen.getByLabelText('Delivery')).toHaveValue('now')
+  expect(apiPostRaw).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Schedule for 1 phone' }))
+  expect(await screen.findByText('Scheduled for 1 phone. Already scheduled for 0.')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/review-set/schedules', expect.objectContaining({ targetType: 'terminal', targetId: 'review-phone', terminalIds: ['review-phone'], availableAtUtc: null }))
+  expect(readDownloadReviews()).toEqual([{ terminalId: 'other-phone', tableSetId: 'review-set', reason: 'inventory' }])
+})
+
+it('does not clear a full configuration review when only a selected record is scheduled', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { downloads: 4 })
+  const review = { terminalId: 'review-phone', tableSetId: 'review-set', reason: 'assignment' as const }
+  rememberDownloadReview(review)
+  vi.mocked(apiGet).mockResolvedValue([{ id: review.terminalId, displayName: 'Review phone' }] as never)
+  vi.mocked(apiGetRaw).mockResolvedValue(Response.json({ targets: [{ id: review.terminalId, displayName: 'Review phone', eligible: true }], recordNumbers: [29] }))
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ scheduled: 1, alreadyScheduled: 0 }))
+  render(<MemoryRouter><TableSetAssignment setId={review.tableSetId} revision={1}
+    versions={[{ tableNumber: 29, definitionName: 'Advertising', payloadLengthBytes: 200, validationPassed: true, configurationId: null }]}
+    optionalRecords={[]} initialSchedulePhone={review.terminalId} /></MemoryRouter>)
+  await screen.findByRole('option', { name: 'Review phone' })
+  fireEvent.change(screen.getByLabelText('Assignment action'), { target: { value: 'schedule-records' } })
+  fireEvent.click(screen.getByLabelText(/MT29.*Advertising/))
+  fireEvent.click(screen.getByRole('button', { name: 'Preview phones' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Schedule for 1 phone' }))
+  expect(await screen.findByText('Scheduled for 1 phone. Already scheduled for 0.')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/review-set/schedules', expect.objectContaining({ recordNumbers: [29] }))
+  expect(readDownloadReviews()).toEqual([review])
 })
 
 it('keeps existing firmware schedules by default and confirms the exact records to replace', async () => {

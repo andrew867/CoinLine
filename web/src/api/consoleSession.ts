@@ -1,3 +1,5 @@
+import { clearDownloadReviews } from './downloadReviews'
+
 const keys = {
   token: 'coinline.token', apiKey: 'coinline.apiKey', displayName: 'coinline.displayName',
   role: 'coinline.role', permissions: 'coinline.permissions',
@@ -29,6 +31,7 @@ export const consoleSession = {
     else localStorage.removeItem(keys.apiKey)
   },
   save(token: string, apiKey: string, displayName?: string, role?: string, permissions?: ScreenPermissions | null) {
+    if (localStorage.getItem(keys.token) !== token) clearDownloadReviews()
     localStorage.setItem(keys.token, token)
     consoleSession.setApiKey(apiKey)
     if (displayName) localStorage.setItem(keys.displayName, displayName)
@@ -40,5 +43,6 @@ export const consoleSession = {
   },
   clear() {
     for (const key of Object.values(keys)) localStorage.removeItem(key)
+    clearDownloadReviews()
   },
 }

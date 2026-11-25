@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
 import { FirmwareLiveFlashBanner } from './FirmwareLiveFlashBanner'
 import { GlobalSearch } from './GlobalSearch'
 import { consoleSession, type ScreenPermissions } from '../api/consoleSession'
+import { clearDownloadReviews, readDownloadReviews } from '../api/downloadReviews'
+import { DownloadReviewFooter } from './DownloadReviewReminder'
 
 const screenByPath: Record<string, string> = {
   '/': 'overview',
@@ -115,6 +117,14 @@ export function Layout() {
   const role = consoleSession.role()
   const permissions = consoleSession.permissions()
   const allow = (path: string) => mayOpenScreen(path, role, permissions)
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.storageArea === localStorage && (event.key === 'coinline.token' || event.key === null))
+        clearDownloadReviews()
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
   return (
     <div className="shell">
       <aside className="sidebar">
@@ -139,6 +149,7 @@ export function Layout() {
             </div>
           ))}
           <button type="button" className="sign-out" onClick={() => {
+            if (readDownloadReviews().length > 0 && !window.confirm('There are pending download reviews in this tab. Sign out without reviewing them?')) return
             consoleSession.clear()
             window.location.assign('/login')
           }}>Sign out</button>
@@ -153,6 +164,7 @@ export function Layout() {
             <p>Your account does not have permission for this screen. Choose another page from the menu, or contact an administrator.</p>
           </section>
         )}
+        <DownloadReviewFooter canReadPhones={role === 'Admin' || permissions === null || ((permissions.phones ?? 0) & 1) !== 0} />
       </main>
     </div>
   )
