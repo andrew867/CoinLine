@@ -76,7 +76,7 @@ export function GraphicalLinkField({ label, value, onChange }: InputProps) {
     <div className="native-graphical-field-pair">
       <label className="native-table-field">
         <span>{label}</span>
-        <select value={selection} onChange={(event) => onChange(event.target.value)}>
+        <select aria-label={label} value={selection} onChange={(event) => onChange(event.target.value)}>
           <option value={noScreen}>None</option>
           {Array.from({ length: screenCount }, (_, index) => <option key={index} value={index}>Screen {index + 1}</option>)}
           <option value={applicationScreen}>Built-in application screen</option>
@@ -86,7 +86,7 @@ export function GraphicalLinkField({ label, value, onChange }: InputProps) {
       {hasPanel && (
         <label className="native-table-field">
           <span>{label} panel</span>
-          <select value={packed >> 6} onChange={(event) => onChange(String(screen | Number(event.target.value) << 6))}>
+          <select aria-label={`${label} panel`} value={packed >> 6} onChange={(event) => onChange(String(screen | Number(event.target.value) << 6))}>
             {Array.from({ length: 4 }, (_, index) => <option key={index} value={index}>Panel {index + 1}</option>)}
           </select>
         </label>
