@@ -248,6 +248,6 @@ The local lab assignment was updated with the corrected MT92 and the new MT23. T
 
 ## Evidence inspected
 
-- Legacy desktop WinHelp topics for Configuration Management, Terminal Management, Advertising, Edit Entry, Edit Block and Simulate, cross-checked against the archived executable's decompiled configuration and preview paths.
+- Legacy desktop WinHelp topics for Configuration Management, Terminal Management, Advertising, Edit Entry, Edit Block and Simulate, cross-checked against the corresponding legacy manager configuration and preview logic.
 - Older and later terminal DLOG message definitions, dispatch catalogues, packed table layouts and feature guards. Observed lab sizes and applications come from the [emulator acceptance record](phase-5-gate-status.md).
 - CoinLine implementation of [table distribution](../../backend/src/HostPlatform.Infrastructure/Tables/TableDistributionService.cs), [NCC dispatch](../../backend/src/HostPlatform.Api/Hosting/NccLinkProcessor.cs), the [DLOG registry](../../backend/src/HostPlatform.Protocols.Dlog/DlogMessageTypeRegistry.cs) and [TCP integration tests](../../backend/tests/HostPlatform.Tests.Integration/NccOperationalTests.cs).
