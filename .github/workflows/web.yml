@@ -86,6 +86,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify reference record catalogue workflow
+        run: npm run e2e -- e2e/reference-record-catalogue.spec.ts --output test-results/reference-record-catalogue
+        env:
+          CI: "true"
+
       - name: Verify observed firmware profiles workflow
         run: npm run e2e -- e2e/observed-firmware-profiles.spec.ts --output test-results/observed-firmware-profiles
         env:

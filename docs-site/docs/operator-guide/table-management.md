@@ -228,3 +228,10 @@ Open an alarm to see its name and number, the phone that reported it, and when C
 From **Table sets**, open **Inmate Feature Configurations**. The editor covers PIN entry, call processing, voice announcements, disconnect warnings, recording equipment, call timers and other settings. Enter a name of up to six characters and an optional description. Use **Copy as new** to reuse the current settings under a new name.
 
 The editor checks the legacy timer ranges and the minimum 10-second gap between disconnect warnings. Recorder codes accept up to two DTMF characters, and the automated operator code accepts up to three. A saved configuration can be selected in the [phone's Inmate terminal configuration panel](terminals.md#inmate-terminal-configuration). Terminal download awaits evidence of the Inmate firmware record layout.
+
+
+## Reference record catalogue
+
+Open **Table definitions** to find the master record catalogue. Search by MT number, reference name or registered definition name, and filter by native editor, observed length, documented reference, scheduler record or operational message. Expand a record to inspect exact packed layout lengths and template availability separately from firmware-specific lengths and retained emulator MT14 observations. A narrow behavior observation is displayed only where a previous emulator milestone established it; it does not certify all fields or physical hardware.
+
+The registered definitions remain a separate storage directory. A historical stored name is not authoritative wire semantics; for example MT10 is terminal status and MT20 is clock synchronization. MT94 is a separate code-download scheduling record. Viewing the reference catalogue does not change definitions, sets, assignments or payload hashes.

@@ -87,6 +87,9 @@ public static class LegacyTerminalTableRequirements
         _ => null
     };
 
+    public static IReadOnlySet<int> ReferencedRecordNumbers() =>
+        Enum.GetValues<Group>().SelectMany(group => Describe(group, expandedPrompts: false).Item2).ToHashSet();
+
     public static TerminalFamilyTableReview Review(TerminalFamily family, IEnumerable<(int Number, byte[] Payload, string? LayoutProfile)> records,
         FirmwareTableProfile? firmware)
     {

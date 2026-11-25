@@ -56,7 +56,7 @@ public static class OperatorPermissions
             ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
             ("Tables", A | U, "FirmwareOptions"));
-        Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById"), ("Tables", A, "CreateDefinition"));
+        Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
