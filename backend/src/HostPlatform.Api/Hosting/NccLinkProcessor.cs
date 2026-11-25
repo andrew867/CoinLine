@@ -104,7 +104,7 @@ internal sealed class NccLinkProcessor(
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested && HasPendingInstall)
                 {
                     var firmwareTransfer = _firmwareTables != null;
-                    await FailOutstandingAsync("acknowledgement was missing");
+                    await FailOutstandingAsync("acknowledgement was missing", missingAcknowledgement: true);
                     if (firmwareTransfer)
                         break;
                     continue;
@@ -177,7 +177,7 @@ internal sealed class NccLinkProcessor(
         finally
         {
             if (_batch?.Status == DownloadBatchStatus.Running)
-                await FailOutstandingAsync("acknowledgement was missing");
+                await FailOutstandingAsync("acknowledgement was missing", missingAcknowledgement: true);
 
             outbound.Unregister(_session.Id);
 
@@ -1189,7 +1189,7 @@ internal sealed class NccLinkProcessor(
         {
             if (transfer.Retransmissions >= MaxInstallRetransmissions)
             {
-                await FailOutstandingAsync($"terminal rejected the install frame (session frame {_lastReceivedSequence})");
+                await FailOutstandingAsync($"terminal rejected the install frame (session frame {_lastReceivedSequence})", ackStatus: "link_nak");
                 return;
             }
 
@@ -1231,11 +1231,13 @@ internal sealed class NccLinkProcessor(
             var hex = Convert.ToHexString(rawFrame);
             foreach (var item in _waiting.Values.ToList())
             {
-                Advance(item, TableDownloadTrigger.NakReceived);
+                var notSent = DownloadFailureDiagnostics.WasNotSent(item.HostDownloadPhase);
+                if (!notSent)
+                    Advance(item, TableDownloadTrigger.NakReceived);
                 Advance(item, TableDownloadTrigger.FailPermanent);
                 item.Succeeded = false;
-                item.LastAckStatus = "nak";
-                item.ErrorDetail = "negative acknowledgement " + hex;
+                item.LastAckStatus = notSent ? "not_sent" : "nak";
+                item.ErrorDetail = notSent ? DownloadFailureDiagnostics.NotSentReason : "negative acknowledgement " + hex;
             }
 
             _waiting.Clear();
@@ -1263,14 +1265,37 @@ internal sealed class NccLinkProcessor(
             await FinishBatchAsync(null);
     }
 
-    private async Task FailOutstandingAsync(string reason)
+    private async Task FailOutstandingAsync(string reason, bool missingAcknowledgement = false, string ackStatus = "interrupted")
     {
+        var transfer = _firmwareTables;
+        var active = _waiting.FirstOrDefault(pair => !DownloadFailureDiagnostics.WasNotSent(pair.Value.HostDownloadPhase));
+        if (missingAcknowledgement)
+            ackStatus = "missing";
+        if (missingAcknowledgement && transfer != null)
+        {
+            if (transfer.IsEnding)
+                reason = "End-of-data link acknowledgement was missing.";
+            else if (active.Value == null)
+                reason = "Start-of-download link acknowledgement was missing.";
+            else if (transfer.InFlight != null)
+            {
+                ackStatus = "missing_link_ack";
+                reason = $"Link acknowledgement was missing for MT{active.Key} fragment.";
+            }
+            else if (transfer.WaitingForTableAck)
+            {
+                ackStatus = "missing_table_ack";
+                reason = $"Table acknowledgement was missing for MT{active.Key} (MT14).";
+            }
+        }
+
         foreach (var item in _waiting.Values)
         {
+            var notSent = DownloadFailureDiagnostics.WasNotSent(item.HostDownloadPhase);
             Advance(item, TableDownloadTrigger.FailPermanent);
             item.Succeeded = false;
-            item.LastAckStatus = "missing";
-            item.ErrorDetail = reason;
+            item.LastAckStatus = notSent ? "not_sent" : ackStatus;
+            item.ErrorDetail = notSent ? DownloadFailureDiagnostics.NotSentReason : reason;
         }
 
         _waiting.Clear();

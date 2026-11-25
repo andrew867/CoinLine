@@ -6,7 +6,7 @@ const phone = {
   displayName: 'Workshop test phone', terminalIdHex: '0000000123', status: 1,
   terminalGroupId: null, groupName: null, onCall: false, lastSessionAtUtc: null,
 }
-const failure = 'acknowledgement was missing'
+const failure = 'Link acknowledgement was missing for MT131 fragment.'
 const batch = {
   id: '00000000-0000-4000-8000-000000000103', terminalId: phone.id, status: 3, lastError: failure,
 }
@@ -14,9 +14,11 @@ const download = {
   ...batch, tableSetName: 'Workshop setup', scope: 0, retryCount: 0, diagnosticsJson: null,
   timeline: [
     { id: 'step-1', stepIndex: 1, tableDefinitionName: 'Feature options (MT26)', hostDownloadPhaseName: 'Completed',
-      hostDownloadPhase: 4, lastAckStatus: 'ack', itemStatus: 2, errorDetail: null, payloadSha256Hex: 'a'.repeat(64) },
-    { id: 'step-2', stepIndex: 2, tableDefinitionName: 'Text advertising (MT29)', hostDownloadPhaseName: 'Failed',
-      hostDownloadPhase: 5, lastAckStatus: 'missing', itemStatus: 3, errorDetail: failure, payloadSha256Hex: 'b'.repeat(64) },
+      hostDownloadPhase: 9, lastAckStatus: 'ack', itemStatus: 3, errorDetail: null, payloadSha256Hex: 'a'.repeat(64) },
+    { id: 'step-2', stepIndex: 2, tableDefinitionName: 'Graphical advertising (MT131)', hostDownloadPhaseName: 'Failed',
+      hostDownloadPhase: 10, lastAckStatus: 'missing_link_ack', itemStatus: 4, errorDetail: failure, payloadSha256Hex: 'b'.repeat(64) },
+    { id: 'step-3', stepIndex: 3, tableDefinitionName: 'Graphical continuation (MT132)', hostDownloadPhaseName: 'Failed',
+      hostDownloadPhase: 10, lastAckStatus: 'not_sent', itemStatus: 4, errorDetail: 'Not sent because the download stopped before this table.', payloadSha256Hex: 'c'.repeat(64) },
   ],
 }
 
@@ -73,8 +75,11 @@ test('find the table missing an acknowledgement on a phone’s failed download',
   await expect(page.getByText(phone.id, { exact: true })).toBeVisible()
   await expect(page.getByRole('alert')).toHaveText(failure)
 
-  const missing = page.getByRole('listitem').filter({ hasText: 'Text advertising (MT29)' })
-  await expect(missing).toContainText('ACK: missing')
+  const missing = page.getByRole('listitem').filter({ hasText: 'Graphical advertising (MT131)' })
+  await expect(missing).toContainText('Acknowledgement: Link acknowledgement missing')
   await expect(missing).toContainText(failure)
-  await expect(page.getByRole('listitem').filter({ hasText: 'Feature options (MT26)' })).toContainText('ACK: ack')
+  const notSent = page.getByRole('listitem').filter({ hasText: 'Graphical continuation (MT132)' })
+  await expect(notSent).toContainText('Acknowledgement: Not sent')
+  await expect(notSent).toContainText('Not sent because the download stopped before this table.')
+  await expect(page.getByRole('listitem').filter({ hasText: 'Feature options (MT26)' })).toContainText('Acknowledgement: Table acknowledged')
 })
