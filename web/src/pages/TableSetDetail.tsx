@@ -216,7 +216,7 @@ export function TableSetDetail() {
         {draft && recordDirty && targetChanged && <p>Save the record edits before changing the target.</p>}
         {d.targetFirmware && <p>Table layout <strong>{d.tableProfile ?? 'Unverified'}</strong></p>}
         {d.tableProfileEvidence && <p className="page-intro">{d.tableProfileEvidence.recordCount} known record lengths.
-          {' '}{d.tableProfileEvidence.terminalAcknowledgedCount} with OEM-emulator acknowledgements.
+          {' '}{d.tableProfileEvidence.terminalAcknowledgedCount} acknowledged by emulated terminals.
           {d.tableProfileEvidence.completeCatalogue && ' Records outside the compiled catalogue cannot be published for this target.'}</p>}
         {!!d.firmwareFindings?.length && <ul>{d.firmwareFindings.map((finding) => (
           <li key={`${finding.tableNumber}:${finding.message}`}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}

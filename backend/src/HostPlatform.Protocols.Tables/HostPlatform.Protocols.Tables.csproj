@@ -3,6 +3,7 @@
   <ItemGroup>
     <ProjectReference Include="..\HostPlatform.Domain\HostPlatform.Domain.csproj" />
     <ProjectReference Include="..\HostPlatform.Protocols.Ncc\HostPlatform.Protocols.Ncc.csproj" />
+    <EmbeddedResource Include="Assets\GraphicalStarter\*.bin" />
   </ItemGroup>
 
   <PropertyGroup>

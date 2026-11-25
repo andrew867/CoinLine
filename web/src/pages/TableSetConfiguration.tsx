@@ -6,6 +6,8 @@ import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback
 import type { ExchangeFile } from './localDialingExchangeData'
 
 const NativeTableEditor = lazy(async () => ({ default: (await import('./NativeTableEditor')).NativeTableEditor }))
+const starterFrames = Object.entries(import.meta.glob<string>('../assets/graphical-starter/*.png',
+  { eager: true, query: '?url', import: 'default' })).sort(([a], [b]) => a.localeCompare(b)).map(([, url]) => url)
 
 type AdvertisingSnapshot = AdvertisingFeatures & { slots: AdvertisingSlot[]; revision: number; sha256: string | null }
 type Definition = { id: string; tableNumber: number; name: string }
@@ -85,6 +87,8 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
         </label>
       </div>
       <p className="page-intro">{panel.fields}</p>
+      {draft && !recordDirty && tableNumber >= 131 && tableNumber <= 133 && canPerform('table-records', op.add) &&
+        <GraphicalStarterPanel setId={setId} onSaved={onImported} />}
       {tableNumber === 29 ? (
         <AdvertisingEditor key={setId} setId={setId} draft={canWriteRecord} revision={advertisingRevision} onSaved={onSaved} onDirty={onRecordDirty} />
       ) : (
@@ -104,6 +108,58 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
       )}
     </section>
   )
+}
+
+function GraphicalStarterPanel({ setId, onSaved }: { setId: string; onSaved: () => void }) {
+  const [enableSampleMenu, setEnableSampleMenu] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [message, setMessage] = useState('')
+  const [playing, setPlaying] = useState(false)
+  const [frame, setFrame] = useState(0)
+  useEffect(() => {
+    if (!playing || starterFrames.length === 0) return
+    const timer = window.setInterval(() => setFrame(current => (current + 1) % starterFrames.length), 500)
+    return () => window.clearInterval(timer)
+  }, [playing])
+
+  async function create() {
+    setBusy(true)
+    setMessage('')
+    try {
+      const response = await apiPostRaw(`/api/tables/sets/${setId}/graphical-starter`, { enableSampleMenu })
+      const result = await response.json()
+      if (!response.ok) throw new Error(result.error ?? 'Could not add graphical starter records.')
+      setMessage(result.created === 0 ? 'The matching starter records are already in this draft.'
+        : `${result.created} graphical records added. Open the simulator to preview the loop.`)
+      onSaved()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not add graphical starter records.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return <details onToggle={event => { if (!event.currentTarget.open) setPlaying(false) }}>
+    <summary>Start graphical advertising from sample artwork</summary>
+    <p>Add MT131, MT132 and MT133 with sixteen 500 ms bitmap frames and an example menu.
+      Existing different records are never replaced. Usage statistics and connected-call advertising are disabled initially.</p>
+    {starterFrames.length > 0 && <div className="row-actions">
+      <img src={starterFrames[frame]} alt="Graphical starter globe artwork preview" width={224} height={144}
+        style={{ imageRendering: 'pixelated', maxWidth: '100%', height: 'auto' }} />
+      <button type="button" onClick={() => setPlaying(value => !value)}>
+        {playing ? 'Pause sample animation' : 'Play sample animation'}
+      </button>
+      <span>Frame {frame + 1} of {starterFrames.length}</span>
+    </div>}
+    <label><input type="checkbox" checked={enableSampleMenu}
+      onChange={event => setEnableSampleMenu(event.target.checked)} disabled={busy} />
+      Enable the sample off-hook navigation menu (no dialed numbers)
+    </label>
+    <div className="row-actions">
+      <button type="button" onClick={() => void create()} disabled={busy}>{busy ? 'Adding records…' : 'Add graphical starter'}</button>
+    </div>
+    {message && <p role="status">{message}</p>}
+  </details>
 }
 
 function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Props, 'setId' | 'draft' | 'onSaved'> & {

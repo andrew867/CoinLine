@@ -8,7 +8,7 @@ type TableProfile = { id: string; label: string; verifiedLengths: Record<string,
 function profileEvidence(profile: TableProfile) {
   const count = Object.keys(profile.verifiedLengths).length
   const acked = profile.terminalAcknowledgedRecords.length
-  return `${count} known record lengths, ${acked} with OEM-emulator acknowledgements${profile.completeCatalogue ? '. Complete image catalogue.' : '.'}`
+  return `${count} known record lengths, ${acked} acknowledged by emulated terminals${profile.completeCatalogue ? '. Complete image catalogue.' : '.'}`
 }
 
 export function FirmwareVersionsPage() {

@@ -32,6 +32,23 @@ it('identifies MT72 and its native IOPR configuration from the table-set editor'
   expect(await screen.findByRole('spinbutton', { name: /IOPR access number/ })).toHaveValue(180)
 })
 
+it('adds the complete graphical starter without importing unrelated records', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 5 })
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ supported: false, reason: 'Choose a template',
+    templates: [{ profile: 'Later packed profile', length: 9224 }] }))
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ created: 3, records: [131, 132, 133] }))
+  const saved = vi.fn()
+  render(<TableSetConfiguration setId="set-fixture" draft initialRecord={131}
+    versions={[]} onSaved={saved} recordDirty={false} onRecordDirty={vi.fn()} />)
+  fireEvent.click(screen.getByText('Start graphical advertising from sample artwork'))
+  fireEvent.click(screen.getByLabelText(/Enable the sample off-hook navigation menu/))
+  fireEvent.click(screen.getByRole('button', { name: 'Add graphical starter' }))
+  await waitFor(() => expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/set-fixture/graphical-starter',
+    { enableSampleMenu: true }))
+  expect(await screen.findByText(/3 graphical records added/)).toBeVisible()
+  expect(saved).toHaveBeenCalledTimes(1)
+})
+
 it('does not let Read plus Add edit an existing draft record', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 5 })
   vi.mocked(apiFetch).mockResolvedValue(Response.json({ supported: true, editable: true, profile: 'Fixture',
