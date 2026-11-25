@@ -18,7 +18,7 @@ Review the existing host-ledger and reconciliation workflows under [Cards and ac
 
 Enable this only in an isolated lab with no external call routing or payment processing. The synthetic provider recognizes the existing designated emulator test fixture, not arbitrary cards. Each binding must identify a registered phone, a magstripe account belonging to that phone, a product marked as a test fixture, and a ten-digit fictional destination in the reserved 555-01xx range. The account must have a test-fixture credential designation and a consistent USD ledger. Approval requires a matching positive native runtime quote from the previous five minutes and sufficient test balance.
 
-Supply these application configuration keys in a private local environment file rather than committing configuration:
+Supply these application configuration keys in the API process environment rather than committing configuration. With Docker Compose, use an untracked, lab-only override for the API service environment; a Compose .env file is not automatically passed into the API container. Leave the ordinary and production overlays unchanged:
 
 | Key | Value |
 | --- | --- |
