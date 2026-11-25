@@ -58,6 +58,10 @@ public static class TableSetFirmwareCompatibility
                 yield return finding;
             foreach (var finding in ReviewServiceRestriction(verifiedRecords, later))
                 yield return finding;
+            foreach (var number in new[] { CollectionPolicyWire.CommunicationsType, CollectionPolicyWire.CallCarrierType })
+                if (verifiedRecords.TryGetValue(number, out var collection))
+                    foreach (var finding in CollectionPolicyWire.Review(collection, later))
+                        yield return new(number, finding.Blocking, finding.Message);
             if (verifiedRecords.TryGetValue(MessagingServiceWire.MessageType, out var messaging))
             {
                 if (MessagingServiceWire.ConfigurationIssue(messaging) is { } messagingIssue)

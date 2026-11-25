@@ -121,3 +121,32 @@ it('previews Audio-Gram permissions and changes the independent statistics optio
   await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/tables/sets/set-fixture/records/68/fields',
     expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"changes":{"statistics":"1"}') })))
 })
+
+it('edits the optional CDR mode independently of the later combined carrier mode', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+  const numeric = (key: string, label: string, value: string, max: number) => ({ key, label, value, editor: 'number', min: 0, max, maxLength: null, choices: null, help: null })
+  const select = (key: string, label: string, value: string, choices: { value: number; label: string }[]) =>
+    ({ ...numeric(key, label, value, 255), editor: 'select', choices })
+  const layout = { supported: true, editable: true, profile: 'Later packed profile', length: 19, revision: 1, sha256: 'fixture-hash', sections: [
+    { key: 'summary', label: 'Call and carrier statistics', fields: [numeric('days', 'Collection interval (days)', '3', 255), numeric('threshold', 'Statistics upload threshold', '2', 255),
+      numeric('startHour', 'Collection start hour', '2', 23), numeric('startMinute', 'Collection start minute', '15', 59),
+      select('carrierStatistics', 'Carrier statistics', '17', [{ value: 0, label: 'Disabled' }, { value: 1, label: 'Per carrier' }, { value: 17, label: 'Combined carrier summary' }])] },
+    { key: 'detail', label: 'Optional CDR logging', fields: [select('enabled', 'Optional CDR mode', '4', [{ value: 0, label: 'Normal calls only' }, { value: 4, label: 'Completed calls only' }, { value: 16, label: 'Completed except local coin and stored-value' }]),
+      numeric('detailThreshold', 'Optional CDR upload threshold', '40', 255), numeric('detailHour', 'Optional logging start hour', '20', 23), numeric('detailMinute', 'Optional logging start minute', '0', 59),
+      numeric('detailDays', 'Duration days', '0', 255), numeric('detailHours', 'Duration hours', '6', 23)] },
+    ...Array.from({ length: 4 }, (_, i) => ({ key: `timestamp-${i}`, label: `Report timestamp ${i + 1}`, fields: [
+      numeric(`timestamp-${i}.hour`, 'Hour', i === 0 ? '6' : '0', 23), numeric(`timestamp-${i}.minute`, 'Minute', '0', 59)] })),
+  ] }
+  vi.mocked(apiFetch).mockImplementation(async (_, options) => options?.method === 'PUT'
+    ? new Response(null, { status: 204 }) : Response.json(layout))
+  renderEditor(34)
+  expect(await screen.findByText(/Daily checkpoints at 02:15, 06:00/)).toBeVisible()
+  expect(screen.getByText('Combined (MT71 reference 253)')).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Section or entry'), { target: { value: 'detail' } })
+  const mode = screen.getByLabelText('Optional CDR mode')
+  fireEvent.change(mode, { target: { value: '16' } })
+  expect(screen.getByText('Combined (MT71 reference 253)')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/tables/sets/set-fixture/records/34/fields',
+    expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"changes":{"enabled":"16"}') })))
+})
