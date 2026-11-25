@@ -15,6 +15,7 @@ import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { InterfaceTimingPanel, interfaceTimingKeys } from './InterfaceTimingPanel'
+import { TimeDiscountCalendar } from './TimeDiscountCalendar'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
@@ -382,6 +383,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         return field && effectiveValue(field)
       }} />}
       {(number === 32 || number === 34) && <CollectionPolicyPreview number={number} later={layout.profile === 'Later packed profile'} value={key => {
+        const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
+        return field && effectiveValue(field)
+      }} />}
+      {number === 152 && layout.length === 95 && <TimeDiscountCalendar key={setId} value={key => {
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}
