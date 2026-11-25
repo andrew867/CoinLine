@@ -58,6 +58,13 @@ public static class TableSetFirmwareCompatibility
                 yield return finding;
             foreach (var finding in ReviewServiceRestriction(verifiedRecords, later))
                 yield return finding;
+            if (verifiedRecords.TryGetValue(MessagingServiceWire.MessageType, out var messaging))
+            {
+                if (MessagingServiceWire.ConfigurationIssue(messaging) is { } messagingIssue)
+                    yield return new(MessagingServiceWire.MessageType, true, messagingIssue);
+                yield return new(MessagingServiceWire.MessageType, false,
+                    "Audio-Gram is a conditional firmware feature. The matching record length does not establish that this terminal build accepts MT68 or supports the switch-provided service.");
+            }
             foreach (var finding in ReviewMultiPayRates(verifiedRecords, later))
                 yield return finding;
         }

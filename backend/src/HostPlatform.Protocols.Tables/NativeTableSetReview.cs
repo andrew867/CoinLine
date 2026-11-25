@@ -93,6 +93,11 @@ public static class NativeTableSetReview
             findings.Add(new(NativeTableLayouts.TimeDiscountRecord,
                 "The scheduled discounts refer to MT93. This set relies on the phone's existing compatible discount rates."));
 
+        var messaging = Get(records, MessagingServiceWire.MessageType, MessagingServiceWire.RecordLength);
+        if (messaging != null)
+            foreach (var finding in MessagingServiceWire.OperatingFindings(messaging))
+                findings.Add(new(MessagingServiceWire.MessageType, finding));
+
         return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings);
     }
 

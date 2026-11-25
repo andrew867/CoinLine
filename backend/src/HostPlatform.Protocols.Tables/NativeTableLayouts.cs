@@ -8,7 +8,7 @@ public static partial class NativeTableLayouts
     public const string MultiPay = "MTR 1.9 packed";
     public const byte CallInRecord = 35;
     public const byte AnswerSupervisionRecord = 49;
-    public const byte MessagingRecord = 68;
+    public const byte MessagingRecord = MessagingServiceWire.MessageType;
     internal const byte TimeDiscountRecord = 152;
     private const int LaterAnswerSupervisionLength = 263;
     public const string Later = "Later packed profile";
@@ -98,15 +98,10 @@ public static partial class NativeTableLayouts
 
     internal static void ValidateMessagingChanges(ReadOnlySpan<byte> original, ReadOnlySpan<byte> updated)
     {
-        if (updated[19] == 0 || (original[19] != 0 && original[..20].SequenceEqual(updated[..20])))
+        if (updated[19] == 0 || (original[..20].SequenceEqual(updated[..20]) && original[42] == updated[42]))
             return;
-        if (!NativeTableField.IsUsableMessagingKey(updated.Slice(1, 8)))
-            throw new InvalidOperationException("Enter a valid messaging service key before enabling the service.");
-        var serviceNumber = DialField("serviceNumber", "Messaging service number", 9, 10).Read(updated);
-        if (string.IsNullOrEmpty(serviceNumber))
-            throw new InvalidOperationException("Enter a valid messaging service number before enabling the service.");
-        if (updated[42] > 9)
-            throw new InvalidOperationException("Choose a protocol version from 0 through 9 before enabling the service.");
+        if (MessagingServiceWire.ConfigurationIssue(updated) is { } issue)
+            throw new InvalidOperationException(issue);
     }
 
     private static IEnumerable<NativeTableLayout> Build()
@@ -202,7 +197,7 @@ public static partial class NativeTableLayouts
                         Bits($"response-{index}.call", $"{label} call type", 8 + index, 15, CallKinds),
                         Bits($"response-{index}.payment", $"{label} payment type", 8 + index, 112, PaymentKinds) })]));
 
-        yield return Layout(MessagingRecord, 72,
+        yield return Layout(MessagingRecord, MessagingServiceWire.RecordLength,
             Section("service", "Access and reporting",
                 Select("enabled", "Messaging service", 19, (0, "Disabled"), (1, "Enabled")),
                 DialField("serviceNumber", "Messaging service number", 9, 10),
@@ -210,7 +205,7 @@ public static partial class NativeTableLayouts
                     Help: "Enter an eight-digit replacement key. Leave blank to keep the stored key."),
                 Field("protocolVersion", "Protocol version", 42, max: 9),
                 Select("cdrs", "Send service call records", 20, (0, "Disabled"), (1, "Enabled")),
-                Select("statistics", "Collect service statistics", 21, (0, "Disabled"), (1, "Enabled"))),
+                Bits("statistics", "Collect service statistics", 21, 1, (0, "Disabled"), (1, "Enabled"))),
             Section("permissions", "Call and payment permissions",
                 Toggle("allowLocal", "Local calls", 34, 1),
                 Toggle("allowIntraArea", "Intra-area toll calls", 34, 2),
@@ -232,12 +227,19 @@ public static partial class NativeTableLayouts
                 Bits("noGoTone", "No-go tone", 40, 0xF0, MessagingTones),
                 Bits("paidTone", "Payment accepted tone", 41, 0xF0, MessagingTones),
                 Field("syncTimeout", "Synchronization timeout (10 ms ticks)", 44, Word),
-                Field("digitPause", "Interdigit pause (10 ms ticks)", 46, Word),
+                Field("digitPause", "DTMF digit duration and interdigit pause (10 ms ticks)", 46, Word),
                 Field("goNoGoTimeout", "Go or no-go timeout (10 ms ticks)", 48, Word),
                 Field("answerTimeout", "Answer supervision timeout (10 ms ticks)", 50, Word),
                 Field("identityDelay", "Version and terminal ID dial delay (10 ms ticks)", 52, Word),
-                Field("sessionTimeout", "Overall session timeout (10 ms ticks)", 54, Word),
-                Field("lineReleaseDelay", "Line release delay (10 ms ticks)", 56, Word)));
+                Field("sessionTimeout", "Session timeout after go signal (10 ms ticks)", 54, Word),
+                Field("lineReleaseDelay", "Line release delay (10 ms ticks)", 56, Word,
+                    help: "The legacy manager labels this timing word Voice Prompt Play Delay. The documented terminal implementation uses it to wait for line release.")),
+            Section("spare", "Reserved fields", [
+                Field("spare4", "Spare 4 (word)", 58, Word), Field("spare5", "Spare 5 (word)", 60, Word),
+                .. Enumerable.Range(0, 10).Select(i => Field($"spare{i + 6}", $"Spare {i + 6} (byte)", 62 + i)),
+                .. Enumerable.Range(1, 7).Select(bit => Toggle($"statisticsSpare{bit}", $"Reserved statistics flag {bit}", 21, 1 << bit)),
+                .. Enumerable.Range(4, 4).Select(bit => Toggle($"callSpare{bit}", $"Reserved call type flag {bit}", 34, 1 << bit)),
+                .. Enumerable.Range(4, 4).Select(bit => Toggle($"paymentSpare{bit}", $"Reserved payment type flag {bit}", 35, 1 << bit))]));
 
         yield return new NativeTableLayout(SpareTableWire.MessageType, SpareTableWire.RecordLength, Later, SpareTableSections());
 

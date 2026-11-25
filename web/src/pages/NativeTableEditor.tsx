@@ -10,6 +10,7 @@ import { LocalDialingImport } from './LocalDialingImport'
 import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
+import { MessagingServicePreview } from './MessagingServicePreview'
 
 type Field = {
   key: string
@@ -324,6 +325,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         {layout.sections.some(section => section.fields.some(field => field.key === 'restriction' && effectiveValue(field) === '4')) &&
           <p>Mark the permitted entries in Call-Screening List and Quick Access Keys using <strong>Allow in configurable restricted service</strong>.</p>}
       </section>}
+      {number === 68 && <MessagingServicePreview value={key => {
+        const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
+        return field && effectiveValue(field)
+      }} />}
       {layout.profiles && layout.profiles.length > 1 && (
         <div className="table-config-selectors">
           <label>Firmware profile

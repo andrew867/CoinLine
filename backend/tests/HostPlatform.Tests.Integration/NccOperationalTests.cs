@@ -2619,6 +2619,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     [InlineData(8, 26)]
     [InlineData(44, 26)]
     [InlineData(44, 58)]
+    [InlineData(44, 68)]
     public async Task Terminal_call_sends_only_the_selected_records_and_acknowledges_the_original_batch(int trigger, int selectedType)
     {
         var terminal = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
@@ -2646,6 +2647,11 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             selected = NativeTableLayouts.Find(58, selected)!.Apply(selected, new Dictionary<string, string>
             {
                 ["restriction"] = "2", ["startHour"] = "20", ["durationHours"] = "6"
+            });
+        else if (selectedType == 68)
+            selected = NativeTableLayouts.Find(68, selected)!.Apply(selected, new Dictionary<string, string>
+            {
+                ["statistics"] = "1", ["lineReleaseDelay"] = "300", ["spare4"] = "100"
             });
         var unrelated = new byte[1192];
         unrelated[0] = 73;

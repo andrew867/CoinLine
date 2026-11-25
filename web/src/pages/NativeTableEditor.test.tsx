@@ -96,3 +96,28 @@ it('previews edited phone-local service hours and identifies the later permitted
   await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/tables/sets/set-fixture/records/58/fields',
     expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"durationMinutes":"20"') })))
 })
+
+it('previews Audio-Gram permissions and changes the independent statistics option without exposing a key', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+  const toggle = (key: string, label: string, value: string) => ({ key, label, value, editor: 'checkbox', min: 0, max: 1, maxLength: null, choices: null, help: null })
+  const select = (key: string, label: string, value: string) => ({ ...toggle(key, label, value), editor: 'select', choices: [{ value: 0, label: 'Disabled' }, { value: 1, label: 'Enabled' }] })
+  const layout = { supported: true, editable: true, profile: 'MTR 1.9 packed', length: 72, revision: 1, sha256: 'fixture-hash', sections: [
+    { key: 'service', label: 'Access and reporting', fields: [select('enabled', 'Messaging service', '1'), select('statistics', 'Collect service statistics', '0'), select('cdrs', 'Send service call records', '1'),
+      { key: 'serviceKey', label: 'Messaging service key', editor: 'password', value: null, min: 0, max: 0, maxLength: 8, choices: null, help: 'Leave blank to keep the stored key.' }] },
+    { key: 'permissions', label: 'Call and payment permissions', fields: [toggle('allowLocal', 'Local calls', 'true'), toggle('allowCoin', 'Coins', 'true')] },
+    { key: 'signaling', label: 'Signaling and timing', fields: [{ ...toggle('ringCycles', 'Unanswered ringing cycles', '1'), editor: 'number' }, { ...toggle('busyCycles', 'Busy cycles', '1'), editor: 'number' }] },
+  ] }
+  vi.mocked(apiFetch).mockImplementation(async (_, options) => options?.method === 'PUT'
+    ? new Response(null, { status: 204 }) : Response.json(layout))
+  renderEditor(68)
+  expect(await screen.findByRole('region', { name: 'Audio-Gram configuration preview' })).toBeVisible()
+  expect(screen.getByText('Local', { exact: true })).toBeVisible()
+  expect(screen.getByText('Coins', { exact: true })).toBeVisible()
+  expect(screen.getByText(/internal offer-detection thresholds/)).toBeVisible()
+  expect(screen.getByLabelText(/Messaging service key/)).toHaveValue('')
+  fireEvent.change(screen.getByLabelText('Collect service statistics'), { target: { value: '1' } })
+  expect(screen.getByText('Collect MT69')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/tables/sets/set-fixture/records/68/fields',
+    expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"changes":{"statistics":"1"}') })))
+})

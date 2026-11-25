@@ -638,6 +638,75 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Imported_audio_gram_record_preserves_spare_flags_and_requires_valid_enabled_configuration()
+    {
+        using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
+        {
+            label = "Audio-Gram fixture", tableProfileId = FirmwareTableProfiles.MultiPay200
+        });
+        firmware.EnsureSuccessStatusCode();
+        var targetFirmwareVersionId = (await firmware.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Audio-Gram review fixture", targetFirmwareVersionId });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+        var fieldsPath = path + "/records/68/fields";
+        var record = new byte[72];
+        record[0] = 68;
+        record[19] = 1;
+        record[21] = 0xA4;
+        record[34] = 0xA1;
+        record[35] = 0xB1;
+        record[36] = 5;
+        record[37] = 2;
+        record[39] = 0x10;
+        record[40] = 0x20;
+        new Random(68).NextBytes(record.AsSpan(56));
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Audio-Gram review fixture", tableNumber = 68 });
+        definition.EnsureSuccessStatusCode();
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            tableRevision = 1, payloadBase64 = Convert.ToBase64String(record), sortOrder = 68
+        });
+        imported.EnsureSuccessStatusCode();
+        var initial = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        using (var untouched = await Save(initial, new Dictionary<string, string>())) Assert.Equal(HttpStatusCode.NoContent, untouched.StatusCode);
+        using (var rejected = await _client.PostAsync(path + "/publish?confirm=true", null)) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+
+        var replacement = string.Concat(Enumerable.Range(1, 8));
+        using (var corrected = await Save(initial, new Dictionary<string, string>
+        {
+            ["serviceKey"] = replacement, ["serviceNumber"] = "120", ["protocolVersion"] = "1", ["statistics"] = "1", ["lineReleaseDelay"] = "300"
+        })) Assert.Equal(HttpStatusCode.NoContent, corrected.StatusCode);
+        System.Text.Encoding.ASCII.GetBytes(replacement).CopyTo(record, 1);
+        record[9] = 0x12;
+        record[10] = 0xA0;
+        record[21] |= 1;
+        record[42] = 1;
+        record[56] = 44;
+        record[57] = 1;
+        var edited = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(record)).ToLowerInvariant(), edited.GetProperty("sha256").GetString());
+        var fields = edited.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal(JsonValueKind.Null, fields["serviceKey"].GetProperty("value").ValueKind);
+        Assert.Equal("1", fields["statistics"].GetProperty("value").GetString());
+        Assert.Equal("true", fields["statisticsSpare7"].GetProperty("value").GetString());
+        var findings = (await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("firmwareFindings").EnumerateArray();
+        var advisory = Assert.Single(findings);
+        Assert.False(advisory.GetProperty("blocking").GetBoolean());
+        Assert.Contains("conditional firmware feature", advisory.GetProperty("message").GetString());
+        using var published = await _client.PostAsync(path + "/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+
+        Task<HttpResponseMessage> Save(JsonElement details, Dictionary<string, string> changes) => _client.PutAsJsonAsync(fieldsPath, new
+        {
+            profile = details.GetProperty("profile"), revision = details.GetProperty("revision"), sha256 = details.GetProperty("sha256"), changes
+        });
+    }
+
+    [Fact]
     public async Task Visual_prompt_record_exposes_paired_preview_and_saves_accents_with_existing_field_keys()
     {
         using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Language record test", tableNumber = 86 });
