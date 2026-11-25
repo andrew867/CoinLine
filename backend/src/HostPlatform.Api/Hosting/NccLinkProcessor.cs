@@ -489,9 +489,9 @@ internal sealed class NccLinkProcessor(
             outcome = "audit_failed";
             try
             {
-                var previous = await db.AuditEvents.AsNoTracking().SingleOrDefaultAsync(
+                var recordedDecision = await db.AuditEvents.AsNoTracking().SingleOrDefaultAsync(
                     row => row.Id == evidence.DecisionId, stoppingToken);
-                if (CardAuthorizationAudit.TryReplay(previous, terminalId, request.Data[0], evidence, out var replay)
+                if (CardAuthorizationAudit.TryReplay(recordedDecision, terminalId, request.Data[0], evidence, out var replay)
                     && DlogCardAuthorizationWire.TryBuildDecision(request.Data, replay.Approved,
                         replay.AuthorizationReference.Span, out var replayResponse))
                 {
@@ -502,7 +502,7 @@ internal sealed class NccLinkProcessor(
                     else
                         outcome = "audit_failed";
                 }
-                else if (previous != null)
+                else if (recordedDecision != null)
                 {
                     outcome = "declined";
                     await StoreCardAttemptAsync(NewCardAttempt(terminalId,
