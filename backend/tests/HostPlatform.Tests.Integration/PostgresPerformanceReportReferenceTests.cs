@@ -90,6 +90,31 @@ public sealed class PostgresPerformanceReportReferenceTests
         Assert.Equal(20, timing[0].GetProperty("intervalTicks").GetInt32());
         Assert.Equal("missing", (await Read(otherUploadId)).GetProperty("performanceReference").GetProperty("status").GetString());
 
+        // A partially sent record with no result yet is uncertain too.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            await db.DownloadBatchItems.Where(row => row.Id == uncertain.Id)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(row => row.LastAckStatus, "pending_terminal_ack")
+                    .SetProperty(row => row.HostDownloadPhase, TableDownloadHostPhase.WaitingForAck)
+                    .SetProperty(row => row.ItemStatus, DownloadBatchItemStatus.InProgress));
+            await db.DownloadBatches.Where(row => row.Id == uncertain.DownloadBatch!.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.Status, DownloadBatchStatus.Running));
+        }
+        Assert.True((await Read(uploadId)).GetProperty("performanceReference").GetProperty("laterUncertainAttempt").GetBoolean());
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            await db.DownloadBatchItems.Where(row => row.Id == uncertain.Id)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(row => row.LastAckStatus, "missing_table_ack")
+                    .SetProperty(row => row.HostDownloadPhase, TableDownloadHostPhase.Failed)
+                    .SetProperty(row => row.ItemStatus, DownloadBatchItemStatus.Failed));
+            await db.DownloadBatches.Where(row => row.Id == uncertain.DownloadBatch!.Id)
+                .ExecuteUpdateAsync(update => update.SetProperty(row => row.Status, DownloadBatchStatus.Failed));
+        }
+
         await SignIn(uploadReader);
         var restricted = await Read(uploadId);
         Assert.Equal("restricted", restricted.GetProperty("performanceReference").GetProperty("status").GetString());

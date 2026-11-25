@@ -51,7 +51,11 @@ internal static class PerformanceReportReferences
         var laterUncertainAttempt = await delivered.AnyAsync(item =>
             item.UpdatedAtUtc >= latest.UpdatedAtUtc && item.Id != latest.Id &&
             item.LastAckStatus != "ack" && item.LastAckStatus != "not_sent" &&
-            item.LastAckStatus != "pending_terminal_ack", ct);
+            (item.LastAckStatus != "pending_terminal_ack" ||
+             item.HostDownloadPhase == TableDownloadHostPhase.SendingHeader ||
+             item.HostDownloadPhase == TableDownloadHostPhase.SendingPayload ||
+             item.HostDownloadPhase == TableDownloadHostPhase.WaitingForAck ||
+             item.HostDownloadPhase == TableDownloadHostPhase.Retrying), ct);
         return new(timing == null ? "invalid" : "acknowledged", latest.DownloadBatchId,
             latest.TableVersion!.TableRevision, latest.UpdatedAtUtc, laterUncertainAttempt, timing);
     }

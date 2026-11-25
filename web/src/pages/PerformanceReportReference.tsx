@@ -15,7 +15,7 @@ export function PerformanceReferenceSummary({ reference }: { reference?: Perform
   const hasSource = status === 'acknowledged' || status === 'invalid'
   return <section className="performance-report-reference" aria-label="MT32 timing reference">
     <h3>MT32 timing reference</h3>
-    {hasSource ? <>
+    {reference && hasSource ? <>
       <p>Last retained terminal-acknowledged MT32 recorded before the host received this report.
         {reference.tableRevision != null && <> Revision {reference.tableRevision}.</>}
         {reference.ackRecordedAtUtc && <> Acknowledgement recorded <time dateTime={reference.ackRecordedAtUtc}>
