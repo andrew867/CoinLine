@@ -18,6 +18,7 @@ import { TableSets } from './pages/TableSets'
 import { InmateFeaturesPage } from './pages/InmateFeaturesPage'
 import { CarrierLibraryPage } from './pages/CarrierLibraryPage'
 import { CardMasterPage } from './pages/CardMasterPage'
+import { QuickAccessCustomersPage } from './pages/QuickAccessCustomersPage'
 import { TableVersions } from './pages/TableVersions'
 import { FieldEventsPage } from './pages/FieldEventsPage'
 import { OperatorsPage } from './pages/OperatorsPage'
@@ -85,6 +86,7 @@ export default function App() {
           <Route path="/table-sets" element={<TableSets />} />
           <Route path="/carrier-library" element={<CarrierLibraryPage />} />
           <Route path="/card-master" element={<CardMasterPage />} />
+          <Route path="/quick-access-customers" element={<QuickAccessCustomersPage />} />
           <Route path="/inmate-features/:id?" element={<InmateFeaturesPage />} />
           <Route path="/downloads/:id" element={<DownloadDetail />} />
           <Route path="/downloads" element={<DownloadsPage />} />

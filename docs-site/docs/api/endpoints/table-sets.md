@@ -162,6 +162,28 @@ Graphical screen and mixed-panel `.dwell` values use 10 ms ticks. The two nibble
 
 The MT68 `serviceKey` field is write-only in the native field API. Omit it from `changes` to keep the stored key. The field response provides `editor: "password"` and `value: null`. Enabling messaging requires a valid service number and key.
 
+## Quick Access Key Customer Directory
+
+| Method | Path | Operation |
+| --- | --- | --- |
+| POST | `/api/quick-access-customers/search` | Search directory summaries, including archived entries if requested |
+| POST | `/api/quick-access-customers/lookup` | Search active references and names for an MT55 key |
+| GET | `/api/quick-access-customers/{id}` | Read one directory entry, including its contact and billing notes |
+| POST | `/api/quick-access-customers` | Create an entry with a unique six-digit reference |
+| PUT | `/api/quick-access-customers/{id}` | Update details using the current revision |
+| DELETE | `/api/quick-access-customers/{id}?revision={revision}&confirm=true` | Archive an entry without reassigning its reference |
+| POST | `/api/quick-access-customers/{id}/restore?revision={revision}` | Restore an archived entry |
+
+Search and lookup accept a JSON body with `query`, `page` (one-based), and `sort` (`reference` or `name`). Search also accepts `includeArchived`. Each returns `rows`, `total`, `page` and `pageSize`. Lookup returns only `reference` and `name` in each row and always excludes archived entries. Search returns those fields plus `id`, `revision` and `archived`. Search terms belong in the body rather than the URL.
+
+Create and update use `reference` (a six-digit string, not `000000`), `name`, and optional `billingComments`, `contactName` (up to 40 characters), `phone`, `street`, `city`, `province`, `postalCode`, and `notes`. Update replaces those details using `revision`, including empty values to clear optional fields. References cannot be changed or reused after archiving. Duplicate references and stale revisions return HTTP 409. Administrative directory responses are not cached; directory audit details omit contact and billing contents.
+
+Search and full details require Quick Access Key customer directory Read. Creation, revision updates or restoration, and archiving require its Add, Update and Delete rights respectively. A separate Quick Access Key customer reference lookup Read right can use the minimal lookup endpoint without the full directory permission. The two permissions do not grant Table records Update.
+
+Selecting a reference stages the existing MT55 native field `key-{zeroBasedSlot}.customerReference` as a decimal string; existing `fields` revision/hash protection and Table records Update apply. Both 571-byte profiles store a four-byte unsigned little-endian value at offset `1 + slot * 57 + 51`; zero is blank. Imported non-directory values remain valid for byte-preserving editing. Directory contact information is never included in that wire field or any generated download.
+
+**UI:** `/quick-access-customers` and the per-key lookup on `/table-sets/:id`.
+
 ## Inmate Feature Configurations
 
 | Method | Path | Operation |
