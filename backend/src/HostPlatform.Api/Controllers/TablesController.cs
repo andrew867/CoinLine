@@ -33,6 +33,19 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 t.Description
             }).ToListAsync(ct));
 
+    [HttpGet("reference-records")]
+    public async Task<ActionResult<IEnumerable<object>>> ReferenceRecords(CancellationToken ct)
+    {
+        var definitions = await db.TableDefinitions.AsNoTracking().OrderBy(row => row.Name)
+            .Select(row => new { row.Id, row.Name, row.TableNumber }).ToListAsync(ct);
+        var byNumber = definitions.ToLookup(row => row.TableNumber);
+        return Ok(RecordReferenceCatalogue.Build(byNumber.Select(row => row.Key)).Select(row => new
+        {
+            row.Number, row.Name, row.Kind, row.Layouts, row.Firmware, row.BehaviorObservation,
+            registeredDefinitions = byNumber[row.Number].Select(definition => new { definition.Id, definition.Name })
+        }));
+    }
+
     [HttpPost("definitions")]
     public async Task<ActionResult<object>> CreateDefinition([FromBody] TableDefDto body, CancellationToken ct)
     {
