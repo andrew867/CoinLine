@@ -64,6 +64,7 @@ export function TableSets() {
   return (
     <div>
       <h1>Table sets</h1>
+      {(canPerform('card-master', op.read) || canPerform('card-master', op.add)) && <p><Link to="/card-master">Card Master List</Link></p>}
       {canPerform('inmate-features', op.read) && <p><Link to="/inmate-features">Inmate Feature Configurations</Link></p>}
       {canAdd && <form onSubmit={(e) => void createSet(e)} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>
         <label>
