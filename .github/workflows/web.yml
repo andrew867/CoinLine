@@ -57,7 +57,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Verify console workflow fixtures
-        run: npm run e2e -- e2e/failed-download.spec.ts e2e/quick-access-customers.spec.ts e2e/advertising-editor.spec.ts e2e/native-spare-fields.spec.ts
+        run: npm run e2e -- e2e/failed-download.spec.ts e2e/quick-access-customers.spec.ts e2e/advertising-editor.spec.ts e2e/native-spare-fields.spec.ts e2e/call-setup-spares.spec.ts
         env:
           CI: "true"
 

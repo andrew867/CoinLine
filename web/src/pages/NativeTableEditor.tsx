@@ -17,6 +17,7 @@ import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
+import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
 
 type Field = {
   key: string
@@ -494,6 +495,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
               </div>
             </figure>
           )}
+          {number === 95 && current.key === 'display' && <PromotionPromptPreview
+            prompts={current.fields.filter(field => field.displayGlyphs).map(field => ({ label: field.label, text: effectiveValue(field) }))} />}
           {!keyCleared && !changingCardFamily && visibleFields.filter(field => !field.isSpare).map((field) => (
             <FieldInput key={field.key} field={carrierReference && field.key.endsWith('.rate') ? { ...field, label: 'Carrier reference' } : field}
               value={edits[field.key] ?? field.value ?? ''}
@@ -530,6 +533,24 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
 function cardDataKind(standard: string | null) {
   const code = standard === null ? 255 : Number(standard)
   return code >= 1 && code <= 9 ? 'magnetic' : code >= 10 && code <= 16 ? 'stored-value' : 'unknown'
+}
+
+function PromotionPromptPreview({ prompts }: { prompts: { label: string; text: string | null }[] }) {
+  const [index, setIndex] = useState(0)
+  const selected = prompts[index]
+  if (!selected) return null
+  const line = selected.text === null ? 'Unmapped glyphs'.padEnd(20) : advertisingLine(selected.text)
+  return <section className="native-table-prompt-preview" aria-label="Promotion message preview">
+    <div className="table-config-selectors">
+      <label>Preview promotion prompt<select value={index} onChange={event => setIndex(Number(event.target.value))}>
+        {prompts.map((prompt, promptIndex) => <option key={prompt.label} value={promptIndex}>{prompt.label}</option>)}
+      </select></label>
+    </div>
+    <div className="table-config-vfd" role="img" aria-label={`${selected.label}, ${line.trim() || 'blank'}`}>
+      <div aria-hidden="true">{blankAdvertisingLine}</div><div aria-hidden="true">{line}</div>
+    </div>
+    <p className="page-intro">Preview the selected display message. Contest eligibility and animation depend on compatible terminal firmware.</p>
+  </section>
 }
 
 function FieldInput({ field, value, dirty, mandatory, onChange }: {
