@@ -80,7 +80,15 @@ The default Compose stack is for local evaluation. For a real deployment, use th
 
 CoinLine implements many of the configuration and operational workflows familiar to Millennium fleet operators. Compatibility is tracked per firmware and terminal family, not as one blanket certification.
 
-The project has exercised real NCC dialogues with emulated controller firmware, including older Multi-pay, later standard Multi-pay and MTR 2.12-based type 40 graphical Multi-pay. Observations include acknowledged installation records, clock and maintenance exchanges, a live rating request and on-screen charge, terminal-rendered text advertising, and all sixteen distinct bitmaps in the initial graphical rotation. These are emulator results, not physical terminal certification.
+The project has exercised real NCC dialogues using emulated controller firmware. Observed results include a live rating request and on-screen charge, clock and maintenance exchanges, and terminal-rendered advertising.
+
+| Firmware family | Observed in emulator tests |
+| --- | --- |
+| MTR 1.9 Multi-pay | Installation and service, rated and free calls, and text advertising. |
+| MTR 2.x standard Multi-pay | Twelve acknowledged installation records, warm restart, and a connected local synthetic card call. |
+| MTR 2.12-based graphical Multi-pay (type 40) | Eighteen acknowledged installation and refresh records, including MT131/132/133, and all sixteen distinct bitmaps from the initial rotation rendered by the terminal. |
+
+These are emulator results, not physical terminal certification. The synthetic card call did not establish settlement; graphical menu service and the latest static advertisement dwell times remain to be verified.
 
 The [table catalogue and parity audit](docs/program/table-catalog-and-parity-audit.md) separates native editor coverage, encoding and byte preservation, receipt acknowledgements, and actual terminal behavior. It also identifies the remaining stock hardware, optional service, payment, code-download and reporting tests. The [known limitations](docs-site/docs/reference/known-limitations.md) describe the broader deployment boundaries.
 
