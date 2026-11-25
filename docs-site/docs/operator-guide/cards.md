@@ -13,3 +13,29 @@ The **Card accounts** page reports whether a runtime authorization provider is r
 The integration fixture supplies an opaque synthetic request to a test-only provider, exercising both authorization formats, provider decline, invalid response, exception and retransmission. No test provider is registered in the ordinary application. The tests do not certify payment processing, settlement, real card acceptance or a firmware payment transaction. A production provider must implement its own secure credential handling, authorization and durable idempotency across reconnects; processor settlement remains a separate integration task.
 
 Review the existing host-ledger and reconciliation workflows under [Cards and accounts](../administration/cards-and-accounts.md). Physical card writes are not enabled by this integration.
+
+## Isolated synthetic terminal acceptance
+
+The integration test assembly contains an opt-in, manual emulator harness. It runs a loopback-only NCC listener in the Testing environment with its own in-memory database, a synthetic terminal, a test account, and an exact reserved-destination five-cent-per-minute quote. The shared application, database and telephone routes are not used. The fixture recognizes only its designated nonproduction card, terminal and reserved test destination. It never forwards to a real issuer and never writes a physical card.
+
+Create a private settings file outside the tracked source tree with the following fields:
+
+| Field | Purpose |
+| --- | --- |
+| `terminalWireId` | The reserved synthetic terminal line ID of the existing emulator instance. |
+| `destination` | A reserved fictional local number ending in the `555-01xx` range. |
+| `port` | A free local TCP port distinct from the normal NCC listener. |
+| `timeoutSeconds` | Bounded test duration, from 30 to 1800 seconds. |
+| `readyFile`, `resultFile` | Distinct absolute local paths for readiness and redacted observations. |
+
+From `backend/`, run only the manual fixture with the settings path in `COINLINE_MANUAL_CARD_LAB_SETTINGS`:
+
+```sh
+COINLINE_MANUAL_CARD_LAB_SETTINGS=/path/to/private/settings.json \
+  dotnet test tests/HostPlatform.Tests.Integration/HostPlatform.Tests.Integration.csproj \
+  --configuration Release --filter 'FullyQualifiedName~Isolated_synthetic_card_call'
+```
+
+CI does not activate the manual fixture. The automated fixture test verifies rejection of unrelated synthetic terminal, route, credential and format values and deduplication of authorization retries. Wait for the readiness file, then use an already installed emulator and direct only its NCC connection to the reported loopback port. Keep its local central-office simulator isolated. No table assignment is installed on this manual host. Verify the emulator's existing screening permits the selected test route before placing a call.
+
+The readiness file confirms the exact quote preflight and listener reachability. The result file separates actual terminal quote requests, simulated authorization sequences, decoded CDRs, reported charge and an idempotent adjustment to the fixture's in-memory synthetic account. A quote alone does not debit the simulated account. A legacy CDR without a charge amount is insufficient to complete the simulated settlement test; no amount is inferred. No result represents processor settlement.
