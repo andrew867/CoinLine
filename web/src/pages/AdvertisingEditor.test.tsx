@@ -58,6 +58,7 @@ it('supports Western characters and a 20-cell NFC preview', () => {
   expect(advertisingLine('Cafe\u0301')).toBe('Café'.padEnd(20))
 })
 
+// This case renders and edits the entire 20-slot form across several interactions.
 it('inserts a French glyph, previews it and saves explicit spare edits without replacing imported text', async () => {
   await openEditor()
   expect(message(1).getByText(/Imported text contains unmapped cells/)).toBeVisible()
@@ -87,7 +88,7 @@ it('inserts a French glyph, previews it and saves explicit spare edits without r
   expect(slots[0]).toMatchObject({ text: 'A\uFFFD B', durationTicks: 200, mode: 3, blankBefore: true,
     spareByte: 87, reservedFlags: 32, containsUnmappedGlyphs: true })
   expect(slots[1]).toMatchObject({ text: 'Café', durationTicks: 500, spareByte: 0, reservedFlags: 0, endSequence: false })
-})
+}, 10_000)
 
 it('validates block changes, permits unchanged unmapped text and does not clobber slot spares', async () => {
   await openEditor()
