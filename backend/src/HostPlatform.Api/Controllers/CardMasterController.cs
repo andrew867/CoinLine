@@ -14,9 +14,9 @@ namespace HostPlatform.Api.Controllers;
 [Route("api/card-master")]
 public sealed class CardMasterController(HostPlatformDbContext db) : ControllerBase
 {
-    public sealed record SourceRow(Guid SetId, int Position, int Revision, string Sha256);
-    public sealed record EntryInput(string? Code, string? Name, int TableNumber, Dictionary<string, string>? Changes,
-        int? Revision = null, SourceRow? Source = null);
+    public sealed record CardMasterSourceRow(Guid SetId, int Position, int Revision, string Sha256);
+    public sealed record CardMasterEntryInput(string? Code, string? Name, int TableNumber, Dictionary<string, string>? Changes,
+        int? Revision = null, CardMasterSourceRow? Source = null);
 
     [HttpGet("schema")]
     public IActionResult Schema(int tableNumber, int standard = 1)
@@ -47,7 +47,7 @@ public sealed class CardMasterController(HostPlatformDbContext db) : ControllerB
     }
 
     [HttpPost]
-    public async Task<IActionResult> Create(EntryInput body, CancellationToken ct)
+    public async Task<IActionResult> Create(CardMasterEntryInput body, CancellationToken ct)
     {
         if (!CardSequenceWire.Supports(body.TableNumber)) return BadRequest(new { error = "Choose MT22 or MT134." });
         var entry = new CardMasterDefinition { TableNumber = body.TableNumber, RowPayload = CardMasterWire.Empty(body.TableNumber), Version = 1 };
@@ -71,7 +71,7 @@ public sealed class CardMasterController(HostPlatformDbContext db) : ControllerB
     }
 
     [HttpPut("{id:guid}")]
-    public async Task<IActionResult> Update(Guid id, EntryInput body, CancellationToken ct)
+    public async Task<IActionResult> Update(Guid id, CardMasterEntryInput body, CancellationToken ct)
     {
         var entry = await db.CardMasterDefinitions.FindAsync([id], ct);
         if (entry == null) return NotFound();
@@ -143,7 +143,7 @@ public sealed class CardMasterController(HostPlatformDbContext db) : ControllerB
                 .Select(item => item.Row.TableSetId).Distinct().Sum(setId => counts.GetValueOrDefault(setId)) });
     }
 
-    private async Task Configure(CardMasterDefinition entry, EntryInput body, CancellationToken ct)
+    private async Task Configure(CardMasterDefinition entry, CardMasterEntryInput body, CancellationToken ct)
     {
         var code = (body.Code ?? "").Trim();
         var name = (body.Name ?? "").Trim();
