@@ -76,6 +76,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify card authorization history workflow
+        run: npm run e2e -- e2e/card-authorization-history.spec.ts --output test-results/card-authorization-history
+        env:
+          CI: "true"
+
       - name: Verify communications performance histogram workflow
         run: npm run e2e -- e2e/performance-buckets.spec.ts --output test-results/performance-buckets
         env:

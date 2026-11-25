@@ -428,8 +428,14 @@ internal sealed class NccLinkProcessor(
 
     private async Task AuthorizeCardAsync(NetworkStream stream, NccWirePacket request, Guid terminalId)
     {
+        var providerKind = cardProvider is SyntheticLabCardAuthorizationProvider ? CardAuthorizationAudit.LabProvider
+            : cardProvider != null ? "trusted_provider" : "none";
         if (!DlogCardAuthorizationWire.TryBuildDecline(request.Data, out var decline))
+        {
+            await StoreCardAttemptAsync(NewCardAttempt(terminalId,
+                new CardAuthorizationAuditDetail(request.Data[0], "malformed_request", providerKind)));
             return;
+        }
 
         // A retry of the same dialogue does not create a second authorization.
         if ((request.Control & NccControl.ReTrans) != 0 && _lastDialogueRequest is { } previous
@@ -443,6 +449,7 @@ internal sealed class NccLinkProcessor(
 
         var response = decline;
         var outcome = "provider_unavailable";
+        SyntheticAuthorizationEvidence? evidence = null;
         if (cardProvider != null)
         {
             try
@@ -453,6 +460,8 @@ internal sealed class NccLinkProcessor(
                 {
                     response = encoded;
                     outcome = decision.Approved ? "approved" : "declined";
+                    if (providerKind == CardAuthorizationAudit.LabProvider)
+                        evidence = decision.SyntheticEvidence;
                 }
                 else
                     outcome = "provider_invalid_decision";
@@ -465,20 +474,90 @@ internal sealed class NccLinkProcessor(
             }
         }
 
-        var audit = Audit("card_authorization_decision", new { messageType = request.Data[0], outcome }, terminalId);
+        var audit = NewCardAttempt(terminalId, Detail(outcome, evidence), evidence);
         try
         {
             await db.SaveChangesAsync(stoppingToken);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException && evidence is { DecisionId: not null, Replayed: false })
+        {
+            // The quote-derived audit ID is a durable, unique decision key.
+            // A reconnect may have committed it while this request was being
+            // evaluated. Reuse only the exact matching safe decision.
+            db.Entry(audit).State = EntityState.Detached;
+            response = decline;
+            outcome = "audit_failed";
+            try
+            {
+                var previous = await db.AuditEvents.AsNoTracking().SingleOrDefaultAsync(
+                    row => row.Id == evidence.DecisionId, stoppingToken);
+                if (CardAuthorizationAudit.TryReplay(previous, terminalId, request.Data[0], evidence, out var replay)
+                    && DlogCardAuthorizationWire.TryBuildDecision(request.Data, replay.Approved,
+                        replay.AuthorizationReference.Span, out var replayResponse))
+                {
+                    outcome = replay.Approved ? "approved" : "declined";
+                    if (await StoreCardAttemptAsync(NewCardAttempt(terminalId, Detail(outcome, replay.SyntheticEvidence),
+                        replay.SyntheticEvidence)))
+                        response = replayResponse;
+                    else
+                        outcome = "audit_failed";
+                }
+                else if (previous != null)
+                {
+                    outcome = "declined";
+                    await StoreCardAttemptAsync(NewCardAttempt(terminalId,
+                        Detail(outcome, evidence with { Reason = "quote_already_used", DecisionId = null })));
+                }
+            }
+            catch (Exception readError) when (readError is not OperationCanceledException)
+            {
+                logger.LogWarning("Card decision replay lookup failed ({ErrorType}).", readError.GetType().Name);
+            }
+            if (outcome == "audit_failed")
+                logger.LogWarning("Card decision audit was not stored ({ErrorType}); declining.", ex.GetType().Name);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            if (audit != null)
-                db.Entry(audit).State = EntityState.Detached;
+            db.Entry(audit).State = EntityState.Detached;
             logger.LogWarning("Card decision audit was not stored ({ErrorType}); declining.", ex.GetType().Name);
             response = decline;
             outcome = "audit_failed";
         }
         await SendDialogueReplyAsync(stream, request, response, $"card authorization {outcome}");
+
+        CardAuthorizationAuditDetail Detail(string result, SyntheticAuthorizationEvidence? lab) => new(
+            request.Data[0], result, providerKind, lab?.Reason, lab?.CardAccountId, lab?.QuoteId,
+            lab?.QuotedAmountUsd, lab?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null);
+    }
+
+    private AuditEvent NewCardAttempt(Guid terminalId, CardAuthorizationAuditDetail detail,
+        SyntheticAuthorizationEvidence? evidence = null)
+    {
+        var row = new AuditEvent
+        {
+            Id = evidence is { DecisionId: { } decision, Replayed: false } ? decision : Guid.NewGuid(),
+            Category = "ncc", Action = evidence?.Replayed == true ? CardAuthorizationAudit.ReplayAction : CardAuthorizationAudit.DecisionAction,
+            Actor = Actor, Resource = _session.Id.ToString(), TerminalId = terminalId,
+            CorrelationId = _session.CorrelationId, TerminalSessionId = _session.Id.ToString(),
+            DetailJson = CardAuthorizationAudit.Encode(detail)
+        };
+        db.AuditEvents.Add(row);
+        return row;
+    }
+
+    private async Task<bool> StoreCardAttemptAsync(AuditEvent row)
+    {
+        try
+        {
+            await db.SaveChangesAsync(stoppingToken);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            db.Entry(row).State = EntityState.Detached;
+            logger.LogWarning("Card authorization observation was not stored ({ErrorType}).", ex.GetType().Name);
+            return false;
+        }
     }
 
     private async Task<byte[]> StoreCallDetailsAsync(byte[] data, Terminal terminal)

@@ -33,6 +33,15 @@ internal sealed class ManualCardLabFact : FactAttribute
 /// <summary>Manual emulator fixture, never started by the normal application or CI.</summary>
 public sealed class ManualCardLabTests
 {
+    internal static byte[] SyntheticAuthorizationRequest(string route, byte messageType, ushort sequence)
+    {
+        var data = SyntheticCardFixtureProvider.MakeSyntheticRequest(route);
+        if (messageType == 1) Array.Resize(ref data, 29);
+        data[0] = messageType;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(data.Length - 2), sequence);
+        return data;
+    }
+
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
     [ManualCardLabFact]

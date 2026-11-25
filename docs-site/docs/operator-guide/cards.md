@@ -8,11 +8,28 @@ CoinLine separates terminal card configuration, card accounts and runtime author
 
 ## Authorization provider integration
 
-The **Card accounts** page reports whether a runtime authorization provider is registered. Registration is not a live connectivity or settlement check. The built-in host has no live authorization provider. It declines runtime card requests even if a matching card product exists in the operator catalog. An installed, trusted in-process provider can supply a decision through the `INccCardAuthorizationProvider` boundary. The host validates the response shape, declines when the provider is unavailable or reports an invalid decision, and records a redacted outcome rather than cardholder data. Retries within the same NCC dialogue reuse the original response without authorizing a second time.
+The **Card accounts** page reports whether a runtime authorization provider is registered. Registration is not a live connectivity or settlement check. The built-in host has no live payment processor. It declines runtime card requests by default even if a matching card product exists in the operator catalog. An installed, trusted in-process provider can supply a decision through the `INccCardAuthorizationProvider` boundary. The host validates the response shape, declines when the provider is unavailable or reports an invalid decision, and records a redacted outcome rather than cardholder data. Retries within the same NCC dialogue reuse the original response without authorizing a second time.
 
-The integration fixture supplies an opaque synthetic request to a test-only provider, exercising both authorization formats, provider decline, invalid response, exception and retransmission. No test provider is registered in the ordinary application. The tests do not certify payment processing, settlement, real card acceptance or a firmware payment transaction. A production provider must implement its own secure credential handling, authorization and durable idempotency across reconnects; processor settlement remains a separate integration task.
+The integration fixture supplies an opaque synthetic request to a test-only provider, exercising both authorization formats, provider decline, invalid response, exception and retransmission. No test provider is registered in the ordinary application with the default settings. The tests do not certify payment processing, settlement, real card acceptance or a firmware payment transaction. A production provider must implement its own secure credential handling, authorization and durable idempotency across reconnects; processor settlement remains a separate integration task.
 
 Review the existing host-ledger and reconciliation workflows under [Cards and accounts](../administration/cards-and-accounts.md). Physical card writes are not enabled by this integration.
+
+## Optional synthetic authorization on a lab host
+
+Enable this only in an isolated lab with no external call routing or payment processing. The synthetic provider recognizes the existing designated emulator test fixture, not arbitrary cards. Each binding must identify a registered phone, a magstripe account belonging to that phone, a product marked as a test fixture, and a ten-digit fictional destination in the reserved 555-01xx range. The account must have a test-fixture credential designation and a consistent USD ledger. Approval requires a matching positive native runtime quote from the previous five minutes and sufficient test balance.
+
+Supply these application configuration keys in a private local environment file rather than committing configuration:
+
+| Key | Value |
+| --- | --- |
+| `CardPayments__LabAuthorization__Enabled` | `true` (default `false`) |
+| `CardPayments__LabAuthorization__Bindings__0__TerminalId` | Phone's host UUID |
+| `CardPayments__LabAuthorization__Bindings__0__CardAccountId` | Synthetic test account's host UUID |
+| `CardPayments__LabAuthorization__Bindings__0__Destination` | Exact fictional ten-digit lab route |
+
+Use subsequent integer indexes for additional independent bindings. No actual payment credentials are configuration inputs. The designated fixture is recognized only for the configured phone and route. Authorization attempts in **Card payments** show the outcome, reason, phone, quote and eligible synthetic account. Older redacted requests with no stored decision display **Outcome unavailable**. The payment ledger is displayed separately. No synthetic approval creates a debit, payment transaction, or claim of completed service, and reconnect retries do not create a second decision for the same quote.
+
+This is a magstripe authorization testing path only. Smartcard contact tests, application compatibility, stored-value transactions, actual call-detail upload and settlement remain distinct validation gates.
 
 ## Isolated synthetic terminal acceptance
 

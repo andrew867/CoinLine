@@ -26,3 +26,11 @@ it('does not guess authorization state on an old or unavailable host', async () 
   render(<RuntimeCardAuthorizationStatus />)
   expect(await screen.findByText(/Authorization status could not be loaded/)).toBeVisible()
 })
+
+it('describes the opt-in provider as synthetic without promising settlement', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ runtimeAuthorizationProviderRegistered: true, labAuthorizationEnabled: true, physicalCardWritesDisabled: true })
+  render(<RuntimeCardAuthorizationStatus />)
+  expect(await screen.findByText(/Synthetic lab authorization configured/)).toBeVisible()
+  expect(screen.getByText(/Only explicitly bound test accounts and local test routes/)).toBeVisible()
+  expect(screen.getByText(/Physical card writes are disabled/)).toBeVisible()
+})

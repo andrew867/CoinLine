@@ -527,7 +527,8 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var audit = await stored.AuditEvents.SingleAsync(row => row.Action == "card_authorization_decision");
         var metadata = JsonSerializer.Deserialize<JsonElement>(audit.DetailJson, Json);
         Assert.Equal(expectedOutcome, metadata.GetProperty("outcome").GetString());
-        Assert.Equal(2, metadata.EnumerateObject().Count());
+        Assert.Equal(3, metadata.EnumerateObject().Count());
+        Assert.Equal("trusted_provider", metadata.GetProperty("provider").GetString());
         Assert.Equal(requestType, metadata.GetProperty("messageType").GetByte());
         Assert.Equal(beforeBatches, await stored.DownloadBatches.CountAsync());
         var sessionId = Guid.Parse(audit.TerminalSessionId!);

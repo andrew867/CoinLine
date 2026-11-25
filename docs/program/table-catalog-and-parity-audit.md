@@ -272,7 +272,7 @@ Terminal Status displays MT10 health flags and MT60 reported software versions a
 
 The later standard Multi-pay emulator cold INSTALL acknowledged all twelve assigned records and subsequently passed the synthetic chip-reader contact test. Its warm restart also passed. The contact test is not evidence of a stored-value or provider-backed payment.
 
-The install-bench MT22 card acceptance demonstrates the terminal's local card policy and stripe-reader path. The real-time quote uses a host rate plan. Both are independent of the runtime card authorization decision.
+The install-bench MT22 card acceptance demonstrates the terminal's local card policy and stripe-reader path. The real-time quote uses a host rate plan. Both are independent of the runtime card authorization decision. The optional synthetic magstripe provider adds explicit phone, fixture account and reserved-route bindings, requires a recent paid native quote, and persists one redacted decision per quote. Reconnects reuse the exact matching decision; approval alone never creates a payment or debits a balance. Authorization history is separate from the payment ledger in the console. Stock-firmware acceptance on this production-shaped provider, CDR ingestion and settlement, and historical smartcard application transactions remain pending.
 
 The OEM firmware accepted a nickel and a dime in service after quoting a 15-cent rate, both offline and after a live MT63/64 exchange. It reduced the displayed amount to 10 cents after the first deposit and outpulsed the local test destination after the second.
 
