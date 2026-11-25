@@ -6,7 +6,7 @@ import { InmateAssignmentPanel } from './InmateAssignmentPanel'
 import { TerminalLifecyclePanel } from './TerminalLifecyclePanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiFetch, apiGet, apiPost, apiPostBareOk, apiPut } from '../api/client'
+import { apiFetch, apiGet, apiPost, apiPostBare, apiPostRaw, apiPut } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
@@ -104,7 +104,13 @@ type Assign = {
   targetFirmware?: string | null
 }
 
-type SetRow = { id: string; name: string; status: number; targetFirmwareVersionId: string | null; targetFirmware: string | null }
+type SetRow = { id: string; name: string; status: number; targetFirmwareVersionId: string | null; targetFirmware: string | null; compatibilityIssue?: string | null }
+
+function assignmentIssue(set: SetRow, firmwareId: string | null) {
+  return set.targetFirmwareVersionId && set.targetFirmwareVersionId !== firmwareId
+    ? `Requires ${set.targetFirmware ?? 'matching firmware'}`
+    : set.compatibilityIssue ?? null
+}
 
 type SessionRow = {
   id: string
@@ -368,9 +374,8 @@ export function TerminalDetail() {
         if (canAssign) void apiGet<SetRow[]>(`/api/terminals/${id}/table-assignment-options`).then(list => {
           if (c) return
           setSets(list)
-          const published = list.find(set => set.status === 1 &&
-            (!set.targetFirmwareVersionId || set.targetFirmwareVersionId === terminal.firmwareVersionId))
-          if (published) setPick(published.id)
+          const published = list.find(set => set.status === 1 && !assignmentIssue(set, terminal.firmwareVersionId))
+          setPick(published?.id ?? '')
         }).catch(() => { if (!c) setErr('Could not load table assignment choices.') })
 
         if (canReadDiagnostics) void apiGet<DiagnosticsPayload>(`/api/terminals/${id}/diagnostics`)
@@ -391,11 +396,15 @@ export function TerminalDetail() {
     if (!id || !pick || !canAssign || term?.deactivatedAtUtc) return
     setErr(null)
     try {
-      await apiPost<unknown>('/api/terminals/' + id + '/table-assignment', {
+      const response = await apiPostRaw('/api/terminals/' + id + '/table-assignment', {
         tableSetId: pick,
         customerId: null,
         siteId: null,
       })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.error ?? `Could not assign the set (HTTP ${response.status}).`)
+      }
       const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
       if (a.ok) setAssign((await a.json()) as Assign)
     } catch (ex) {
@@ -462,7 +471,11 @@ export function TerminalDetail() {
       return
     setErr(null)
     try {
-      await apiPostBareOk(`/api/terminals/${id}/table-assignment/rollback`, { confirm: true })
+      const response = await apiPostBare(`/api/terminals/${id}/table-assignment/rollback`, { confirm: true })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.error ?? `Could not roll back the assignment (HTTP ${response.status}).`)
+      }
       const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
       if (a.ok) setAssign((await a.json()) as Assign)
     } catch (ex) {
@@ -535,6 +548,16 @@ export function TerminalDetail() {
       setTerm((current) => current?.id === term.id ? { ...current, firmwareVersionId: firmwareEdit || null } : current)
       setFirmwareEdit(null)
       setFirmwareNotice('Installed firmware saved.')
+      if (canAssign) {
+        setSets([]); setPick('')
+        try {
+          const list = await apiGet<SetRow[]>(`/api/terminals/${term.id}/table-assignment-options`)
+          setSets(list)
+          setPick(list.find(set => set.status === 1 && !assignmentIssue(set, firmwareEdit || null))?.id ?? '')
+        } catch {
+          setErr('Installed firmware saved, but the table assignment choices could not be refreshed.')
+        }
+      }
     } catch (error) {
       setErr(error instanceof Error ? error.message : 'Could not save installed firmware.')
     } finally {
@@ -649,7 +672,7 @@ export function TerminalDetail() {
         ))}
       </div>
       </>}
-      {err && <p style={{ color: 'crimson' }}>{err}</p>}
+      {err && <p role="alert" style={{ color: 'crimson' }}>{err}</p>}
 
       {canPerform('callbacks', op.read) && <SpecialCallback key={`callback-${id}`} terminalId={id} terminalActive={terminalActive} />}
       {canReadAssignment && <>
@@ -668,6 +691,7 @@ export function TerminalDetail() {
             Review table requirements for this family</Link></div>}
           {assignedTargetId && assignedTargetId !== term.firmwareVersionId &&
             <p role="status">This set requires {assignedTargetName}. Register matching firmware or assign a compatible set.</p>}
+          {assignedSet?.compatibilityIssue && <p role="status">The current assignment is incompatible with the registered firmware: {assignedSet.compatibilityIssue}</p>}
           {assign.previousTableSetId && (
             <div>
               Previous set: <code>{assign.previousTableSetId}</code>
@@ -683,14 +707,14 @@ export function TerminalDetail() {
           <select value={pick} disabled={!terminalActive} onChange={(e) => setPick(e.target.value)} style={{ display: 'block', minWidth: 220 }}>
             <option value="">Choose a table set</option>
             {sets.map((s) => {
-              const mismatch = !!s.targetFirmwareVersionId && s.targetFirmwareVersionId !== term.firmwareVersionId
-              return <option key={s.id} value={s.id} disabled={mismatch}>
-                {s.name} {mismatch ? `(requires ${s.targetFirmware})` : s.status === 1 ? '(published)' : '(draft)'}
+              const issue = assignmentIssue(s, term.firmwareVersionId)
+              return <option key={s.id} value={s.id} disabled={!!issue}>
+                {s.name} {issue ? `(${issue})` : s.status === 1 ? '(published)' : '(draft)'}
               </option>
             })}
           </select>
         </label>
-        <button type="submit" disabled={!terminalActive || !pickedSet || (!!pickedSet.targetFirmwareVersionId && pickedSet.targetFirmwareVersionId !== term.firmwareVersionId)}>Assign set</button>
+        <button type="submit" disabled={!terminalActive || !pickedSet || !!assignmentIssue(pickedSet, term.firmwareVersionId)}>Assign set</button>
         <button type="button" disabled={!terminalActive || !assign?.previousTableSetId} onClick={() => void rollback()}>
           Rollback to previous set
         </button>

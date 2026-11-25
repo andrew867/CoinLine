@@ -90,8 +90,23 @@ public sealed class DlogFieldLayoutTests
         Assert.Null(alarm.PhoneTime);
         Assert.Equal("Call record store full, Unlisted reason bits (1)", FieldEventSummary.TryBuild(42, [42, 0x05]));
         Assert.Equal("Technician requested download, Cash box follow-up", FieldEventSummary.TryBuild(44, [44, 0x81]));
+        Assert.Equal("Installation, Memory lost, Cash box follow-up", FieldEventSummary.TryBuild(44, [44, 0x86]));
         Assert.True(FieldEventCatalog.TryDescribe(39, out var title));
         Assert.Contains("Attention", title, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0x01, false)]
+    [InlineData(0x08, false)]
+    [InlineData(0x80, false)]
+    [InlineData(0x81, false)]
+    [InlineData(0x02, true)]
+    [InlineData(0x04, true)]
+    [InlineData(0x82, true)]
+    [InlineData(0x86, true)]
+    public void Table_request_reason_distinguishes_full_recovery_from_ordinary_delivery(byte reason, bool full)
+    {
+        Assert.Equal(full, DlogTableRequestWire.RequiresFullAssignment(reason));
     }
 
     [Fact]

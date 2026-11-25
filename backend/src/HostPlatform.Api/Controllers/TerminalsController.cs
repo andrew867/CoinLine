@@ -628,14 +628,25 @@ public sealed class TerminalsController(
     [HttpGet("{id:guid}/table-assignment-options")]
     public async Task<ActionResult<object>> TableAssignmentOptions(Guid id, CancellationToken ct)
     {
-        if (!await db.Terminals.AnyAsync(phone => phone.Id == id, ct))
+        var phone = await db.Terminals.AsNoTracking().Where(phone => phone.Id == id)
+            .Select(phone => new { ProfileId = phone.FirmwareVersion == null ? null : phone.FirmwareVersion.TableProfileId })
+            .SingleOrDefaultAsync(ct);
+        if (phone == null)
             return NotFound();
-        return Ok(await db.TableSets.AsNoTracking()
+        var options = await db.TableSets.AsNoTracking()
             .Where(set => !(set.Versions.Count == 1 && set.Versions.Any(version => version.TableDefinition!.TableNumber == CodeDownloadWire.MessageType)))
             .OrderByDescending(set => set.IsDefault).ThenBy(set => set.Name)
             .Select(set => new { set.Id, set.Name, set.Status, set.TargetFirmwareVersionId,
                 targetFirmware = set.TargetFirmwareVersion != null ? set.TargetFirmwareVersion.Label : null })
-            .ToListAsync(ct));
+            .ToListAsync(ct);
+        var profile = FirmwareTableProfiles.Find(phone.ProfileId);
+        var shapes = profile == null ? new Dictionary<Guid, TableRecordShape[]>()
+            : await tables.ReadRecordShapesAsync(options.Select(set => set.Id).ToArray(), ct);
+        return Ok(options.Select(set => new
+        {
+            set.Id, set.Name, set.Status, set.TargetFirmwareVersionId, set.targetFirmware,
+            compatibilityIssue = TableSetFirmwareCompatibility.SelectionIssue(profile, shapes.GetValueOrDefault(set.Id) ?? [])
+        }));
     }
 
     /// <summary>Assigns a table set to the terminal. Writes an audit event.</summary>

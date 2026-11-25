@@ -10,4 +10,21 @@ public sealed class CardPaymentOptions
 
     /// <summary>Host refuses non-simulated physical card write paths until cleared.</summary>
     public bool PhysicalCardWritesDisabled { get; set; } = true;
+
+    /// <summary>Explicitly scoped synthetic authorization; never a live payment processor.</summary>
+    public LabCardAuthorizationOptions LabAuthorization { get; set; } = new();
+}
+
+public sealed class LabCardAuthorizationOptions
+{
+    public bool Enabled { get; set; }
+    public LabCardBinding[] Bindings { get; set; } = [];
+}
+
+public sealed class LabCardBinding
+{
+    public Guid TerminalId { get; set; }
+    public Guid CardAccountId { get; set; }
+    /// <summary>Exact fictional lab destination, not an external payment route.</summary>
+    public string Destination { get; set; } = "";
 }

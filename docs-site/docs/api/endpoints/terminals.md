@@ -62,6 +62,8 @@ For a special callback, supply the current `revision` or null when creating the 
 
 The firmware and table assignment choices are separately permissioned under Phones Read and Table assignments Read. They do not grant access to firmware registry or table authoring endpoints. The current assignment response includes the set name and target firmware label and ID, so a read-only assignment operator need not retrieve the whole table catalogue.
 
+The assignment choices also include `compatibilityIssue` (null if there is no known conflict) for the installed profile and all records in each set. Direct assignment and rollback check again before changing the assignment. A known length, complete catalogue or explicitly confirmed layout conflict is returned as HTTP 400 with its message type. The target-firmware ID constraint still applies.
+
 Phone registration choices require Phones Add and do not require full site, group, firmware or phone-list access. A group choice is returned only if the operator also has Membership Add. A new phone must use an existing site; its optional group must belong to the site's customer or be a global group.
 
 **UI:** `/terminals`, `/terminals/:id`

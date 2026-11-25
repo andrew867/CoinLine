@@ -16,6 +16,7 @@ public sealed class CardTranche6Tests(ApiFixture factory)
     {
         var state = await _client.GetFromJsonAsync<JsonElement>("/api/cards/simulation-state");
         Assert.False(state.GetProperty("runtimeAuthorizationProviderRegistered").GetBoolean());
+        Assert.False(state.GetProperty("labAuthorizationEnabled").GetBoolean());
         Assert.True(state.GetProperty("physicalCardWritesDisabled").GetBoolean());
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/smartcards/types")).StatusCode);
 

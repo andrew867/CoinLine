@@ -141,7 +141,7 @@ public sealed class GraphicalSpareNccTests(NccListenFixture fx) : IClassFixture<
         {
             await tcp.ConnectAsync(IPAddress.Loopback, fx.Port);
             var stream = tcp.GetStream();
-            await stream.WriteAsync(Packet(0, [44, 2])); AssertAck(await Read(stream));
+            await stream.WriteAsync(Packet(0, [44, 1])); AssertAck(await Read(stream));
             var header = await Read(stream); Assert.Equal(new byte[] { 18 }, header.Data);
             await stream.WriteAsync(Packet((byte)(NccControl.Ack | header.Control)));
             for (var index = 0; index < records.Length; index++)

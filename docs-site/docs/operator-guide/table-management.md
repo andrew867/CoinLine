@@ -15,9 +15,11 @@ Additional observed profiles cover MSR 1.7-family Multi-pay, Card-only, Desk and
 
 To classify a build already in service, open **Firmware versions** and choose **Review profile change** on that build. Select the verified profile that matches the installed firmware, then **Preview impact**. Review the counts for the affected phones, sets, queued and scheduled downloads, and active sessions. Resolve blocking findings first; draft-only incompatibilities are advisory. Apply the reviewed profile or cancel. A changed configuration requires a fresh preview. This retains the existing registry ID, phone assignments, table bytes and prepared selections. Clearing the profile removes its known-length checks; it does not make an incompatible record valid.
 
-For one phone, open **Downloads**, select the phone and a published set, then choose **Entire set** or **Selected records**. **Create batch** prepares the exact versions and shows a link to the pending batch. The terminal's next eligible call changes that same batch to running and records each acknowledgement under its timeline. Any necessary records come along with the selection. The phone's normal assignment stays in effect for later requests.
+For one phone, open **Downloads**, select the phone and a published set, then choose **Entire set** or **Selected records**. **Create batch** prepares the exact versions and shows a link to the pending batch. The terminal's next eligible ordinary call changes that same batch to running and records each acknowledgement under its timeline. Any necessary records come along with the selection. The phone's normal assignment stays in effect for later requests. A cold installation or memory recovery takes priority and receives the full assignment. Once completed, it cancels older partial work only when the exact requested versions were acknowledged during that installation. Different versions and future scheduled work remain queued. The cancelled partial history identifies the completed full installation rather than claiming a separate transfer.
 
 On an interrupted download, the timeline distinguishes a missing link acknowledgement for a fragment from a missing table acknowledgement (MT14) after all fragments were accepted. **Not sent** means the transfer stopped before that record began; it does not mean the terminal rejected it. Earlier successfully acknowledged tables remain marked as such. The batch-level error identifies the interruption, including a missing start or end acknowledgement. A retry creates a separate batch and does not turn an unacknowledged record into a successful one.
+
+Known firmware incompatibility is checked before changing an assignment, scheduling or queuing a download. A phone's assignment choices and fleet preview identify the conflicting record and, for a size mismatch, both lengths. If only one compatible record is needed, choose **Selected records** rather than assigning or sending an incompatible full set. Required companion records must also be compatible. The phone's next call repeats the check against its registered profile before bytes are sent. A missing or incomplete profile does not certify compatibility with unverified records.
 
 In a draft table set, open **Copy saved records** to reuse selected records from another saved set. Select a source, check the records you need, and choose **Review copy**. The review lists additions, replacements and any required records from the source. Confirm the copy, then open the relevant editor to review the draft before publishing and assigning it. If either set changes, use **Reload sets** and review again.
 
@@ -227,8 +229,21 @@ Open **Terminal status** to filter decoded alarms, maintenance reports, status f
 
 Open an alarm to see its name and number, the phone that reported it, and when CoinLine recorded it. The phone's own timestamp appears separately when the record contains a valid clock. Unlisted alarms retain their numeric code. Expand **Technical record** to inspect the decoded JSON or download the captured bytes.
 
+## Configurable service restrictions
+
+On the later packed profile, select configurable restricted access in MT58 to review saved permitted entries in the included MT92 Call-Screening List and MT55 Quick Access Keys. The review shows exact entry/key positions, decoded destination or pattern, wildcard/translation markers, classification and marked-but-blank, denied, information-only or unmapped entries. Missing companions in a partial set are explicitly unknown; the terminal may retain an existing record. Unverified profiles are not decoded as if their lengths established field meanings.
+
+This is a read-only review of stored companion bytes, independent of the daily schedule edit. It does not change the markings in MT55 or MT92, or establish actual authorization, rating, connection or device restriction behavior. Change the marking in the appropriate native editor and reopen MT58 to review the saved companion record.
+
 ## Inmate Feature Configurations
 
 From **Table sets**, open **Inmate Feature Configurations**. The editor covers PIN entry, call processing, voice announcements, disconnect warnings, recording equipment, call timers and other settings. Enter a name of up to six characters and an optional description. Use **Copy as new** to reuse the current settings under a new name.
 
 The editor checks the legacy timer ranges and the minimum 10-second gap between disconnect warnings. Recorder codes accept up to two DTMF characters, and the automated operator code accepts up to three. A saved configuration can be selected in the [phone's Inmate terminal configuration panel](terminals.md#inmate-terminal-configuration). Terminal download awaits evidence of the Inmate firmware record layout.
+
+
+## Reference record catalogue
+
+Open **Table definitions** to find the master record catalogue. Search by MT number, reference name or registered definition name, and filter by native editor, observed length, documented reference, scheduler record or operational message. Expand a record to inspect exact packed layout lengths and template availability separately from firmware-specific lengths and retained emulator MT14 observations. A narrow behavior observation is displayed only where a previous emulator milestone established it; it does not certify all fields or physical hardware.
+
+The registered definitions remain a separate storage directory. A historical stored name is not authoritative wire semantics; for example MT10 is terminal status and MT20 is clock synchronization. MT94 is a separate code-download scheduling record. Viewing the reference catalogue does not change definitions, sets, assignments or payload hashes.

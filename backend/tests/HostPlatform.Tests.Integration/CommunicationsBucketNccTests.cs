@@ -74,7 +74,7 @@ public sealed class CommunicationsBucketNccTests(NccListenFixture fx) : IClassFi
         {
             await tcp.ConnectAsync(IPAddress.Loopback, fx.Port);
             var stream = tcp.GetStream();
-            await stream.WriteAsync(Packet(0, [44, 2])); AssertAck(await Read(stream));
+            await stream.WriteAsync(Packet(0, [44, 1])); AssertAck(await Read(stream));
             var header = await Read(stream); Assert.Equal(new byte[] { 18 }, header.Data);
             await stream.WriteAsync(Packet((byte)(NccControl.Ack | header.Control)));
             var content = await Read(stream); Assert.Equal(expected, content.Data);

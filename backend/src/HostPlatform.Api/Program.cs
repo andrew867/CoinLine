@@ -140,6 +140,8 @@ builder.Services.AddSingleton<ICraftExecutionPolicy, CraftExecutionPolicy>();
 builder.Services.AddSingleton<INccSessionOutbound, NccSessionOutboundHub>();
 builder.Services.AddSingleton<CraftLiveSocketWriter>();
 builder.Services.AddScoped<ICardAccountLedger, CardAccountLedger>();
+if (builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:Enabled"))
+    builder.Services.AddScoped<INccCardAuthorizationProvider, SyntheticLabCardAuthorizationProvider>();
 builder.Services.AddHostedService<HostPlatform.Api.Hosting.NccModemListenService>();
 builder.Services.AddHostedService<HostPlatform.Api.Hosting.ScheduledDownloadPreparationService>();
 builder.Services.Configure<HostPlatform.SipModem.SipModemOptions>(

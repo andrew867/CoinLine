@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { apiGet } from '../api/client'
 
-type State = { runtimeAuthorizationProviderRegistered?: boolean; physicalCardWritesDisabled: boolean }
+type State = { runtimeAuthorizationProviderRegistered?: boolean; labAuthorizationEnabled?: boolean; physicalCardWritesDisabled: boolean }
 
 export function RuntimeCardAuthorizationStatus() {
   const [state, setState] = useState<State | null>(null)
@@ -19,6 +19,8 @@ export function RuntimeCardAuthorizationStatus() {
       <p role="status" style={{ margin: 0 }}>
         {unavailable ? 'Authorization status could not be loaded.' : !state ? 'Loading authorization status...' :
           registered === false ? 'No authorization provider registered. Terminal card authorizations will be declined.' :
+          registered === true && state.labAuthorizationEnabled ?
+            'Synthetic lab authorization configured. Only explicitly bound test accounts and local test routes can be approved.' :
           registered === true ? 'Authorization provider registered. Processor connectivity and settlement readiness are not established by this status.' :
           'This host does not report its runtime authorization provider status.'}
       </p>

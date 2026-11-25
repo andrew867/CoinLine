@@ -56,9 +56,13 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                 : "A native editor is unavailable for this wire profile." });
         }
 
+        var restrictedRoutes = number == ServiceRestrictionWire.MessageType && layout.Profile == NativeTableLayouts.Later
+            ? await ReadRestrictionRoutes(id, firmware, ct) : null;
+
         return Ok(new
         {
             supported = true,
+            restrictedRoutes,
             editable = set.Status == TableSetStatus.Draft,
             layout.Profile,
             observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
@@ -253,6 +257,30 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         if (profile != null && profile != nativeLayout)
             return (null, "This layout does not match the set's target firmware.");
         return (NativeTableLayouts.Find(number, data, nativeLayout), null);
+    }
+
+    private async Task<RestrictedRouteRecord[]> ReadRestrictionRoutes(Guid setId, FirmwareTableProfile? firmware, CancellationToken ct)
+    {
+        var result = new List<RestrictedRouteRecord>();
+        foreach (var number in new[] { 92, 55 })
+        {
+            var versions = await ReadVersions(setId, number, ct);
+            if (versions.Count != 1)
+            {
+                result.Add(new(number, versions.Count == 0 ? "missing" : "ambiguous", []));
+                continue;
+            }
+            if (firmware == null || firmware.ObservedLengthsOnly || firmware.LayoutFor(number) != NativeTableLayouts.Later
+                || !firmware.VerifiedLengths.TryGetValue(number, out var expected))
+            {
+                result.Add(new(number, "unverified", []));
+                continue;
+            }
+            var raw = TableDistributionService.GetEffectivePayload(versions[0]);
+            result.Add(raw.Length == expected ? ServiceRestrictionWire.ReadRestrictedRoutes(number, raw)
+                : new(number, "incompatible", []));
+        }
+        return result.ToArray();
     }
 
     private Task<List<TableVersion>> ReadVersions(Guid set, int number, CancellationToken ct) => db.TableVersions
