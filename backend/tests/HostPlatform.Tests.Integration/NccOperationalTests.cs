@@ -920,6 +920,160 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
+    public async Task Performance_report_references_the_retained_mt32_ack_before_receipt_not_the_current_assignment()
+    {
+        var wireId = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+        var id = Convert.FromHexString(wireId);
+        Guid terminalId;
+        await using (var scope = fx.Factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var phone = new HostPlatform.Domain.Terminal
+            {
+                SiteId = (await db.Sites.FirstAsync()).Id, TerminalIdHex = wireId, DisplayName = "Performance reference fixture"
+            };
+            db.Terminals.Add(phone);
+            await db.SaveChangesAsync();
+            terminalId = phone.Id;
+        }
+
+        var definitions = await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/definitions", Json);
+        var definition = definitions.EnumerateArray().FirstOrDefault(row => row.GetProperty("tableNumber").GetInt32() == 32);
+        Guid definitionId;
+        if (definition.ValueKind == JsonValueKind.Undefined)
+        {
+            using var created = await fx.Client.PostAsJsonAsync("/api/tables/definitions", new { name = "Performance reference fixture", tableNumber = 32 });
+            created.EnsureSuccessStatusCode();
+            definitionId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        }
+        else
+            definitionId = definition.GetProperty("id").GetGuid();
+
+        var first = Timing(100);
+        var second = Timing(500);
+        var third = Timing(900);
+        var firstSet = await Set(first, 1);
+        var secondSet = await Set(second, 2);
+        var thirdSet = await Set(third, 3);
+        var firstBatch = await Queue(firstSet);
+        await Transfer(firstBatch, first, true);
+
+        using (var assigned = await fx.Client.PostAsJsonAsync($"/api/terminals/{terminalId}/table-assignment", new { tableSetId = secondSet }))
+            assigned.EnsureSuccessStatusCode();
+        var secondBatch = await Queue(secondSet);
+        var original = await Upload(8);
+        AssertReference(original, firstBatch, 1, 100, false);
+
+        await Transfer(secondBatch, second, true);
+        var stillOriginal = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/uploads/{original.GetProperty("id").GetGuid()}", Json);
+        AssertReference(stillOriginal, firstBatch, 1, 100, false);
+        var newer = await Upload(9);
+        AssertReference(newer, secondBatch, 2, 500, false);
+
+        var thirdBatch = await Queue(thirdSet);
+        await Transfer(thirdBatch, third, false);
+        var afterFailure = await Upload(10);
+        AssertReference(afterFailure, secondBatch, 2, 500, true);
+
+        static byte[] Timing(short start)
+        {
+            var payload = new byte[33];
+            payload[0] = 32;
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(1), start);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(3), 20);
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(9), -99); // Reserved pair is not in MT37.
+            BinaryPrimitives.WriteInt16LittleEndian(payload.AsSpan(13), 333);
+            return payload;
+        }
+
+        async Task<Guid> Set(byte[] payload, int revision)
+        {
+            using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = $"Performance reference {revision}" });
+            created.EnsureSuccessStatusCode();
+            var set = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            using var version = await fx.Client.PostAsJsonAsync("/api/tables/versions", new
+            {
+                tableSetId = set, tableDefinitionId = definitionId, tableRevision = revision,
+                payloadBase64 = Convert.ToBase64String(payload), sortOrder = 0
+            });
+            version.EnsureSuccessStatusCode();
+            using var published = await fx.Client.PostAsync($"/api/tables/sets/{set}/publish?confirm=true", null);
+            published.EnsureSuccessStatusCode();
+            return set;
+        }
+
+        async Task<Guid> Queue(Guid set)
+        {
+            using var queued = await fx.Client.PostAsJsonAsync($"/api/terminals/{terminalId}/downloads", new
+            {
+                tableSetId = set, scope = "Partial", partialTableDefinitionIds = new[] { definitionId }
+            });
+            queued.EnsureSuccessStatusCode();
+            return (await queued.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        }
+
+        async Task Transfer(Guid batch, byte[] payload, bool acknowledge)
+        {
+            await using (var call = await OpenAsync())
+            {
+                await call.Stream.WriteAsync(Message(id, [44, 2]));
+                AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+                var begin = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 18 }, begin.Data);
+                await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | begin.Control)));
+                var record = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(payload, record.Data);
+                await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | record.Control)));
+                if (acknowledge)
+                {
+                    await call.Stream.WriteAsync(Message(id, [14, 32]));
+                    AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+                    var end = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
+                    Assert.Equal(new byte[] { 13 }, end.Data);
+                    await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+                }
+            }
+            var completed = await WaitBatchAsync(batch, acknowledge ? 2 : 3);
+            var step = Assert.Single(completed.GetProperty("timeline").EnumerateArray());
+            Assert.Equal(acknowledge, step.GetProperty("succeeded").GetBoolean());
+            if (acknowledge) Assert.Equal("ack", step.GetProperty("lastAckStatus").GetString());
+        }
+
+        async Task<JsonElement> Upload(ushort count)
+        {
+            var report = StatisticsReport(37, 99);
+            BinaryPrimitives.WriteUInt16LittleEndian(report.AsSpan(21), count);
+            await using (var link = await OpenAsync())
+            {
+                await link.Stream.WriteAsync(Message(id, report));
+                AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            }
+            var uploads = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+            var entry = uploads.EnumerateArray().First(row => row.GetProperty("terminalId").ValueKind != JsonValueKind.Null &&
+                row.GetProperty("terminalId").GetGuid() == terminalId && row.GetProperty("isTerminalStatistics").GetBoolean());
+            var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/uploads/{entry.GetProperty("id").GetGuid()}", Json);
+            var decoded = Assert.Single(detail.GetProperty("records").EnumerateArray()).GetProperty("terminalStatistics");
+            Assert.Equal(count, StatisticsCounter(decoded, "Line seizure to end of dialing", "Bucket 1"));
+            return detail;
+        }
+
+        static void AssertReference(JsonElement detail, Guid batch, int revision, short start, bool uncertain)
+        {
+            var reference = detail.GetProperty("performanceReference");
+            Assert.Equal("acknowledged", reference.GetProperty("status").GetString());
+            Assert.Equal(batch, reference.GetProperty("downloadBatchId").GetGuid());
+            Assert.Equal(revision, reference.GetProperty("tableRevision").GetInt32());
+            Assert.True(reference.GetProperty("ackRecordedAtUtc").GetDateTime() <= detail.GetProperty("createdAtUtc").GetDateTime());
+            Assert.Equal(uncertain, reference.GetProperty("laterUncertainAttempt").GetBoolean());
+            var timing = reference.GetProperty("timing").EnumerateArray().ToArray();
+            Assert.Equal(new[] { 0, 1, 3, 4 }, timing.Select(pair => pair.GetProperty("measurementIndex").GetInt32()));
+            Assert.Equal(start, timing[0].GetProperty("startTicks").GetInt32());
+            Assert.Equal(20, timing[0].GetProperty("intervalTicks").GetInt32());
+            Assert.Equal(333, timing[2].GetProperty("startTicks").GetInt32());
+        }
+    }
+
+    [Fact]
     public async Task Truncated_statistics_close_the_link_before_acknowledgement()
     {
         await using var link = await OpenAsync();

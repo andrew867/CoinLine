@@ -1,6 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Authorization;
+using HostPlatform.Api.Services;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Uploads;
@@ -59,6 +61,23 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
             return NotFound();
         var isTerminalCallDetail = TerminalUploads.IsCallDetail(u.IdempotencyKey);
         var isTerminalStatistics = TerminalUploads.IsStatistics(u.IdempotencyKey);
+        var records = u.Records.OrderBy(r => r.CreatedAtUtc).Select(r => new
+        {
+            r.Id,
+            RawPayloadHex = Convert.ToHexString(r.RawPayload),
+            r.DecodedMetadataJson,
+            TerminalCall = isTerminalCallDetail ? TerminalUploads.ReadMetadata<DlogCallDetailWire.CallDetail>(r.DecodedMetadataJson) : null,
+            TerminalStatistics = isTerminalStatistics ? TerminalUploads.ReadMetadata<DlogTerminalStatisticsWire.Report>(r.DecodedMetadataJson) : null,
+            r.CreatedAtUtc
+        }).ToArray();
+        PerformanceReportReference? performanceReference = null;
+        if (records.Any(record => record.TerminalStatistics?.MessageType == 37))
+        {
+            performanceReference = OperatorPermissions.Allows(HttpContext, "downloads", PermissionOperation.Read) &&
+                OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read)
+                ? await PerformanceReportReferences.FindAsync(db, u.TerminalId, u.CreatedAtUtc, ct)
+                : new("restricted");
+        }
         return Ok(new
         {
             u.Id,
@@ -72,15 +91,8 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
             u.RelatedDlogTransactionId,
             u.CreatedAtUtc,
             u.UpdatedAtUtc,
-            Records = u.Records.OrderBy(r => r.CreatedAtUtc).Select(r => new
-            {
-                r.Id,
-                RawPayloadHex = Convert.ToHexString(r.RawPayload),
-                r.DecodedMetadataJson,
-                TerminalCall = isTerminalCallDetail ? TerminalUploads.ReadMetadata<DlogCallDetailWire.CallDetail>(r.DecodedMetadataJson) : null,
-                TerminalStatistics = isTerminalStatistics ? TerminalUploads.ReadMetadata<DlogTerminalStatisticsWire.Report>(r.DecodedMetadataJson) : null,
-                r.CreatedAtUtc
-            })
+            performanceReference,
+            Records = records
         });
     }
 

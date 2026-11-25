@@ -5,6 +5,8 @@ test('previews configured MT37 histogram boundaries, saves selected MT32 timing,
   if (!baseURL) throw new Error('The console fixture requires a local base URL.')
   const origin = new URL(baseURL).origin, token = 'fixture-performance-operator'
   const id = '00000000-0000-4000-8000-000000003201'
+  const reportId = '00000000-0000-4000-8000-000000003701'
+  const sourceBatch = '00000000-0000-4000-8000-000000003702'
   let revision = 1, start = '100'
   const saves: Record<string, unknown>[] = []
   const field = (key: string, label: string, value: string) => ({ key, label, value, editor: 'number', min: 0,
@@ -15,7 +17,7 @@ test('previews configured MT37 histogram boundaries, saves selected MT32 timing,
     if (!url.pathname.startsWith('/api/')) return route.continue()
     if (url.pathname === '/api/auth/login' && request.method() === 'POST')
       return route.fulfill({ json: { token, displayName: 'Workshop operator', role: 'Operator',
-        permissions: { overview: 1, 'table-sets': 1, 'table-records': 3 } } })
+        permissions: { overview: 1, 'table-sets': 1, 'table-records': 3, uploads: 1, downloads: 1 } } })
     if (request.headers().authorization !== `Bearer ${token}`) return route.fulfill({ status: 401 })
     if (url.pathname === `/api/tables/sets/${id}`) return route.fulfill({ json: {
       id, name: 'Communications statistics draft', status: 0, revision: 1, customerId: null, isDefault: false, publishedAtUtc: null,
@@ -40,6 +42,19 @@ test('previews configured MT37 histogram boundaries, saves selected MT32 timing,
     if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
       openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
     if (url.pathname === '/api/terminals/families') return route.fulfill({ json: [] })
+    if (url.pathname === `/api/uploads/${reportId}`) return route.fulfill({ json: {
+      id: reportId, terminalId: null, status: 2, idempotencyKey: 'fixture-report', isTerminalStatistics: true,
+      rawPayloadHex: '', decodedMetadataJson: '{}', createdAtUtc: '2028-03-01T12:00:00Z', updatedAtUtc: '2028-03-01T12:00:00Z',
+      performanceReference: { status: 'acknowledged', tableRevision: 1, downloadBatchId: sourceBatch,
+        ackRecordedAtUtc: '2028-03-01T11:30:00Z', laterUncertainAttempt: false,
+        timing: [{ measurementIndex: 0, startTicks: 100, intervalTicks: 50 }] },
+      records: [{ id: 'fixture-record', terminalStatistics: {
+        messageType: 37, name: 'Communications performance', carrierFormat: null, carriers: [],
+        periodStart: '2028-02-29T10:00:00', periodEnd: '2028-03-01T10:00:00',
+        groups: [{ label: 'Line seizure to end of dialing',
+          counters: Array.from({ length: 7 }, (_, i) => ({ label: `Bucket ${i + 1}`, value: 80 + i })) }],
+      } }],
+    } })
     return route.fulfill({ status: 404 })
   })
   await signIn(page)
@@ -63,4 +78,15 @@ test('previews configured MT37 histogram boundaries, saves selected MT32 timing,
   await page.getByText('Performance histogram bucket ranges (MT37)', { exact: true }).click()
   await expect(range.getByText('4.00 s or more')).toBeVisible()
   await expect(page.getByRole('region', { name: 'Dial complete to carrier', exact: true }).getByText('Empty range', { exact: true })).toHaveCount(5)
+
+  await page.goto(`/uploads/${reportId}`)
+  const reference = page.getByRole('region', { name: 'MT32 timing reference' })
+  await expect(reference).toContainText('Revision 1')
+  await expect(reference).toContainText('not proven historical bucket boundaries')
+  await expect(reference.getByRole('link', { name: 'View source download' })).toHaveAttribute('href', `/downloads/${sourceBatch}`)
+  const reportGroup = page.getByRole('heading', { name: 'Line seizure to end of dialing' }).locator('..')
+  await expect(reportGroup.getByText('Reference: Below 1.00 s', { exact: true })).toBeVisible()
+  await expect(reportGroup.getByText('Reference: 3.50 s or more', { exact: true })).toBeVisible()
+  await expect(reportGroup.getByText('86', { exact: true })).toBeVisible()
+  await expect(reportGroup.getByText('Reference: 4.00 s or more', { exact: true })).toHaveCount(0)
 })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiPostBareOk } from '../api/client'
 import { carrierReportLabel } from './collectionPolicy'
+import { PerformanceReferenceSummary, performanceReportRanges, type PerformanceReference } from './PerformanceReportReference'
 import './UploadDetail.css'
 
 
@@ -58,6 +59,7 @@ type Detail = {
   relatedDlogTransactionId: string | null
   createdAtUtc: string
   updatedAtUtc: string
+  performanceReference?: PerformanceReference | null
   records: RecordRow[]
 }
 
@@ -191,7 +193,7 @@ export function UploadDetail() {
       {d.isTerminalStatistics ? (
         <section aria-label="Received statistics" data-testid="upload-records">
           {d.records.map(({ id: recordId, terminalStatistics }) => terminalStatistics &&
-            <StatisticsReport key={recordId} report={terminalStatistics} />)}
+            <StatisticsReport key={recordId} report={terminalStatistics} performanceReference={d.performanceReference} />)}
           <p>Received <time dateTime={d.createdAtUtc}>{new Date(d.createdAtUtc).toLocaleString()}</time></p>
         </section>
       ) : d.isTerminalCallDetail ? (
@@ -235,7 +237,7 @@ export function UploadDetail() {
   )
 }
 
-function StatisticsReport({ report }: { report: TerminalStatistics }) {
+function StatisticsReport({ report, performanceReference }: { report: TerminalStatistics; performanceReference?: PerformanceReference | null }) {
   const period = (value: string | null) => value?.replace('T', ' ') ?? 'Unavailable'
 
   return <article className="upload-statistics">
@@ -248,7 +250,9 @@ function StatisticsReport({ report }: { report: TerminalStatistics }) {
         {report.carrierFormat != null && <div><dt>Carrier record version</dt><dd>{report.carrierFormat}</dd></div>}
       </dl>
     </header>
-    {report.groups.length > 0 && <CounterGroups groups={report.groups} />}
+    {report.messageType === 37 && <PerformanceReferenceSummary reference={performanceReference} />}
+    {report.groups.length > 0 && <CounterGroups groups={report.groups}
+      performanceReference={report.messageType === 37 ? performanceReference : null} />}
     {report.carriers.map(({ reference, groups }, index) => <details key={`${reference}-${index}`} open={index === 0}>
       <summary>{carrierReportLabel(report.messageType, reference)}</summary>
       <CounterGroups groups={groups} />
@@ -287,14 +291,19 @@ function GraphicalUsageReport({ screens }: { screens: GraphicalScreenUsage[] }) 
   </section>
 }
 
-function CounterGroups({ groups }: { groups: CounterGroup[] }) {
+function CounterGroups({ groups, performanceReference }: { groups: CounterGroup[]; performanceReference?: PerformanceReference | null }) {
   return <div className="upload-statistics-groups">
-    {groups.map(({ label, counters }) => <section key={label}>
-      <h3>{label}</h3>
-      <dl>{counters.map(({ label: counter, value }) => <div key={counter}>
-        <dt>{counter}</dt><dd>{value.toLocaleString()}</dd>
-      </div>)}</dl>
-    </section>)}
+    {groups.map(({ label, counters }) => {
+      const timing = performanceReportRanges(performanceReference, label)
+      return <section key={label}>
+        <h3>{label}</h3>
+        {timing?.reason && <p>{timing.reason}</p>}
+        <dl>{counters.map(({ label: counter, value }) => <div key={counter}>
+          <dt>{counter}{timing?.ranges?.[counter] && <span className="performance-report-range">
+            Reference: {timing.ranges[counter]}</span>}</dt><dd>{value.toLocaleString()}</dd>
+        </div>)}</dl>
+      </section>
+    })}
   </div>
 }
 
