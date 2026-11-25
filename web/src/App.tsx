@@ -27,6 +27,7 @@ import { SitesPage } from './pages/SitesPage'
 import { TerminalCreatePage } from './pages/TerminalCreatePage'
 import { TerminalGroupsPage } from './pages/TerminalGroupsPage'
 import { TerminalDetail } from './pages/TerminalDetail'
+import { TerminalIdCutoverPage } from './pages/TerminalIdCutoverPage'
 import { TerminalsList } from './pages/TerminalsList'
 import { RatePlansPage } from './pages/RatePlansPage'
 import { RatePlanDetail } from './pages/RatePlanDetail'
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/sites" element={<SitesPage />} />
           <Route path="/terminal-groups" element={<TerminalGroupsPage />} />
           <Route path="/operators" element={<OperatorsPage />} />
+          <Route path="/terminals/identity-cutover" element={<TerminalIdCutoverPage />} />
           <Route path="/terminals/new" element={<TerminalCreatePage />} />
           <Route path="/terminals/:id" element={<TerminalDetail />} />
           <Route path="/terminals" element={<TerminalsList />} />

@@ -243,3 +243,11 @@ The editor checks the legacy timer ranges and the minimum 10-second gap between 
 Open **Table definitions** to find the master record catalogue. Search by MT number, reference name or registered definition name, and filter by native editor, observed length, documented reference, scheduler record or operational message. Expand a record to inspect exact packed layout lengths and template availability separately from firmware-specific lengths and retained emulator MT14 observations. A narrow behavior observation is displayed only where a previous emulator milestone established it; it does not certify all fields or physical hardware.
 
 The registered definitions remain a separate storage directory. A historical stored name is not authoritative wire semantics; for example MT10 is terminal status and MT20 is clock synchronization. MT94 is a separate code-download scheduling record. Viewing the reference catalogue does not change definitions, sets, assignments or payload hashes.
+
+### Terminal ID cutover review
+
+From **Phones**, select **Review terminal ID cutover**. Enter either an existing and replacement ten-digit decimal terminal ID, or two six-digit NPA-NXX prefixes of equal length. A prefix mapping preserves each phone's final four digits. Limit the inventory to a phone, group, group ID pattern, location, customer, region or time area if needed.
+
+The review shows each registered phone, its current and proposed ID, its published assignment and MT21 record revision. It checks replacement IDs against the entire inventory, including inactive phones, and reports inactive phones, open sessions, unfinished downloads, missing or incompatible access records, and unsupported ID formats. For a verified access profile, expand **Record fingerprints** to compare the current and proposed payload digests; only the terminal ID field is substituted.
+
+This is a read-only worksheet. It neither reserves proposed IDs nor changes a phone, table assignment, download batch or inventory. It does not yet implement automatic scheduled cutover or confirmation on the new identity. Do not interpret an eligible review as a completed terminal change.
