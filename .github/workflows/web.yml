@@ -56,6 +56,11 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
+      - name: Verify phone profile compatibility preflight
+        run: npm run e2e -- e2e/phone-profile-preflight.spec.ts --output test-results/phone-profile-preflight
+        env:
+          CI: "true"
+
       - name: Verify interface timing worksheet workflow
         run: npm run e2e -- e2e/interface-timing.spec.ts --output test-results/interface-timing
         env:
@@ -86,8 +91,18 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify restricted route review workflow
+        run: npm run e2e -- e2e/restriction-route-review.spec.ts --output test-results/restriction-route-review
+        env:
+          CI: "true"
+
       - name: Verify discount calendar workflow
         run: npm run e2e -- e2e/discount-calendar.spec.ts --output test-results/discount-calendar
+        env:
+          CI: "true"
+
+      - name: Verify reference record catalogue workflow
+        run: npm run e2e -- e2e/reference-record-catalogue.spec.ts --output test-results/reference-record-catalogue
         env:
           CI: "true"
 

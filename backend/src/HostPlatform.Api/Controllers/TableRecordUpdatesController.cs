@@ -150,7 +150,7 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
                 IReadOnlyList<TableRecordUpdateChange> changes = [];
                 if (reason == null && basis != null && assignment != null)
                 {
-                    var key = (basis.Id, removals.Length == 0 ? null : phone.FirmwareVersion?.TableProfileId,
+                    var key = (basis.Id, phone.FirmwareVersion?.TableProfileId,
                         request.PersonalizeAccessIdentity ? (Guid?)phone.Id : null);
                     if (!groups.TryGetValue(key, out var prepared))
                     {

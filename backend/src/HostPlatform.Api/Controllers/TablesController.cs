@@ -33,6 +33,19 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 t.Description
             }).ToListAsync(ct));
 
+    [HttpGet("reference-records")]
+    public async Task<ActionResult<IEnumerable<object>>> ReferenceRecords(CancellationToken ct)
+    {
+        var definitions = await db.TableDefinitions.AsNoTracking().OrderBy(row => row.Name)
+            .Select(row => new { row.Id, row.Name, row.TableNumber }).ToListAsync(ct);
+        var byNumber = definitions.ToLookup(row => row.TableNumber);
+        return Ok(RecordReferenceCatalogue.Build(byNumber.Select(row => row.Key)).Select(row => new
+        {
+            row.Number, row.Name, row.Kind, row.Layouts, row.Firmware, row.BehaviorObservation,
+            registeredDefinitions = byNumber[row.Number].Select(definition => new { definition.Id, definition.Name })
+        }));
+    }
+
     [HttpPost("definitions")]
     public async Task<ActionResult<object>> CreateDefinition([FromBody] TableDefDto body, CancellationToken ct)
     {
@@ -1015,6 +1028,9 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             ? await db.TableVersions.AsNoTracking().Include(v => v.TablePayload)
                 .Where(v => v.TableSetId == set.Id && v.TableDefinition!.TableNumber == 21).Take(2).ToListAsync(ct)
             : records.Where(v => v.TableDefinition!.TableNumber == 21).Take(2).ToList();
+        var shapes = records == null
+            ? (await tables.ReadRecordShapesAsync([set.Id], ct)).GetValueOrDefault(set.Id) ?? []
+            : TableSetFirmwareCompatibility.Shapes(records).ToArray();
         var reports = db.DlogTransactions.AsNoTracking().Where(row => row.NccSessionId != null
             && row.Direction == (int)DlogDirection.TerminalToHost && row.MessageType == FieldEventCatalog.SoftwareVersionMessageType
             && row.RawPayload.Length == FieldEventCatalog.SoftwareVersionRecordLength);
@@ -1024,18 +1040,22 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             .Select(t => new
             {
                 t.Id, t.DisplayName, t.SiteId, t.TerminalIdHex, t.Site!.CustomerId, t.FirmwareVersionId, t.TerminalFamilyId, t.DeactivatedAtUtc,
+                ProfileId = t.FirmwareVersion == null ? null : t.FirmwareVersion.TableProfileId,
                 Report = matchVersion ? reports.Where(row => row.TerminalId == t.Id)
                     .OrderByDescending(row => row.CapturedAtUtc).ThenByDescending(row => row.Id)
                     .Select(row => row.RawPayload).FirstOrDefault() : null
             })
             .ToListAsync(ct);
+        var profileIssues = phones.Select(t => t.ProfileId).OfType<string>().Distinct().ToDictionary(
+            id => id, id => TableSetFirmwareCompatibility.SelectionIssue(FirmwareTableProfiles.Find(id), shapes));
         return phones.Where(t => !matchVersion || (t.Report != null && FieldEventCatalog.ReadControllerVersion(t.Report) == currentVersion))
             .Select(t =>
         {
             var reason = t.DeactivatedAtUtc != null ? "Terminal is deactivated."
                 : set.CustomerId != null && t.CustomerId != set.CustomerId ? "Outside the set’s customer scope."
                 : TableDistributionService.AccessRecordIssue(access, t.TerminalIdHex)
-                    ?? TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId);
+                    ?? TableSetFirmwareCompatibility.Mismatch(set, t.FirmwareVersionId)
+                    ?? (t.ProfileId == null ? null : profileIssues.GetValueOrDefault(t.ProfileId));
             return new AssignmentTarget(t.Id, t.DisplayName, t.SiteId, t.CustomerId, TerminalFamilies.Find(t.TerminalFamilyId)?.Label,
                 reason == null, reason, isCodeOnly || scope.TargetType is "terminal-id-range" or "configuration-id" ? t.TerminalIdHex : null);
         }).ToList();

@@ -97,6 +97,9 @@ public static class TableRecordUpdate
             var issues = TableDistributionService.PublicationIssues(result);
             if (issues.Count != 0)
                 throw new InvalidOperationException(string.Join(" ", issues));
+            if (TableSetFirmwareCompatibility.SelectionIssue(FirmwareTableProfiles.Find(firmware?.TableProfileId),
+                TableSetFirmwareCompatibility.Shapes(result.Versions)) is { } profileIssue)
+                throw new InvalidOperationException(profileIssue);
             TableDistributionService.OrderVersionsForDownload(result.Versions.ToArray());
         }
         return new(result, operations);

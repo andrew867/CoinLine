@@ -1,12 +1,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
-import { apiFetch, apiGet, apiPost } from '../api/client'
+import { apiFetch, apiGet, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { TerminalDetail } from './TerminalDetail'
 
 vi.mock('../api/client', () => ({
-  apiFetch: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn(), apiPostBareOk: vi.fn(), apiPut: vi.fn(),
+  apiFetch: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn(), apiPostBare: vi.fn(), apiPostBareOk: vi.fn(), apiPut: vi.fn(),
   apiPostRaw: vi.fn(),
 }))
 
@@ -84,15 +84,34 @@ it('uses the narrow assignment lookup and permits an assignment without table-se
     if (path === `${phonePath}/table-assignment`) return Response.json(assignment)
     throw new Error(`Unexpected request ${path}`)
   })
-  vi.mocked(apiPost).mockResolvedValue({})
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({}))
   renderPhone()
   await screen.findByRole('option', { name: 'Fixture set (published)' })
   expect(screen.getByRole('button', { name: 'Assign set' })).toBeEnabled()
   fireEvent.click(screen.getByRole('button', { name: 'Assign set' }))
-  await waitFor(() => expect(apiPost).toHaveBeenCalledWith(`${phonePath}/table-assignment`, {
+  await waitFor(() => expect(apiPostRaw).toHaveBeenCalledWith(`${phonePath}/table-assignment`, {
     tableSetId: set.id, customerId: null, siteId: null,
   }))
   expect(apiGet).not.toHaveBeenCalledWith('/api/tables/sets')
+})
+
+it('excludes incompatible published sets from defaults and shows the reason for a stale rejected assignment', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { phones: 1, 'table-assignments': 3 })
+  const reason = 'MT92. The selected firmware uses 3,061 bytes. The record has 3,401.'
+  mockReads({ [`${phonePath}/table-assignment-options`]: [
+    { ...set, id: 'wrong', name: 'Older screening', compatibilityIssue: reason }, set,
+  ] })
+  vi.mocked(apiFetch).mockImplementation(async path => {
+    if (path === phonePath) return Response.json(phone)
+    if (path === `${phonePath}/table-assignment`) return Response.json(assignment)
+    throw new Error(`Unexpected request ${path}`)
+  })
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ error: reason }, { status: 400 }))
+  renderPhone()
+  expect(await screen.findByRole('option', { name: `Older screening (${reason})` })).toBeDisabled()
+  expect(screen.getByLabelText('Table set')).toHaveValue(set.id)
+  fireEvent.click(screen.getByRole('button', { name: 'Assign set' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent(reason)
 })
 
 it('retains the readable assignment and callback but disables new actions for an inactive phone', async () => {
