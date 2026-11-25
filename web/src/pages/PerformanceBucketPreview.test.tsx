@@ -70,9 +70,9 @@ it('previews a selected MT32 timer edit, warnings and other unchanged ranges, th
   fireEvent.change(screen.getByLabelText('Section or entry'), { target: { value: 'collection' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
   await waitFor(() => expect(savedChanges).toEqual([{ 'interval-0.start': '150' }]))
-  await waitFor(() => {
-    screen.getByText('Performance histogram bucket ranges (MT37)').closest('details')!.open = true
-    expect(within(screen.getByRole('region', { name: 'Access to dial complete' })).getByText('4.00 s or more')).toBeVisible()
-    expect(screen.getByRole('button', { name: 'Save record' })).toBeDisabled()
-  })
+  await screen.findByText(/33 bytes · Revision 2/)
+  const reopenedDetails = screen.getByText('Performance histogram bucket ranges (MT37)').closest('details')!
+  if (!reopenedDetails.open) reopenedDetails.open = true
+  expect(within(screen.getByRole('region', { name: 'Access to dial complete' })).getByText('4.00 s or more')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Save record' })).toBeDisabled()
 })
