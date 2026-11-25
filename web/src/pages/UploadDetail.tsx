@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiPostBareOk } from '../api/client'
+import { carrierReportLabel } from './collectionPolicy'
 import './UploadDetail.css'
 
 
@@ -242,7 +243,7 @@ function StatisticsReport({ report }: { report: TerminalStatistics }) {
     </header>
     {report.groups.length > 0 && <CounterGroups groups={report.groups} />}
     {report.carriers.map(({ reference, groups }, index) => <details key={`${reference}-${index}`} open={index === 0}>
-      <summary>Carrier reference {reference}</summary>
+      <summary>{carrierReportLabel(report.messageType, reference)}</summary>
       <CounterGroups groups={groups} />
     </details>)}
     {report.groups.length === 0 && report.carriers.length === 0 && <p>No carrier entries in this report.</p>}

@@ -550,6 +550,57 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Later_call_collection_policy_edits_independent_carrier_and_cdr_bits_without_changing_the_record_tail()
+    {
+        using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
+        {
+            label = "CDR policy fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180
+        });
+        firmware.EnsureSuccessStatusCode();
+        var targetFirmwareVersionId = (await firmware.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "CDR collection fixture", targetFirmwareVersionId });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+        var fieldsPath = path + "/records/34/fields";
+        var templates = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(NativeTableLayouts.Later, Assert.Single(templates.GetProperty("templates").EnumerateArray()).GetProperty("profile").GetString());
+
+        byte[] record = [34, 2, 15, 1, 2, 6, 0, 12, 0, 0, 0, 0, 0, 0xC2, 40, 20, 0, 0, 6];
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "CDR collection fixture", tableNumber = 34 });
+        definition.EnsureSuccessStatusCode();
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            tableRevision = 1, payloadBase64 = Convert.ToBase64String(record), sortOrder = 34
+        });
+        imported.EnsureSuccessStatusCode();
+        var original = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        using (var untouched = await Save(original, new Dictionary<string, string>())) Assert.Equal(HttpStatusCode.NoContent, untouched.StatusCode);
+        using (var edited = await Save(original, new Dictionary<string, string> { ["enabled"] = "16" })) Assert.Equal(HttpStatusCode.NoContent, edited.StatusCode);
+        record[13] = 0xD2;
+        var updated = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(Hash(record), updated.GetProperty("sha256").GetString());
+        using (var summarized = await Save(updated, new Dictionary<string, string> { ["carrierStatistics"] = "17" })) Assert.Equal(HttpStatusCode.NoContent, summarized.StatusCode);
+        record[13] = 0xF2;
+        var final = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(Hash(record), final.GetProperty("sha256").GetString());
+        var fields = final.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .ToDictionary(field => field.GetProperty("key").GetString()!);
+        Assert.Equal("16", fields["enabled"].GetProperty("value").GetString());
+        Assert.Equal("17", fields["carrierStatistics"].GetProperty("value").GetString());
+        Assert.Empty((await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("firmwareFindings").EnumerateArray());
+        using var published = await _client.PostAsync(path + "/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+
+        static string Hash(byte[] bytes) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+        Task<HttpResponseMessage> Save(JsonElement details, Dictionary<string, string> changes) => _client.PutAsJsonAsync(fieldsPath, new
+        {
+            profile = details.GetProperty("profile"), revision = details.GetProperty("revision"), sha256 = details.GetProperty("sha256"), changes
+        });
+    }
+
+    [Fact]
     public async Task Later_service_restriction_editor_reviews_imported_windows_and_keeps_the_unedited_tail()
     {
         using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new

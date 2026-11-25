@@ -36,7 +36,7 @@ public static partial class NativeTableLayouts
     {
         var candidates = Candidates(number, record);
         // Existing sets without a registered target already use the older editing profile for these records.
-        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 33 or QuickAccessKeyWire.MessageType or ServiceRestrictionWire.MessageType or 73 ? MultiPay : null);
+        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 33 or CollectionPolicyWire.CallCarrierType or QuickAccessKeyWire.MessageType or ServiceRestrictionWire.MessageType or 73 ? MultiPay : null);
         var layout = selection == null ? candidates.Count == 1 ? candidates[0] : null
             : candidates.SingleOrDefault(layout => layout.Profile == selection);
         if (layout == null)
@@ -56,7 +56,7 @@ public static partial class NativeTableLayouts
         if (number == AnswerSupervisionRecord)
             return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
         return IsLocalDialingRecord(number) || CallScreeningWire.IsRecord(number)
-            || number is 22 or 23 or CallInRecord or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
+            || number is 22 or 23 or CollectionPolicyWire.CommunicationsType or CollectionPolicyWire.CallCarrierType or CallInRecord or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
             or SpareTableWire.MessageType or 73 or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or >= 150 and <= 152
             ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
             : [];
@@ -109,25 +109,20 @@ public static partial class NativeTableLayouts
         foreach (var terminalLayout in TerminalConfigurationLayouts())
             yield return terminalLayout;
 
-        yield return Layout(32, 33, [Section("collection", "Performance reporting",
-            Field("threshold", "Upload threshold", 21), Hour("startHour", "Start hour", 22),
-            Minute("startMinute", "Start minute", 23), Field("days", "Window duration (days)", 24)),
+        yield return Layout(CollectionPolicyWire.CommunicationsType, 33, [Section("collection", "Performance reporting",
+            Field("threshold", "Upload threshold", 21, help: "Zero disables call-ins triggered by this record count."), Hour("startHour", "Start hour", 22),
+            Minute("startMinute", "Start minute", 23), Field("days", "Collection interval (days)", 24, help: "Zero disables performance statistics.")),
             .. ReportTimes(25), .. new[] { (0, "Access to dial complete"), (1, "Dial complete to carrier"), (3, "Carrier to first packet"), (4, "User waiting time") }
                 .Select(item => Section($"interval-{item.Item1}", item.Item2,
                     Field($"interval-{item.Item1}.start", "Start (10 ms ticks)", 1 + item.Item1 * 4, SignedWord, min: 0),
-                    Field($"interval-{item.Item1}.duration", "Interval (10 ms ticks)", 3 + item.Item1 * 4, SignedWord, min: 0)))]);
+                    Field($"interval-{item.Item1}.duration", "Interval (10 ms ticks)", 3 + item.Item1 * 4, SignedWord, min: 0))),
+            Section("reserved", "Reserved timing pair", Field("spareStart", "Reserved start", 9, SignedWord), Field("spareInterval", "Reserved interval", 11, SignedWord))]);
 
         yield return Layout(33, 36, ModemSections(later: false));
         yield return new NativeTableLayout(33, 36, Later, ModemSections(later: true));
 
-        yield return Layout(34, 19, [Section("summary", "Summary collection",
-            Hour("startHour", "Start hour", 1), Minute("startMinute", "Start minute", 2),
-            Field("days", "Window duration (days)", 3), Field("threshold", "Upload threshold", 4)),
-            Section("detail", "Detailed collection",
-                Select("enabled", "Detailed collection", 13, (0, "Disabled"), (1, "Enabled")),
-                Field("detailThreshold", "Detailed upload threshold", 14), Hour("detailHour", "Start hour", 15),
-                Minute("detailMinute", "Start minute", 16), Field("detailDays", "Duration days", 17),
-                Hour("detailHours", "Duration hours", 18)), .. ReportTimes(5)]);
+        yield return CallCarrierStatisticsLayout(later: false);
+        yield return CallCarrierStatisticsLayout(later: true);
 
         yield return Layout(CallInRecord, 21,
             Section("callIn", "Scheduled call-in",
