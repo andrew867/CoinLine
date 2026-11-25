@@ -28,6 +28,24 @@
 .advertising-spares summary { font-size: .88rem; margin-bottom: 4px; }
 .advertising-spares .page-intro, .advertising-import-notice { font-size: .8rem; color: #526c61; }
 .advertising-spares label { margin-bottom: 4px; }
+.visual-prompt-worksheet { margin: 10px 0; }
+.visual-prompt-grid { border: 1px solid #dce7e1; border-radius: 10px; overflow: hidden; }
+.visual-prompt-row { display: grid; grid-template-columns: minmax(140px, 1.15fr) minmax(190px, 1fr) minmax(85px, auto); gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid #e5ece8; }
+.visual-prompt-row:last-child { border-bottom: 0; }
+.visual-prompt-row:nth-child(even) { background: #f7faf8; }
+.visual-prompt-row small { display: block; color: #526b60; font-size: .8rem; }
+.visual-prompt-cell { display: grid; gap: 3px; min-width: 0; }
+.visual-prompt-cell input { width: 100%; font-family: Consolas, monospace; }
+.visual-prompt-cell input[aria-invalid='true'] { border-color: #b42318; }
+.visual-prompt-row-actions, .visual-prompt-unmapped { display: flex; flex-wrap: wrap; gap: 5px 8px; align-items: center; }
+.visual-prompt-unmapped { color: #775923; font-size: .84rem; }
+.visual-prompt-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.visual-prompt-import { padding: 12px; border: 1px solid #dce7e1; border-radius: 10px; }
+.visual-prompt-import label { display: grid; gap: 4px; margin: 8px 0; }
+.visual-prompt-import textarea { width: 100%; font-family: Consolas, monospace; }
+.visual-prompt-review ul { max-height: 260px; overflow: auto; border: 1px solid #dce7e1; padding: 10px 10px 10px 28px; border-radius: 8px; }
+.visual-prompt-review li { margin-block: 6px; overflow-wrap: anywhere; }
+@media (max-width: 680px) { .visual-prompt-row { grid-template-columns: 1fr; gap: 6px; } }
 .table-config-simulator {
   display: flex;
   align-items: start;

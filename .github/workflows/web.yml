@@ -61,6 +61,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify visual prompt worksheet workflow
+        run: npm run e2e -- e2e/visual-prompt-worksheet.spec.ts --output test-results/visual-prompts
+        env:
+          CI: "true"
+
       - name: Upload Playwright failure traces
         if: failure()
         uses: actions/upload-artifact@v4
