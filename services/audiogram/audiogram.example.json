@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "data_directory": "/var/lib/asterisk/coinline-audiogram",
+  "callfile_staging_directory": "/var/spool/asterisk/coinline-audiogram-stage",
+  "callfile_outgoing_directory": "/var/spool/asterisk/outgoing",
+  "callfile_archive_directory": "/var/spool/asterisk/outgoing_done",
+  "recipients": {
+    "lab-recipient": "7005"
+  },
+  "duration_limit": 60,
+  "minimum_seconds": 1,
+  "wait_seconds": 30,
+  "retries": 2,
+  "retry_seconds": 60
+}
