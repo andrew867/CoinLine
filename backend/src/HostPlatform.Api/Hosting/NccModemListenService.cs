@@ -140,10 +140,11 @@ public sealed class NccModemListenService(
                 interrupted.CompletedAtUtc = now;
                 foreach (var item in interrupted.Items.Where(item => !item.Succeeded))
                 {
+                    var notSent = DownloadFailureDiagnostics.WasNotSent(item.HostDownloadPhase);
                     item.ItemStatus = DownloadBatchItemStatus.Failed;
-                    item.LastAckStatus = "missing";
+                    item.LastAckStatus = notSent ? "not_sent" : "interrupted";
                     item.HostDownloadPhase = TableDownloadHostPhase.Failed;
-                    item.ErrorDetail = reason;
+                    item.ErrorDetail = notSent ? DownloadFailureDiagnostics.NotSentReason : reason;
                 }
             }
 

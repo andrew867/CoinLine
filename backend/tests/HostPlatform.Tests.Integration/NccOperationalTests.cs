@@ -2214,6 +2214,145 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         }
     }
 
+    [Theory]
+    [InlineData("link", "missing_link_ack", "Link acknowledgement was missing for MT131 fragment.")]
+    [InlineData("table", "missing_table_ack", "Table acknowledgement was missing for MT131 (MT14).")]
+    [InlineData("reject", "nak", "negative acknowledgement")]
+    [InlineData("linkReject", "link_nak", "terminal rejected the install frame")]
+    public async Task Interrupted_graphical_install_identifies_the_actual_failure_and_unsent_tables(
+        string failure, string expectedStatus, string expectedReason)
+    {
+        var records = GraphicalStarterWire.Create();
+        using var created = await fx.Client.PostAsJsonAsync("/api/tables/sets", new
+        {
+            name = $"Graphical failure diagnostics {failure}", isDefault = false
+        }, Json);
+        created.EnsureSuccessStatusCode();
+        var setId = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var definitions = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/definitions", Json))
+            .EnumerateArray().ToDictionary(row => row.GetProperty("tableNumber").GetInt32(), row => row.GetProperty("id").GetGuid());
+        foreach (var (number, payload) in records)
+        {
+            if (!definitions.TryGetValue(number, out var definition))
+            {
+                using var added = await fx.Client.PostAsJsonAsync("/api/tables/definitions", new { name = $"Graphical MT{number}", tableNumber = number }, Json);
+                added.EnsureSuccessStatusCode();
+                definition = (await added.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+            }
+            using var version = await fx.Client.PostAsJsonAsync("/api/tables/versions", new
+            {
+                tableSetId = setId, tableDefinitionId = definition, tableRevision = 1,
+                payloadBase64 = Convert.ToBase64String(payload), sortOrder = number
+            }, Json);
+            version.EnsureSuccessStatusCode();
+        }
+        using var published = await fx.Client.PostAsync($"/api/tables/sets/{setId}/publish?confirm=true", null);
+        published.EnsureSuccessStatusCode();
+        await AssignSetAsync(setId);
+        try
+        {
+            var before = await BatchIdsAsync();
+            await using (var link = await OpenAsync())
+            {
+                await link.Stream.WriteAsync(Message(KnownId, [44, 2]));
+                AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                var header = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 18 }, header.Data);
+                await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+                var first = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(131, first.Data[0]);
+                if (failure == "linkReject")
+                {
+                    for (var retryIndex = 0; retryIndex < 3; retryIndex++)
+                    {
+                        await link.Stream.WriteAsync(Control((byte)(NccControl.Nack | first.Control)));
+                        if (retryIndex < 2)
+                        {
+                            var retry = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                            Assert.Equal(first.Data, retry.Data);
+                            Assert.Equal(first.Control | NccControl.ReTrans, retry.Control);
+                        }
+                    }
+                }
+                else if (failure != "link")
+                {
+                    var payload = records[131];
+                    for (var offset = 0; offset < payload.Length; offset += NccConstants.MaxDataSize)
+                    {
+                        var part = offset == 0 ? first : Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                        Assert.Equal(payload[offset..Math.Min(offset + NccConstants.MaxDataSize, payload.Length)], part.Data);
+                        await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | part.Control)));
+                    }
+                    if (failure == "reject")
+                    {
+                        await link.Stream.WriteAsync(Message(KnownId, [14, 0]));
+                        AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                    }
+                }
+            }
+            var batch = await WaitNewBatchAsync(before, 3);
+            Assert.Contains(expectedReason, batch.GetProperty("lastError").GetString(), StringComparison.OrdinalIgnoreCase);
+            var steps = batch.GetProperty("timeline").EnumerateArray().ToArray();
+            Assert.Equal(3, steps.Length);
+            Assert.Equal(expectedStatus, steps[0].GetProperty("lastAckStatus").GetString());
+            Assert.Contains(expectedReason, steps[0].GetProperty("errorDetail").GetString(), StringComparison.OrdinalIgnoreCase);
+            Assert.All(steps.Skip(1), step =>
+            {
+                Assert.Equal("not_sent", step.GetProperty("lastAckStatus").GetString());
+                Assert.Equal("Not sent because the download stopped before this table.", step.GetProperty("errorDetail").GetString());
+            });
+        }
+        finally
+        {
+            await AssignLabSetAsync();
+        }
+    }
+
+    [Theory]
+    [InlineData(false, "Start-of-download link acknowledgement was missing.", "not_sent")]
+    [InlineData(true, "End-of-data link acknowledgement was missing.", "ack")]
+    public async Task Missing_download_boundary_ack_preserves_table_delivery_evidence(
+        bool acknowledgeTable, string reason, string expectedStatus)
+    {
+        var payload = new byte[1192];
+        payload[0] = 73;
+        await AssignRateTableSetAsync($"Missing boundary acknowledgement {acknowledgeTable}", payload);
+        try
+        {
+            var before = await BatchIdsAsync();
+            await using (var link = await OpenAsync())
+            {
+                await link.Stream.WriteAsync(Message(KnownId, [44, 2]));
+                AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                var header = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                Assert.Equal(new byte[] { 18 }, header.Data);
+                if (acknowledgeTable)
+                {
+                    await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+                    for (var offset = 0; offset < payload.Length; offset += NccConstants.MaxDataSize)
+                    {
+                        var part = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                        Assert.Equal(payload[offset..Math.Min(offset + NccConstants.MaxDataSize, payload.Length)], part.Data);
+                        await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | part.Control)));
+                    }
+                    await link.Stream.WriteAsync(Message(KnownId, [14, 73]));
+                    AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                    var end = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+                    Assert.Equal(new byte[] { 13 }, end.Data);
+                }
+            }
+            var batch = await WaitNewBatchAsync(before, 3);
+            Assert.Equal(reason, batch.GetProperty("lastError").GetString());
+            var step = batch.GetProperty("timeline")[0];
+            Assert.Equal(expectedStatus, step.GetProperty("lastAckStatus").GetString());
+            Assert.Equal(acknowledgeTable, step.GetProperty("succeeded").GetBoolean());
+        }
+        finally
+        {
+            await AssignLabSetAsync();
+        }
+    }
+
     [Fact]
     public async Task Missing_ack_fails_the_batch_and_retry_is_accepted()
     {

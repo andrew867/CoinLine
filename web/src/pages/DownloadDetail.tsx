@@ -35,6 +35,22 @@ type Detail = {
   timeline: Step[]
 }
 
+const acknowledgementLabels: Record<string, string> = {
+  ack: 'Table acknowledged',
+  pending_terminal_ack: 'Awaiting terminal',
+  missing: 'Acknowledgement missing',
+  missing_link_ack: 'Link acknowledgement missing',
+  missing_table_ack: 'Table acknowledgement missing (MT14)',
+  nak: 'Table rejected',
+  link_nak: 'Link frame rejected',
+  not_sent: 'Not sent',
+  interrupted: 'Interrupted',
+  cancelled: 'Cancelled',
+}
+
+const itemStatusLabels: Record<number, string> = {
+  0: 'Pending', 1: 'Queued', 2: 'In progress', 3: 'Succeeded', 4: 'Failed', 5: 'Cancelled', 6: 'Skipped',
+}
 export function DownloadDetail() {
   const { id } = useParams()
   const [d, setD] = useState<Detail | null>(null)
@@ -151,8 +167,8 @@ export function DownloadDetail() {
               Step {s.stepIndex}: <strong>{s.tableDefinitionName}</strong>
             </div>
             <div style={{ fontSize: 13, color: '#444' }}>
-              Host phase: {s.hostDownloadPhaseName} ({s.hostDownloadPhase}) · ACK: {s.lastAckStatus} · Item status:{' '}
-              {s.itemStatus}
+              Host phase: {s.hostDownloadPhaseName} · Acknowledgement: {acknowledgementLabels[s.lastAckStatus] ?? s.lastAckStatus} · Item status:{' '}
+              {itemStatusLabels[s.itemStatus] ?? s.itemStatus}
             </div>
             {s.errorDetail && <div>{s.errorDetail}</div>}
             <div style={{ fontSize: 12 }}>

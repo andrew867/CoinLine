@@ -209,6 +209,10 @@ The family checklist was verified with Playwright and isolated PostgreSQL. An op
 
 The source check included the archived WinHelp project, RTF topics and screen references for call screening, quick-access keys, service levels, advertising, carrier screens and rating. CoinLine uses those workflows in its own interface. The archive confirms the desktop screen responsibilities and does not establish that each server setting has a terminal wire field.
 
+### Interrupted transfer evidence
+
+The NCC download timeline distinguishes a missing fragment link acknowledgement from a missing MT14 table acknowledgement. If a transfer stops before the next record, those records are marked not sent, not terminal-rejected. A missing end-of-data link acknowledgement fails the batch without erasing earlier table acknowledgements. A controlled TCP graphical-set fixture exercises the 9,224-byte MT131 record followed by MT132 and MT133, covering missing link and table acknowledgements and an explicit table rejection. The browser workflow opens the failed phone download and identifies both the actual missing acknowledgement and a subsequent unsent record. This does not establish new firmware behavior acceptance.
+
 ## Runtime card and rating calls
 
 An ordinary assigned install set transfers on MT44. A due scheduled download can also transfer on a routine MT8 call-in or MT9 callback. A runtime authorization or quote exchange returns its application reply after the NCC link ACK. The terminal can then acknowledge and clear the call.
