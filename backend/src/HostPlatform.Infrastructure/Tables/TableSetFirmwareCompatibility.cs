@@ -44,7 +44,11 @@ public static class TableSetFirmwareCompatibility
             else if (profile == null || !profile.VerifiedLengths.ContainsKey(number))
                 yield return new(number, false, "The record format has no verified length for the selected firmware.");
             else
+            {
                 verifiedRecords.Add(number, data);
+                if (profile.ObservedLengthsOnly && NativeTableLayouts.Candidates(number, data).Count > 1)
+                    yield return new(number, false, "The record length was acknowledged by an emulated terminal, but the native field layout is not established for this firmware. Confirm the layout before editing.");
+            }
         }
 
         if (profile?.Id is FirmwareTableProfiles.MultiPay200 or FirmwareTableProfiles.LaterMultiPay180

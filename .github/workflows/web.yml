@@ -71,6 +71,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify firmware profile revision workflow
+        run: npm run e2e -- e2e/firmware-profile-revision.spec.ts --output test-results/firmware-profile-revision
+        env:
+          CI: "true"
+
       - name: Verify visual prompt worksheet workflow
         run: npm run e2e -- e2e/visual-prompt-worksheet.spec.ts --output test-results/visual-prompts
         env:
@@ -83,6 +88,11 @@ jobs:
 
       - name: Verify discount calendar workflow
         run: npm run e2e -- e2e/discount-calendar.spec.ts --output test-results/discount-calendar
+        env:
+          CI: "true"
+
+      - name: Verify observed firmware profiles workflow
+        run: npm run e2e -- e2e/observed-firmware-profiles.spec.ts --output test-results/observed-firmware-profiles
         env:
           CI: "true"
 

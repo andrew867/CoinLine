@@ -28,14 +28,15 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             var templates = set.Status == TableSetStatus.Draft
                 ? NativeTableLayouts.DraftTemplates(number)
                     .Where(layout => firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expectedLength)
-                        || (layout.Length == expectedLength && layout.Profile == firmware.LayoutFor(number)))
+                        || (layout.Length == expectedLength &&
+                            (firmware.ObservedLengthsOnly || layout.Profile == firmware.LayoutFor(number))))
                     .Select(layout => new
                     {
                         layout.Profile, layout.Length,
                         screeningSlots = CallScreeningWire.IsRecord(number) ? (int?)layout.Sections.Count : null
                     }).ToArray() : [];
-            return Ok(new { supported = false, templates, reason = templates.Length == 0
-                ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
+            return Ok(new { supported = false, templates, observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
+                reason = templates.Length == 0 ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
         }
         if (versions.Count != 1)
             return Ok(new { supported = false, reason = "This set has more than one record with the same message type." });
@@ -48,8 +49,10 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             var profiles = NativeTableLayouts.Candidates(number, raw).Select(candidate => candidate.Profile).ToArray();
             if (error != null)
                 return Ok(new { supported = false, reason = error });
-            return Ok(new { supported = false, profiles, reason = profiles.Length > 1
-                ? "Choose the firmware profile. These layouts use the same record length."
+            return Ok(new { supported = false, profiles, observedLengthsOnly = firmware?.ObservedLengthsOnly == true, reason = profiles.Length > 1
+                ? firmware?.ObservedLengthsOnly == true
+                    ? "Choose a native layout only if its field meanings are known for this build. A record length alone does not determine the layout."
+                    : "Choose the firmware profile. These layouts use the same record length."
                 : "A native editor is unavailable for this wire profile." });
         }
 
@@ -58,8 +61,9 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             supported = true,
             editable = set.Status == TableSetStatus.Draft,
             layout.Profile,
+            observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
             profiles = version.ScreeningLayoutProfile != null
-                || firmware?.VerifiedLengths.ContainsKey(number) == true
+                || (firmware?.VerifiedLengths.ContainsKey(number) == true && !firmware.ObservedLengthsOnly)
                 ? [layout.Profile] : NativeTableLayouts.Candidates(number, raw).Select(candidate => candidate.Profile).ToArray(),
             layout.Length,
             revision = version.TableRevision,
@@ -226,10 +230,24 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
         if (firmware?.CompleteCatalogue == true && !firmware.VerifiedLengths.ContainsKey(number))
             return (null, "This record type is absent from the selected firmware catalogue.");
-        if (firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expected))
+        if (firmware == null)
             return (NativeTableLayouts.Find(number, data, profile), null);
-        if (data.Length != expected)
+        var knownLength = firmware.VerifiedLengths.TryGetValue(number, out var expected);
+        if (knownLength && data.Length != expected)
             return (null, $"The selected firmware uses {expected:N0} bytes for this record. Import the matching record to edit it.");
+        if (firmware.ObservedLengthsOnly)
+        {
+            // The emulator acknowledgement establishes length, not the meaning of
+            // fields shared by same-sized packed layout families. Never fall back
+            // to the historic automatic older selection for an ambiguous record.
+            var candidates = NativeTableLayouts.Candidates(number, data);
+            var choice = profile ?? (candidates.Count == 1 ? candidates[0].Profile : null);
+            if (choice == null)
+                return (null, null);
+            return (NativeTableLayouts.Find(number, data, choice), null);
+        }
+        if (!knownLength)
+            return (NativeTableLayouts.Find(number, data, profile), null);
         var nativeLayout = firmware.LayoutFor(number);
         if (profile != null && profile != nativeLayout)
             return (null, "This layout does not match the set's target firmware.");

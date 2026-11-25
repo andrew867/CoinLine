@@ -1,14 +1,19 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Fragment, useCallback, useEffect, useState } from 'react'
 import { apiGet, apiPost } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { FirmwareProfileEditor } from './FirmwareProfileEditor'
 
 type Row = { id: string; label: string; buildId: string | null; tableProfileId: string | null }
 type TableProfile = { id: string; label: string; verifiedLengths: Record<string, number>;
-  completeCatalogue: boolean; terminalAcknowledgedRecords: number[] }
+  completeCatalogue: boolean; terminalAcknowledgedRecords: number[];
+  observedLengthsOnly?: boolean; evidenceNote?: string | null }
 
 function profileEvidence(profile: TableProfile) {
   const count = Object.keys(profile.verifiedLengths).length
   const acked = profile.terminalAcknowledgedRecords.length
   return `${count} known record lengths, ${acked} acknowledged by emulated terminals${profile.completeCatalogue ? '. Complete image catalogue.' : '.'}`
+    + (profile.observedLengthsOnly ? ' Observed subset only; ambiguous native layouts require explicit selection.' : '')
+    + (profile.evidenceNote ? ` ${profile.evidenceNote}` : '')
 }
 
 export function FirmwareVersionsPage() {
@@ -19,6 +24,10 @@ export function FirmwareVersionsPage() {
   const [buildId, setBuildId] = useState('')
   const [profiles, setProfiles] = useState<TableProfile[]>([])
   const [tableProfileId, setTableProfileId] = useState('')
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const canAdd = canPerform('firmware-registry', op.add)
+  const canUpdate = canPerform('firmware-registry', op.update)
   const selectedProfile = profiles.find(profile => profile.id === tableProfileId)
 
   const refresh = useCallback(async () => {
@@ -68,7 +77,8 @@ export function FirmwareVersionsPage() {
       </p>
       {loading && <p role="status">Loading…</p>}
       {err && <p role="alert" style={{ color: 'crimson' }}>{err}</p>}
-      <form onSubmit={onCreate} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'end', gap: 10, marginBottom: 20 }}>
+      {notice && <p role="status">{notice}</p>}
+      {canAdd && <form onSubmit={onCreate} style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'end', gap: 10, marginBottom: 20 }}>
         <label>Firmware label<input style={{ display: 'block' }} required value={label} onChange={(e) => setLabel(e.target.value)} /></label>
         <label>Build ID<input style={{ display: 'block' }} value={buildId} onChange={(e) => setBuildId(e.target.value)} /></label>
         <label>Table layout
@@ -79,7 +89,7 @@ export function FirmwareVersionsPage() {
         </label>
         <button type="submit" disabled={!label.trim()}>Register firmware</button>
         {selectedProfile && <p className="page-intro" style={{ flexBasis: '100%', margin: 0 }}>{profileEvidence(selectedProfile)}</p>}
-      </form>
+      </form>}
       {!loading && !err && rows.length === 0 && (
         <p role="status" style={{ color: '#666' }}>
           No firmware versions registered.
@@ -92,19 +102,28 @@ export function FirmwareVersionsPage() {
               <th>Label</th>
               <th>Build</th>
               <th>Table layout</th>
+              {canUpdate && <th>Actions</th>}
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
               const profile = profiles.find(item => item.id === r.tableProfileId)
               return (
-              <tr key={r.id}>
+              <Fragment key={r.id}><tr>
                 <td>{r.label}</td>
                 <td>{r.buildId ?? '—'}</td>
                 <td>{profile?.label ?? 'Unverified layout'}
                   {profile && <div><small>{profileEvidence(profile)}</small></div>}
                 </td>
+                {canUpdate && <td><button type="button" disabled={editingId !== null}
+                  onClick={() => { setNotice(null); setEditingId(r.id) }}>Review profile change</button></td>}
               </tr>
+              {canUpdate && editingId === r.id && <tr><td colSpan={4}>
+                <FirmwareProfileEditor id={r.id} currentProfileId={r.tableProfileId} profiles={profiles}
+                  onCancel={() => setEditingId(null)} onApplied={() => {
+                    setEditingId(null); setNotice('Firmware table profile updated.'); void refresh()
+                  }} />
+              </td></tr>}</Fragment>
               )
             })}
           </tbody>

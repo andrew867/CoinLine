@@ -25,7 +25,7 @@ public sealed class PostgresNumberingProfileTests
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-API-Key", key);
-        foreach (var profile in FirmwareTableProfiles.Catalog)
+        foreach (var profile in FirmwareTableProfiles.Catalog.Where(profile => !profile.ObservedLengthsOnly))
         {
             var record = NumberingProfileFixture.Create(profile.Id);
             var definition = new TableDefinition { Name = "Synthetic numbering plan", TableNumber = 62 };

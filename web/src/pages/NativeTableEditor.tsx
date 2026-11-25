@@ -52,6 +52,7 @@ type Layout = {
   editable: boolean
   profile: string
   profiles?: string[]
+  observedLengthsOnly?: boolean
   length: number
   revision: number
   sha256: string
@@ -60,7 +61,8 @@ type Layout = {
   numberingFormatCapacity?: number | null
   spareBytes?: string | null
   screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean } | null
-} | { supported: false; reason: string; profiles?: string[]; templates?: { profile: string; length: number; screeningSlots?: number | null }[] }
+} | { supported: false; reason: string; profiles?: string[]; observedLengthsOnly?: boolean;
+  templates?: { profile: string; length: number; screeningSlots?: number | null }[] }
 
 type Props = {
   setId: string
@@ -270,6 +272,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   if (!layout.supported) return (
     <div className="native-table-editor">
       <p className="page-intro">{layout.reason}</p>
+      {layout.observedLengthsOnly && <p className="page-intro">This target has an observed record-length catalogue, not confirmed native field meanings.
+        Confirm the selected editor or template against the actual firmware before authoring.</p>}
       {layout.profiles && layout.profiles.length > 1 && <label>Firmware profile
         <select value={profile} onChange={(event) => changeProfile(event.target.value)}>
           <option value="">Select firmware profile</option>
@@ -356,6 +360,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         {!layout.editable && <span>Published record</span>}
         {layout.editable && !canEdit && <span>Read-only access</span>}
       </header>
+      {layout.observedLengthsOnly && <p className="page-intro">Observed firmware profile: this editor is a candidate for the wire record.
+        Record-length acknowledgement does not establish that every field has the same meaning on this build.</p>}
       {(number === 22 || number === 134) && <CardSequencePanel setId={setId} number={number} revision={layout.revision}
         sha256={layout.sha256} editable={canEdit} dirty={changed > 0} busy={busy} onBusyChange={setBusy}
         labels={Object.fromEntries(layout.sections.filter(section => /^card-\d+$/.test(section.key)).map(section => {

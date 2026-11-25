@@ -1079,7 +1079,9 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             {
                 recordCount = profile.VerifiedLengths.Count,
                 terminalAcknowledgedCount = profile.TerminalAcknowledgedRecords.Count,
-                profile.CompleteCatalogue
+                profile.CompleteCatalogue,
+                profile.ObservedLengthsOnly,
+                profile.EvidenceNote
             },
             firmwareFindings = TableSetFirmwareCompatibility.Review(s),
             s.IsDefault,

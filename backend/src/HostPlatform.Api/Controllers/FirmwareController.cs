@@ -1,3 +1,4 @@
+using System.Data;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Firmware;
@@ -9,6 +10,7 @@ using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HostPlatform.Api.Controllers;
 
@@ -45,7 +47,7 @@ public sealed class FirmwareController(
     [AllowAnonymous]
     [HttpGet("table-profiles")]
     public ActionResult<object> TableProfiles() => Ok(FirmwareTableProfiles.Catalog.Select(profile =>
-        new { profile.Id, profile.Label, profile.VerifiedLengths, profile.CompleteCatalogue,
+        new { profile.Id, profile.Label, profile.VerifiedLengths, profile.CompleteCatalogue, profile.ObservedLengthsOnly, profile.EvidenceNote,
             terminalAcknowledgedRecords = profile.TerminalAcknowledgedRecords.Order().ToArray() }));
 
     [AllowAnonymous]
@@ -78,6 +80,64 @@ public sealed class FirmwareController(
         await db.SaveChangesAsync(ct);
         return Created($"/api/firmware/versions/{v.Id}", new { v.Id });
     }
+
+    public sealed record FirmwareTableProfileChoice(string? TableProfileId);
+    public sealed record FirmwareTableProfileChange(string? TableProfileId, string? PreviewToken);
+
+    [HttpPost("versions/{id:guid}/table-profile/preview")]
+    public async Task<ActionResult<object>> PreviewFirmwareTableProfile(Guid id,
+        [FromBody] FirmwareTableProfileChoice body, CancellationToken ct)
+    {
+        if (body.TableProfileId != null && FirmwareTableProfiles.Find(body.TableProfileId) == null)
+            return BadRequest(new { error = "Choose a known table layout profile." });
+        var firmware = await db.FirmwareVersions.AsNoTracking().SingleOrDefaultAsync(row => row.Id == id, ct);
+        if (firmware == null)
+            return NotFound();
+        return Ok(await FirmwareProfileImpact.ReviewAsync(db, firmware, body.TableProfileId, ct));
+    }
+
+    [HttpPut("versions/{id:guid}/table-profile")]
+    public async Task<ActionResult<object>> SetFirmwareTableProfile(Guid id,
+        [FromBody] FirmwareTableProfileChange body, CancellationToken ct)
+    {
+        if (body.TableProfileId != null && FirmwareTableProfiles.Find(body.TableProfileId) == null)
+            return BadRequest(new { error = "Choose a known table layout profile." });
+        try
+        {
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            var firmware = await db.FirmwareVersions.SingleOrDefaultAsync(row => row.Id == id, ct);
+            if (firmware == null)
+                return NotFound();
+            var review = await FirmwareProfileImpact.ReviewAsync(db, firmware, body.TableProfileId, ct);
+            if (!string.Equals(body.PreviewToken, review.PreviewToken, StringComparison.Ordinal))
+                return Conflict(new { error = "The firmware or its affected configuration has changed. Preview the impact again.", review });
+            if (!review.Changed)
+                return Ok(new { firmware.Id, firmware.TableProfileId, revision = firmware.Version, changed = false });
+            if (!review.CanApply)
+                return Conflict(new { error = "Resolve the blocking findings before changing the table profile.", review });
+
+            var previousProfileId = firmware.TableProfileId;
+            firmware.TableProfileId = body.TableProfileId;
+            firmware.Version++;
+            ApiAudit.Write(db, HttpContext, "firmware.version", "table-profile", $"FirmwareVersion:{id}",
+                new { previousProfileId, firmware.TableProfileId, review.PhoneCount, review.TargetedSetCount,
+                    review.AssignedSetCount, review.PendingBatchCount, review.ScheduledDownloadCount }, null);
+            await db.SaveChangesAsync(ct);
+            if (transaction != null)
+                await transaction.CommitAsync(ct);
+            return Ok(new { firmware.Id, firmware.TableProfileId, revision = firmware.Version, changed = true });
+        }
+        // The Npgsql execution strategy can wrap a serialization failure
+        // in an InvalidOperationException as well as a DbUpdateException.
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsSerializationConflict(ex.GetBaseException()))
+        {
+            return Conflict(new { error = "The firmware configuration changed concurrently. Preview the impact again." });
+        }
+    }
+
+    private static bool IsSerializationConflict(Exception exception) => exception is PostgresException
+        { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected };
 
     [HttpPost("packages")]
     public async Task<ActionResult<object>> CreatePackage([FromBody] PackageDto body, CancellationToken ct)

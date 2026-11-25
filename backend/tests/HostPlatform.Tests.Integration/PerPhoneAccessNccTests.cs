@@ -36,7 +36,8 @@ internal static class AccessRolloutFixture
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
-        var later = profile != FirmwareTableProfiles.MultiPay200;
+        var accessLength = FirmwareTableProfiles.Find(profile)!.VerifiedLengths[21];
+        var later = accessLength == 48;
         var firmware = new FirmwareVersion { Label = "Synthetic access receiver", TableProfileId = profile };
         var incompatible = new FirmwareVersion { Label = "Synthetic incompatible receiver",
             TableProfileId = later ? FirmwareTableProfiles.MultiPay200 : FirmwareTableProfiles.LaterMultiPay180 };
@@ -47,7 +48,7 @@ internal static class AccessRolloutFixture
         var unrelatedDefinition = new TableDefinition { Name = "Synthetic coin record", TableNumber = 50 };
         var source = new TableSet { Name = "Synthetic shared access source", CustomerId = customer.Id };
         var basis = new TableSet { Name = "Synthetic existing configuration", CustomerId = customer.Id };
-        var original = new byte[later ? 48 : 18]; original[0] = 21;
+        var original = new byte[accessLength]; original[0] = 21;
         Convert.FromHexString(Wire()).CopyTo(original, 1);
         original.AsSpan(6).Fill(0xA5); // opaque synthetic noncredential settings for byte preservation
         var unrelated = NativeTableLayouts.CreateDraftTemplate(NativeTableLayouts.DraftTemplates(50).Single());

@@ -25,6 +25,9 @@ public sealed class InterfaceTimingTests
         Assert.Throws<InvalidOperationException>(() => layout.Apply(input, new Dictionary<string, string> { ["scrollSpeed"] = "-1" }));
         Assert.Throws<InvalidOperationException>(() => layout.Apply(input, new Dictionary<string, string> { ["scrollSpeed"] = "0.25" }));
         foreach (var profile in FirmwareTableProfiles.Catalog)
-            Assert.Equal(layout.Profile, profile.LayoutFor(30));
+            if (profile.ObservedLengthsOnly)
+                Assert.Null(profile.LayoutFor(30));
+            else
+                Assert.Equal(layout.Profile, profile.LayoutFor(30));
     }
 }

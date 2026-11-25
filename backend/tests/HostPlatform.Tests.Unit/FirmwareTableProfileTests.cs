@@ -1,3 +1,5 @@
+using HostPlatform.Domain;
+using HostPlatform.Infrastructure.Tables;
 using HostPlatform.Protocols.Tables;
 
 namespace HostPlatform.Tests.Unit;
@@ -5,7 +7,7 @@ namespace HostPlatform.Tests.Unit;
 public sealed class FirmwareTableProfileTests
 {
     [Fact]
-    public void Every_compiled_length_has_a_matching_native_editor_or_the_advertising_codec()
+    public void Every_catalogued_length_has_a_native_candidate_and_compiled_layouts_remain_exact()
     {
         foreach (var profile in FirmwareTableProfiles.Catalog)
         {
@@ -16,9 +18,60 @@ public sealed class FirmwareTableProfileTests
                 data[0] = (byte)number;
                 if (number == AdvertisingTableWire.MessageType)
                     Assert.Equal(AdvertisingTableWire.RecordLength, length);
+                else if (profile.ObservedLengthsOnly)
+                    Assert.NotEmpty(NativeTableLayouts.Candidates(number, data));
                 else
                     Assert.NotNull(NativeTableLayouts.Find(number, data, profile.LayoutFor(number)));
             }
+        }
+    }
+
+    [Theory]
+    [InlineData(FirmwareTableProfiles.Msr17MultiPay, "21:18 22:661 23:678 24:721 26:72 31:37 50:105 62:353 73:1192 74:819")]
+    [InlineData(FirmwareTableProfiles.Msr17Card, "21:18 22:661 23:678 24:721 26:72 31:37 62:353 73:1192 74:819")]
+    [InlineData(FirmwareTableProfiles.Msr17Desk, "21:18 22:661 23:678 24:721 26:72 31:37 62:353 73:1192 74:819")]
+    [InlineData(FirmwareTableProfiles.Msr17CoinBasic, "21:18 23:678 24:721 26:72 31:37 50:105 62:353 73:1192 74:819")]
+    [InlineData(FirmwareTableProfiles.Mtr19Desk, "21:18 22:661 23:678 26:72 31:37 62:353 73:1192 92:3401 93:225 101:403")]
+    [InlineData(FirmwareTableProfiles.Mtr113MultiPay, "21:18 22:661 23:678 26:72 31:37 50:105 62:353 73:1192 92:3401 93:225 101:403")]
+    [InlineData(FirmwareTableProfiles.Mtr120MultiPay, "21:48 26:72 31:37 50:105 62:353 73:1192 92:3061 93:225 134:1153 135:1109 136:203")]
+    [InlineData(FirmwareTableProfiles.Mtr120CoinBasic, "21:48 26:72 31:37 50:105 62:353 73:1192 92:3061 93:225 135:1109 136:203")]
+    [InlineData(FirmwareTableProfiles.Mtr20EarlyMultiPay, "21:18 22:661 23:678 26:72 31:37 50:105 62:353 73:1192 92:3401 93:225 101:403")]
+    [InlineData(FirmwareTableProfiles.Mtr211MultiPay, "21:48 26:72 31:37 50:105 62:353 72:1001 73:1192 85:8001 86:8001 92:3061 93:225 134:1153 135:1109 136:203")]
+    public void Observed_profiles_are_exact_acknowledged_length_subsets_not_complete_native_catalogues(string id, string expected)
+    {
+        var profile = FirmwareTableProfiles.Find(id)!;
+        Assert.True(profile.ObservedLengthsOnly);
+        Assert.False(profile.CompleteCatalogue);
+        Assert.Equal(expected, string.Join(" ", profile.VerifiedLengths.OrderBy(pair => pair.Key).Select(pair => $"{pair.Key}:{pair.Value}")));
+        Assert.Equal(profile.VerifiedLengths.Keys.Order(), profile.TerminalAcknowledgedRecords.Order());
+        Assert.All(profile.VerifiedLengths.Keys, number => Assert.Null(profile.LayoutFor(number)));
+        Assert.Contains(id == FirmwareTableProfiles.Mtr20EarlyMultiPay ? "firmware error" : "successful emulated cold INSTALL",
+            profile.EvidenceNote);
+    }
+
+    [Fact]
+    public void Observed_size_checks_reject_mismatched_records_but_do_not_invent_copy_layout_conflicts()
+    {
+        var observed = FirmwareTableProfiles.Find(FirmwareTableProfiles.Msr17Desk)!;
+        Assert.Null(TableSetFirmwareCompatibility.RecordIssue(observed, 24, 721));
+        Assert.Contains("721 bytes", TableSetFirmwareCompatibility.RecordIssue(observed, 24, 1021));
+        Assert.Null(TableSetFirmwareCompatibility.RecordIssue(observed, 29, AdvertisingTableWire.RecordLength));
+
+        var source = Set(FirmwareTableProfiles.MultiPay200);
+        var record = new byte[72]; record[0] = 26; record[24] = 0xA5;
+        source.Versions.Add(new TableVersion { TableDefinition = new TableDefinition { TableNumber = 26 },
+            EmbeddedPayload = record, TableRevision = 1 });
+        var destination = Set(FirmwareTableProfiles.Msr17Desk);
+        var planned = Assert.Single(TableRecordCopy.Prepare(source, destination, [26]));
+        Assert.Equal("add", planned.Action);
+        Assert.Equal(record, TableDistributionService.GetEffectivePayload(planned.Source));
+        Assert.Throws<InvalidOperationException>(() => TableRecordCopy.Prepare(source, Set(FirmwareTableProfiles.LaterMultiPay180), [26]));
+        return;
+
+        static TableSet Set(string profile)
+        {
+            var firmware = new FirmwareVersion { TableProfileId = profile };
+            return new TableSet { TargetFirmwareVersionId = firmware.Id, TargetFirmwareVersion = firmware };
         }
     }
 
