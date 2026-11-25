@@ -81,6 +81,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify observed firmware profiles workflow
+        run: npm run e2e -- e2e/observed-firmware-profiles.spec.ts --output test-results/observed-firmware-profiles
+        env:
+          CI: "true"
+
       - name: Upload Playwright failure traces
         if: failure()
         uses: actions/upload-artifact@v4

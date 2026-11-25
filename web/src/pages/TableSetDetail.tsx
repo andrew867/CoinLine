@@ -41,7 +41,8 @@ type Detail = {
   targetFirmwareVersionId: string | null
   targetFirmware: string | null
   tableProfile: string | null
-  tableProfileEvidence?: { recordCount: number; terminalAcknowledgedCount: number; completeCatalogue: boolean } | null
+  tableProfileEvidence?: { recordCount: number; terminalAcknowledgedCount: number; completeCatalogue: boolean;
+    observedLengthsOnly?: boolean; evidenceNote?: string | null } | null
   firmwareFindings: { tableNumber: number; blocking: boolean; message: string }[]
   firmwareSchedule?: FirmwareSchedule | null
   versions: Ver[]
@@ -217,7 +218,9 @@ export function TableSetDetail() {
         {d.targetFirmware && <p>Table layout <strong>{d.tableProfile ?? 'Unverified'}</strong></p>}
         {d.tableProfileEvidence && <p className="page-intro">{d.tableProfileEvidence.recordCount} known record lengths.
           {' '}{d.tableProfileEvidence.terminalAcknowledgedCount} acknowledged by emulated terminals.
-          {d.tableProfileEvidence.completeCatalogue && ' Records outside the compiled catalogue cannot be published for this target.'}</p>}
+          {d.tableProfileEvidence.completeCatalogue && ' Records outside the compiled catalogue cannot be published for this target.'}
+          {d.tableProfileEvidence.observedLengthsOnly && ' Observed subset only; the full catalogue and ambiguous native layouts are not established.'}
+          {d.tableProfileEvidence.evidenceNote && ` ${d.tableProfileEvidence.evidenceNote}`}</p>}
         {!!d.firmwareFindings?.length && <ul>{d.firmwareFindings.map((finding) => (
           <li key={`${finding.tableNumber}:${finding.message}`}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}
             {canReadRecords && !recordDirty && d.versions.some(version => version.tableNumber === finding.tableNumber) &&
