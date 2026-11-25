@@ -17,11 +17,19 @@ def main():
     asterisk = shutil.which("asterisk") or "/usr/sbin/asterisk"
     if not Path(asterisk).is_file():
         raise RuntimeError("Install Asterisk before running this standalone Local-channel test")
+    modules = next((path for path in [Path("/usr/lib/asterisk/modules"), *Path("/usr/lib").glob("*/asterisk/modules")]
+                    if (path / "res_agi.so").is_file()), None)
+    documentation = Path("/usr/share/asterisk/documentation")
+    if modules is None or not (documentation / "core-en_US.xml").is_file():
+        raise RuntimeError("Asterisk distribution modules or core XML documentation are missing")
     service = Path(__file__).resolve().parent / "coinline_audiogram_agi.py"
     with tempfile.TemporaryDirectory(prefix="coinline-audio-smoke-") as tmp:
         root = Path(tmp)
         for directory in ["etc", "agi", "run", "log", "db", "data", "astdata/sounds", "spool/stage", "spool/outgoing", "spool/outgoing_done"]:
             (root / directory).mkdir(parents=True, exist_ok=True)
+        # Asterisk's core configuration initialization requires its installed XML
+        # definitions even when the PBX uses an otherwise isolated data directory.
+        (root / "astdata/documentation").symlink_to(documentation, target_is_directory=True)
         agi = root / "agi" / service.name
         shutil.copyfile(service, agi)
         agi.chmod(0o700)
@@ -42,7 +50,7 @@ def main():
         conf = root / "etc/asterisk.conf"
         conf.write_text(f"""[directories]
 astetcdir => {root / 'etc'}
-astmoddir => /usr/lib/asterisk/modules
+astmoddir => {modules}
 astvarlibdir => {root / 'astdata'}
 astdbdir => {root / 'db'}
 astkeydir => {root / 'etc'}
