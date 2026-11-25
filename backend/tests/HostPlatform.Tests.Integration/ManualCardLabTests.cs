@@ -43,7 +43,7 @@ public sealed class ManualCardLabTests
             ?? throw new InvalidOperationException("Missing synthetic lab settings.");
         settings.Validate();
         var test = new SyntheticCardFixtureProvider(settings.Destination);
-        await using var host = new LabFactory(settings.Port, test);
+        await using var host = new LabFactory(settings.Port, settings.ObserveExistingUploadOnly ? null : test);
         using var client = host.CreateClient();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(settings.TimeoutSeconds));
         Guid terminalId;
@@ -89,7 +89,8 @@ public sealed class ManualCardLabTests
         using (var probe = new TcpClient())
             await probe.ConnectAsync(IPAddress.Loopback, settings.Port, deadline.Token);
         await WriteJson(settings.ReadyFile, new { listening = true, host = "127.0.0.1", settings.Port,
-            settings.TerminalWireId, settings.Destination, quotedUsd = 0.05m, syntheticOnly = true, prepared });
+            settings.TerminalWireId, settings.Destination, quotedUsd = 0.05m, syntheticOnly = true,
+            settings.ObserveExistingUploadOnly, settings.NewInstallCollectionTrial, prepared });
 
         // This test reports only the isolated synthetic ledger. A quote is not a settlement.
         var settled = new HashSet<ushort>();
@@ -107,9 +108,8 @@ public sealed class ManualCardLabTests
             var calls = uploads.SelectMany(batch => batch.Records.Select(record =>
                 TerminalUploads.ReadMetadata<DlogCallDetailWire.CallDetail>(record.DecodedMetadataJson)))
                 .OfType<DlogCallDetailWire.CallDetail>().ToArray();
-            var completed = calls.Where(call => test.ApprovedCallSequences.Contains(call.Sequence)
-                && (call.DialedDigits == settings.Destination || call.DialedDigits == "1" + settings.Destination)
-                && call.Payment is "Credit card" or "Calling card" or "Debit card" or "Card").ToArray();
+            var observed = calls.Where(call => IsSyntheticRouteCardCall(call, settings.Destination)).ToArray();
+            var completed = observed.Where(call => IsCompletedAuthorizedCall(call, test.ApprovedCallSequences)).ToArray();
             var account = await db.CardAccounts.Include(row => row.CardBalance).Include(row => row.CardProduct)
                 .SingleAsync(row => row.Id == accountId, deadline.Token);
             var quoteObserved = quotes.Any(row => (row.DialedDigits == settings.Destination || row.DialedDigits == "1" + settings.Destination)
@@ -128,12 +128,18 @@ public sealed class ManualCardLabTests
             }
             var snapshot = new
             {
-                syntheticOnly = true, settings.Destination, quoteObserved, simulatedAccountBalanceUsd = account.Balance,
+                syntheticOnly = true, settings.Destination, settings.ObserveExistingUploadOnly,
+                settings.NewInstallCollectionTrial, quoteObserved,
+                simulatedAccountBalanceUsd = account.Balance,
                 downloads = batches.Select(batch => new { batch.Status, total = batch.Items.Count,
                     acknowledged = batch.Items.Count(item => item.Succeeded), batch.LastError }).ToArray(),
                 quotes = quotes.Select(row => new { row.DialedDigits, amountsUsd = row.Results.Select(result => result.Amount).ToArray() }).ToArray(),
                 denied = test.DeniedCount,
                 approvedAuthorizationSequences = test.ApprovedCallSequences.Order().ToArray(),
+                observedCallDetails = calls.Select(call => new { call.MessageType, call.Sequence, call.CallType,
+                    call.DurationSeconds, call.Payment, matchesSyntheticRoute = IsSyntheticRouteCardCall(call, settings.Destination),
+                    matchingCompletedAuthorization = completed.Contains(call), reportedChargeCents = call.AmountCharged,
+                    reportedCollectionCents = call.AmountCollected }).ToArray(),
                 uploadedCalls = completed.Select(call => new { call.Sequence, call.DurationSeconds, call.Payment,
                     reportedChargeCents = call.AmountCharged, reportedCollectionCents = call.AmountCollected }).ToArray(),
                 simulatedCharges = completed.Where(call => settled.Contains(call.Sequence) && call.AmountCharged.HasValue)
@@ -142,12 +148,108 @@ public sealed class ManualCardLabTests
                 processorSettlement = false
             };
             await WriteJson(settings.ResultFile, snapshot);
-            if (quoteObserved && completed.Length > 0 && settled.Count > 0)
+            if (settings.ObserveExistingUploadOnly ? observed.Length > 0 : quoteObserved && completed.Length > 0 && settled.Count > 0)
                 return;
             try { await Task.Delay(1000, deadline.Token); }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested) { break; }
         }
-        Assert.Fail("No matching completed test-card call was reported before the manual fixture deadline. See the safe result file.");
+        Assert.Fail(settings.ObserveExistingUploadOnly
+            ? "No test-route card detail was reported before the observation deadline. See the safe result file."
+            : "No matching completed test-card call was reported before the manual fixture deadline. See the safe result file.");
+    }
+
+    private static bool IsSyntheticRouteCardCall(DlogCallDetailWire.CallDetail call, string destination) =>
+        (call.DialedDigits == destination || call.DialedDigits == "1" + destination)
+        && call.Payment is "Credit card" or "Calling card" or "Debit card" or "Card";
+
+    private static bool IsCompletedAuthorizedCall(DlogCallDetailWire.CallDetail call, IReadOnlyCollection<ushort> approved) =>
+        approved.Contains(call.Sequence) && call.DurationSeconds is > 0
+        && call.CallType is "Local" or "Intra-area toll" or "Inter-area toll" or "International" or "Operator" or "Operator-assisted";
+
+    [Fact]
+    public void Observed_old_call_or_incomplete_attempt_cannot_match_a_new_authorization()
+    {
+        const string route = "3335550123";
+        var detail = new DlogCallDetailWire.CallDetail(53, 2, route, false, 0,
+            "Inter-area toll", "Credit card", null, 10, 5, 0);
+        Assert.True(IsSyntheticRouteCardCall(detail, route));
+        Assert.False(IsCompletedAuthorizedCall(detail, new ushort[] { 3 }));
+        Assert.False(IsCompletedAuthorizedCall(detail with { CallType = "Unanswered" }, new ushort[] { 2 }));
+        Assert.False(IsCompletedAuthorizedCall(detail with { DurationSeconds = 0 }, new ushort[] { 2 }));
+        Assert.False(IsSyntheticRouteCardCall(detail with { DialedDigits = "3335550124" }, route));
+        Assert.True(IsCompletedAuthorizedCall(detail, new ushort[] { 2 }));
+    }
+
+    [Fact]
+    public void New_install_craft_access_uses_seven_decimal_digits_and_not_the_five_digit_pin()
+    {
+        var record = new byte[37];
+        record[0] = 31;
+        record[3] = 0x1A; // Representative malformed imported field, not a real credential.
+        record[31] = 0x80;
+        record[32] = 0xAD;
+        var code = string.Concat(Enumerable.Range(0, 7));
+        var edited = ApplyNewInstallCraftAccess(record, code);
+        var expected = record.ToArray();
+        new byte[] { 0x01, 0x23, 0x45, 0x6E }.CopyTo(expected, 1);
+        Assert.Equal(expected, edited);
+        var layout = NativeTableLayouts.Find(31, edited, NativeTableLayouts.Later)!;
+        Assert.Null(layout.Sections.Single(section => section.Key == "craft").Fields.Single(field => field.Key == "craftAccessCode").Read(edited));
+        Assert.Equal(edited, layout.Apply(edited, new Dictionary<string, string>()));
+        Assert.Throws<InvalidOperationException>(() => ApplyNewInstallCraftAccess(record, new string('1', 5)));
+        Assert.Throws<InvalidOperationException>(() => ApplyNewInstallCraftAccess(record, "12345A7"));
+        var observation = new LabSettings("2025550100", "3335550123", 12345, 60,
+            "ready.json", "result.json", "baseline.json", ObserveExistingUploadOnly: true);
+        observation.Validate();
+        Assert.Throws<InvalidOperationException>(() => (observation with { NewInstallCraftAccessCode = code }).Validate());
+        (observation with { ObserveExistingUploadOnly = false, NewInstallCraftAccessCode = code }).Validate();
+    }
+
+    private static byte[] ApplyNewInstallCraftAccess(byte[] source, string code)
+    {
+        if (code.Length != 7 || code.Any(character => !char.IsAsciiDigit(character)))
+            throw new InvalidOperationException("A new synthetic INSTALL requires a separate seven-digit Craft access code.");
+        var layout = NativeTableLayouts.Find(31, source, NativeTableLayouts.Later)
+            ?? throw new InvalidOperationException("A recognized later MT31 record is required.");
+        Assert.Equal(source, layout.Apply(source, new Dictionary<string, string>()));
+        return layout.Apply(source, new Dictionary<string, string> { ["craftAccessCode"] = code });
+    }
+
+    [Fact]
+    public void New_install_collection_trial_preserves_every_other_call_in_field()
+    {
+        var source = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(35)));
+        source[1] = 0xA5;
+        source[2] = 0x7F;
+        source[3] = 0xFE;
+        var original = source.ToArray();
+        var edited = ApplyNewInstallCollectionThreshold(source);
+        var expected = original.ToArray();
+        expected[12] = 1;
+        Assert.Equal(expected, edited);
+        Assert.Equal(original, source);
+        Assert.Equal(edited, ApplyNewInstallCollectionThreshold(edited));
+        Assert.Throws<InvalidOperationException>(() => ApplyNewInstallCollectionThreshold(source[..20]));
+
+        var install = new LabSettings("2025550100", "3335550123", 12345, 60,
+            "ready.json", "result.json", "baseline.json", NewInstallCollectionTrial: true);
+        install.Validate();
+        Assert.Throws<InvalidOperationException>(() => (install with { ObserveExistingUploadOnly = true }).Validate());
+        Assert.Throws<InvalidOperationException>(() => (install with { TablePackageFile = null }).Validate());
+        Assert.Equal(13, ExpectedRecordNumbers(install).Length);
+        Assert.Contains(35, ExpectedRecordNumbers(install));
+        Assert.DoesNotContain(35, ExpectedRecordNumbers(install with { NewInstallCollectionTrial = false }));
+    }
+
+    private static byte[] ApplyNewInstallCollectionThreshold(byte[] source)
+    {
+        var layout = NativeTableLayouts.Find(35, source, NativeTableLayouts.MultiPay)
+            ?? throw new InvalidOperationException("The collection trial requires a recognized MT35 record.");
+        Assert.Equal(source, layout.Apply(source, new Dictionary<string, string>()));
+        var edited = layout.Apply(source, new Dictionary<string, string> { ["recordThreshold"] = "1" });
+        Assert.Equal("1", layout.Sections.SelectMany(section => section.Fields)
+            .Single(field => field.Key == "recordThreshold").Read(edited));
+        return edited;
     }
 
     [Fact]
@@ -179,14 +281,18 @@ public sealed class ManualCardLabTests
     private sealed record LabRecord(int Number, string Name, int SortOrder, int? Dependency, string Sha256, string PayloadBase64);
     private sealed record PreparedSet(Guid TableSetId, int Records, int[] ChangedRecordNumbers);
 
+    private static int[] ExpectedRecordNumbers(LabSettings settings) => settings.NewInstallCollectionTrial
+        ? [21, 26, 31, 35, 50, 62, 72, 73, 92, 93, 134, 135, 136]
+        : [21, 26, 31, 50, 62, 72, 73, 92, 93, 134, 135, 136];
+
     private static async Task<PreparedSet> PrepareIsolatedTablesAsync(HostPlatformDbContext db, Terminal terminal,
         LabSettings settings, CancellationToken ct)
     {
         var records = JsonSerializer.Deserialize<LabRecord[]>(await File.ReadAllTextAsync(settings.TablePackageFile!, ct), Json)
             ?? throw new InvalidOperationException("Synthetic table package is missing.");
-        var expected = new[] { 21, 26, 31, 50, 62, 72, 73, 92, 93, 134, 135, 136 };
+        var expected = ExpectedRecordNumbers(settings);
         if (!records.OrderBy(record => record.SortOrder).Select(record => record.Number).SequenceEqual(expected))
-            throw new InvalidOperationException("The isolated baseline must contain exactly the twelve standard Multi-pay records.");
+            throw new InvalidOperationException("The isolated baseline must contain the twelve standard Multi-pay records, plus MT35 only for the explicit collection trial.");
         var profile = FirmwareTableProfiles.Find(FirmwareTableProfiles.LaterMultiPay180)!;
         var payloads = new Dictionary<int, byte[]>();
         foreach (var record in records)
@@ -241,9 +347,21 @@ public sealed class ManualCardLabTests
             ["rate-127.additionalPeriod"] = "60", ["rate-127.additionalCharge"] = "5"
         });
 
+        // Only a new isolated INSTALL may replace the imported access field. Never
+        // derive it from the separate five-digit PIN or change an observation retry.
+        if (settings.NewInstallCraftAccessCode is { } craftCode)
+            payloads[31] = ApplyNewInstallCraftAccess(payloads[31], craftCode);
+        if (settings.NewInstallCollectionTrial)
+            payloads[35] = ApplyNewInstallCollectionThreshold(payloads[35]);
+
         var changed = records.Where(record => !Convert.ToHexString(SHA256.HashData(payloads[record.Number]))
             .Equals(record.Sha256, StringComparison.OrdinalIgnoreCase)).Select(record => record.Number).Order().ToArray();
-        Assert.Equal(new[] { 73, 92 }, changed);
+        var allowedChanges = new List<int> { 73, 92 };
+        if (settings.NewInstallCraftAccessCode is not null && changed.Contains(31))
+            allowedChanges.Add(31);
+        if (settings.NewInstallCollectionTrial && changed.Contains(35))
+            allowedChanges.Add(35);
+        Assert.Equal(allowedChanges.Order(), changed);
         foreach (var change in changes)
             Assert.Equal(change.Value, screenFields[change.Key].Read(payloads[92]));
         Assert.Equal("7", rateFields["rate-127.classification"].Read(payloads[73]));
@@ -257,7 +375,7 @@ public sealed class ManualCardLabTests
         await db.SaveChangesAsync(ct);
         var tables = new TableDistributionService(db);
         foreach (var record in records)
-            await tables.UpsertVersionAsync(set.Id, definitions[record.Number].Id, record.Number is 73 or 92 ? 2 : 1,
+            await tables.UpsertVersionAsync(set.Id, definitions[record.Number].Id, changed.Contains(record.Number) ? 2 : 1,
                 payloads[record.Number], record.SortOrder, record.Dependency is { } dep ? definitions[dep].Id : null, ct);
         await tables.PublishTableSetAsync(set.Id, ct);
         await tables.AssignTableSetAsync(terminal.Id, set.Id, null, null, ct);
@@ -272,7 +390,8 @@ public sealed class ManualCardLabTests
     private static Task WriteJson(string path, object value) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(value, Json));
 
     private sealed record LabSettings(string TerminalWireId, string Destination, int Port, int TimeoutSeconds, string ReadyFile, string ResultFile,
-        string? TablePackageFile = null)
+        string? TablePackageFile = null, bool ObserveExistingUploadOnly = false, string? NewInstallCraftAccessCode = null,
+        bool NewInstallCollectionTrial = false)
     {
         public void Validate()
         {
@@ -281,10 +400,15 @@ public sealed class ManualCardLabTests
                 || Port is < 1024 or > 65535 || TimeoutSeconds is < 30 or > 1800 || string.IsNullOrWhiteSpace(ReadyFile)
                 || string.IsNullOrWhiteSpace(ResultFile) || Path.GetFullPath(ReadyFile) == Path.GetFullPath(ResultFile))
                 throw new InvalidOperationException("Use reserved synthetic line IDs and a distinct local fixture output path.");
+            if (NewInstallCraftAccessCode is { } code && (ObserveExistingUploadOnly || string.IsNullOrWhiteSpace(TablePackageFile)
+                    || code.Length != 7 || code.Any(character => !char.IsAsciiDigit(character))))
+                throw new InvalidOperationException("A separate seven-digit Craft access code may be supplied only for a new isolated INSTALL package.");
+            if (NewInstallCollectionTrial && (ObserveExistingUploadOnly || string.IsNullOrWhiteSpace(TablePackageFile)))
+                throw new InvalidOperationException("The collection trial requires a new isolated INSTALL package containing MT35.");
         }
     }
 
-    private sealed class LabFactory(int port, SyntheticCardFixtureProvider provider) : WebApplicationFactory<Program>
+    private sealed class LabFactory(int port, SyntheticCardFixtureProvider? provider) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -295,7 +419,8 @@ public sealed class ManualCardLabTests
             builder.UseSetting("SipModem:Enabled", "false");
             builder.UseSetting("SerialModem:Enabled", "false");
             builder.UseSetting("Observability:MetricsEnabled", "false");
-            builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider));
+            if (provider is not null)
+                builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider));
         }
     }
 

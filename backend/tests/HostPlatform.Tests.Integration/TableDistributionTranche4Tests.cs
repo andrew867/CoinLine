@@ -461,7 +461,7 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         await Import(131, 9224);
         var review = await _client.GetFromJsonAsync<JsonElement>(path);
         Assert.Equal(42, review.GetProperty("tableProfileEvidence").GetProperty("recordCount").GetInt32());
-        Assert.Equal(0, review.GetProperty("tableProfileEvidence").GetProperty("terminalAcknowledgedCount").GetInt32());
+        Assert.Equal(12, review.GetProperty("tableProfileEvidence").GetProperty("terminalAcknowledgedCount").GetInt32());
         var findings = review.GetProperty("firmwareFindings").EnumerateArray().ToArray();
         Assert.Equal(2, findings.Length);
         Assert.All(findings, finding => Assert.True(finding.GetProperty("blocking").GetBoolean()));
