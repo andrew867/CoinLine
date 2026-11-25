@@ -10,6 +10,7 @@ const screenByPath: Record<string, string> = {
   '/call-records': 'calls',
   '/downloads': 'downloads',
   '/field-events': 'phone-status',
+  '/field-event-destinations': 'field-event-destinations',
   '/rate-plans': 'rate-plans',
   '/rating-quote': 'rating',
   '/card-accounts': 'card-accounts',
@@ -59,6 +60,7 @@ const groups = [
       ['/call-records', 'Calls'],
       ['/downloads', 'Downloads'],
       ['/field-events', 'Terminal status'],
+      ['/field-event-destinations', 'Event destinations'],
     ],
   },
   {

@@ -21,6 +21,7 @@ import { CardMasterPage } from './pages/CardMasterPage'
 import { QuickAccessCustomersPage } from './pages/QuickAccessCustomersPage'
 import { TableVersions } from './pages/TableVersions'
 import { FieldEventsPage } from './pages/FieldEventsPage'
+import { FieldEventDestinationsPage } from './pages/FieldEventDestinationsPage'
 import { OperatorsPage } from './pages/OperatorsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SitesPage } from './pages/SitesPage'
@@ -91,6 +92,7 @@ export default function App() {
           <Route path="/downloads/:id" element={<DownloadDetail />} />
           <Route path="/downloads" element={<DownloadsPage />} />
           <Route path="/field-events" element={<FieldEventsPage />} />
+          <Route path="/field-event-destinations" element={<FieldEventDestinationsPage />} />
           <Route path="/uploads/:id" element={<UploadDetail />} />
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/rate-plans/:id" element={<RatePlanDetail />} />

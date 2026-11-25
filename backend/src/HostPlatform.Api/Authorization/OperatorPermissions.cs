@@ -44,6 +44,10 @@ public static class OperatorPermissions
             ("Operator", R, "TerminalTimeline"));
         Screen("field-event-catalogue", "Alarm and maintenance catalogue",
             ("FieldEvents", U, "SaveReference"));
+        Screen("field-event-destinations", "Alarm and maintenance destinations",
+            ("FieldEventDestinations", R, "List Options Preview Queue"),
+            ("FieldEventDestinations", A, "Create"), ("FieldEventDestinations", U, "Update"),
+            ("FieldEventDestinations", D, "Delete"));
         Screen("phone-lifecycle", "Terminal deactivation and reactivation", ("TerminalLifecycle", R, "Get"),
             ("TerminalLifecycle", U, "Save"));
         Screen("diagnostics", "Phone diagnostics",

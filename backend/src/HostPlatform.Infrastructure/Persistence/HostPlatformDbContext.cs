@@ -17,6 +17,8 @@ public class HostPlatformDbContext : DbContext
     public DbSet<CardMasterDefinition> CardMasterDefinitions => Set<CardMasterDefinition>();
     public DbSet<QuickAccessCustomer> QuickAccessCustomers => Set<QuickAccessCustomer>();
     public DbSet<FieldEventCodeSetting> FieldEventCodeSettings => Set<FieldEventCodeSetting>();
+    public DbSet<FieldEventDestinationRule> FieldEventDestinationRules => Set<FieldEventDestinationRule>();
+    public DbSet<FieldEventRouteDecision> FieldEventRouteDecisions => Set<FieldEventRouteDecision>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
@@ -165,6 +167,25 @@ public class HostPlatformDbContext : DbContext
             b.Property(c => c.RowPayload).HasColumnType("bytea");
             b.Property(c => c.Version).IsConcurrencyToken();
             b.HasIndex(c => new { c.TableNumber, c.CodeKey }).IsUnique();
+        });
+        modelBuilder.Entity<FieldEventRouteDecision>(b =>
+        {
+            b.HasOne<DlogTransaction>().WithOne().HasForeignKey<FieldEventRouteDecision>(row => row.TransactionId);
+            b.Property(row => row.Kind).HasMaxLength(16);
+            b.Property(row => row.Status).HasMaxLength(16);
+            b.Property(row => row.Destination).HasMaxLength(80);
+        });
+        modelBuilder.Entity<FieldEventDestinationRule>(b =>
+        {
+            b.Property(row => row.Kind).HasMaxLength(16);
+            b.Property(row => row.RegionCode).HasMaxLength(TerminalInventoryDetails.RegionCodeLength);
+            b.Property(row => row.ScopeKey).HasMaxLength(160);
+            b.Property(row => row.Destination).HasMaxLength(80);
+            b.Property(row => row.Version).IsConcurrencyToken();
+            b.HasIndex(row => row.ScopeKey).IsUnique();
+            b.ToTable(t => t.HasCheckConstraint("CK_FieldEventDestinationRules_KindCode",
+                "(\"Kind\" = 'alarm' AND (\"Code\" IS NULL OR \"Code\" BETWEEN 0 AND 255)) OR "
+                + "(\"Kind\" = 'maintenance' AND (\"Code\" IS NULL OR \"Code\" BETWEEN 0 AND 65535))"));
         });
         modelBuilder.Entity<FieldEventCodeSetting>(b =>
         {
