@@ -790,7 +790,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             AssertAck(await ReadFrameAsync(statusUpload.Stream, TimeSpan.FromSeconds(5)));
         }
         await using var combined = await OpenAsync();
-        await combined.Stream.WriteAsync(Message(wire, [44, 0x82]));
+        await combined.Stream.WriteAsync(Message(wire, [44, 0x81]));
         AssertAck(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5)));
         var header = Decode(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5)));
         byte[] expectedHeader = [18, .. replacement];
@@ -1017,7 +1017,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         {
             await using (var call = await OpenAsync())
             {
-                await call.Stream.WriteAsync(Message(id, [44, 2]));
+                await call.Stream.WriteAsync(Message(id, [44, 1]));
                 AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
                 var begin = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
                 Assert.Equal(new byte[] { 18 }, begin.Data);
@@ -2280,9 +2280,25 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var phone = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
         var wrong = new byte[35];
         wrong[0] = 33;
-        var wrongSet = await CreateSet("Untargeted old modem record", null, wrong);
+        var display = new byte[68]; display[0] = 30; display[^1] = 0xA5;
+        var wrongSet = await CreateSet("Untargeted mixed records", null, wrong, display);
         await Publish(wrongSet);
+        var before = await BatchIdsAsync();
+        using (var rejected = await fx.Client.PostAsJsonAsync($"/api/terminals/{phone}/downloads",
+            new { tableSetId = wrongSet, scope = "Full" }, Json))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            Assert.Contains("36 bytes", (await rejected.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("error").GetString());
+        }
+        Assert.Empty((await BatchIdsAsync()).Except(before));
+
+        // Model a previously queued configuration whose installed firmware
+        // was identified after it was queued. Pickup must still reject it.
+        using (var unclassified = await fx.Client.PutAsJsonAsync($"/api/terminals/{phone}/firmware",
+            new { firmwareVersionId = (Guid?)null }, Json)) unclassified.EnsureSuccessStatusCode();
         var wrongBatch = await Queue(wrongSet);
+        using (var classified = await fx.Client.PutAsJsonAsync($"/api/terminals/{phone}/firmware",
+            new { firmwareVersionId = firmwareId }, Json)) classified.EnsureSuccessStatusCode();
         await using (var link = await OpenAsync())
         {
             await link.Stream.WriteAsync(Message(wire, [8]));
@@ -2295,6 +2311,34 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Contains("36 bytes", refused.GetProperty("lastError").GetString());
         Assert.All(refused.GetProperty("timeline").EnumerateArray(), step =>
             Assert.Equal("not_sent", step.GetProperty("lastAckStatus").GetString()));
+        using (var retry = await fx.Client.PostAsync($"/api/downloads/{wrongBatch}/retry?confirm=true", null))
+            Assert.Equal(HttpStatusCode.BadRequest, retry.StatusCode);
+
+        var details = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{wrongSet}", Json);
+        var displayDefinition = details.GetProperty("versions").EnumerateArray().Single(row => row.GetProperty("tableNumber").GetInt32() == 30)
+            .GetProperty("tableDefinitionId").GetGuid();
+        using var selected = await fx.Client.PostAsJsonAsync($"/api/terminals/{phone}/downloads",
+            new { tableSetId = wrongSet, scope = "Partial", partialTableDefinitionIds = new[] { displayDefinition } }, Json);
+        selected.EnsureSuccessStatusCode();
+        var partial = (await selected.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        await using (var link = await OpenAsync())
+        {
+            await link.Stream.WriteAsync(Message(wire, [8]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var header = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 18 }, header.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | header.Control)));
+            var record = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(display, record.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | record.Control)));
+            await link.Stream.WriteAsync(Message(wire, [14, 30]));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            var end = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+        }
+        var selectedComplete = await WaitBatchAsync(partial, 2);
+        Assert.Equal("ack", Assert.Single(selectedComplete.GetProperty("timeline").EnumerateArray()).GetProperty("lastAckStatus").GetString());
 
         var access = new byte[48];
         access[0] = 21;
@@ -3189,7 +3233,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         try
         {
             await using var call = await OpenAsync();
-            var request = trigger == 8 ? new byte[] { 8 } : new byte[] { 44, 2 };
+            var request = trigger == 8 ? new byte[] { 8 } : new byte[] { 44, 1 };
             await call.Stream.WriteAsync(Message(KnownId, request));
             AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
             var header = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));

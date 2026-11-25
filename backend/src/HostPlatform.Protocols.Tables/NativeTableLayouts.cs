@@ -28,6 +28,13 @@ public static partial class NativeTableLayouts
     private static readonly IReadOnlyDictionary<(byte, int), NativeTableLayout[]> Layouts = Build()
         .GroupBy(layout => (layout.Number, layout.Length)).ToDictionary(group => group.Key, group => group.ToArray());
 
+    public static IReadOnlyList<NativeLayoutReference> ReferenceLayouts() =>
+        Layouts.Values.SelectMany(layouts => layouts)
+            .Select(layout => new NativeLayoutReference(layout.Number, layout.Length, layout.Profile,
+                DraftTemplates(layout.Number).Any(template => template.Length == layout.Length && template.Profile == layout.Profile)))
+            .OrderBy(layout => layout.Number).ThenBy(layout => layout.Length).ThenBy(layout => layout.Profile, StringComparer.Ordinal)
+            .ToArray();
+
     public static IReadOnlyList<NativeTableLayout> Candidates(int number, ReadOnlySpan<byte> record) =>
         number is >= 0 and <= 255 && !record.IsEmpty && record[0] == number
             ? Layouts.GetValueOrDefault(((byte)number, record.Length)) ?? [] : [];

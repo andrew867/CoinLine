@@ -56,7 +56,7 @@ public static class OperatorPermissions
             ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
             ("Tables", A | U, "FirmwareOptions"));
-        Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById"), ("Tables", A, "CreateDefinition"));
+        Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
@@ -123,7 +123,7 @@ public static class OperatorPermissions
             ("InmateFeatures", A, "Create"), ("InmateFeatures", U, "Update"), ("InmateFeatures", D, "Delete"));
         Screen("inmate-assignments", "Inmate terminal configuration", ("TerminalInmateConfiguration", R, "Get"),
             ("TerminalInmateConfiguration", U, "Save"));
-        Screen("smartcards", "Smartcard types", ("Smartcards", R, "Types"));
+        Screen("smartcards", "Smartcard types", ("Smartcards", R, "Types Applications"));
         Screen("protocol-tools", "Protocol tools", ("NccProtocol", R, "Decode Encode"), ("NccProtocol", U, "Replay"));
 
         void Screen(string key, string label, params (string Controller, PermissionOperation Operations, string Actions)[] entries)

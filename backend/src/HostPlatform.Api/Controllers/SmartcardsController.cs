@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HostPlatform.Api.Controllers;
 
-/// <summary>Firmware-aligned smartcard catalog — maps towards MT 93 / MCAL card_type_info rows (HARDWARE_VALIDATION_REQUIRED for prod).</summary>
+/// <summary>Host classifications and independent reference application compatibility evidence.</summary>
 [ApiController]
 [Route("api/smartcards")]
 public sealed class SmartcardsController(HostPlatformDbContext db) : ControllerBase
@@ -24,4 +24,13 @@ public sealed class SmartcardsController(HostPlatformDbContext db) : ControllerB
                 mapsToCardType = t.MapsToCardType,
                 t.Notes
             }).ToListAsync(ct));
+    /// <summary>Independent, read-only historical application/transport evidence. No issuer data or payment acceptance implied.</summary>
+    [HttpGet("applications")]
+    public ActionResult<object> Applications() => Ok(new
+    {
+        referenceScope = SmartcardApplicationCatalogue.ReferenceScope,
+        applications = SmartcardApplicationCatalogue.Applications,
+        physicalCardTransactionsQualified = false,
+        referenceApplicationEvidenceOnly = true
+    });
 }

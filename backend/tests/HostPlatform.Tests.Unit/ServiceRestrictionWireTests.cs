@@ -82,6 +82,58 @@ public sealed class ServiceRestrictionWireTests
         Assert.Empty(Review(FirmwareTableProfiles.LaterMultiPay180, restriction, keys));
     }
 
+    [Fact]
+    public void Marked_routes_explain_blank_denied_information_and_unmapped_slots_without_altering_bytes()
+    {
+        var screening = Record(92, 3061);
+        var keys = Record(55, 571);
+        Screen(0, 3, 0x12);
+        Screen(1, 11, 0x34);
+        Screen(2, 3, 0);
+        Screen(3, 3, 0xD0);
+        Screen(4, 3, 0x56, 16);
+        Screen(5, 3, 0x78, 15);
+        screening[1 + 5 * 17 + 13] |= 0x40;
+        Key(0, 3, 0x12, true);
+        Key(1, 3, 0x34, false);
+        Key(2, 3, 0, false);
+        var screeningBefore = screening.ToArray();
+        var keysBefore = keys.ToArray();
+
+        var screens = ServiceRestrictionWire.ReadRestrictedRoutes(92, screening);
+        Assert.Equal("included", screens.Availability);
+        Assert.Equal(new[] { "configured_dialable", "denied", "blank", "unreadable_number", "unreadable_wildcards", "configured_dialable" },
+            screens.Routes.Select(route => route.Status));
+        Assert.Equal(new[] { 1, 6 }, screens.Routes.Where(route => route.Dialable).Select(route => route.Slot));
+        Assert.Equal("12", screens.Routes[0].Destination);
+        Assert.Equal(15, screens.Routes[5].TrailingWildcards);
+        Assert.True(screens.Routes[5].Translated);
+        var quick = ServiceRestrictionWire.ReadRestrictedRoutes(55, keys);
+        Assert.Equal(new[] { "information_only", "configured_dialable", "blank" }, quick.Routes.Select(route => route.Status));
+        Assert.Equal(2, Assert.Single(quick.Routes.Where(route => route.Dialable)).Slot);
+        Assert.Equal(screeningBefore, screening);
+        Assert.Equal(keysBefore, keys);
+        Assert.Equal("incompatible", ServiceRestrictionWire.ReadRestrictedRoutes(92, Record(92, 3401)).Availability);
+        Assert.Equal("incompatible", ServiceRestrictionWire.ReadRestrictedRoutes(55, Record(55, 2)).Availability);
+
+        void Screen(int index, byte classification, byte digits, byte trailing = 0)
+        {
+            var offset = 1 + index * 17;
+            screening[offset + 1] = classification;
+            screening[offset + 3] = trailing;
+            screening[offset + 4] = digits;
+            screening[offset + 13] = 4;
+        }
+        void Key(int index, byte classification, byte digits, bool information)
+        {
+            var offset = 1 + index * 57;
+            keys[offset] = information ? (byte)0x40 : (byte)0;
+            keys[offset + 1] = classification;
+            keys[offset + 3] = digits;
+            keys[offset + 55] = 1;
+        }
+    }
+
     private static byte[] Record(int number, int length)
     {
         var record = new byte[length];

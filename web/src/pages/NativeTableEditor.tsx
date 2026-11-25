@@ -12,6 +12,7 @@ import { LocalDialingImport } from './LocalDialingImport'
 import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
+import { RestrictedRouteReview, type RestrictedRouteRecord } from './RestrictedRouteReview'
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { InterfaceTimingPanel, interfaceTimingKeys } from './InterfaceTimingPanel'
@@ -61,6 +62,7 @@ type Layout = {
   numberingFormatCapacity?: number | null
   spareBytes?: string | null
   screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean } | null
+  restrictedRoutes?: RestrictedRouteRecord[] | null
 } | { supported: false; reason: string; profiles?: string[]; observedLengthsOnly?: boolean;
   templates?: { profile: string; length: number; screeningSlots?: number | null }[] }
 
@@ -392,7 +394,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           section.fields.map(field => [field.key, effectiveValue(field)]))), layout.profile === 'Later packed profile')}</p>
         <p>Restrictions activate when the handset is on hook and its cover is closed. They repeat daily, not on the host clock.</p>
         {layout.sections.some(section => section.fields.some(field => field.key === 'restriction' && effectiveValue(field) === '4')) &&
-          <p>Mark the permitted entries in Call-Screening List and Quick Access Keys using <strong>Allow in configurable restricted service</strong>.</p>}
+          <RestrictedRouteReview records={layout.restrictedRoutes ?? null} />}
       </section>}
       {number === 68 && <MessagingServicePreview value={key => {
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)

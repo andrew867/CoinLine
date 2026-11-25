@@ -155,8 +155,9 @@ public sealed class PostgresPhonePermissionTests
         Assert.Equal(new[] { "buildId", "id", "label" }, option.EnumerateObject().Select(field => field.Name).Order().ToArray());
         var choices = await client.GetFromJsonAsync<JsonElement>($"/api/terminals/{phone.Id}/table-assignment-options");
         var choice = Assert.Single(choices.EnumerateArray(), row => row.GetProperty("id").GetGuid() == set.Id);
-        Assert.Equal(new[] { "id", "name", "status", "targetFirmware", "targetFirmwareVersionId" },
+        Assert.Equal(new[] { "compatibilityIssue", "id", "name", "status", "targetFirmware", "targetFirmwareVersionId" },
             choice.EnumerateObject().Select(field => field.Name).Order().ToArray());
+        Assert.Equal(JsonValueKind.Null, choice.GetProperty("compatibilityIssue").ValueKind);
         Assert.DoesNotContain(choices.EnumerateArray(), row => row.GetProperty("id").GetGuid() == codeOnly.Id);
 
         var path = $"/api/terminals/{phone.Id}/table-assignment";
