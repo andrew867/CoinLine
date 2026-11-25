@@ -31,7 +31,7 @@ internal sealed class ManualCardLabFact : FactAttribute
 }
 
 /// <summary>Manual emulator fixture, never started by the normal application or CI.</summary>
-public sealed class ManualCardLabTests
+public sealed partial class ManualCardLabTests
 {
     internal static byte[] SyntheticAuthorizationRequest(string route, byte messageType, ushort sequence)
     {

@@ -75,3 +75,24 @@ CI does not activate the manual fixture. The automated fixture test verifies rej
 The readiness file confirms the exact quote preflight and listener reachability. The result file separates actual terminal quote requests, simulated authorization sequences, decoded CDRs, reported charge and an idempotent adjustment to the fixture's in-memory synthetic account. A quote alone does not debit the simulated account. The result also lists safe summary fields for all decoded CDRs and indicates whether the route and completed authorization matched; it does not include raw dialed numbers or card data. Observation-only mode can receive a previously recorded test CDR after an earlier isolated listener expires, but does not attribute it to a new authorization or debit the ledger. A legacy CDR without a charge amount is insufficient to complete the simulated settlement test; no amount is inferred. No result represents processor settlement.
 
 For a count-triggered collection trial, preserve a known-good MT35 in the private package and insert it into the ordered baseline between MT31 and MT50. Enable `newInstallCollectionTrial`, complete INSTALL, and verify all thirteen record acknowledgements before testing a call. Wait for the actual completed call and the subsequent terminal call-in or use its normal call-record Craft menu. Compare the decoded upload, not the rating quote, against the fixture result. The automated regression checks the edited threshold byte, byte preservation, and fresh-install-only restriction. The later-profile terminal acknowledgement, count-triggered upload and resulting charge are still bench acceptance checks; changing the threshold does not prove the terminal writes a CDR.
+
+
+## Native emulator acceptance against the built-in provider
+
+The independent opt-in test `Native_emulator_call_using_built_in_synthetic_provider` uses the ordinary API's built-in synthetic provider, production-style migrations and an isolated PostgreSQL ledger. It does not register the older in-memory manual test provider or a real payment processor. The NCC listener is loopback-only, SIP and serial listeners are disabled, and the API runs inside its test server.
+
+Create a new empty PostgreSQL database named `coinline_card_lab_<unique>` on an isolated local PostgreSQL instance. Supply its private connection string in `COINLINE_CARD_LAB_POSTGRES_CONNECTION`. The fixture requires a loopback database hostname, the reserved lab database name and an empty schema before migrations. It refuses an existing populated database and never removes database contents. Do not point it at the normal CoinLine deployment.
+
+Supply a private settings file in `COINLINE_MANUAL_BUILTIN_CARD_LAB_SETTINGS`:
+
+| Field | Purpose |
+| --- | --- |
+| `lab` | The existing manual fixture settings object described above, including a reserved lab wire ID, fictional test route, unused loopback port, timeout and new ready/result files. Optional hash-verified table package for a new INSTALL. |
+| `finishFile` | A third distinct, initially absent local file. Create it only when the emulator is back on hook and the test is finished. It requests a clean exit after matched NCC sessions close. |
+| `requireCompletedCdr` | True by default. For an authorization-only observation explicitly set false. |
+| `enableCdrPosting` | False by default. Enable only for a separate confirmed CDR collection trial. Requires completed CDR evidence and a known phone-clock offset. |
+| `terminalClockOffsetMinutes` | Explicit observed terminal clock offset from UTC, required for a completed record or settlement trial, including zero for a UTC clock. |
+
+From the backend directory, run only the named manual test with these private settings. Keep the emulator's CO simulator local and route only its NCC connection to the lab listener. The readiness file is published only after the isolated database observes a real NCC connection probe. The result file separates native authorization, candidate completed upload, simulated payment and pending reconciliation. A finish marker does not turn missing evidence into a pass. Use an authorization-only trial first; then use the optional MT35 collection trial and observe the genuine completed record before enabling simulated posting on a fresh isolated run.
+
+The fixture and its test ledger are nonproduction, and its results never contain protected card bytes or authorization references. A passing authorization-only trial is not proof of a connected call or terminal CDR behavior; correlate the emulator's own state separately. No native completed card record or physical smartcard payment is claimed by this procedure alone.

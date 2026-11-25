@@ -45,7 +45,9 @@ public sealed class NccModemListenService(
         else if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_NCC_PORT"), out var envPort) && envPort is > 0 and < 65536)
             port = envPort;
 
-        var listener = new TcpListener(env.IsEnvironment("Testing") ? IPAddress.Loopback : IPAddress.Any, port);
+        var bind = env.IsEnvironment("Testing") || config.GetValue<bool>("Ncc:LoopbackOnly")
+            ? IPAddress.Loopback : IPAddress.Any;
+        var listener = new TcpListener(bind, port);
         try
         {
             listener.Start();
