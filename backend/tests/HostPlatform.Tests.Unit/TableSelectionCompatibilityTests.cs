@@ -19,4 +19,16 @@ public sealed class TableSelectionCompatibilityTests
         Assert.Contains("confirmed record layout", TableSetFirmwareCompatibility.SelectionIssue(later,
             [new(92, 3061, NativeTableLayouts.MultiPay)]));
     }
+
+    [Fact]
+    public void Observed_length_only_profile_does_not_invent_a_native_layout_or_complete_catalogue()
+    {
+        var observed = FirmwareTableProfiles.Find(FirmwareTableProfiles.Mtr120MultiPay);
+        Assert.NotNull(observed);
+        Assert.True(observed.ObservedLengthsOnly);
+        Assert.Null(TableSetFirmwareCompatibility.SelectionIssue(observed,
+            [new(92, 3061, NativeTableLayouts.Later), new(95, 153, null)]));
+        Assert.Contains("MT92", TableSetFirmwareCompatibility.SelectionIssue(observed,
+            [new(92, 3401, NativeTableLayouts.MultiPay)]));
+    }
 }
