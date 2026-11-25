@@ -90,7 +90,7 @@ public sealed class ManualCardLabTests
             await probe.ConnectAsync(IPAddress.Loopback, settings.Port, deadline.Token);
         await WriteJson(settings.ReadyFile, new { listening = true, host = "127.0.0.1", settings.Port,
             settings.TerminalWireId, settings.Destination, quotedUsd = 0.05m, syntheticOnly = true,
-            settings.ObserveExistingUploadOnly, prepared });
+            settings.ObserveExistingUploadOnly, settings.NewInstallCollectionTrial, prepared });
 
         // This test reports only the isolated synthetic ledger. A quote is not a settlement.
         var settled = new HashSet<ushort>();
@@ -128,7 +128,8 @@ public sealed class ManualCardLabTests
             }
             var snapshot = new
             {
-                syntheticOnly = true, settings.Destination, settings.ObserveExistingUploadOnly, quoteObserved,
+                syntheticOnly = true, settings.Destination, settings.ObserveExistingUploadOnly,
+                settings.NewInstallCollectionTrial, quoteObserved,
                 simulatedAccountBalanceUsd = account.Balance,
                 downloads = batches.Select(batch => new { batch.Status, total = batch.Items.Count,
                     acknowledged = batch.Items.Count(item => item.Succeeded), batch.LastError }).ToArray(),
@@ -215,6 +216,43 @@ public sealed class ManualCardLabTests
     }
 
     [Fact]
+    public void New_install_collection_trial_preserves_every_other_call_in_field()
+    {
+        var source = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(35)));
+        source[1] = 0xA5;
+        source[2] = 0x7F;
+        source[3] = 0xFE;
+        var original = source.ToArray();
+        var edited = ApplyNewInstallCollectionThreshold(source);
+        var expected = original.ToArray();
+        expected[12] = 1;
+        Assert.Equal(expected, edited);
+        Assert.Equal(original, source);
+        Assert.Equal(edited, ApplyNewInstallCollectionThreshold(edited));
+        Assert.Throws<InvalidOperationException>(() => ApplyNewInstallCollectionThreshold(source[..20]));
+
+        var install = new LabSettings("2025550100", "3335550123", 12345, 60,
+            "ready.json", "result.json", "baseline.json", NewInstallCollectionTrial: true);
+        install.Validate();
+        Assert.Throws<InvalidOperationException>(() => (install with { ObserveExistingUploadOnly = true }).Validate());
+        Assert.Throws<InvalidOperationException>(() => (install with { TablePackageFile = null }).Validate());
+        Assert.Equal(13, ExpectedRecordNumbers(install).Length);
+        Assert.Contains(35, ExpectedRecordNumbers(install));
+        Assert.DoesNotContain(35, ExpectedRecordNumbers(install with { NewInstallCollectionTrial = false }));
+    }
+
+    private static byte[] ApplyNewInstallCollectionThreshold(byte[] source)
+    {
+        var layout = NativeTableLayouts.Find(35, source, NativeTableLayouts.MultiPay)
+            ?? throw new InvalidOperationException("The collection trial requires a recognized MT35 record.");
+        Assert.Equal(source, layout.Apply(source, new Dictionary<string, string>()));
+        var edited = layout.Apply(source, new Dictionary<string, string> { ["recordThreshold"] = "1" });
+        Assert.Equal("1", layout.Sections.SelectMany(section => section.Fields)
+            .Single(field => field.Key == "recordThreshold").Read(edited));
+        return edited;
+    }
+
+    [Fact]
     public async Task Synthetic_fixture_is_restricted_and_repeated_authorizations_share_one_reference()
     {
         const string route = "3335550123";
@@ -243,14 +281,18 @@ public sealed class ManualCardLabTests
     private sealed record LabRecord(int Number, string Name, int SortOrder, int? Dependency, string Sha256, string PayloadBase64);
     private sealed record PreparedSet(Guid TableSetId, int Records, int[] ChangedRecordNumbers);
 
+    private static int[] ExpectedRecordNumbers(LabSettings settings) => settings.NewInstallCollectionTrial
+        ? [21, 26, 31, 35, 50, 62, 72, 73, 92, 93, 134, 135, 136]
+        : [21, 26, 31, 50, 62, 72, 73, 92, 93, 134, 135, 136];
+
     private static async Task<PreparedSet> PrepareIsolatedTablesAsync(HostPlatformDbContext db, Terminal terminal,
         LabSettings settings, CancellationToken ct)
     {
         var records = JsonSerializer.Deserialize<LabRecord[]>(await File.ReadAllTextAsync(settings.TablePackageFile!, ct), Json)
             ?? throw new InvalidOperationException("Synthetic table package is missing.");
-        var expected = new[] { 21, 26, 31, 50, 62, 72, 73, 92, 93, 134, 135, 136 };
+        var expected = ExpectedRecordNumbers(settings);
         if (!records.OrderBy(record => record.SortOrder).Select(record => record.Number).SequenceEqual(expected))
-            throw new InvalidOperationException("The isolated baseline must contain exactly the twelve standard Multi-pay records.");
+            throw new InvalidOperationException("The isolated baseline must contain the twelve standard Multi-pay records, plus MT35 only for the explicit collection trial.");
         var profile = FirmwareTableProfiles.Find(FirmwareTableProfiles.LaterMultiPay180)!;
         var payloads = new Dictionary<int, byte[]>();
         foreach (var record in records)
@@ -309,10 +351,17 @@ public sealed class ManualCardLabTests
         // derive it from the separate five-digit PIN or change an observation retry.
         if (settings.NewInstallCraftAccessCode is { } craftCode)
             payloads[31] = ApplyNewInstallCraftAccess(payloads[31], craftCode);
+        if (settings.NewInstallCollectionTrial)
+            payloads[35] = ApplyNewInstallCollectionThreshold(payloads[35]);
 
         var changed = records.Where(record => !Convert.ToHexString(SHA256.HashData(payloads[record.Number]))
             .Equals(record.Sha256, StringComparison.OrdinalIgnoreCase)).Select(record => record.Number).Order().ToArray();
-        Assert.Equal(settings.NewInstallCraftAccessCode is not null && changed.Contains(31) ? new[] { 31, 73, 92 } : new[] { 73, 92 }, changed);
+        var allowedChanges = new List<int> { 73, 92 };
+        if (settings.NewInstallCraftAccessCode is not null && changed.Contains(31))
+            allowedChanges.Add(31);
+        if (settings.NewInstallCollectionTrial && changed.Contains(35))
+            allowedChanges.Add(35);
+        Assert.Equal(allowedChanges.Order(), changed);
         foreach (var change in changes)
             Assert.Equal(change.Value, screenFields[change.Key].Read(payloads[92]));
         Assert.Equal("7", rateFields["rate-127.classification"].Read(payloads[73]));
@@ -341,7 +390,8 @@ public sealed class ManualCardLabTests
     private static Task WriteJson(string path, object value) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(value, Json));
 
     private sealed record LabSettings(string TerminalWireId, string Destination, int Port, int TimeoutSeconds, string ReadyFile, string ResultFile,
-        string? TablePackageFile = null, bool ObserveExistingUploadOnly = false, string? NewInstallCraftAccessCode = null)
+        string? TablePackageFile = null, bool ObserveExistingUploadOnly = false, string? NewInstallCraftAccessCode = null,
+        bool NewInstallCollectionTrial = false)
     {
         public void Validate()
         {
@@ -353,6 +403,8 @@ public sealed class ManualCardLabTests
             if (NewInstallCraftAccessCode is { } code && (ObserveExistingUploadOnly || string.IsNullOrWhiteSpace(TablePackageFile)
                     || code.Length != 7 || code.Any(character => !char.IsAsciiDigit(character))))
                 throw new InvalidOperationException("A separate seven-digit Craft access code may be supplied only for a new isolated INSTALL package.");
+            if (NewInstallCollectionTrial && (ObserveExistingUploadOnly || string.IsNullOrWhiteSpace(TablePackageFile)))
+                throw new InvalidOperationException("The collection trial requires a new isolated INSTALL package containing MT35.");
         }
     }
 
