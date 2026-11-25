@@ -71,6 +71,7 @@ load=res_agi.so
 load=pbx_config.so
 load=pbx_spool.so
 load=app_playback.so
+load=res_clioriginate.so
 """, encoding="ascii")
         (root / "etc/logger.conf").write_text("[logfiles]\nconsole=notice,warning,error,verbose\n", encoding="ascii")
         (root / "etc/extensions.conf").write_text(f"""[general]
@@ -104,10 +105,14 @@ exten => s,1,Set(AGISIGHUP=no)
                     time.sleep(0.2)
                 else:
                     raise RuntimeError("Isolated Asterisk did not start")
+                dialplan = subprocess.run(cli_base + ["dialplan show 7004@coinline-audiogram-record-test"],
+                                          stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=5)
+                if "AGI" not in dialplan.stdout or "7004" not in dialplan.stdout:
+                    raise RuntimeError(f"Local recording dialplan not loaded: {dialplan.stdout}")
                 result = subprocess.run(cli_base + [f"channel originate Local/7004@coinline-audiogram-record-test/n application Playback {source}"],
                                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, timeout=10)
-                if result.returncode != 0:
-                    raise RuntimeError("Local-channel origination failed")
+                if result.returncode != 0 or "No such command" in result.stdout or "failed" in result.stdout.lower():
+                    raise RuntimeError(f"Local-channel origination failed: {result.stdout}")
                 for _ in range(120):
                     records = spool.statuses()
                     if len(records) == 1 and records[0]["state"] == "delivered" and records[0]["asterisk_status"] == "Completed":
