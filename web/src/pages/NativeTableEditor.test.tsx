@@ -18,6 +18,42 @@ function renderEditor(number = 55) {
     onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} />)
 }
 
+it('moves a card range through the native editor and reopens its actual saved destination', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+  let moved = false
+  const layout = () => ({ supported: true, editable: true, profile: 'Later packed profile', length: 1153,
+    revision: moved ? 2 : 1, sha256: moved ? 'card-moved' : 'card-initial',
+    sections: [0, 1, 2].map(index => ({ key: `card-${index}`, label: `Card range ${index + 1}`, fields: [
+      { key: `card-${index}.start`, label: 'Lowest six-digit prefix', editor: 'text', value: index === (moved ? 2 : 0) ? '000001' : '000000',
+        min: 0, max: 0, maxLength: 6, choices: null, help: null },
+      { key: `card-${index}.end`, label: 'Highest six-digit prefix', editor: 'text', value: index === (moved ? 2 : 0) ? '000002' : '000000',
+        min: 0, max: 0, maxLength: 6, choices: null, help: null },
+    ] })) })
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (String(url).endsWith('/card-sequence')) {
+      if (init?.method === 'POST') { moved = true; return Response.json({ carrierChanged: true }) }
+      return Response.json({ available: true, editable: true, cards: { revision: layout().revision, sha256: layout().sha256 },
+        carriers: { revision: moved ? 2 : 1, sha256: moved ? 'carrier-moved' : 'carrier-initial' }, carrierNumber: 135,
+        slots: [1, 2, 3].map(number => ({ number, blank: number !== (moved ? 3 : 1), movable: number === (moved ? 3 : 1) })) })
+    }
+    return Response.json(layout())
+  })
+  renderEditor(134)
+  const from = await screen.findByLabelText('Move from')
+  const field = screen.getByLabelText('Lowest six-digit prefix')
+  fireEvent.change(field, { target: { value: '000003' } })
+  expect(from).toBeDisabled()
+  fireEvent.change(field, { target: { value: '000001' } })
+  expect(from).toBeEnabled()
+  fireEvent.change(from, { target: { value: '1' } })
+  fireEvent.change(screen.getByLabelText('Move to'), { target: { value: '3' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Move card entry' }))
+  await waitFor(() => expect(screen.getByLabelText('Section or entry')).toHaveValue('card-2'))
+  expect(screen.getByLabelText('Lowest six-digit prefix')).toHaveValue('000001')
+  expect(screen.getByText('Card entry moved to position 3. Matching carrier acceptance was updated.')).toBeVisible()
+  expect(await screen.findByRole('option', { name: 'Position 3 · 000001 to 000002' })).toBeVisible()
+})
+
 it('identifies MT72 and its native IOPR configuration from the table-set editor', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 1 })
   vi.mocked(apiFetch).mockResolvedValue(Response.json({ supported: true, editable: false, profile: 'Later packed profile',
