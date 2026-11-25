@@ -3,12 +3,15 @@ import { apiGet, apiPost } from '../api/client'
 
 type Row = { id: string; label: string; buildId: string | null; tableProfileId: string | null }
 type TableProfile = { id: string; label: string; verifiedLengths: Record<string, number>;
-  completeCatalogue: boolean; terminalAcknowledgedRecords: number[] }
+  completeCatalogue: boolean; terminalAcknowledgedRecords: number[];
+  observedLengthsOnly?: boolean; evidenceNote?: string | null }
 
 function profileEvidence(profile: TableProfile) {
   const count = Object.keys(profile.verifiedLengths).length
   const acked = profile.terminalAcknowledgedRecords.length
   return `${count} known record lengths, ${acked} acknowledged by emulated terminals${profile.completeCatalogue ? '. Complete image catalogue.' : '.'}`
+    + (profile.observedLengthsOnly ? ' Observed subset only; ambiguous native layouts require explicit selection.' : '')
+    + (profile.evidenceNote ? ` ${profile.evidenceNote}` : '')
 }
 
 export function FirmwareVersionsPage() {

@@ -38,8 +38,9 @@ public static class TableRecordCopy
             var bytes = TableDistributionService.GetEffectivePayload(version);
             if (TableSetFirmwareCompatibility.RecordIssue(firmware, number, bytes.Length) is { } issue)
                 throw new InvalidOperationException($"MT{number}. {issue}");
-            if (firmware?.VerifiedLengths.ContainsKey(number) == true && sourceFirmware != null &&
-                sourceFirmware.LayoutFor(number) != firmware.LayoutFor(number) && NativeTableLayouts.Candidates(number, bytes).Count > 1)
+            if (firmware?.VerifiedLengths.ContainsKey(number) == true &&
+                sourceFirmware?.LayoutFor(number) is { } sourceLayout && firmware.LayoutFor(number) is { } targetLayout &&
+                sourceLayout != targetLayout && NativeTableLayouts.Candidates(number, bytes).Count > 1)
                 throw new InvalidOperationException($"MT{number} does not match the destination firmware layout.");
 
             var existing = candidates.SingleOrDefault();
