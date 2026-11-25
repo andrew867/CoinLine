@@ -206,3 +206,7 @@
 .local-dialing-import table { border-collapse: collapse; margin-bottom: 12px; text-align: left; }
 .local-dialing-import table :is(th, td) { border-bottom: 1px solid var(--line); padding: 4px 12px 4px 0; }
 .local-dialing-import caption { text-align: left; font-weight: 600; }
+.interface-timing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .65rem; margin: .8rem 0; }
+.interface-timing-value { display: grid; gap: .15rem; padding: .7rem; border: 1px solid #dce7e1; border-radius: .4rem; }
+.interface-timing-value > strong { font-variant-numeric: tabular-nums; font-size: 1.25rem; }
+.interface-timing-value > small { opacity: .8; }

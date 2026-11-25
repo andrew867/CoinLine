@@ -14,6 +14,7 @@ import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
+import { InterfaceTimingPanel, interfaceTimingKeys } from './InterfaceTimingPanel'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
@@ -384,6 +385,14 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}
+      {number === 30 && layout.length === 68 && <InterfaceTimingPanel key={`${layout.revision}:${layout.sha256}`}
+        timers={layout.sections.flatMap(section => section.fields).filter(field =>
+          field.editor === 'number' && interfaceTimingKeys.some(key => key === field.key)).map(field => ({
+          key: field.key, label: field.label.replace(/ \(10 ms ticks\)$/, ''), value: effectiveValue(field), changed: field.key in edits,
+        }))} editable={canEdit && !busy} onChange={(key, value) => {
+          const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
+          if (field) edit(field, value)
+        }} />}
       {layout.profiles && layout.profiles.length > 1 && (
         <div className="table-config-selectors">
           <label>Firmware profile
