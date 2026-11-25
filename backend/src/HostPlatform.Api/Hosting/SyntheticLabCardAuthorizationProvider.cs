@@ -81,7 +81,7 @@ internal sealed class SyntheticLabCardAuthorizationProvider(
     private static NccCardAuthorizationDecision Decline(SyntheticAuthorizationEvidence evidence) =>
         new() { SyntheticEvidence = evidence };
 
-    private static decimal? EligibleQuotedAmount(CallRecord quote)
+    internal static decimal? EligibleQuotedAmount(CallRecord quote)
     {
         if (quote.RequestRaw.Length != DlogRateWire.RequestLength || quote.RequestRaw[0] != DlogRateWire.MessageTypeRequest
             || quote.ResponseRaw.Length != DlogRateWire.ResponseLength || quote.ResponseRaw[0] != DlogRateWire.MessageTypeResponse
@@ -111,7 +111,7 @@ internal sealed class SyntheticLabCardAuthorizationProvider(
         return destination.Length is 10 or 11;
     }
 
-    private static bool IsReservedDestination(string? value) =>
+    internal static bool IsReservedDestination(string? value) =>
         value is { Length: 10 } && value[0] is >= '2' and <= '9'
         && value.All(char.IsAsciiDigit) && value.AsSpan(3, 5).SequenceEqual("55501");
 }

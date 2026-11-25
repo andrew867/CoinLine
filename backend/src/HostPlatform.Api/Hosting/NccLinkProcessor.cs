@@ -578,6 +578,7 @@ internal sealed class NccLinkProcessor(
                     break;
                 var detail = DlogCallDetailWire.Decode(data.AsSpan(offset, length), fullCombinedNumber, out var fingerprint);
                 await TerminalUploads.StoreAsync(db, terminal.Id, _session.Id, detail, fingerprint, stoppingToken);
+                await TrySettleSyntheticCallAsync(terminal.Id, fingerprint);
                 var receipt = new byte[3];
                 DlogCallDetailWire.WriteAcknowledgement(receipt, detail.Sequence);
                 replies.AddRange(receipt);
@@ -590,6 +591,23 @@ internal sealed class NccLinkProcessor(
                 _session.Id, ex.GetType().Name);
         }
         return replies.ToArray();
+    }
+
+    private async Task TrySettleSyntheticCallAsync(Guid terminalId, string fingerprint)
+    {
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var settlement = scope.ServiceProvider.GetService<SyntheticLabCdrSettlement>();
+            if (settlement != null)
+                await settlement.TrySettleAsync(terminalId, fingerprint, stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The CDR has already been stored. Its receipt is independent of
+            // whether the optional synthetic ledger adjustment succeeds.
+            logger.LogWarning("Synthetic call settlement not posted ({ErrorType}).", ex.GetType().Name);
+        }
     }
 
     private async Task<bool> RecordFieldEventAsync(byte[] data, Terminal? terminal)

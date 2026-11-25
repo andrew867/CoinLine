@@ -6,7 +6,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import './TableSetConfiguration.css'
 
 type Row = {
-  id: string; cardAccountId: string; amount: number; reconciliation: number; reportedCardType: number; createdAtUtc: string
+  id: string; cardAccountId: string; amount: number; reconciliation: number; reportedCardType: number; createdAtUtc: string; source?: string
 }
 type Attempt = {
   id: string; terminalId: string | null; terminalDisplayName: string | null; nccSessionId: string | null
@@ -108,11 +108,12 @@ export function PaymentTransactionsPage() {
       {!!rows?.length && <div role="region" aria-label="Payment ledger entries" tabIndex={0} style={{ overflowX: 'auto' }}>
         <table cellPadding={8} style={{ borderCollapse: 'collapse', width: '100%' }}>
           <thead><tr><th scope="col">Created</th><th scope="col">Account</th><th scope="col">Amount</th>
-            <th scope="col">Card type</th><th scope="col">Reconciliation</th></tr></thead>
+            <th scope="col">Card type</th><th scope="col">Source</th><th scope="col">Reconciliation</th></tr></thead>
           <tbody>{rows.map(row => <tr key={row.id} style={{ borderBottom: '1px solid #eee' }}>
             <td>{new Date(row.createdAtUtc).toLocaleString()}</td>
             <td>{canReadAccounts ? <Link to={`/card-accounts/${row.cardAccountId}`}>{row.cardAccountId}</Link> : row.cardAccountId}</td>
             <td>{row.amount.toFixed(2)}</td><td>{cardTypes[row.reportedCardType] ?? 'Unknown'}</td>
+            <td>{row.source === 'synthetic_cdr' ? 'Simulated call-detail posting' : 'Not classified'}</td>
             <td>{reconciliations[row.reconciliation] ?? 'Unknown'}</td>
           </tr>)}</tbody>
         </table>

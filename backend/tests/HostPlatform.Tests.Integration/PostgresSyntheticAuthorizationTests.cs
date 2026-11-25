@@ -20,7 +20,7 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresSyntheticAuthorizationTests
 {
     [PostgresIntegrationFact]
-    public async Task Native_quote_and_test_authorizations_are_audited_without_payments_or_double_decisions()
+    public async Task Native_quote_and_test_authorizations_are_audited_and_only_matched_cdr_posts_once()
     {
         const string route = "3335550123";
         var key = Guid.NewGuid().ToString("N");
@@ -57,9 +57,11 @@ public sealed class PostgresSyntheticAuthorizationTests
             .UseSetting("Ncc:Listen", "1")
             .UseSetting("Ncc:Port", port.ToString())
             .UseSetting("CardPayments:LabAuthorization:Enabled", "true")
+            .UseSetting("CardPayments:LabAuthorization:SettleUploadedCalls", "true")
             .UseSetting("CardPayments:LabAuthorization:Bindings:0:TerminalId", terminal.Id.ToString())
             .UseSetting("CardPayments:LabAuthorization:Bindings:0:CardAccountId", account.Id.ToString())
             .UseSetting("CardPayments:LabAuthorization:Bindings:0:Destination", route)
+            .UseSetting("CardPayments:LabAuthorization:Bindings:0:TerminalClockOffsetMinutes", "0")
             .UseSetting("CardPayments:LabAuthorization:Bindings:1:TerminalId", otherTerminal.Id.ToString())
             .UseSetting("CardPayments:LabAuthorization:Bindings:1:CardAccountId", otherAccount.Id.ToString())
             .UseSetting("CardPayments:LabAuthorization:Bindings:1:Destination", route));
@@ -85,6 +87,7 @@ public sealed class PostgresSyntheticAuthorizationTests
         var state = await admin.GetFromJsonAsync<JsonElement>("/api/cards/simulation-state");
         Assert.True(state.GetProperty("runtimeAuthorizationProviderRegistered").GetBoolean());
         Assert.True(state.GetProperty("labAuthorizationEnabled").GetBoolean());
+        Assert.True(state.GetProperty("labSettlementEnabled").GetBoolean());
         var request = ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 1);
         await Denied(wireId, request); // no preceding quote
         await Denied(otherWireId, request); // a non-test product cannot authorize
@@ -159,6 +162,85 @@ public sealed class PostgresSyntheticAuthorizationTests
                 && !row.SentByHost && (row.WireLength == 40 || row.WireLength == 50)).ToListAsync();
             Assert.NotEmpty(protectedFrames);
             Assert.All(protectedFrames, frame => Assert.Empty(frame.RawBytes));
+        }
+
+        // A new synthetic test balance and a fresh native quote. Neither
+        // authorization nor unrelated/incomplete CDRs can post a payment.
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var storedAccount = await db.CardAccounts.Include(row => row.CardBalance).SingleAsync(row => row.Id == account.Id);
+            storedAccount.Balance = storedAccount.CardBalance!.Amount = 1m;
+            await db.SaveChangesAsync();
+        }
+        var terminalStart = DateTime.UtcNow;
+        await Quote();
+        Assert.Equal(0, (await Exchange(wireId, ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 5)))[1]);
+        await Upload(Cdr(53, 4, terminalStart, 5, 10, 0x44)); // wrong sequence
+        await Upload(Cdr(53, 5, terminalStart.AddHours(-1), 5, 10, 0x44)); // stale
+        await Upload(Cdr(53, 5, terminalStart, 6, 10, 0x44)); // amount differs from quote
+        await Upload(Cdr(53, 5, terminalStart, 5, 0, 0x44)); // no duration
+        await Upload(Cdr(53, 5, terminalStart, 5, 61, 0x44)); // later charge period unqualified
+        await Upload(Cdr(53, 5, terminalStart, 5, 10, 0x41)); // unanswered
+        await Upload(Cdr(4, 5, terminalStart, 5, 10, 0x44)); // legacy record has no confirmed charge field
+        await AssertLedger(1m, 0);
+
+        var complete = Cdr(53, 5, terminalStart, 5, 10, 0x44);
+        await Task.WhenAll(Upload(complete), Upload(complete)); // reconnect and parallel retry
+        await Upload(complete);
+        await Upload(Cdr(53, 5, terminalStart.AddSeconds(1), 5, 10, 0x44)); // different upload, same approval
+        await AssertLedger(0.95m, 1);
+        var paymentList = await restricted.GetFromJsonAsync<JsonElement>("/api/cards/transactions?cardAccountId=" + account.Id);
+        var listed = Assert.Single(paymentList.EnumerateArray());
+        Assert.Equal("synthetic_cdr", Value(listed, "source"));
+        Assert.Equal(-0.05m, listed.GetProperty("amount").GetDecimal());
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var payment = await db.PaymentTransactions.SingleAsync(row => row.CardAccountId == account.Id);
+            Assert.Equal(-0.05m, payment.Amount);
+            Assert.Equal(ReconciliationStatus.Pending, payment.Reconciliation);
+            Assert.Equal(CardType.Magstripe, payment.ReportedCardType);
+            var adjustment = await db.BalanceAdjustments.SingleAsync(row => row.CardAccountId == account.Id);
+            Assert.Equal(-0.05m, adjustment.Delta);
+            Assert.True(adjustment.SimulationMode);
+            Assert.Equal(1, await db.AuditEvents.CountAsync(row => row.TerminalId == terminal.Id && row.Action == "synthetic_cdr_settlement"));
+        }
+
+        async Task AssertLedger(decimal expectedBalance, int expectedPayments)
+        {
+            await using var scope = host.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.Equal(expectedBalance, await db.CardAccounts.Where(row => row.Id == account.Id).Select(row => row.Balance).SingleAsync());
+            Assert.Equal(expectedBalance, await db.CardBalances.Where(row => row.CardAccountId == account.Id).Select(row => row.Amount).SingleAsync());
+            Assert.Equal(expectedPayments, await db.PaymentTransactions.CountAsync(row => row.CardAccountId == account.Id));
+        }
+
+        async Task Upload(byte[] payload)
+        {
+            var response = await Exchange(wireId, payload);
+            Assert.Equal(DlogCallDetailWire.Acknowledgement, response[0]);
+            Assert.Equal(BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(payload[0] == 53 ? 31 : 23)),
+                BinaryPrimitives.ReadUInt16LittleEndian(response.AsSpan(1)));
+        }
+
+        byte[] Cdr(byte type, ushort sequence, DateTime start, int cents, byte seconds, byte classification)
+        {
+            // Only known synthetic route and ordinary call metadata, no simulated
+            // credential, authorization reference or protected card fields.
+            var combined = type == DlogCallDetailWire.CombinedDetails;
+            var data = new byte[combined ? 54 : 35];
+            data[0] = type;
+            DlogRateWire.EncodeRequest(route, false).AsSpan(3, 10).CopyTo(data.AsSpan(2));
+            if (combined)
+                BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(27), cents);
+            var offset = combined ? 31 : 23;
+            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(offset), sequence);
+            byte[] time = [(byte)(start.Year - 1900), (byte)start.Month, (byte)start.Day,
+                (byte)start.Hour, (byte)start.Minute, (byte)start.Second,
+                0, (byte)(seconds / 60), (byte)(seconds % 60), classification];
+            time.CopyTo(data, offset + 2);
+            return data;
         }
 
         async Task Quote()

@@ -142,6 +142,9 @@ builder.Services.AddSingleton<CraftLiveSocketWriter>();
 builder.Services.AddScoped<ICardAccountLedger, CardAccountLedger>();
 if (builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:Enabled"))
     builder.Services.AddScoped<INccCardAuthorizationProvider, SyntheticLabCardAuthorizationProvider>();
+if (builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:Enabled")
+    && builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:SettleUploadedCalls"))
+    builder.Services.AddScoped<SyntheticLabCdrSettlement>();
 builder.Services.AddHostedService<HostPlatform.Api.Hosting.NccModemListenService>();
 builder.Services.AddHostedService<HostPlatform.Api.Hosting.ScheduledDownloadPreparationService>();
 builder.Services.Configure<HostPlatform.SipModem.SipModemOptions>(
