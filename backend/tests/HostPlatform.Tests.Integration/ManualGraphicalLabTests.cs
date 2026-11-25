@@ -93,9 +93,10 @@ public sealed class ManualGraphicalLabTests
             await probe.ConnectAsync(IPAddress.Loopback, settings.Port, deadline.Token);
         await WriteJson(settings.ReadyFile, new { listening = true, host = "127.0.0.1", settings.Port,
             settings.TerminalWireId, settings.Destination, syntheticOnly = true, quotedUsd = 0m, setId,
-            records = Expected.Length, changedRecordNumbers = new[] { 92 } });
+            records = Expected.Length, changedRecordNumbers = new[] { 92 }, settings.RequireDownload });
 
         var completed = false;
+        var warmSessionObserved = false;
         while (!deadline.IsCancellationRequested)
         {
             await using var scope = host.Services.CreateAsyncScope();
@@ -108,25 +109,30 @@ public sealed class ManualGraphicalLabTests
             var sessions = await db.NccSessions.AsNoTracking().Where(row => row.TerminalId == terminalId).ToListAsync(deadline.Token);
             completed |= batches.Any(batch => batch.Status == DownloadBatchStatus.Completed && batch.Items.Count == Expected.Length
                 && batch.Items.All(item => item.Succeeded));
+            warmSessionObserved |= sessions.Any(row => row.Status == NccSessionStatus.Closed);
+            var activeSessions = sessions.Count(row => row.Status == NccSessionStatus.Active);
             await WriteJson(settings.ResultFile, new
             {
-                syntheticOnly = true, settings.Destination, downloaded = completed,
+                syntheticOnly = true, settings.Destination, settings.RequireDownload, downloaded = completed, warmSessionObserved,
                 downloads = batches.Select(batch => new { batch.Status, total = batch.Items.Count,
                     acknowledged = batch.Items.Count(item => item.Succeeded), batch.LastError }).ToArray(),
                 quotes = quotes.Select(row => new { row.DialedDigits, amountsUsd = row.Results.Select(result => result.Amount).ToArray() }).ToArray(),
                 callDetailUploads = uploads.Count(row => TerminalUploads.IsCallDetail(row.IdempotencyKey)),
                 statisticsUploads = uploads.Count(row => TerminalUploads.IsStatistics(row.IdempotencyKey)),
                 matchingSessions = sessions.Count,
-                activeSessions = sessions.Count(row => row.Status == NccSessionStatus.Active),
+                activeSessions,
                 audioServiceBehaviorVerifiedByHost = false
             });
             // A stop signal ends this local fixture. It is not evidence of terminal audio behavior.
-            if (File.Exists(settings.StopFile))
+            if (File.Exists(settings.StopFile) && activeSessions == 0)
                 break;
             try { await Task.Delay(1000, deadline.Token); }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested) { break; }
         }
-        Assert.True(completed, "No complete eighteen-record acknowledgement batch was observed in the isolated graphical lab.");
+        if (settings.RequireDownload)
+            Assert.True(completed, "No complete eighteen-record acknowledgement batch was observed in the isolated graphical lab.");
+        else
+            Assert.True(warmSessionObserved, "No closed matched NCC session was observed during the isolated graphical warm retry.");
     }
 
     private static Dictionary<int, byte[]> PrepareRecords(LabSettings settings, LabRecord[] baseline)
@@ -181,7 +187,7 @@ public sealed class ManualGraphicalLabTests
     private static Task WriteJson(string path, object value) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(value, Json));
     private sealed record LabRecord(int Number, int SortOrder, int? Dependency, string Sha256, string PayloadBase64);
     private sealed record LabSettings(string TerminalWireId, string Destination, int Port, int TimeoutSeconds,
-        string ReadyFile, string ResultFile, string TablePackageFile, string StopFile)
+        string ReadyFile, string ResultFile, string TablePackageFile, string StopFile, bool RequireDownload = true)
     {
         public void Validate()
         {
