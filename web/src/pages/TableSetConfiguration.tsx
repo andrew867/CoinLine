@@ -1,8 +1,9 @@
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { apiFetch, apiGet, apiPost, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { AdvertisingSimulator } from './AdvertisingSimulator'
 import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback'
+import { authorableAdvertisingText, glyphPalettes, normalizedAdvertisingText, advertisingDisplayWidth } from './advertisingGlyphs'
 import type { ExchangeFile } from './localDialingExchangeData'
 
 const NativeTableEditor = lazy(async () => ({ default: (await import('./NativeTableEditor')).NativeTableEditor }))
@@ -168,6 +169,7 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
   onDirty: (dirty: boolean) => void
 }) {
   const [snapshot, setSnapshot] = useState<AdvertisingSnapshot | null>(null)
+  const [originalSlots, setOriginalSlots] = useState<AdvertisingSlot[]>([])
   const slots = snapshot?.slots
   const onHookEnabled = snapshot?.onHookEnabled
   const [previewIndex, setPreviewIndex] = useState(0)
@@ -177,8 +179,15 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
   const [block, setBlock] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [feedback, setFeedback] = useState('')
+  const [palette, setPalette] = useState<keyof typeof glyphPalettes>('all')
+  const slotInputs = useRef<(HTMLInputElement | null)[]>([])
   const endpoint = `/api/tables/sets/${setId}/advertising`
   const blockChanged = block !== null && block !== slots?.map((slot) => slot.text).join('\n')
+  const keepsImportedText = (index: number, text: string) =>
+    originalSlots[index]?.containsUnmappedGlyphs === true && originalSlots[index].text === text
+  const invalid = (slot: AdvertisingSlot, index: number) =>
+    !slot.endSequence && !keepsImportedText(index, slot.text) && !authorableAdvertisingText(slot.text)
+  const invalidSlots = slots?.some(invalid) ?? false
 
   useEffect(() => onDirty(dirty || blockChanged), [dirty, blockChanged, onDirty])
 
@@ -189,7 +198,7 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
       .then(async (response) => {
         if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not load text advertising.')
         const data = await response.json() as AdvertisingSnapshot
-        if (!controller.signal.aborted) setSnapshot(data)
+        if (!controller.signal.aborted) { setSnapshot(data); setOriginalSlots(data.slots) }
       })
       .catch((error: unknown) => {
         if (!controller.signal.aborted) setFeedback(error instanceof Error ? error.message : 'Could not load advertising.')
@@ -205,17 +214,39 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
     setFeedback('')
   }
 
+  function updateText(index: number, text: string) {
+    update(index, { text, endSequence: text.length === 0 && slots?.[index].endSequence,
+      containsUnmappedGlyphs: keepsImportedText(index, text) })
+  }
+
+  function insertGlyph(glyph: string) {
+    const slot = slots?.[previewIndex]
+    if (!slot || block !== null) return
+    const input = slotInputs.current[previewIndex]
+    const start = input?.selectionStart ?? slot.text.length
+    const end = input?.selectionEnd ?? start
+    const next = slot.text.slice(0, start) + glyph + slot.text.slice(end)
+    if (Array.from(normalizedAdvertisingText(next)).length > advertisingDisplayWidth) {
+      setFeedback('Select a cell to replace before adding another glyph to a full message.')
+      return
+    }
+    updateText(previewIndex, next)
+    requestAnimationFrame(() => { input?.focus(); input?.setSelectionRange(start + glyph.length, start + glyph.length) })
+  }
+
   function applyBlock() {
     if (block === null) return
     const lines = block.split('\n')
-    if (lines.length > 20 || lines.some((line) => !/^[ -~]{0,20}$/.test(line))) {
-      setFeedback('Use up to 20 lines of 20 printable ASCII characters each.')
+    if (lines.length > 20 || lines.some((line, index) => !keepsImportedText(index, line) && !authorableAdvertisingText(line))) {
+      setFeedback('Use up to 20 lines of 20 display cells each, with ASCII or supported Western glyphs. Replace unmapped cells before editing their text.')
       return
     }
     setSnapshot((current) => current && {
       ...current, slots: current.slots.map((slot, index) => {
-        const text = lines[index] ?? ''
-        return { ...slot, text, endSequence: text.length === 0 && slot.endSequence }
+        const entered = lines[index] ?? ''
+        const text = keepsImportedText(index, entered) ? entered : normalizedAdvertisingText(entered)
+        return { ...slot, text, endSequence: text.length === 0 && slot.endSequence,
+          containsUnmappedGlyphs: keepsImportedText(index, text) }
       }),
     })
     setBlock(null)
@@ -225,7 +256,7 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
 
   async function save(event: React.FormEvent) {
     event.preventDefault()
-    if (!draft || !snapshot || blockChanged) return
+    if (!draft || !snapshot || blockChanged || invalidSlots) return
     setBusy(true)
     setFeedback('')
     try {
@@ -241,7 +272,8 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
         setSnapshot(null)
         throw new Error('Advertising was saved. Refresh the page to load the updated record.')
       }
-      setSnapshot(await latest.json() as AdvertisingSnapshot)
+      const data = await latest.json() as AdvertisingSnapshot
+      setSnapshot(data); setOriginalSlots(data.slots)
       setFeedback('Advertising saved to this draft.')
     } catch (error) {
       setFeedback(error instanceof Error ? error.message : 'Could not save advertising.')
@@ -256,12 +288,27 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
       if (event.currentTarget.open) setExpanded(true)
     }}>
       <summary>{draft ? 'Edit advertising messages' : 'View advertising messages'}</summary>
-      <p className="page-intro">Use up to 20 characters per slot. Duration 0 skips a static slot. Mark the first unused slot in each rotation as End sequence. An unmarked slot with empty text and a duration displays a blank line.</p>
+      <p className="page-intro">Use up to 20 display cells per slot, including supported Western accents. Duration 0 skips a static slot. Mark the first unused slot in each rotation as End sequence. An unmarked slot with empty text and a duration displays a blank line.</p>
       {typeof onHookEnabled === 'boolean' && <p>On-hook advertising is {onHookEnabled ? 'enabled' : 'disabled'} in the feature record.</p>}
       {!slots && !feedback && <p>Loading messages…</p>}
       {slots && (
         <form onSubmit={(event) => void save(event)}>
           {open && <AdvertisingSimulator slots={slots} features={snapshot} selectedSlot={previewIndex} onSelectSlot={setPreviewIndex} />}
+          {draft && block === null && <details className="advertising-glyph-palette">
+            <summary>Display character palette</summary>
+            <div className="table-config-selectors"><label>Language palette
+              <select value={palette} disabled={busy} onChange={event => setPalette(event.target.value as keyof typeof glyphPalettes)}>
+                <option value="all">All supported Western glyphs</option>
+                <option value="french">French accents</option><option value="spanish">Spanish accents</option>
+              </select></label>
+              <span>Insert in message {previewIndex + 1}; focus a text field to choose another message.</span>
+            </div>
+            <div className="advertising-glyph-buttons">
+              {Array.from(glyphPalettes[palette]).map(glyph => <button key={glyph} type="button" className="quiet" disabled={busy}
+                aria-label={`Insert ${glyph} into message ${previewIndex + 1}`} onClick={() => insertGlyph(glyph)}>{glyph}</button>)}
+            </div>
+            <p className="page-intro">These palettes are authoring aids. MT29 has no language selector byte. A compatible Western-font display is required for accented text.</p>
+          </details>}
           {draft && block === null && <button type="button" disabled={busy}
             onClick={() => setBlock(slots.map((slot) => slot.text).join('\n'))}>Edit as text block</button>}
           {block !== null && <fieldset disabled={busy}>
@@ -276,10 +323,11 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
             {slots.map((slot, index) => (
               <fieldset key={index} disabled={!draft || busy || block !== null}>
                 <legend>Message {index + 1}</legend>
-                <label>Text<input value={slot.text} maxLength={20} onFocus={() => setPreviewIndex(index)} onChange={(event) => {
-                  const text = event.target.value
-                  update(index, { text, endSequence: text.length === 0 && slot.endSequence })
-                }} /></label>
+                <label>Text<input value={slot.text} maxLength={40} ref={node => { slotInputs.current[index] = node }}
+                  aria-invalid={invalid(slot, index) || undefined} onFocus={() => setPreviewIndex(index)}
+                  onChange={event => updateText(index, event.target.value)} /></label>
+                {slot.containsUnmappedGlyphs && !slot.endSequence && <small className="advertising-import-notice">Imported text contains unmapped cells. The original bytes are retained until its text is changed.</small>}
+                {invalid(slot, index) && <small role="alert">Enter at most 20 supported display cells. Replace any unmapped characters before saving.</small>}
                 <label>Seconds<input type="number" min="0" max="655.35" step="0.01" value={slot.durationTicks / 100} onChange={(event) => update(index, { durationTicks: Math.round(Number(event.target.value) * 100) })} /></label>
                 <label>Display mode
                   <select value={slot.mode} onChange={(event) => update(index, { mode: Number(event.target.value) })}>
@@ -289,10 +337,20 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
                 </label>
                 <label className="table-config-check"><input type="checkbox" checked={slot.blankBefore} onChange={(event) => update(index, { blankBefore: event.target.checked })} /> Blank before display</label>
                 <label className="table-config-check"><input type="checkbox" checked={slot.endSequence} onChange={(event) => update(index, { endSequence: event.target.checked })} /> End sequence</label>
+                <details className="advertising-spares"><summary>Spare fields</summary>
+                  <p className="page-intro">Reserved for firmware-specific use. Ordinary edits leave these values intact.</p>
+                  {[0x10, 0x20, 0x80].map(mask => <label key={mask} className="table-config-check">
+                    <input type="checkbox" checked={((slot.reservedFlags ?? 0) & mask) !== 0}
+                      onChange={event => update(index, { reservedFlags: event.target.checked ? (slot.reservedFlags ?? 0) | mask : (slot.reservedFlags ?? 0) & ~mask })} />
+                    Spare attribute bit {Math.log2(mask)} (0x{mask.toString(16).toUpperCase()})
+                  </label>)}
+                  <label>Spare byte<input type="number" min="0" max="255" step="1" value={slot.spareByte ?? 0}
+                    onChange={event => update(index, { spareByte: Number(event.target.value) })} /></label>
+                </details>
               </fieldset>
             ))}
           </div>
-          {draft && <button type="submit" disabled={!dirty || busy || block !== null}>{busy ? 'Saving…' : 'Save advertising'}</button>}
+          {draft && <button type="submit" disabled={!dirty || busy || block !== null || invalidSlots}>{busy ? 'Saving…' : 'Save advertising'}</button>}
         </form>
       )}
       {feedback && <p role="status">{feedback}</p>}

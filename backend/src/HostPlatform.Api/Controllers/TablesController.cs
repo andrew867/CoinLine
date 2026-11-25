@@ -308,7 +308,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         {
             var version = SingleAdvertisingVersion(set);
             var slots = version == null
-                ? Enumerable.Repeat(new AdvertisingSlot("", 0, 0, false, EndSequence: true), AdvertisingTableWire.SlotCount).ToArray()
+                ? Enumerable.Repeat(new AdvertisingSlot("", 0, 0, false, EndSequence: true, SpareByte: 0, ReservedFlags: 0), AdvertisingTableWire.SlotCount).ToArray()
                 : AdvertisingTableWire.Read(TableDistributionService.GetEffectivePayload(version));
             var feature = set.Versions.FirstOrDefault(v => v.TableDefinition?.TableNumber == 26);
             var featureBytes = feature == null ? [] : TableDistributionService.GetEffectivePayload(feature);

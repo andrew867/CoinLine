@@ -1,9 +1,14 @@
+import { normalizedAdvertisingText, advertisingDisplayWidth } from './advertisingGlyphs'
+
 export type AdvertisingSlot = {
   text: string
   durationTicks: number
   mode: number
   blankBefore: boolean
   endSequence: boolean
+  spareByte?: number | null
+  reservedFlags?: number | null
+  containsUnmappedGlyphs?: boolean
 }
 
 export type AdvertisingFeatures = {
@@ -27,11 +32,11 @@ type Phase = { text: string; ticks: number }
 type Stage = { slot: number; phases: Phase[]; ticks: number; period: number }
 type Rotation = { stages: Stage[]; ticks: number; lastLine: string }
 
-const width = 20
+const width = advertisingDisplayWidth
 export const blankAdvertisingLine = ' '.repeat(width)
 
 export function advertisingLine(text: string) {
-  return text.slice(0, width).padEnd(width)
+  return normalizedAdvertisingText(text).slice(0, width).padEnd(width)
 }
 
 export function firmwareAdvertisingTiming(scrollTicks: number | null): AdvertisingTiming {
