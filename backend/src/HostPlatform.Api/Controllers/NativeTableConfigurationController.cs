@@ -65,7 +65,9 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             revision = version.TableRevision,
             sha256 = version.PayloadSha256Hex,
             numberingPlan = number == NumberingPlanWire.MessageType && NumberingPlanWire.Supports(raw)
-                ? NumberingPlanWire.Read(raw) : null,
+                ? NumberingPlanWire.Read(raw, later: layout.Profile == NativeTableLayouts.Later) : null,
+            numberingFormatCapacity = number == NumberingPlanWire.MessageType
+                ? (int?)NumberingPlanWire.FormatCapacity(layout.Profile == NativeTableLayouts.Later) : null,
             spareBytes = number == SpareTableWire.MessageType ? SpareTableWire.Read(raw, layout) : null,
             screening = CallScreeningWire.IsRecord(number) ? new
             {
@@ -175,7 +177,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                     return BadRequest(new { error = "Numbering rules can only be saved with a numbering-plan record." });
                 if (body.NumberingPlan.Dial != null && body.Changes.Keys.Any(key => key.StartsWith("dial-", StringComparison.Ordinal)))
                     return BadRequest(new { error = "Use one editor to change the dialing rules in this save." });
-                NumberingPlanWire.Apply(updated, body.NumberingPlan);
+                NumberingPlanWire.Apply(updated, body.NumberingPlan, later: layout.Profile == NativeTableLayouts.Later);
             }
             if (body.SpareBytes != null)
                 SpareTableWire.Apply(updated, layout, body.Changes, body.SpareBytes);

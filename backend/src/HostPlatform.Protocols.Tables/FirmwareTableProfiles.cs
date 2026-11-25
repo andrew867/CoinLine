@@ -29,11 +29,11 @@ public static class FirmwareTableProfiles
         new(LaterMultiPay180, "MTR 2.x Multi-pay, 180-entry, double-compressed LCD",
             NativeTableLayouts.Later, LaterCatalogue(),
             new HashSet<int> { 21, 26, 31, 50, 62, 72, 73, 92, 93, 134, 135, 136 }, true,
-            new HashSet<int> { 30, 32, 35, 50, 62 }),
+            new HashSet<int> { 30, 32, 35, 50 }),
         new(GraphicalMultiPay180, "MTR 2.12-based graphical Multi-pay (type 40), 180-entry, double-compressed LCD",
             NativeTableLayouts.Later, LaterCatalogue(graphical: true),
             new HashSet<int> { 21, 26, 30, 31, 33, 49, 50, 62, 72, 73, 92, 93, 131, 132, 133, 134, 135, 136 }, true,
-            new HashSet<int> { 30, 32, 35, 50, 62 })
+            new HashSet<int> { 30, 32, 35, 50 })
     ];
 
     public static FirmwareTableProfile? Find(string? id) => Catalog.SingleOrDefault(profile => profile.Id == id);
