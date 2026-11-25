@@ -90,10 +90,10 @@ export function TerminalIdCutoverPage() {
             onChange={event => { setSource(event.target.value); clearPreview() }} /></label>
           <label>Replacement ID or prefix<input value={replacement} inputMode="numeric" maxLength={10} disabled={busy}
             onChange={event => { setReplacement(event.target.value); clearPreview() }} /></label>
-          <label>Inventory scope<select value={scope} disabled={busy} onChange={event => {
+          <label>Inventory scope<select aria-label="Inventory scope" value={scope} disabled={busy} onChange={event => {
             setScope(event.target.value as Scope); setScopeValue(''); setOptions([]); setScopeError(''); clearPreview()
           }}>{Object.entries(scopes).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select></label>
-          {needsOptions && <label>{scopes[scope]}<select value={scopeValue} disabled={busy}
+          {needsOptions && <label>{scopes[scope]}<select aria-label={scopes[scope]} value={scopeValue} disabled={busy}
             onChange={event => { setScopeValue(event.target.value); clearPreview() }}>
             <option value="">Choose {scopes[scope].toLowerCase()}</option>
             {options.map(option => <option key={option.id} value={option.id}>
