@@ -278,7 +278,7 @@ export function TerminalIdCutoverPage() {
           onClick={() => setJobsRefresh(value => value + 1)}>Refresh jobs</button>}</div>
         {jobsOpen && <>
           {jobsError && <p role="alert">{jobsError}</p>}
-          {!jobs && !jobsError && <p>Loading cutover jobs…</p>}
+          {!jobs && !jobsError && <p>Loading cutover jobsâ€¦</p>}
           {jobs && jobs.length === 0 && <p>No cutover jobs yet.</p>}
           {jobs && jobs.length > 0 && <div className="table-scroll"><table>
             <thead><tr><th>Phone</th><th>Replacement ID</th><th>Due</th><th>Delivery and confirmation</th><th>Actions</th></tr></thead>
@@ -309,12 +309,12 @@ export function TerminalIdCutoverPage() {
               <legend>Choose which assignment to retain</legend>
               <p><label><input type="radio" name="cutover-recovery" value="keep-current" checked={recoveryChoice === 'keep-current'}
                 disabled={Boolean(recovery.review.currentIssue)} onChange={() => setRecoveryChoice('keep-current')} /> Keep current assignment</label>
-                {' · '}{recovery.review.currentSetName ?? 'Unassigned'}
-                {recovery.review.currentIssue && <small> · {recovery.review.currentIssue}</small>}</p>
+                {' Â· '}{recovery.review.currentSetName ?? 'Unassigned'}
+                {recovery.review.currentIssue && <small> Â· {recovery.review.currentIssue}</small>}</p>
               <p><label><input type="radio" name="cutover-recovery" value="staged" checked={recoveryChoice === 'staged'}
                 disabled={Boolean(recovery.review.stagedIssue)} onChange={() => setRecoveryChoice('staged')} /> Use the dispatched replacement set</label>
-                {' · '}{recovery.review.stagedSetName ?? 'Unavailable'}
-                {recovery.review.stagedIssue && <small> · {recovery.review.stagedIssue}</small>}</p>
+                {' Â· '}{recovery.review.stagedSetName ?? 'Unavailable'}
+                {recovery.review.stagedIssue && <small> Â· {recovery.review.stagedIssue}</small>}</p>
             </fieldset>
             <div className="table-config-selectors">
               <button type="button" disabled={jobBusy || !recoveryChoice} onClick={() => void reconcile()}>Confirm reviewed replacement</button>
