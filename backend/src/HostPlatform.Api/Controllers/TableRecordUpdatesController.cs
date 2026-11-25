@@ -75,6 +75,8 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
             if (requested.Length is < 1 or > 255 || requested.Distinct().Count() != requested.Length
                 || requested.Any(number => number is < 1 or > 255 or CodeDownloadWire.MessageType))
                 return BadRequest(new { error = "Choose one action per data record. Firmware schedules are handled separately." });
+            if (request.PersonalizeAccessIdentity && !request.CopyRecords.Contains(21))
+                return BadRequest(new { error = "Select MT21 for copying before personalizing its terminal identity." });
             if (request.TargetType == "time-area")
                 return BadRequest(new { error = "Use scheduled delivery to target a time area." });
 
@@ -132,22 +134,28 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
 
             var copies = request.CopyRecords.Order().ToArray();
             var removals = request.RemoveRecords.Order().ToArray();
-            var groups = new Dictionary<(Guid, string?), (TableRecordUpdatePlan? Plan, string? Issue)>();
+            var groups = new Dictionary<(Guid, string?, Guid?), (TableRecordUpdatePlan? Plan, string? Issue)>();
             var changed = new List<(Terminal Phone, TerminalTableAssignment Assignment, TableSet Set)>();
             var targets = new List<UpdateTarget>();
             var accessBySet = new Dictionary<Guid, TableVersion[]>();
+            var reviewedById = reviewedPhones?.ToDictionary(phone => phone.Id);
             foreach (var phone in phones)
             {
                 var assignment = assignments.GetValueOrDefault(phone.Id);
                 var basis = assignment == null ? null : existing.GetValueOrDefault(assignment.TableSetId);
                 var reason = EligibilityIssue(source, basis, phone, request.CopyRecords.Length != 0, scheduled.Contains(phone.Id));
+                if (reason == null && request.PersonalizeAccessIdentity && reviewedById?.TryGetValue(phone.Id, out var reviewed) == true
+                    && !string.Equals(reviewed.WireId, phone.TerminalIdHex, StringComparison.OrdinalIgnoreCase))
+                    reason = "The phone's registered wire ID changed since the rollout preview. Skip it or start a new reviewed rollout.";
                 IReadOnlyList<TableRecordUpdateChange> changes = [];
                 if (reason == null && basis != null && assignment != null)
                 {
-                    var key = (basis.Id, removals.Length == 0 ? null : phone.FirmwareVersion?.TableProfileId);
+                    var key = (basis.Id, removals.Length == 0 ? null : phone.FirmwareVersion?.TableProfileId,
+                        request.PersonalizeAccessIdentity ? (Guid?)phone.Id : null);
                     if (!groups.TryGetValue(key, out var prepared))
                     {
-                        try { prepared = (TableRecordUpdate.Prepare(source, basis, phone.FirmwareVersion, copies, removals), null); }
+                        try { prepared = (TableRecordUpdate.Prepare(source, basis, phone.FirmwareVersion, copies, removals,
+                            request.PersonalizeAccessIdentity ? phone.TerminalIdHex : null), null); }
                         catch (InvalidOperationException ex) { prepared = (null, ex.Message); }
                         groups.Add(key, prepared);
                     }
@@ -181,7 +189,7 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
             {
                 id, source.Version, request.TargetType, request.TargetId, regionCode = request.RegionCode?.Trim().ToLowerInvariant(),
                 groupPattern = request.GroupPattern?.Trim().ToUpperInvariant(),
-                request.StopOnIssue, begin,
+                request.StopOnIssue, request.PersonalizeAccessIdentity, begin,
                 copies, removals, targets,
                 phones = phones.Select(phone => new { phone.Id, phone.Version, phone.SiteId, phone.Site!.CustomerId, phone.FirmwareVersionId, phone.TerminalIdHex }),
                 assignments = assignments.Values.OrderBy(row => row.TerminalId).Select(row => new { row.Id, row.Version, row.TableSetId }),
@@ -230,7 +238,7 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
                 ApiAudit.Write(db, HttpContext, "tables.set", "update_scope_records", id.ToString(), new
                 {
                     request.TargetType, request.TargetId, request.RegionCode, request.GroupPattern,
-                    copies, removals, changed = changed.Count, sets = updatedSets.Select(set => set.Id)
+                    copies, removals, request.PersonalizeAccessIdentity, changed = changed.Count, sets = updatedSets.Select(set => set.Id)
                 });
             }
             if (request.StopOnIssue)
@@ -259,7 +267,11 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
                 await db.SaveChangesAsync(ct);
             if (transaction != null)
                 await transaction.CommitAsync(ct);
-            return Ok(new { changed = changed.Count, sets = updatedSets.Select(set => new { set.Id, set.Name }),
+            var personalizedOwners = request.PersonalizeAccessIdentity
+                ? changed.ToDictionary(update => update.Set.Id, update => update.Phone) : null;
+            return Ok(new { changed = changed.Count, sets = updatedSets.Select(set => new
+                { set.Id, set.Name, phoneId = personalizedOwners?.GetValueOrDefault(set.Id)?.Id,
+                    phoneDisplayName = personalizedOwners?.GetValueOrDefault(set.Id)?.DisplayName }),
                 run = run == null ? null : RunView(run) });
         }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsWriteConflict(ex.GetBaseException()))
@@ -318,6 +330,6 @@ public sealed class TableRecordUpdatesController(HostPlatformDbContext db, Table
     public sealed record RunControl(int Revision, string Decision);
     public sealed record RecordUpdateRequest(string TargetType, Guid? TargetId, int SourceRevision, int[] CopyRecords, int[] RemoveRecords,
         string? PreviewToken = null, string? RegionCode = null, string? GroupPattern = null, string? TimeAreaCode = null,
-        bool StopOnIssue = false, string? BeginWithTerminalId = null, Guid? RolloutId = null)
+        bool StopOnIssue = false, string? BeginWithTerminalId = null, Guid? RolloutId = null, bool PersonalizeAccessIdentity = false)
         : TableTargetScope(TargetType, TargetId, RegionCode, GroupPattern, TimeAreaCode);
 }
