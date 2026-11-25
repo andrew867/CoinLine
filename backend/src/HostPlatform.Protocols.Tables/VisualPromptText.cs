@@ -13,15 +13,26 @@ internal static class VisualPromptText
         Span<char> text = stackalloc char[data.Length];
         for (var index = 0; index < data.Length; index++)
         {
-            var code = data[index];
-            if (code is >= 0x20 and <= 0x7E)
-                text[index] = (char)code;
-            else if (code >= FirstExtendedCode && code < FirstExtendedCode + ExtendedGlyphs.Length)
-                text[index] = ExtendedGlyphs[code - FirstExtendedCode];
-            else
+            if (!TryReadCell(data[index], out text[index]))
                 return null;
         }
         return new string(text);
+    }
+
+    public static bool TryReadCell(byte code, out char character)
+    {
+        if (code is >= 0x20 and <= 0x7E)
+        {
+            character = (char)code;
+            return true;
+        }
+        if (code >= FirstExtendedCode && code < FirstExtendedCode + ExtendedGlyphs.Length)
+        {
+            character = ExtendedGlyphs[code - FirstExtendedCode];
+            return true;
+        }
+        character = default;
+        return false;
     }
 
     public static bool TryWrite(string value, Span<byte> data, byte padding = (byte)' ')

@@ -1,9 +1,9 @@
 using System.Buffers.Binary;
-using System.Text;
 
 namespace HostPlatform.Protocols.Tables;
 
-public sealed record AdvertisingSlot(string Text, int DurationTicks, int Mode, bool BlankBefore, bool? EndSequence = null);
+public sealed record AdvertisingSlot(string Text, int DurationTicks, int Mode, bool BlankBefore, bool? EndSequence = null,
+    int? SpareByte = null, int? ReservedFlags = null, bool ContainsUnmappedGlyphs = false);
 
 /// <summary>Text advertising profile with twenty fixed-width slots.</summary>
 public static class AdvertisingTableWire
@@ -16,6 +16,8 @@ public static class AdvertisingTableWire
     private const int SlotLength = 4 + TextLength;
     private const byte ModeMask = 0x0F;
     private const byte BlankBeforeMask = 0x40;
+    // The remaining attribute bits have no assigned behavior in the verified text-advertising profiles.
+    public const byte ReservedFlagsMask = 0xB0;
 
     public static AdvertisingSlot[] Read(ReadOnlySpan<byte> record)
     {
@@ -28,12 +30,13 @@ public static class AdvertisingTableWire
             var slot = record.Slice(1 + i * SlotLength, SlotLength);
             var message = slot[4..];
             var endSequence = message[0] == 0;
+            var (text, unmapped) = endSequence ? ("", false) : ReadMessage(message);
             slots[i] = new AdvertisingSlot(
-                endSequence ? "" : Encoding.Latin1.GetString(message).Replace('\0', ' ').TrimEnd(' '),
+                text,
                 BinaryPrimitives.ReadUInt16LittleEndian(slot),
                 slot[2] & ModeMask,
                 (slot[2] & BlankBeforeMask) != 0,
-                endSequence);
+                endSequence, slot[3], slot[2] & ReservedFlagsMask, unmapped);
         }
         return slots;
     }
@@ -53,11 +56,17 @@ public static class AdvertisingTableWire
                 throw new InvalidOperationException($"Slot {i + 1} needs a duration of 0 through 65535 ticks.");
             if (value.Mode is < 0 or > 5 && value.Mode != before?[i].Mode)
                 throw new InvalidOperationException($"Slot {i + 1} uses an unsupported display mode.");
+            if (value.SpareByte is < 0 or > byte.MaxValue)
+                throw new InvalidOperationException($"Slot {i + 1} needs a spare byte between 0 and 255.");
+            if (value.ReservedFlags is int flags && (flags & ~ReservedFlagsMask) != 0)
+                throw new InvalidOperationException($"Slot {i + 1} contains non-spare attribute bits in its reserved flags.");
 
             var target = record.AsSpan(1 + i * SlotLength, SlotLength);
             BinaryPrimitives.WriteUInt16LittleEndian(target, (ushort)value.DurationTicks);
-            target[2] = (byte)((target[2] & ~(ModeMask | BlankBeforeMask)) | value.Mode
+            target[2] = (byte)((value.ReservedFlags ?? (target[2] & ReservedFlagsMask)) | value.Mode
                 | (value.BlankBefore ? BlankBeforeMask : 0));
+            if (value.SpareByte is int spareByte)
+                target[3] = (byte)spareByte;
             var previous = before?[i];
             var endSequence = value.EndSequence ?? (previous?.EndSequence == true && value.Text == previous.Text);
             if (endSequence)
@@ -68,12 +77,27 @@ public static class AdvertisingTableWire
             }
             if (previous?.EndSequence == false && value.Text == previous.Text)
                 continue;
-            if (value.Text == null || value.Text.Length > TextLength || value.Text.Any(ch => ch is < ' ' or > '~'))
-                throw new InvalidOperationException($"Slot {i + 1} supports up to {TextLength} printable ASCII characters.");
-            target[4..].Fill((byte)' ');
-            Encoding.ASCII.GetBytes(value.Text, target[4..]);
+            if (value.Text == null || !VisualPromptText.TryWrite(value.Text, target[4..]))
+                throw new InvalidOperationException($"Slot {i + 1} supports up to {TextLength} display cells using printable ASCII or supported Western glyphs. Replace unmapped glyphs before changing the message text.");
         }
 
         return record;
+    }
+
+    private static (string Text, bool Unmapped) ReadMessage(ReadOnlySpan<byte> message)
+    {
+        Span<char> cells = stackalloc char[message.Length];
+        var unmapped = false;
+        for (var index = 0; index < message.Length; index++)
+        {
+            var code = message[index];
+            if (VisualPromptText.TryReadCell(code, out cells[index]))
+                continue;
+            // A zero in the middle of a stored message is not an end-of-sequence marker.
+            // Keep the familiar blank approximation for zero; other unknown cells are visible placeholders.
+            cells[index] = code == 0 ? ' ' : '\uFFFD';
+            unmapped = true;
+        }
+        return (new string(cells).TrimEnd(' '), unmapped);
     }
 }
