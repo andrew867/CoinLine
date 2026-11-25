@@ -69,6 +69,11 @@ public static class OperatorPermissions
         Screen("card-master", "Card master list", ("CardMaster", R, "List Get Schema Usage"),
             ("CardMaster", A, "Create Schema"), ("CardMaster", U, "Update Restore"), ("CardMaster", D, "Archive"),
             ("CardMasterRollout", R, "Preview"), ("CardMasterRollout", U, "Apply"));
+        Screen("quick-access-customers", "Quick Access Key customer directory",
+            ("QuickAccessCustomers", R, "Search Get Lookup"), ("QuickAccessCustomers", A, "Create"),
+            ("QuickAccessCustomers", U, "Update Restore"), ("QuickAccessCustomers", D, "Archive"));
+        Screen("quick-access-customer-lookup", "Quick Access Key customer reference lookup",
+            ("QuickAccessCustomers", R, "Lookup"));
         Screen("table-assignments", "Table assignments",
             ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
             ("Terminals", R, "GetTableAssignment TableAssignmentOptions"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));

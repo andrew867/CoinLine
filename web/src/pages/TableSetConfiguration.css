@@ -98,6 +98,13 @@
   margin: 14px 0 0; border: 1px solid #dce7e1; border-radius: 10px; padding: 12px 14px;
 }
 .native-table-fields legend { padding-inline: 5px; font-weight: 650; color: #244b3b; }
+.quick-access-customer-lookup { grid-column: 1 / -1; min-width: 0; }
+.quick-access-customer-lookup .table-config-panel { margin: 6px 0 0; padding: 12px; }
+.quick-access-customer-directory .native-table-fields { min-width: 0; }
+.quick-access-customer-directory .native-table-fields > label { display: grid; gap: 5px; min-width: 0; }
+.quick-access-customer-directory .native-table-fields :is(input, textarea) { width: 100%; min-width: 0; }
+.quick-access-customer-directory .native-table-fields textarea { min-height: 5rem; resize: vertical; }
+.quick-access-customer-help { margin: 0; color: var(--muted); align-self: end; }
 .native-table-field { display: grid; align-content: start; gap: 5px; padding: 6px 8px; border-radius: 6px; }
 .native-table-field span { color: #2e493e; font-weight: 600; }
 .native-table-field :is(input, select) { width: 100%; min-width: 0; }

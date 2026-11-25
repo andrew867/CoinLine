@@ -56,8 +56,8 @@ jobs:
       - name: Install Playwright Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Inspect a failed download in the console
-        run: npm run e2e -- e2e/failed-download.spec.ts
+      - name: Verify console workflow fixtures
+        run: npm run e2e -- e2e/failed-download.spec.ts e2e/quick-access-customers.spec.ts
         env:
           CI: "true"
 
@@ -65,7 +65,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-failed-download
+          name: playwright-console-workflows
           path: web/test-results/**/trace.zip
           if-no-files-found: ignore
           retention-days: 7

@@ -5,6 +5,30 @@ namespace HostPlatform.Tests.Unit;
 public sealed class QuickAccessKeyWireTests
 {
     [Theory]
+    [InlineData(false, 0)]
+    [InlineData(true, 9)]
+    public void Choosing_a_directory_reference_changes_only_the_little_endian_field(bool later, int slot)
+    {
+        var layout = Assert.Single(NativeTableLayouts.DraftTemplates(55),
+            item => (item.Profile != NativeTableLayouts.MultiPay) == later);
+        var original = NativeTableLayouts.CreateDraftTemplate(layout);
+        var offset = 1 + slot * 57 + 51;
+        original[offset - 1] = 0xA9; original[offset + 4] = 0xAF; original[offset + 5] = 0xA4;
+        original[offset] = 0x78; original[offset + 1] = 0x56; original[offset + 2] = 0x34; original[offset + 3] = 0x12;
+        var field = $"key-{slot}.customerReference";
+        Assert.Equal(original, layout.Apply(original, new Dictionary<string, string>()));
+        var edited = layout.Apply(original, new Dictionary<string, string> { [field] = "1234" });
+        Assert.Equal(original[..offset], edited[..offset]);
+        Assert.Equal(new byte[] { 0xD2, 0x04, 0, 0 }, edited[offset..(offset + 4)]);
+        Assert.Equal(original[(offset + 4)..], edited[(offset + 4)..]);
+        Assert.Equal(edited, layout.Apply(edited, new Dictionary<string, string> { [field] = "1234" }));
+        var cleared = layout.Apply(edited, new Dictionary<string, string> { [field] = "0" });
+        Assert.Equal(original[..offset], cleared[..offset]);
+        Assert.Equal(new byte[4], cleared[offset..(offset + 4)]);
+        Assert.Equal(original[(offset + 4)..], cleared[(offset + 4)..]);
+    }
+
+    [Theory]
     [InlineData(false, 0xF7)]
     [InlineData(true, 0xF0)]
     public void Quick_access_profiles_edit_exact_fields_and_clear_the_selected_slot(bool later, byte expectedVariantFlags)

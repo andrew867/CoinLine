@@ -15,6 +15,7 @@ import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { CardSequencePanel } from './CardSequencePanel'
+import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 
 type Field = {
   key: string
@@ -300,6 +301,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     return field && effectiveValue(field)
   }
   const selectedKey = isQuickAccess && current ? quickAccessNumber(current) : null
+  const customerReferenceField = selectedKey != null && current ? current.fields.find(field => field.key.endsWith('.customerReference')) : undefined
   const screeningSlot = layout.screening && current ? screeningNumber(current) : null
   const keyCleared = selectedKey != null && clearedKeys.has(selectedKey)
   const carrierReference = selectedKey != null && current && keyValue(current, 'free') === 'true' && keyValue(current, 'featureGroupB') === 'true'
@@ -493,6 +495,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
                 || screeningSlot != null && field.key.endsWith('.pattern')}
               dirty={field.key in edits} onChange={(value) => edit(field, value)} />
           ))}
+          {!keyCleared && customerReferenceField && canEdit && <QuickAccessCustomerLookup key={customerReferenceField.key}
+            value={effectiveValue(customerReferenceField) ?? ''} onSelect={value => edit(customerReferenceField, value)} />}
         </fieldset>
       )}
       {canEdit && (
