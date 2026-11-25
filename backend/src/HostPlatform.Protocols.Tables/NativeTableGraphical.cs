@@ -15,6 +15,8 @@ public static partial class NativeTableLayouts
     private const int MixedPanelSize = 261;
     private const int MixedPanelAttributes = 133;
     private const int MixedPanelButtons = 171;
+    private const int AttributeSize = 15;
+    private const int BitmapSize = 1008;
     private const byte BitmapScreen = (byte)'B';
     private const byte TextScreen = (byte)'T';
     private const byte MixedScreen = (byte)'M';
@@ -23,6 +25,8 @@ public static partial class NativeTableLayouts
 
     private static readonly TableFieldChoice[] ScreenKinds =
         [new(0, "Undefined"), new(BitmapScreen, "Bitmap"), new(TextScreen, "Text"), new(MixedScreen, "Mixed")];
+    private static readonly TableFieldChoice[] ScreenIcons = Enumerable.Range(0, 64)
+        .Select(icon => new TableFieldChoice(icon, icon.ToString(System.Globalization.CultureInfo.InvariantCulture))).ToArray();
     private static readonly (int, string)[] EntranceChoices =
     [
         (0, "Static"), (1, "Flash"), (2, "Alternate with next screen"),
@@ -73,7 +77,7 @@ public static partial class NativeTableLayouts
     {
         var sections = new List<NativeTableSection>
         {
-            Section("rotation", "Graphical screens and rotation",
+            Section("rotation", "Graphical screens and rotation", [
                 Field("statDuration", "Statistics collection duration (days)", 1, Word,
                     help: "Use MT131 to configure the reporting period. Zero disables collection."),
                 Toggle("onHook", "Display while on hook", 3, 1), Toggle("offHook", "Display while off hook", 3, 2),
@@ -81,7 +85,9 @@ public static partial class NativeTableLayouts
                 Toggle("idleNavigation", "Allow on-hook and off-hook navigation", 3, 8),
                 Toggle("connectedNavigation", "Allow navigation during connected calls", 3, 16),
                 ScreenLink("offHookScreen", "Off-hook entry screen", 4), ScreenLink("connectedScreen", "Connected-call screen", 5),
-                Field("offHookDuration", "Off-hook display duration (seconds)", 6))
+                Field("offHookDuration", "Off-hook display duration (seconds)", 6),
+                .. SpareFlags("spare.control", "Graphical control", 3, 0xE0),
+                SpareByte("spare.byte1", "Header spare byte", 7)])
         };
         for (var index = 0; index < ScreensPerRecord; index++)
         {
@@ -91,10 +97,17 @@ public static partial class NativeTableLayouts
             var kind = record[offset];
             var fields = new List<NativeTableField> { ScreenKindField(index) };
             if (kind == BitmapScreen)
-                fields.Add(new($"{key}.bitmap", "Screen artwork", offset + 1, Bitmap, Size: 1008, BitmapTypeOffset: offset));
+            {
+                fields.Add(new($"{key}.bitmap", "Screen artwork", offset + 1, Bitmap, Size: BitmapSize, BitmapTypeOffset: offset));
+                fields.AddRange(GraphicalSpareBytes($"{key}.spare.bitmap", "Bitmap body", offset + 1 + BitmapSize, ScreenBody - BitmapSize));
+            }
             if (kind == TextScreen)
+            {
                 fields.Add(new($"{key}.text", "Screen text", offset + 1, GraphicalText, Size: GraphicalScreenText.Width));
+                fields.AddRange(GraphicalSpareBytes($"{key}.spare.text", "Text body", offset + 1 + GraphicalScreenText.Width, ScreenBody - GraphicalScreenText.Width));
+            }
             fields.AddRange(ScreenControls(key, offset + ScreenAttributes));
+            fields.AddRange(GraphicalSpareBytes($"{key}.spare", "Screen control", offset + ScreenAttributes + AttributeSize, 2));
             sections.Add(new(key, kind == MixedScreen ? $"{name} · Mixed screen defaults" : name, fields, GraphicalScreenIndex: index));
             if (kind == MixedScreen)
             {
@@ -104,7 +117,9 @@ public static partial class NativeTableLayouts
                     var panelKey = $"{key}.panel-{panel}";
                     var panelName = $"{name} · Panel {panel + 1}";
                     sections.Add(new(panelKey, panelName,
-                        [.. PanelTextFields(panelKey, panelOffset), .. ScreenControls(panelKey, panelOffset + MixedPanelAttributes)],
+                        [.. PanelTextFields(panelKey, panelOffset), .. ScreenControls(panelKey, panelOffset + MixedPanelAttributes),
+                         .. GraphicalSpareBytes($"{panelKey}.spare", "Panel control", panelOffset + MixedPanelAttributes + AttributeSize,
+                             MixedPanelButtons - MixedPanelAttributes - AttributeSize)],
                         GraphicalScreenIndex: index, ShowPanelPreview: true));
                     AddGraphicalButtons(sections, index, panelName, panelOffset + MixedPanelButtons, panelKey);
                 }
@@ -126,6 +141,9 @@ public static partial class NativeTableLayouts
             yield return new($"{key}.label-{row * 2 + 1}", $"Key {row * 2 + 2} label", start + 10, DisplayText, 9);
         }
     }
+
+    private static NativeTableField[] GraphicalSpareBytes(string key, string label, int offset, int count) =>
+        Enumerable.Range(0, count).Select(index => SpareByte($"{key}.byte{index + 1}", $"{label} spare byte {index + 1}", offset + index)).ToArray();
 
     private static IEnumerable<NativeTableField> ScreenControls(string key, int offset)
     {
@@ -157,7 +175,9 @@ public static partial class NativeTableLayouts
                 Bits($"{key}.type", "Call classification", button + 3, 15, CallKinds),
                 Bits($"{key}.payment", "Payment classification", button + 3, 240, PaymentKinds),
                 Field($"{key}.rate", "Rate index", button + 5),
-                Field($"{key}.icon", "Icon ID", button + 4, GraphicalIcon),
+                Field($"{key}.icon", "Packed icon byte", button + 4, GraphicalIcon),
+                new($"{key}.iconId", "Icon ID", button + 4, TableFieldEncoding.Bits, Mask: 0x3F, Choices: ScreenIcons),
+                .. SpareFlags($"{key}.spare.icon", "Icon flags", button + 4, 0xC0),
                 Toggle($"{key}.free", "Free call", button + 2, 1), Toggle($"{key}.answer", "Require answer supervision", button + 2, 2),
                 Toggle($"{key}.mute", "Mute transmitter until answer supervision", button + 2, 16),
                 Toggle($"{key}.disableKeypad", "Disable keypad during the call", button + 2, 32),

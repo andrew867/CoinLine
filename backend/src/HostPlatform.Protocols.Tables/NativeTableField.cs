@@ -420,7 +420,8 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             var packedTime = whole.Encoding is TableFieldEncoding.TerminalCalendar or TableFieldEncoding.TerminalTime;
             var discountByte = Number == NativeTableLayouts.TimeDiscountRecord && whole.Encoding == TableFieldEncoding.UInt8
                 && whole.Key.StartsWith("period-", StringComparison.Ordinal);
-            if ((!packedTime && !discountByte) || !changes.TryGetValue(whole.Key, out var packed))
+            var packedIcon = NativeTableLayouts.IsGraphicalRecord(Number) && whole.Encoding == TableFieldEncoding.GraphicalIcon;
+            if ((!packedTime && !discountByte && !packedIcon) || !changes.TryGetValue(whole.Key, out var packed))
                 continue;
             foreach (var (key, value) in changes)
             {
