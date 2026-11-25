@@ -74,7 +74,8 @@ public static partial class NativeTableLayouts
         var sections = new List<NativeTableSection>
         {
             Section("rotation", "Graphical screens and rotation",
-                Field("statDuration", "Statistics collection duration (days)", 1, Word),
+                Field("statDuration", "Statistics collection duration (days)", 1, Word,
+                    help: "Use MT131 to configure the reporting period. Zero disables collection."),
                 Toggle("onHook", "Display while on hook", 3, 1), Toggle("offHook", "Display while off hook", 3, 2),
                 Toggle("connected", "Display during connected calls", 3, 4),
                 Toggle("idleNavigation", "Allow on-hook and off-hook navigation", 3, 8),
@@ -130,7 +131,8 @@ public static partial class NativeTableLayouts
     {
         yield return Field($"{key}.dwell", "Screen display duration (10 ms ticks)", offset, Word);
         yield return Field($"{key}.flash", "Flash rate", offset + 2, GraphicalFlashRate);
-        yield return Field($"{key}.owner", "Screen owner code", offset + 11, Word);
+        yield return Field($"{key}.owner", "Screen owner code", offset + 11, Word,
+            help: "The terminal reports usage for screens with nonzero owner codes in MT153. A mixed screen uses its main screen's owner code for the report.");
         yield return ScreenLink($"{key}.next", "Next screen", offset + 13);
         yield return ScreenLink($"{key}.connected", "Connected-call screen", offset + 14);
         for (var loop = 0; loop < 4; loop++)
@@ -148,7 +150,8 @@ public static partial class NativeTableLayouts
             var button = offset + index * ButtonSize;
             sections.Add(new(key, $"{name}, key {index + 1}",
             [
-                Field($"{key}.owner", "Key owner code", button, Word),
+                Field($"{key}.owner", "Key owner code", button, Word,
+                    help: "MT153 reports the key owner code from the main screen. Mixed panels contribute their presses to the same screen and key position."),
                 new($"{key}.digits", "Dialed digits", button + 6, KeypadDial, 8),
                 ScreenLink($"{key}.next", "Next screen", button + 14),
                 Bits($"{key}.type", "Call classification", button + 3, 15, CallKinds),

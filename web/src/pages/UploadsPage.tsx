@@ -10,6 +10,8 @@ type Row = {
   idempotencyKey: string
   isTerminalCallDetail?: boolean
   isTerminalStatistics?: boolean
+  statisticsMessageType?: number | null
+  statisticsName?: string | null
   rawPayloadHex: string
   recordCount: number
 }
@@ -33,6 +35,7 @@ export function UploadsPage() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [source, setSource] = useState<Source | ''>('')
+  const [reportType, setReportType] = useState('')
 
   useEffect(() => {
     setErr(null)
@@ -45,7 +48,13 @@ export function UploadsPage() {
       .catch((e) => setErr(e instanceof Error ? e.message : 'error'))
   }, [])
 
-  const visibleRows = rows?.filter((row) => !source || sourceLabel(row) === source)
+  const statisticsTypes = new Map<number, string>()
+  for (const row of rows ?? []) {
+    if (row.isTerminalStatistics && row.statisticsMessageType != null)
+      statisticsTypes.set(row.statisticsMessageType, row.statisticsName ?? 'Statistics')
+  }
+  const visibleRows = rows?.filter((row) => (!source || sourceLabel(row) === source)
+    && (!reportType || (row.isTerminalStatistics && String(row.statisticsMessageType) === reportType)))
 
   return (
     <div>
@@ -55,14 +64,25 @@ export function UploadsPage() {
       </p>
       <label>
         Source{' '}
-        <select value={source} onChange={(event) => setSource(event.target.value as Source | '')}>
+        <select value={source} onChange={(event) => {
+          setSource(event.target.value as Source | '')
+          setReportType('')
+        }}>
           <option value="">All uploads</option>
           {sources.map((label) => <option key={label}>{label}</option>)}
         </select>
       </label>
+      {(!source || source === 'Terminal statistics') && statisticsTypes.size > 0 && <label>
+        {' '}Statistics report{' '}
+        <select value={reportType} onChange={event => setReportType(event.target.value)}>
+          <option value="">All report types</option>
+          {[...statisticsTypes].sort(([a], [b]) => a - b).map(([type, name]) =>
+            <option key={type} value={type}>{name} (MT{type})</option>)}
+        </select>
+      </label>}
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!rows && <p>Loading…</p>}
-      {visibleRows?.length === 0 && <p style={{ color: '#666' }}>{source ? 'No uploads from this source.' : 'No uploads yet.'}</p>}
+      {visibleRows?.length === 0 && <p style={{ color: '#666' }}>{source || reportType ? 'No matching uploads.' : 'No uploads yet.'}</p>}
       {visibleRows && visibleRows.length > 0 && (
         <table cellPadding={8} style={{ borderCollapse: 'collapse' }}>
           <thead>
@@ -70,6 +90,7 @@ export function UploadsPage() {
               <th>Id</th>
               <th>Status</th>
               <th>Source</th>
+              <th>Report</th>
               <th>Records</th>
               <th>Terminal</th>
             </tr>
@@ -82,6 +103,8 @@ export function UploadsPage() {
                 </td>
                 <td>{statusLabel(b.status)}</td>
                 <td>{sourceLabel(b)}</td>
+                <td>{b.isTerminalStatistics && b.statisticsMessageType != null
+                  ? `${b.statisticsName ?? 'Statistics'} (MT${b.statisticsMessageType})` : '—'}</td>
                 <td>{b.recordCount}</td>
                 <td>{b.terminalId ? <code>{b.terminalId.slice(0, 8)}…</code> : '—'}</td>
               </tr>

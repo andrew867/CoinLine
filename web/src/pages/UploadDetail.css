@@ -42,3 +42,10 @@
 .upload-statistics-groups dl div + div { border-top: 1px solid var(--line); }
 .upload-statistics summary { cursor: pointer; font-weight: 650; }
 .upload-statistics details .upload-statistics-groups { margin-top: 12px; }
+
+.graphical-usage-scroll { overflow-x: auto; }
+.graphical-usage-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.graphical-usage-table caption { text-align: left; font-weight: 650; padding: 8px 0; }
+.graphical-usage-table :is(th, td) { text-align: left; padding: 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.graphical-usage-table thead { background: var(--accent-soft); }
+.graphical-usage-table td span { display: block; font-size: .82rem; color: var(--muted); padding-top: 3px; }

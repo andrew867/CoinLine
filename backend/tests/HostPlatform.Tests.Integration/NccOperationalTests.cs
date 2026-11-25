@@ -828,6 +828,99 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             () => ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
     }
 
+    [Fact]
+    public async Task Graphical_usage_report_chunks_are_saved_independently_and_retry_does_not_duplicate()
+    {
+        var tableBatches = await BatchIdsAsync();
+        var before = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+        var existing = before.EnumerateArray().Select(row => row.GetProperty("id").GetGuid()).ToHashSet();
+        var first = StatisticsReport(153, 245);
+        var second = StatisticsReport(153, 245);
+        for (var index = 0; index < 8; index++)
+        {
+            var offset = 13 + 29 * index;
+            first[offset] = (byte)(index + 1);
+            BinaryPrimitives.WriteUInt16LittleEndian(first.AsSpan(offset + 1), (ushort)(1000 + index));
+            BinaryPrimitives.WriteUInt16LittleEndian(first.AsSpan(offset + 3), (ushort)(2000 + index));
+            BinaryPrimitives.WriteUInt16LittleEndian(first.AsSpan(offset + 5), (ushort)(20 + index));
+            BinaryPrimitives.WriteUInt16LittleEndian(first.AsSpan(offset + 27), (ushort)(30 + index));
+        }
+        second[13] = 24;
+        BinaryPrimitives.WriteUInt16LittleEndian(second.AsSpan(14), 1234);
+        BinaryPrimitives.WriteUInt16LittleEndian(second.AsSpan(36), 4321);
+        BinaryPrimitives.WriteUInt16LittleEndian(second.AsSpan(38), 65535);
+        BinaryPrimitives.WriteUInt16LittleEndian(second.AsSpan(40), 321);
+
+        await using (var link = await OpenAsync())
+        {
+            await link.Stream.WriteAsync(Message(KnownId, first));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Single(await NewReports());
+            await link.Stream.WriteAsync(Message(KnownId, second));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(2, (await NewReports()).Count);
+            await link.Stream.WriteAsync(HeaderOnlyRetransmission(KnownId, 0));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => ReadFrameAsync(link.Stream, TimeSpan.FromMilliseconds(400)));
+        }
+        await using (var replay = await OpenAsync())
+        {
+            await replay.Stream.WriteAsync(Message(KnownId, first));
+            AssertAck(await ReadFrameAsync(replay.Stream, TimeSpan.FromSeconds(5)));
+        }
+
+        var rows = await NewReports();
+        Assert.Equal(2, rows.Count);
+        var reports = new List<JsonElement>();
+        foreach (var row in rows)
+        {
+            Assert.Equal("Graphical usage statistics", row.GetProperty("statisticsName").GetString());
+            var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/uploads/{row.GetProperty("id").GetGuid()}", Json);
+            var record = Assert.Single(detail.GetProperty("records").EnumerateArray());
+            Assert.Equal("", record.GetProperty("rawPayloadHex").GetString());
+            var report = record.GetProperty("terminalStatistics");
+            Assert.Equal("2028-02-29T10:11:12", report.GetProperty("periodStart").GetString());
+            Assert.Equal("2028-03-01T10:11:12", report.GetProperty("periodEnd").GetString());
+            reports.Add(report);
+        }
+        var full = reports.Single(report => report.GetProperty("graphicalScreens").GetArrayLength() == 8);
+        var fullLast = full.GetProperty("graphicalScreens")[7];
+        Assert.Equal(8, fullLast.GetProperty("screenNumber").GetInt32());
+        Assert.Equal(1007, fullLast.GetProperty("ownerCode").GetInt32());
+        Assert.Equal(27, fullLast.GetProperty("keys")[0].GetProperty("pressCount").GetInt32());
+        Assert.Equal(37, fullLast.GetProperty("directionKeyPressCount").GetInt32());
+        var partial = Assert.Single(reports.Single(report => report.GetProperty("graphicalScreens").GetArrayLength() == 1)
+            .GetProperty("graphicalScreens").EnumerateArray());
+        Assert.Equal(24, partial.GetProperty("screenNumber").GetInt32());
+        Assert.Equal(1234, partial.GetProperty("ownerCode").GetInt32());
+        Assert.Equal(4321, partial.GetProperty("keys")[5].GetProperty("ownerCode").GetInt32());
+        Assert.Equal(65535, partial.GetProperty("keys")[5].GetProperty("pressCount").GetInt32());
+        Assert.Equal(321, partial.GetProperty("directionKeyPressCount").GetInt32());
+        Assert.True(tableBatches.SetEquals(await BatchIdsAsync()));
+
+        async Task<List<JsonElement>> NewReports()
+        {
+            var uploads = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
+            return uploads.EnumerateArray().Where(row => !existing.Contains(row.GetProperty("id").GetGuid()) &&
+                row.GetProperty("isTerminalStatistics").GetBoolean() &&
+                row.GetProperty("statisticsMessageType").GetInt32() == 153).ToList();
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Graphical_usage_from_an_unregistered_phone_or_truncated_is_not_acknowledged(bool truncated)
+    {
+        var report = StatisticsReport(153, 245);
+        report[13] = 1;
+        report[14] = 1;
+        await using var link = await OpenAsync();
+        await link.Stream.WriteAsync(Message(truncated ? KnownId : UnknownId, truncated ? report[..^1] : report));
+        await Assert.ThrowsAsync<EndOfStreamException>(() => ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+    }
+
     private static byte[] StatisticsReport(byte type, int length)
     {
         var report = new byte[length];

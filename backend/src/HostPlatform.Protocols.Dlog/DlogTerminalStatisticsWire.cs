@@ -11,15 +11,23 @@ public static class DlogTerminalStatisticsWire
     private const byte Carrier = 57;
     private const byte Messaging = 69;
     private const byte ExtendedCarrier = 71;
+    private const byte GraphicalUsage = 153;
     private const int HeaderLength = 1 + 2 * DlogFieldLayouts.YmdhmsBytes;
+    private const int GraphicalScreensPerReport = 8;
+    private const int GraphicalKeysPerScreen = 6;
+    private const int GraphicalScreenLength = 1 + 2 + GraphicalKeysPerScreen * 4 + 2;
     private const byte EmptyCarrier = 0xFE;
     private static readonly string[] Areas = ["Local", "Intra-area toll", "Inter-area toll", "International"];
 
     public sealed record Counter(string Label, uint Value);
     public sealed record CounterGroup(string Label, IReadOnlyList<Counter> Counters);
     public sealed record CarrierCounters(byte Reference, IReadOnlyList<CounterGroup> Groups);
+    public sealed record GraphicalKey(byte KeyNumber, ushort OwnerCode, ushort PressCount);
+    public sealed record GraphicalScreen(byte ScreenNumber, ushort OwnerCode, ushort DirectionKeyPressCount,
+        IReadOnlyList<GraphicalKey> Keys);
     public sealed record Report(byte MessageType, string Name, DateTime? PeriodStart, DateTime? PeriodEnd,
-        IReadOnlyList<CounterGroup> Groups, IReadOnlyList<CarrierCounters> Carriers, byte? CarrierFormat = null);
+        IReadOnlyList<CounterGroup> Groups, IReadOnlyList<CarrierCounters> Carriers, byte? CarrierFormat = null,
+        IReadOnlyList<GraphicalScreen>? GraphicalScreens = null);
 
     public static int RecordLength(byte type) => type switch
     {
@@ -28,6 +36,7 @@ public static class DlogTerminalStatisticsWire
         Carrier => 190,
         Messaging => 213,
         ExtendedCarrier => 244,
+        GraphicalUsage => HeaderLength + GraphicalScreensPerReport * GraphicalScreenLength,
         _ => 0
     };
 
@@ -86,6 +95,8 @@ public static class DlogTerminalStatisticsWire
             Performance => new Report(Performance, "Communications performance", start, end, ReadPerformance(body), []),
             Calls => new Report(Calls, "Call statistics", start, end, ReadCalls(body), []),
             Messaging => new Report(Messaging, "Messaging statistics", start, end, ReadMessaging(body), []),
+            GraphicalUsage => new Report(GraphicalUsage, "Graphical usage statistics", start, end, [], [],
+                GraphicalScreens: ReadGraphicalScreens(body)),
             _ => new Report(record[0], "Carrier statistics", start, end, [], ReadCarriers(body, record[0] == ExtendedCarrier),
                 record[0] == ExtendedCarrier ? record[HeaderLength] : null)
         };
@@ -130,6 +141,29 @@ public static class DlogTerminalStatisticsWire
         groups.Add(new("Other messaging counters", ReadWords(body[72..],
             ["Intentional coin access", "Intentional card access", "Intentional stored-value access", "No-answer counter"])));
         return groups;
+    }
+
+    private static IReadOnlyList<GraphicalScreen> ReadGraphicalScreens(ReadOnlySpan<byte> body)
+    {
+        // A report carries up to eight screen rows; a reporting period can span
+        // multiple records with the same timestamps. Unused rows are zero filled.
+        var screens = new List<GraphicalScreen>();
+        for (var offset = 0; offset < body.Length; offset += GraphicalScreenLength)
+        {
+            var row = body.Slice(offset, GraphicalScreenLength);
+            if (row.IndexOfAnyExcept((byte)0) < 0)
+                continue;
+            var keys = new List<GraphicalKey>(GraphicalKeysPerScreen);
+            for (var index = 0; index < GraphicalKeysPerScreen; index++)
+            {
+                var key = row[(3 + index * 4)..];
+                keys.Add(new((byte)(index + 1), BinaryPrimitives.ReadUInt16LittleEndian(key),
+                    BinaryPrimitives.ReadUInt16LittleEndian(key[2..])));
+            }
+            screens.Add(new(row[0], BinaryPrimitives.ReadUInt16LittleEndian(row[1..]),
+                BinaryPrimitives.ReadUInt16LittleEndian(row[^2..]), keys));
+        }
+        return screens;
     }
 
     private static IReadOnlyList<CarrierCounters> ReadCarriers(Span<byte> body, bool extended)
