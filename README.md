@@ -13,6 +13,10 @@ The project consists of an NCC host, a PostgreSQL database, a REST API and a bro
 
 [Quick start](#get-started) | [Operator guide](docs-site/docs/operator-guide/overview.md) | [Documentation](docs-site/docs/index.md) | [Compatibility and evidence](docs/program/table-catalog-and-parity-audit.md)
 
+![CoinLine management console showing the fleet dashboard with fictional workshop records](docs/media/coinline-console-dashboard.png)
+
+*CoinLine in a local demonstration with fictional data.*
+
 ## What you can do
 
 | Area | In the console |
