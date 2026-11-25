@@ -76,6 +76,18 @@ public static class TableSetFirmwareCompatibility
             }
             foreach (var finding in ReviewMultiPayRates(verifiedRecords, later))
                 yield return finding;
+            if (profile.Id == FirmwareTableProfiles.GraphicalMultiPay180
+                && verifiedRecords.Keys.Any(number => number is >= 131 and <= 133))
+            {
+                var review = NativeTableLayouts.ReviewGraphicalLinks(verifiedRecords);
+                if (review.Records.Single(record => record.Number == 131).Availability != "included")
+                    yield return new(verifiedRecords.Keys.Where(number => number is >= 132 and <= 133).Min(), false,
+                        "The MT131 rotation header is not included. The terminal may retain its previous graphical rotation settings.");
+                foreach (var group in review.References.Where(link => link.Advisory != null && link.Role != "disabled_context")
+                    .GroupBy(link => link.SourceRecord))
+                    yield return new(group.Key, false,
+                        $"{group.Count()} saved graphical reference(s) need review. Open the graphical link review for exact sources, destinations and partial-set context.");
+            }
         }
     }
 
