@@ -134,6 +134,42 @@ public sealed class ServiceRestrictionWireTests
         }
     }
 
+    [Fact]
+    public void Graphical_permitted_routes_use_the_actual_main_or_mixed_panel_buttons()
+    {
+        var raw = GraphicalStarterWire.Create(enableSampleMenu: true);
+        var first = NativeTableLayouts.Find(131, raw[131])!.Apply(raw[131], new Dictionary<string, string>
+        {
+            ["button-0.unrestricted"] = "true", ["button-0.digits"] = "3335550101",
+            ["button-0.type"] = "3", ["button-0.free"] = "true",
+            ["button-1.unrestricted"] = "true", ["button-1.next"] = "20"
+        });
+        var last = NativeTableLayouts.Find(133, raw[133])!.Apply(raw[133], new Dictionary<string, string>
+        {
+            ["screen-4.panel-1.button-0.unrestricted"] = "true", ["screen-4.panel-1.button-0.digits"] = "3335550102",
+            ["screen-4.panel-1.button-0.type"] = "3", ["screen-4.panel-1.button-0.free"] = "false",
+            ["button-24.unrestricted"] = "true", ["button-24.digits"] = "3335550103", ["button-24.type"] = "3"
+        });
+        var firstBefore = first.ToArray(); var lastBefore = last.ToArray();
+        var ordinary = ServiceRestrictionWire.ReadRestrictedRoutes(131, first);
+        Assert.Equal(2, ordinary.Routes.Length);
+        Assert.True(ordinary.Routes[0].Dialable);
+        Assert.True(ordinary.Routes[0].FreeCall);
+        Assert.Equal("navigation_only", ordinary.Routes[1].Status);
+        var mixed = Assert.Single(ServiceRestrictionWire.ReadRestrictedRoutes(133, last).Routes);
+        Assert.Contains("Panel 2", mixed.PositionLabel);
+        Assert.Contains("key 1", mixed.PositionLabel);
+        Assert.Equal("3335550102", mixed.Destination);
+        Assert.False(mixed.FreeCall);
+        Assert.True(mixed.Dialable);
+        Assert.Equal(firstBefore, first); Assert.Equal(lastBefore, last);
+
+        byte[] restriction = [58, 4, 20, 0, 6, 0, .. new byte[20]];
+        var findings = Review(FirmwareTableProfiles.GraphicalMultiPay180, restriction, first, last);
+        Assert.Contains(findings, finding => finding.TableNumber == 58 && !finding.Blocking && finding.Message.Contains("marked restricted route is paid"));
+        Assert.DoesNotContain(findings, finding => finding.TableNumber == 58 && finding.Message.Contains("No permitted dialable entry"));
+    }
+
     private static byte[] Record(int number, int length)
     {
         var record = new byte[length];

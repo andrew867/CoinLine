@@ -61,7 +61,7 @@ public static class TableSetFirmwareCompatibility
                 yield return finding;
             foreach (var finding in ReviewCarrierRoutes(verifiedRecords, later))
                 yield return finding;
-            foreach (var finding in ReviewServiceRestriction(verifiedRecords, later))
+            foreach (var finding in ReviewServiceRestriction(verifiedRecords, later, profile.Id == FirmwareTableProfiles.GraphicalMultiPay180))
                 yield return finding;
             foreach (var number in new[] { CollectionPolicyWire.CommunicationsType, CollectionPolicyWire.CallCarrierType })
                 if (verifiedRecords.TryGetValue(number, out var collection))
@@ -79,7 +79,7 @@ public static class TableSetFirmwareCompatibility
         }
     }
 
-    private static IEnumerable<TableFirmwareFinding> ReviewServiceRestriction(IReadOnlyDictionary<int, byte[]> records, bool later)
+    private static IEnumerable<TableFirmwareFinding> ReviewServiceRestriction(IReadOnlyDictionary<int, byte[]> records, bool later, bool graphical)
     {
         if (!records.TryGetValue(ServiceRestrictionWire.MessageType, out var restriction))
             yield break;
@@ -91,21 +91,29 @@ public static class TableSetFirmwareCompatibility
         if (restriction[1] != ServiceRestrictionWire.ConfigurableAccess)
             yield break;
 
-        var hasScreening = records.TryGetValue(92, out var screening);
-        var hasKeys = records.TryGetValue(55, out var keys);
-        if ((hasScreening && ServiceRestrictionWire.HasPermittedScreeningSlot(screening!)) ||
-            (hasKeys && ServiceRestrictionWire.HasPermittedQuickAccessKey(keys!)))
+        var expected = graphical ? new[] { 55, 92, 131, 132, 133 } : new[] { 55, 92 };
+        var reviews = expected.Where(records.ContainsKey)
+            .Select(number => ServiceRestrictionWire.ReadRestrictedRoutes(number, records[number])).ToArray();
+        var candidates = reviews.SelectMany(review => review.Routes).Where(route => route.Dialable).ToArray();
+        if (candidates.Length > 0)
+        {
+            if (graphical && candidates.Any(route => route.FreeCall == false))
+                yield return new(ServiceRestrictionWire.MessageType, false,
+                    "A marked restricted route is paid. The graphical terminal configuration guidance specifies free restricted routes; verify the configured payment behavior on device.");
             yield break;
+        }
 
-        if (hasScreening && hasKeys)
-            yield return new(ServiceRestrictionWire.MessageType, false,
-                "Configurable restricted access is enabled, but no included dialable screening entry or quick-access key is marked as permitted. Review the permitted routes before applying this window.");
+        if (reviews.Length == expected.Length)
+            yield return new(ServiceRestrictionWire.MessageType, false, graphical
+                ? "Configurable restricted access is enabled, but no included dialable screening entry, quick-access key or graphical key is marked as permitted."
+                : "Configurable restricted access is enabled, but no included dialable screening entry or quick-access key is marked as permitted. Review the permitted routes before applying this window.");
         else
         {
-            var missing = !hasScreening && !hasKeys ? "MT55 and MT92" : !hasScreening ? "MT92" : "MT55";
+            var missing = string.Join(" and ", expected.Where(number => !records.ContainsKey(number)).Select(number => $"MT{number}"));
             yield return new(ServiceRestrictionWire.MessageType, false,
                 $"Configurable restricted access relies on permitted entries in the phone's existing {missing} record(s). No permitted dialable entry was found in the included records.");
         }
+
     }
 
     private static IReadOnlyList<TableFirmwareFinding> ReviewCarrierRoutes(IReadOnlyDictionary<int, byte[]> records, bool later)
