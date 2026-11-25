@@ -4,12 +4,30 @@ using System.Numerics;
 namespace HostPlatform.Protocols.Tables;
 
 public sealed record CollectionPolicyFinding(bool Blocking, string Message);
+public sealed record PerformanceTimingPair(int MeasurementIndex, short StartTicks, short IntervalTicks);
 
 public static class CollectionPolicyWire
 {
     public const byte CommunicationsType = 32;
     public const byte CallCarrierType = 34;
     public const int OptionalCdrMask = 0x1D;
+
+    /// <summary>Only the four active MT32 timing pairs are used by the shared MT37 report.</summary>
+    public static IReadOnlyList<PerformanceTimingPair>? ReadPerformanceTiming(ReadOnlySpan<byte> record)
+    {
+        if (record.Length != 33 || record[0] != CommunicationsType)
+            return null;
+
+        var result = new List<PerformanceTimingPair>(4);
+        foreach (var index in new[] { 0, 1, 3, 4 })
+        {
+            var offset = 1 + index * 4;
+            result.Add(new(index,
+                BinaryPrimitives.ReadInt16LittleEndian(record[offset..]),
+                BinaryPrimitives.ReadInt16LittleEndian(record[(offset + 2)..])));
+        }
+        return result;
+    }
 
     public static IReadOnlyList<CollectionPolicyFinding> Review(ReadOnlySpan<byte> record, bool later)
     {

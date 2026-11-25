@@ -43,6 +43,10 @@
 .upload-statistics summary { cursor: pointer; font-weight: 650; }
 .upload-statistics details .upload-statistics-groups { margin-top: 12px; }
 
+.performance-report-reference { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
+.performance-report-reference h3 { margin-top: 0; }
+.performance-report-range { display: block; font-size: .84rem; color: var(--muted); margin-top: 3px; }
+
 .graphical-usage-scroll { overflow-x: auto; }
 .graphical-usage-table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
 .graphical-usage-table caption { text-align: left; font-weight: 650; padding: 8px 0; }

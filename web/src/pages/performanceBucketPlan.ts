@@ -1,8 +1,8 @@
 export const performanceMeasurements = [
-  { index: 0, label: 'Access to dial complete' },
-  { index: 1, label: 'Dial complete to carrier' },
-  { index: 3, label: 'Carrier to first packet' },
-  { index: 4, label: 'User waiting time' },
+  { index: 0, label: 'Access to dial complete', reportGroup: 'Line seizure to end of dialing' },
+  { index: 1, label: 'Dial complete to carrier', reportGroup: 'End of dialing to carrier' },
+  { index: 3, label: 'Carrier to first packet', reportGroup: 'Carrier to first packet' },
+  { index: 4, label: 'User waiting time', reportGroup: 'Caller wait for NCC response' },
 ] as const
 
 export type PerformanceBucket = { number: number; lower: number; upper: number | null }
