@@ -130,6 +130,10 @@ export function CardMasterPage() {
 
   const visible = entries.filter(entry => (showArchived || !entry.archived) && `${entry.code} ${entry.name} MT${entry.tableNumber}`.toLowerCase().includes(search.toLowerCase()))
   const familyChanging = !!selected && 'card-0.format' in changes
+  const renderField = (field: CardMasterField) => <CardMasterFieldInput key={field.key}
+          field={field.key === 'card-0.format' ? { ...field, choices: field.choices?.filter(choice => choice.value !== 0 && choice.value !== 255) ?? null } : field}
+          value={changes[field.key] ?? field.value ?? ''}
+          onChange={value => field.key === 'card-0.format' ? changeStandard(value) : changeField(field.key, value)} />
   return <div>
     <p><Link to="/table-sets">Table sets</Link></p><h1>Card Master List</h1>
     <p className="page-intro">Define reusable card acceptance configurations for older MT22 and later MT134 terminals. These are terminal settings, not card accounts. Draft configurations retain their own reviewed carrier and other target references.</p>
@@ -155,10 +159,12 @@ export function CardMasterPage() {
       {familyChanging && <p>Save the new standard to open its corresponding detail fields.</p>}
       {sections.filter((_, index) => !familyChanging || index === 0).map(section => <fieldset className="native-table-fields" key={section.key} disabled={!editable || busy}>
         <legend>{section.label.replace('Card range 1', 'Card')}</legend>
-        {section.fields.map(field => <CardMasterFieldInput key={field.key}
-          field={field.key === 'card-0.format' ? { ...field, choices: field.choices?.filter(choice => choice.value !== 0 && choice.value !== 255) ?? null } : field}
-          value={changes[field.key] ?? field.value ?? ''}
-          onChange={value => field.key === 'card-0.format' ? changeStandard(value) : changeField(field.key, value)} />)}
+        {section.fields.filter(field => !field.isSpare).map(renderField)}
+        {section.fields.some(field => field.isSpare) && <details className="native-spare-fields">
+          <summary>Spare fields</summary>
+          <p className="page-intro">These reserved values belong to this exact card definition and are copied with its row. Leave them unchanged unless the target profile documents a use.</p>
+          <div className="native-spare-grid">{section.fields.filter(field => field.isSpare).map(renderField)}</div>
+        </details>}
       </fieldset>)}
       <div className="row-actions">{editable && <button type="submit" disabled={busy || !code.trim() || (!!selected && !dirty)}>Save card definition</button>}
         {selected && !selected.archived && canArchive && <button type="button" className="quiet" disabled={busy || dirty} onClick={() => void archive(false)}>Archive definition</button>}

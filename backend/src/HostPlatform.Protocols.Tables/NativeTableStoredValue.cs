@@ -122,6 +122,7 @@ public static partial class NativeTableLayouts
                     Help = later && index % 2 == 1 ? "Enabling this odd value code requires index 0 on the preceding even value code." : null
                 }),
              .. Enumerable.Range(0, 5).Select(index => Bits($"{key}.manufacturer-{index}", $"Manufacturer code {index + 1}",
-                offset + CardDataOffset + 14 + index, 0x1F))])
+                offset + CardDataOffset + 14 + index, 0x1F)),
+             .. (!later ? new[] { SpareByte($"{key}.spare.storedValue", "Stored-value spare byte", offset + CardDataOffset + 19) } : [])])
     ];
 }

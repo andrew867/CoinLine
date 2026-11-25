@@ -81,7 +81,9 @@ public static partial class NativeTableLayouts
                  Toggle($"{key}.delayedAuthorization", "Delay card-specific authorization", offset + 7, 16),
                  Toggle($"{key}.promptPin", "Prompt for PIN", offset + 7, 32),
                  Toggle($"{key}.promptTelcoPin", "Prompt for the carrier PIN", offset + 7, 64),
-                 Toggle($"{key}.routeAccs", "Route to calling-card service", offset + 7, 128)]));
+                 Toggle($"{key}.routeAccs", "Route to calling-card service", offset + 7, 128),
+                 .. (later && kind != CardDataKind.Unknown
+                     ? SpareFlags($"{key}.spare.control", "Additional card control", offset + 33, 0xE0) : [])]));
 
             switch (kind)
             {
@@ -119,6 +121,7 @@ public static partial class NativeTableLayouts
                  help: "Use a one-based MT93 discount number, or zero to disable it."),
              Bits($"{key}.spillEnd", "Spill terminating key", offset + SpillTerminatorOffset, 15,
                  (0, "None"), (1, "#"), (3, "*")),
+             .. SpareFlags($"{key}.spare.spillTerminator", "Spill terminating key", offset + SpillTerminatorOffset, 0xF0),
              .. Enumerable.Range(0, SpillStepCount).SelectMany(step => new[] {
                  Bits($"{key}.spillStep-{step}.type", $"Step {step + 1} sends", offset + SpillStepsOffset + step, 15,
                      (0, "End sequence"), (1, "Called number"), (2, "Card number"), (3, "Language code"), (4, "PIN"),
@@ -196,8 +199,9 @@ public static partial class NativeTableLayouts
                 }
             }
 
-            if (!later || record.Slice(offset + SpillStepsOffset, SpillStepCount + 1)
-                .SequenceEqual(original.Slice(offset + SpillStepsOffset, SpillStepCount + 1)))
+            if (!later || (record.Slice(offset + SpillStepsOffset, SpillStepCount)
+                .SequenceEqual(original.Slice(offset + SpillStepsOffset, SpillStepCount))
+                && ((record[offset + SpillTerminatorOffset] ^ original[offset + SpillTerminatorOffset]) & 0x0F) == 0))
                 continue;
             var ended = false;
             for (var step = 0; step < SpillStepCount; step++)
