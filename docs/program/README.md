@@ -4,3 +4,4 @@
 - [Emulator acceptance](phase-5-emulator-acceptance.md)
 - [Firmware lab results](phase-5-gate-status.md)
 - [Terminal table catalogue and parity audit](table-catalog-and-parity-audit.md)
+- [Manually selected phone download preparation](manual-download-preparation.md)

@@ -8,6 +8,9 @@
 | GET | `/api/downloads/{id}` | Detail |
 | POST | `/api/downloads/{id}/cancel` | Cancel (**confirm**) |
 | POST | `/api/downloads/{id}/retry` | Retry (**confirm**) |
+| GET | `/api/downloads/preparation/options?query=...` | Minimal phone choices for an operator with Downloads Add permission |
+| POST | `/api/downloads/preparation/preview` | Review 1 to 40 distinct phones and their current assigned data sets |
+| POST | `/api/downloads/preparation` | Confirm the unchanged preview and prepare or schedule each set |
 
 Terminal-scoped download **start** lives under `POST /api/terminals/{id}/downloads`.
 
@@ -18,6 +21,8 @@ An MT44 installation or memory-loss request instead delivers the full published 
 Cancel a pending batch before the phone starts receiving it. Retry creates another pending batch using the original scope. MT94 uses the separate firmware scheduler.
 
 Start and retry reject a known installed firmware size, record type or explicitly confirmed layout conflict with HTTP 400 and a message identifying the record. The checks cover only the requested records and their dependency closure. A rejected request creates no batch; an unrelated record in a partial source set does not prevent a compatible selection. Unclassified firmware and types without verified lengths in an incomplete catalogue are not rejected merely for being unknown. The NCC pickup repeats the compatibility check on the prepared versions before sending; a historical or newly incompatible queued batch records a not-sent failure.
+
+For list preparation, submit `terminalIds` and optionally `availableAtUtc` (omit or use null for immediate preparation). The preview returns the assigned set, record versions, eligibility and `previewToken` for the exact list and time. Submit the same request with that token to confirm. All selected phones must be eligible. A stale review or conflicting concurrent work returns HTTP 409 and does not prepare a partial list. The result contains each phone's schedule ID and immediate batch ID if prepared now. The existing scheduler prepares future rows when due; the published set remains pinned to the schedule, not the phone's subsequent assignment. This workflow uses Downloads Add permission and does not mutate table assignments.
 
 **UI:** `/downloads`, `/downloads/:id`
 
