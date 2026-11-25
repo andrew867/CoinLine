@@ -7,4 +7,6 @@
 
 Both routes require the Smartcard types read permission. No issuer data, personalization, or payment credentials are returned. The matrix is not a query of the currently running firmware.
 
+See the [reference application matrix](../../protocols/smartcard-applications.md) for the evidence and qualification scope.
+
 **UI:** `/smartcard-types`

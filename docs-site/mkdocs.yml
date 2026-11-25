@@ -140,6 +140,7 @@ nav:
       - Upload ingestion: protocols/upload-ingestion.md
       - Rating & call flow: protocols/rating-call-flow.md
       - Cards, smartcards, e-purse: protocols/cards-smartcards-epurse.md
+      - Smartcard applications: protocols/smartcard-applications.md
       - Craft: protocols/craft.md
       - Firmware packages: protocols/firmware-update.md
       - Raw payload preservation: protocols/raw-payload-preservation.md
