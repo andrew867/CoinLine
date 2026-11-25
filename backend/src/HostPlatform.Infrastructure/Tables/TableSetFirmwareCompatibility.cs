@@ -51,7 +51,7 @@ public static class TableSetFirmwareCompatibility
         {
             var later = profile.Id != FirmwareTableProfiles.MultiPay200;
             if (verifiedRecords.TryGetValue(NumberingPlanWire.MessageType, out var numbering))
-                foreach (var finding in NumberingPlanWire.Review(numbering))
+                foreach (var finding in NumberingPlanWire.Review(numbering, later))
                     yield return new(NumberingPlanWire.MessageType, finding.Blocking, finding.Message);
             foreach (var finding in ReviewServiceScreening(verifiedRecords, later))
                 yield return finding;

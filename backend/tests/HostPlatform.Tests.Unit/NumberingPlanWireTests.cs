@@ -87,6 +87,103 @@ public sealed class NumberingPlanWireTests
     }
 
     [Fact]
+    public void Later_formatting_can_reach_last_eight_bytes_without_interpreting_them_as_currency()
+    {
+        var record = EmptyRecord();
+        new byte[] { 0, 0, 0, 48, 3, 1, 2 }.CopyTo(record, 33);
+        new byte[] { 132, 0, 4, 0, 0x51, 0 }.CopyTo(record, 213);
+        new byte[] { 0, 0, 4, 0, 0x91, 0x51, 0x91, 0 }.CopyTo(record, 345);
+        record[220] = 0xA5;
+        Assert.True(Assert.Single(NumberingPlanWire.Review(record)).Blocking);
+        Assert.Empty(NumberingPlanWire.Review(record, later: true));
+        var plan = NumberingPlanWire.Read(record, later: true);
+        Assert.Equal("row-132", plan.Format![0].NoMatch);
+        Assert.Equal(new[] { 0x91, 0x51, 0x91 }, plan.Format[1].Digits);
+        var updated = record.ToArray();
+        NumberingPlanWire.Apply(updated, plan, later: true);
+        Assert.Equal(record, updated);
+        plan.Format[1] = plan.Format[1] with { Digits = [0x91, 0x51, 0x51] };
+        NumberingPlanWire.Apply(updated, plan, later: true);
+        record[351] = 0x51;
+        Assert.Equal(record, updated);
+    }
+
+    [Fact]
+    public void Fixed_length_display_edit_preserves_imported_noncontiguous_links_and_gaps()
+    {
+        var record = EmptyRecord();
+        new byte[] { 12, 0, 4, 0, 0x51, 0 }.CopyTo(record, 213);
+        new byte[] { 0, 0, 4, 0, 0x91, 0 }.CopyTo(record, 225);
+        record[223] = 0xA5;
+        record[345] = (byte)'$';
+        var plan = NumberingPlanWire.Read(record);
+        plan.Format![1] = plan.Format[1] with { Digits = [0x51] };
+        var updated = record.ToArray();
+        NumberingPlanWire.Apply(updated, plan);
+        record[229] = 0x51;
+        Assert.Equal(record, updated);
+    }
+
+    [Fact]
+    public void Format_capacity_is_profile_specific_and_edits_are_atomic()
+    {
+        var record = EmptyRecord();
+        var before = record.ToArray();
+        var rule = new NumberingRule("format", null, null, 0, 0, 0, Enumerable.Repeat(0x51, 135).ToArray());
+        Assert.Throws<InvalidOperationException>(() => NumberingPlanWire.Apply(record, new(null, [rule])));
+        Assert.Equal(before, record);
+        NumberingPlanWire.Apply(record, new(null, [rule]), later: true);
+        Assert.Equal(140, NumberingPlanWire.FormatCapacity(later: true));
+        Assert.Equal(135, Assert.Single(NumberingPlanWire.Read(record, later: true).Format!).Digits.Length);
+        Assert.Equal(0, record[^1]);
+        var changed = record.ToArray();
+        Assert.Throws<InvalidOperationException>(() => NumberingPlanWire.Apply(record,
+            new(null, [rule with { Digits = Enumerable.Repeat(0x51, 136).ToArray() }]), later: true));
+        Assert.Equal(changed, record);
+    }
+
+    [Fact]
+    public void Empty_imported_dialing_rules_can_be_saved_unchanged_but_an_active_plan_cannot_be_removed()
+    {
+        var record = EmptyRecord();
+        var empty = record.ToArray();
+        NumberingPlanWire.Apply(record, NumberingPlanWire.Read(record));
+        Assert.Equal(empty, record);
+        NumberingPlanWire.Apply(record, new([new("root", null, null, 0, 48, 3, [18])], null));
+        var active = record.ToArray();
+        Assert.Throws<InvalidOperationException>(() => NumberingPlanWire.Apply(record, new([], null)));
+        Assert.Equal(active, record);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Profile_specific_numbering_fields_preserve_assigned_and_unmapped_bytes(bool later)
+    {
+        var record = EmptyRecord();
+        record[1] = 0xA3; record[26] = 0xA5; record[29] = 0xB6; record[30] = 0xC7; record[31] = 0x5B; record[32] = 0x81;
+        if (!later) record[352] = 0x87;
+        var profile = later ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay;
+        var layout = NativeTableLayouts.Find(62, record, profile)!;
+        var fields = layout.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key);
+        Assert.Equal(!later, fields.ContainsKey("answerSupervision"));
+        Assert.Equal(!later, fields.ContainsKey("managerTimeout"));
+        Assert.Equal(!later, fields.ContainsKey("currencyWidth"));
+        Assert.Equal(later, fields.ContainsKey("spare.byte3"));
+        Assert.Equal(record, layout.Apply(record, new Dictionary<string, string>()));
+        var changes = new Dictionary<string, string> { ["spare.termination.bit7"] = "false", ["spare.localSearch.bit7"] = "false", ["spare.byte1"] = "129" };
+        var expected = record.ToArray(); expected[1] = 0x23; expected[29] = 129; expected[32] = 1;
+        if (later) { changes["spare.byte3"] = "99"; expected[31] = 99; }
+        else { changes["spare.currency.bit7"] = "false"; expected[352] = 7; }
+        Assert.Equal(expected, layout.Apply(record, changes));
+        if (later)
+            Assert.Throws<InvalidOperationException>(() => layout.Apply(record, new Dictionary<string, string> { ["currencyWidth"] = "8" }));
+        else
+            Assert.Throws<InvalidOperationException>(() => layout.Apply(record, new Dictionary<string, string> { ["spare.byte3"] = "99" }));
+        Assert.Equal(NativeTableLayouts.MultiPay, NativeTableLayouts.Find(62, record)!.Profile);
+    }
+
+    [Fact]
     public void Adding_a_rule_rewrites_link_offsets_and_keeps_format_currency_and_unknown_bytes()
     {
         var record = EmptyRecord();

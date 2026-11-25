@@ -37,10 +37,11 @@ const formatFlags: Choice[] = [[1, 'Defer separator insertion'], [2, 'Suppress t
 const flag = (value: number, mask: number, enabled: boolean) => enabled ? value | mask : value & ~mask
 const labelFor = (index: number) => index === 0 ? 'Rule 1 (start)' : `Rule ${index + 1}`
 
-export function NumberingPlanEditor({ plan, changes, editable, onChange }: {
+export function NumberingPlanEditor({ plan, changes, editable, formatCapacity = 132, onChange }: {
   plan: NumberingPlan
   changes: NumberingPlanChanges
   editable: boolean
+  formatCapacity?: number
   onChange: (group: RuleSet, rules: Rule[]) => void
 }) {
   const [group, setGroup] = useState<RuleSet>('dial')
@@ -51,6 +52,7 @@ export function NumberingPlanEditor({ plan, changes, editable, onChange }: {
   const current = rules?.[index]
   const space = rules?.reduce((bytes, rule) => bytes + rule.digits.length + (dial ? 6 : 5)
     + (dial && (rule.conversion !== null || rule.maximumDigits !== null) ? 1 : 0), 0)
+  const capacity = dial ? 180 : formatCapacity
 
   function update(fields: Partial<Rule>) {
     if (current && rules) onChange(group, rules.map((rule) => rule.id === current.id ? { ...rule, ...fields } : rule))
@@ -101,8 +103,9 @@ export function NumberingPlanEditor({ plan, changes, editable, onChange }: {
           {rules.map((rule, position) => <option value={rule.id} key={rule.id}>{labelFor(position)}</option>)}
         </select>
       </label>}
-      {space !== undefined && <small>{space} of {dial ? 180 : 132} rule bytes used</small>}
+      {space !== undefined && <small>{space} of {capacity} rule bytes used</small>}
     </div>
+    {space !== undefined && space > capacity && <p role="alert">The rules exceed this firmware's available space by {space - capacity} bytes.</p>}
     {rules === null && <p>This rule set uses an unrecognized wire layout.</p>}
     {rules && rules.length === 0 && <p>This rule set is empty.</p>}
     {rules && editable && <div className="row-actions">

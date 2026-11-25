@@ -13,7 +13,7 @@ public static class NumberingPlanWire
     private const int DialStart = 33;
     private const int DialLength = 180;
     private const int FormatStart = DialStart + DialLength;
-    private const int FormatLength = 132;
+    public static int FormatCapacity(bool later = false) => later ? 140 : 132;
     private const int MoreDigits = 0x02;
     private const int ConversionAllowed = 0x10;
 
@@ -21,22 +21,22 @@ public static class NumberingPlanWire
 
     public static bool Supports(ReadOnlySpan<byte> record) => record.Length == RecordLength && record[0] == MessageType;
 
-    public static NumberingPlanChanges Read(ReadOnlySpan<byte> record)
+    public static NumberingPlanChanges Read(ReadOnlySpan<byte> record, bool later = false)
     {
         if (!Supports(record))
             throw new InvalidOperationException("The record does not match the supported numbering plan.");
         return new(
             Parse(record.Slice(DialStart, DialLength), dial: true)?.Select(node => node.Rule).ToArray(),
-            Parse(record.Slice(FormatStart, FormatLength), dial: false)?.Select(node => node.Rule).ToArray());
+            Parse(record.Slice(FormatStart, FormatCapacity(later)), dial: false)?.Select(node => node.Rule).ToArray());
     }
 
-    public static void Apply(Span<byte> record, NumberingPlanChanges changes)
+    public static void Apply(Span<byte> record, NumberingPlanChanges changes, bool later = false)
     {
         if (!Supports(record))
             throw new InvalidOperationException("The record does not match the supported numbering plan.");
 
         var dial = record.Slice(DialStart, DialLength);
-        var format = record.Slice(FormatStart, FormatLength);
+        var format = record.Slice(FormatStart, FormatCapacity(later));
         var packedDial = changes.Dial == null ? null : Pack(dial, changes.Dial, dial: true);
         var packedFormat = changes.Format == null ? null : Pack(format, changes.Format, dial: false);
         if (packedDial != null)
@@ -45,13 +45,13 @@ public static class NumberingPlanWire
             packedFormat.CopyTo(format);
     }
 
-    public static IReadOnlyList<NumberingPlanFinding> Review(ReadOnlySpan<byte> record)
+    public static IReadOnlyList<NumberingPlanFinding> Review(ReadOnlySpan<byte> record, bool later = false)
     {
         if (!Supports(record))
             throw new InvalidOperationException("The record does not match the supported numbering plan.");
         var findings = new List<NumberingPlanFinding>();
         ReviewSection(record.Slice(DialStart, DialLength), dial: true, findings);
-        ReviewSection(record.Slice(FormatStart, FormatLength), dial: false, findings);
+        ReviewSection(record.Slice(FormatStart, FormatCapacity(later)), dial: false, findings);
         return findings;
     }
 
@@ -133,7 +133,7 @@ public static class NumberingPlanWire
                 failure = new(true, $"{name} contain a link at byte {offset} that overlaps another rule.");
                 return null;
             }
-            if (offset > data.Length - header - 1)
+            if (offset > data.Length - header - (dial ? 1 : 2))
             {
                 failure = new(true, $"{name} contain a link to byte {offset}, outside the available rule area.");
                 return null;
@@ -142,7 +142,7 @@ public static class NumberingPlanWire
             var control = data[offset + 2];
             var digitsStart = offset + header;
             var count = dial ? data[offset + 5] : data[digitsStart..].IndexOf((byte)0);
-            var extra = dial && (control & (MoreDigits | ConversionAllowed)) == 0 ? 0 : 1;
+            var extra = !dial || (control & (MoreDigits | ConversionAllowed)) != 0 ? 1 : 0;
             if (count <= 0 || digitsStart + count + extra > data.Length)
             {
                 failure = new(false, $"{name} have an unrecognized or incomplete pattern at byte {offset}. The imported layout needs verification.");
@@ -187,7 +187,7 @@ public static class NumberingPlanWire
     {
         var name = dial ? "Dialing rules" : "Display formatting";
         var previous = Parse(original, dial) ?? throw new InvalidOperationException($"{name} contain an unrecognized layout.");
-        if (rules.Length > 0 && rules.Length == previous.Count &&
+        if (rules.Length == previous.Count &&
             rules.Select((rule, index) => SameRule(rule, previous[index].Rule)).All(matches => matches))
             return original.ToArray();
         if (dial && rules.Length == 0)

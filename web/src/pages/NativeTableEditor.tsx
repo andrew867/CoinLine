@@ -50,6 +50,7 @@ type Layout = {
   sha256: string
   sections: Section[]
   numberingPlan?: NumberingPlan | null
+  numberingFormatCapacity?: number | null
   spareBytes?: string | null
   screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean } | null
 } | { supported: false; reason: string; profiles?: string[]; templates?: { profile: string; length: number; screeningSlots?: number | null }[] }
@@ -401,6 +402,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         setMessage('')
       }} />}
       {showingRules && layout.numberingPlan && <NumberingPlanEditor plan={layout.numberingPlan} changes={ruleEdits}
+        formatCapacity={layout.numberingFormatCapacity ?? 132}
         editable={canEdit && !busy} onChange={(group, rules) => {
           const updated = { ...ruleEdits }
           if (JSON.stringify(rules) === JSON.stringify(layout.numberingPlan?.[group])) delete updated[group]

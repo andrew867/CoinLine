@@ -320,7 +320,9 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         new byte[] { 7, 0, 0, 48, 3, 1, 2 }.CopyTo(numbering, 33);
         new byte[] { 7, 0, 0, 48, 4, 1, 3 }.CopyTo(numbering, 40);
         numbering[60] = 0x5A;
-        numbering[345] = (byte)'$';
+        // This is a later profile: the former currency tail can contain a linked formatting rule.
+        new byte[] { 132, 0, 4, 0, 0x51, 0 }.CopyTo(numbering, 213);
+        new byte[] { 0, 0, 4, 0, 0x91, 0x51, 0x91, 0 }.CopyTo(numbering, 345);
         var features = new byte[72];
         features[0] = 26;
         features[15] = 180; // An enabled reroute points to the last, currently blank slot.
