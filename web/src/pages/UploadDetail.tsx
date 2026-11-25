@@ -29,6 +29,12 @@ type TerminalCall = {
 }
 
 type CounterGroup = { label: string; counters: { label: string; value: number }[] }
+type GraphicalScreenUsage = {
+  screenNumber: number
+  ownerCode: number
+  directionKeyPressCount: number
+  keys: { keyNumber: number; ownerCode: number; pressCount: number }[]
+}
 type TerminalStatistics = {
   messageType: number
   name: string
@@ -37,6 +43,7 @@ type TerminalStatistics = {
   groups: CounterGroup[]
   carriers: { reference: number; groups: CounterGroup[] }[]
   carrierFormat: number | null
+  graphicalScreens?: GraphicalScreenUsage[] | null
 }
 
 type Detail = {
@@ -246,8 +253,38 @@ function StatisticsReport({ report }: { report: TerminalStatistics }) {
       <summary>{carrierReportLabel(report.messageType, reference)}</summary>
       <CounterGroups groups={groups} />
     </details>)}
-    {report.groups.length === 0 && report.carriers.length === 0 && <p>No carrier entries in this report.</p>}
+    {report.messageType === 153 ? <GraphicalUsageReport screens={report.graphicalScreens ?? []} />
+      : report.groups.length === 0 && report.carriers.length === 0 && <p>No carrier entries in this report.</p>}
   </article>
+}
+
+function GraphicalUsageReport({ screens }: { screens: GraphicalScreenUsage[] }) {
+  return <section aria-label="Graphical screen usage">
+    <p>Each screen's reported owner and key counts are captured for this reporting period.
+      A phone can upload more than one record for the same period. Counts are key presses, not advertisement impressions.</p>
+    {screens.length === 0 ? <p>No screen entries in this report.</p> :
+      <div className="graphical-usage-scroll">
+        <table className="graphical-usage-table">
+          <caption>Graphical usage by screen</caption>
+          <thead><tr>
+            <th scope="col">Screen</th><th scope="col">Screen owner code</th>
+            {Array.from({ length: 6 }, (_, index) => <th key={index} scope="col">Softkey {index + 1}</th>)}
+            <th scope="col">Direction keys</th>
+          </tr></thead>
+          <tbody>{screens.map((screen, index) => <tr key={`${screen.screenNumber}-${index}`}>
+            <th scope="row">Screen {screen.screenNumber}</th><td>{screen.ownerCode}</td>
+            {Array.from({ length: 6 }, (_, index) => {
+              const key = screen.keys.find(item => item.keyNumber === index + 1)
+              return <td key={index}>{key ? <>
+                <strong>{key.pressCount.toLocaleString()}</strong>
+                <span>Owner {key.ownerCode}</span>
+              </> : 'Unavailable'}</td>
+            })}
+            <td>{screen.directionKeyPressCount.toLocaleString()}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+  </section>
 }
 
 function CounterGroups({ groups }: { groups: CounterGroup[] }) {

@@ -16,8 +16,9 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(IEnumerable<object>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<object>>> List(CancellationToken ct) =>
-        Ok(await db.UploadBatches.AsNoTracking()
+    public async Task<ActionResult<IEnumerable<object>>> List(CancellationToken ct)
+    {
+        var rows = await db.UploadBatches.AsNoTracking()
             .OrderByDescending(x => x.CreatedAtUtc)
             .Select(x => new
             {
@@ -28,8 +29,23 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
                 IsTerminalCallDetail = x.IdempotencyKey.StartsWith(TerminalUploads.CallDetailPrefix),
                 IsTerminalStatistics = x.IdempotencyKey.StartsWith(TerminalUploads.StatisticsPrefix),
                 RawPayloadHex = Convert.ToHexString(x.RawPayload),
-                RecordCount = x.Records.Count
-            }).ToListAsync(ct));
+                RecordCount = x.Records.Count,
+                StatisticsMetadata = x.IdempotencyKey.StartsWith(TerminalUploads.StatisticsPrefix)
+                    ? x.Records.OrderBy(r => r.CreatedAtUtc).Select(r => r.DecodedMetadataJson).FirstOrDefault()
+                    : null
+            }).ToListAsync(ct);
+        return Ok(rows.Select(row =>
+        {
+            var report = row.StatisticsMetadata is { } metadata
+                ? TerminalUploads.ReadMetadata<DlogTerminalStatisticsWire.Report>(metadata) : null;
+            return new
+            {
+                row.Id, row.TerminalId, row.Status, row.IdempotencyKey, row.IsTerminalCallDetail,
+                row.IsTerminalStatistics, row.RawPayloadHex, row.RecordCount,
+                StatisticsMessageType = report?.MessageType, StatisticsName = report?.Name
+            };
+        }));
+    }
 
     [HttpGet("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status200OK)]
