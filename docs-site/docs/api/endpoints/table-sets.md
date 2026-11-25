@@ -25,6 +25,10 @@
 | PUT | `/api/tables/sets/{id}/records/{number}/fields` | Update selected fields on a draft |
 | GET | `/api/tables/sets/{id}/records/{number}/card-sequence` | Inspect card positions and the observed card/carrier record revisions (MT22 or MT134) |
 | POST | `/api/tables/sets/{id}/records/{number}/card-sequence` | Move a configured card into a blank position and update any affected carrier bits in the same draft save |
+| POST | `/api/tables/sets/{id}/records/{number}/card-sequence/add` | Add a master definition to the first blank position |
+| POST | `/api/tables/sets/{id}/records/{number}/card-sequence/link` | Link a matching pre-existing card row without changing its wire bytes |
+| POST | `/api/tables/sets/{id}/records/{number}/card-sequence/refresh` | Apply the latest linked master revision in a draft |
+| POST | `/api/tables/sets/{id}/records/{number}/card-sequence/remove` | Remove a configured position and clear its carrier acceptance |
 | POST | `/api/tables/sets/{id}/publish` | Publish (**confirm**) |
 | GET | `/api/tables/sets/{id}/assignment-preview` | Preview eligible phones for the requested scope and record selection |
 | POST | `/api/tables/sets/{id}/assignments` | Apply a published set to the eligible phones confirmed by the preview |
@@ -60,6 +64,27 @@ The schedule request takes the same selection plus `availableAtUtc`, either an I
 Field updates include the `revision`, `sha256`, `profile` and a `changes` object keyed by field ID. The API rejects stale revisions and leaves bytes outside the changed fields intact. For matching layouts with the same size, pass `profile` in the read query.
 
 The card sequence GET returns `available`, `editable`, a one-based `slots` list with `blank` and `movable` flags, `carrierNumber`, and `cards` and `carriers` stamps containing `revision` and `sha256`. For POST, send distinct one-based `from` and `to` positions and both observed stamps. The destination must be blank. A matching complete carrier record is required. The response contains the updated stamps and `carrierChanged`; when no bitmap bits change, the carrier keeps its original revision. HTTP 409 indicates that either record is stale or missing, or the set has been published. Invalid positions or layouts return HTTP 400. Get requires Table records Read; move requires Table records Update. This is a draft edit, not a queued download.
+
+The same card sequence GET includes unambiguous `carrierReferences` and, for each configured position, its `master` identity and applied revision (if linked), recognized target `mapping`, and `acceptedCarriers`. Add takes both record stamps, `definitionId`, `definitionRevision`, the complete destination `mapping` keyed by native field ID, and `acceptedCarriers` (an explicit list, which may be empty). The first recognized blank position is selected atomically. Link takes both stamps, the definition identity/revision and `position`; it rejects a wire-byte mismatch. Refresh takes the linked `position`, the latest `definitionRevision` and both stamps. Omit both `mapping` and `acceptedCarriers` to preserve the current target references and carrier bytes, or supply both to explicitly remap. Remove takes `position`, both stamps and `confirm: true`. The response reports the affected position, updated stamps and whether carrier bytes changed. These mutations require Table records Update; add, link and refresh also require Card master list Read.
+
+### Card Master List
+
+| Method | Endpoint | Purpose |
+| --- | --- | --- |
+| GET | `/api/card-master?tableNumber=22&includeArchived=false` | List reusable definitions, optionally filtered by MT22 or MT134 |
+| GET | `/api/card-master/schema?tableNumber=22&standard=1` | Read the typed template sections for a profile and card standard |
+| GET | `/api/card-master/{id}` | Read a named definition and its native sections |
+| POST | `/api/card-master` | Create a named definition from typed changes or a saved card row |
+| PUT | `/api/card-master/{id}` | Update a definition using its observed `revision` |
+| DELETE | `/api/card-master/{id}?revision=1&confirm=true` | Archive a definition without modifying existing snapshots |
+| POST | `/api/card-master/{id}/restore?revision=2` | Restore an archived definition |
+| GET | `/api/card-master/{id}/usage` | List linked sets, positions, applied revisions and assigned-phone counts |
+| POST | `/api/card-master/{id}/rollout/preview` | Preview replacement snapshots and selected downloads for affected assigned phones |
+| POST | `/api/card-master/{id}/rollout` | Confirm the current preview and prepare downloads |
+
+Master definition input is `code` (up to four characters), `name`, `tableNumber`, and `changes`. Create may additionally include `source: { setId, position, revision, sha256 }` to copy a complete configured row using its observed record stamp. Fields are profile-specific and use the ordinary native field IDs. Master definitions retain their own revision. Editing them does not mutate linked records. The stored link tracks the exact applied row hash and definition revision. An unrelated direct edit preserves the link; a modified linked row detaches. Row movements, clones and record copies retain applicable links. Usage additionally requires read access to Table sets, Table records and Table assignments.
+
+Rollout preview takes `revision`. It returns a `previewToken`, grouped configuration positions, `eligiblePhones`, `scheduledPhones`, `metadataOnlyPhones`, and `skippedPhones`. Apply takes the same revision and the exact token. It recomputes the result in a serializable transaction, creates new published snapshots, updates desired assignments with rollback history, and stages selected batches only for changed card bytes plus declared dependencies. Stale state returns HTTP 409. Apply requires Card master list Update and the existing Table set Add/Update, Table records Update, Table assignment Update and Downloads Add permissions in addition to usage read access.
 
 MT55 offers a 571-byte template for each editor profile. Field IDs use zero-based `key-{row}` prefixes. `customerReference` is a four-byte unsigned value and the `rate` byte carries the tariff index or carrier reference according to the key flags. To clear keys, include `clearQuickAccessKeys` with distinct one-based slots from 1 through 10. Save edits to other slots in the same request. The API rejects an edit and a clear for the same slot.
 

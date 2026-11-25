@@ -35,7 +35,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         ValidationDiagnosticsJson = source.ValidationDiagnosticsJson,
         ScreeningDescriptionsJson = source.ScreeningDescriptionsJson,
         ScreeningLayoutProfile = source.ScreeningLayoutProfile,
-        ConfigurationId = source.ConfigurationId
+        ConfigurationId = source.ConfigurationId,
+        CardMasterLinksJson = source.CardMasterLinksJson
     };
 
     public IQueryable<Terminal> PhonesInScope(TableTargetScope scope)
@@ -262,6 +263,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             TableSetId = tableSetId,
             TableDefinitionId = tableDefinitionId
         };
+        version.CardMasterLinksJson = CardMasterLinks.Reconcile(def.TableNumber, rawPayload, version.CardMasterLinksJson);
         StagePayload(version, def, tableRevision, rawPayload);
         version.SortOrder = sortOrder;
         version.DependsOnTableDefinitionId = dependsOnTableDefinitionId;
@@ -332,6 +334,7 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             version.ScreeningDescriptionsJson = source.ScreeningDescriptionsJson;
             version.ScreeningLayoutProfile = source.ScreeningLayoutProfile;
             version.ConfigurationId = source.ConfigurationId;
+            version.CardMasterLinksJson = source.CardMasterLinksJson;
         }
 
         destination.Version++;

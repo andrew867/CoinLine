@@ -47,6 +47,7 @@ public static class TableRecordCopy
                     && existing.ScreeningDescriptionsJson == version.ScreeningDescriptionsJson
                     && existing.ScreeningLayoutProfile == version.ScreeningLayoutProfile
                     && existing.ConfigurationId == version.ConfigurationId
+                    && existing.CardMasterLinksJson == version.CardMasterLinksJson
                     && bytes.AsSpan().SequenceEqual(TableDistributionService.GetEffectivePayload(existing)) ? "keep" : "replace";
             if (action == "replace" && existing!.TableRevision == int.MaxValue)
                 throw new InvalidOperationException($"MT{number} has reached the maximum record revision.");

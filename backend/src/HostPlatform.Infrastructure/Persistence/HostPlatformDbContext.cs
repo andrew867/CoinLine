@@ -14,6 +14,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<FirmwareVersion> FirmwareVersions => Set<FirmwareVersion>();
     public DbSet<InmateFeatureConfiguration> InmateFeatureConfigurations => Set<InmateFeatureConfiguration>();
     public DbSet<CarrierLibraryEntry> CarrierLibraryEntries => Set<CarrierLibraryEntry>();
+    public DbSet<CardMasterDefinition> CardMasterDefinitions => Set<CardMasterDefinition>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
@@ -154,6 +155,15 @@ public class HostPlatformDbContext : DbContext
             b.Property(c => c.Version).IsConcurrencyToken();
             b.HasIndex(c => new { c.TableNumber, c.CodeKey }).IsUnique();
         });
+        modelBuilder.Entity<CardMasterDefinition>(b =>
+        {
+            b.Property(c => c.Code).HasMaxLength(4);
+            b.Property(c => c.CodeKey).HasMaxLength(4);
+            b.Property(c => c.Name).HasMaxLength(80);
+            b.Property(c => c.RowPayload).HasColumnType("bytea");
+            b.Property(c => c.Version).IsConcurrencyToken();
+            b.HasIndex(c => new { c.TableNumber, c.CodeKey }).IsUnique();
+        });
         modelBuilder.Entity<TableSet>(b =>
         {
             b.HasOne(ts => ts.Customer).WithMany().HasForeignKey(ts => ts.CustomerId);
@@ -163,6 +173,7 @@ public class HostPlatformDbContext : DbContext
         modelBuilder.Entity<TableSet>().Property(set => set.Version).IsConcurrencyToken();
         modelBuilder.Entity<TableVersion>(b =>
         {
+            b.Property(tv => tv.CardMasterLinksJson).HasColumnType("jsonb");
             b.Property(tv => tv.EmbeddedPayload).HasColumnName("Payload");
             b.Property(tv => tv.TableRevision).IsConcurrencyToken();
             b.Property(tv => tv.ConfigurationId).HasMaxLength(6);

@@ -328,6 +328,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         onMoved={(to, carrierChanged) => {
           setMessage(`Card entry moved to position ${to}.${carrierChanged ? ' Matching carrier acceptance was updated.' : ' Carrier acceptance was unchanged.'}`)
           setSectionKey(`card-${to - 1}`); setSearch(''); setLayout(null); setReload(count => count + 1); onSaved()
+        }} onConfigured={(action, position, carrierChanged) => {
+          const operation = ({ add: 'added', remove: 'removed', refresh: 'refreshed', link: 'linked' } as Record<string, string>)[action] ?? 'updated'
+          setMessage(`Card position ${position} ${operation}.${carrierChanged ? ' Matching carrier acceptance was updated.' : ' Carrier acceptance was unchanged.'}`)
+          setSectionKey(`card-${position - 1}`); setSearch(''); setLayout(null); setReload(count => count + 1); onSaved()
         }} />}
       {number >= 131 && number <= 133 && (
         <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />

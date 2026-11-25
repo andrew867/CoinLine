@@ -60,12 +60,15 @@ public static class OperatorPermissions
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
-            ("CardSequence", R, "Get"), ("CardSequence", U, "Move"),
+            ("CardSequence", R, "Get"), ("CardSequence", U, "Move Add Remove Refresh Link"),
             ("GraphicalStarter", A, "Create"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),
             ("Tables", R, "ScopeOptions"), ("Tables", U, "ScopeOptions"));
         Screen("carrier-library", "Carrier library", ("CarrierLibrary", R, "List Get Schema Apply"),
             ("CarrierLibrary", A, "Create Schema"), ("CarrierLibrary", U, "Update"), ("CarrierLibrary", D, "Delete"));
+        Screen("card-master", "Card master list", ("CardMaster", R, "List Get Schema Usage"),
+            ("CardMaster", A, "Create Schema"), ("CardMaster", U, "Update Restore"), ("CardMaster", D, "Archive"),
+            ("CardMasterRollout", R, "Preview"), ("CardMasterRollout", U, "Apply"));
         Screen("table-assignments", "Table assignments",
             ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
             ("Terminals", R, "GetTableAssignment TableAssignmentOptions"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));

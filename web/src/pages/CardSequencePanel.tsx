@@ -1,17 +1,17 @@
 import { useEffect, useState } from 'react'
 import { apiFetch } from '../api/client'
+import { CardMasterConfigurationPanel, type CardPosition } from './CardMasterConfigurationPanel'
 
 type Stamp = { revision: number; sha256: string }
-type Slot = { number: number; blank: boolean; movable: boolean }
-type Sequence = { available: true; editable: boolean; cards: Stamp; carriers: Stamp; carrierNumber: number; slots: Slot[] }
+type Sequence = { available: true; editable: boolean; cards: Stamp; carriers: Stamp; carrierNumber: number; slots: CardPosition[]; carrierReferences?: number[] }
   | { available: false; reason: string }
 
 type Props = { setId: string; number: number; revision: number; sha256: string; editable: boolean; dirty: boolean; busy: boolean;
   labels: Record<number, string>; onBusyChange: (busy: boolean) => void; onMoved: (to: number, carrierChanged: boolean) => void;
-  onReload: () => void }
+  onReload: () => void; onConfigured?: (action: string, position: number, carrierChanged: boolean) => void }
 
 export function CardSequencePanel({ setId, number, revision, sha256, editable, dirty, busy, labels,
-  onBusyChange, onMoved, onReload }: Props) {
+  onBusyChange, onMoved, onReload, onConfigured }: Props) {
   const endpoint = `/api/tables/sets/${setId}/records/${number}/card-sequence`
   const [sequence, setSequence] = useState<Sequence | null>(null)
   const [from, setFrom] = useState(''), [to, setTo] = useState('')
@@ -69,6 +69,10 @@ export function CardSequencePanel({ setId, number, revision, sha256, editable, d
         <button type="button" disabled={!canMove || !from || !to} onClick={() => void move()}>Move card entry</button>
       </div>}
       <p>Moving saves the draft MT{number} and any affected MT{sequence.carrierNumber} acceptance bits together. Publish and download both records if their positions change.</p>
+      {sequence.carrierReferences && onConfigured && <CardMasterConfigurationPanel endpoint={endpoint} setId={setId} number={number}
+        cards={sequence.cards} carriers={sequence.carriers} slots={sequence.slots} carrierReferences={sequence.carrierReferences}
+        labels={labels} editable={!!current && sequence.editable && editable} busy={busy} dirty={dirty}
+        onBusyChange={onBusyChange} onCompleted={onConfigured} />}
     </>}
   </section>
 }
