@@ -210,3 +210,4 @@
 .interface-timing-value { display: grid; gap: .15rem; padding: .7rem; border: 1px solid #dce7e1; border-radius: .4rem; }
 .interface-timing-value > strong { font-variant-numeric: tabular-nums; font-size: 1.25rem; }
 .interface-timing-value > small { opacity: .8; }
+.interface-timing-converter > p { flex-basis: 100%; margin: 0; }

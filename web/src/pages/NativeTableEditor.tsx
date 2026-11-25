@@ -385,7 +385,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}
-      {number === 30 && layout.length === 68 && <InterfaceTimingPanel key={`${layout.revision}:${layout.sha256}`}
+      {number === 30 && layout.length === 68 && <InterfaceTimingPanel key={`${setId}:${layout.revision}:${layout.sha256}`}
         timers={layout.sections.flatMap(section => section.fields).filter(field =>
           field.editor === 'number' && interfaceTimingKeys.some(key => key === field.key)).map(field => ({
           key: field.key, label: field.label.replace(/ \(10 ms ticks\)$/, ''), value: effectiveValue(field), changed: field.key in edits,

@@ -39,7 +39,7 @@ export function InterfaceTimingPanel({ timers, editable, onChange }: {
         <small>{timer.value === null ? 'Stored value unavailable' : `${timer.value} ticks`}{timer.changed ? ' · Staged' : ''}</small>
       </div>
     })}</div>
-    {editable && <div className="table-config-selectors">
+    {editable && <div className="table-config-selectors interface-timing-converter">
       <label>Timing field<select value={current.key} onChange={event => { setSelected(event.target.value); setSeconds('') }}>
         {timers.map(timer => <option key={timer.key} value={timer.key}>{timer.label}</option>)}
       </select></label>
