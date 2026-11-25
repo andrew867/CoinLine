@@ -27,6 +27,7 @@ Create a private settings file outside the tracked source tree with the followin
 | `port` | A free local TCP port distinct from the normal NCC listener. |
 | `timeoutSeconds` | Bounded test duration, from 30 to 1800 seconds. |
 | `readyFile`, `resultFile` | Distinct absolute local paths for readiness and redacted observations. |
+| `tablePackageFile` | Optional private, hash-verified standard later Multi-pay twelve-record baseline. Enables a separate full INSTALL. |
 
 From `backend/`, run only the manual fixture with the settings path in `COINLINE_MANUAL_CARD_LAB_SETTINGS`:
 
@@ -36,6 +37,6 @@ COINLINE_MANUAL_CARD_LAB_SETTINGS=/path/to/private/settings.json \
   --configuration Release --filter 'FullyQualifiedName~Isolated_synthetic_card_call'
 ```
 
-CI does not activate the manual fixture. The automated fixture test verifies rejection of unrelated synthetic terminal, route, credential and format values and deduplication of authorization retries. Wait for the readiness file, then use an already installed emulator and direct only its NCC connection to the reported loopback port. Keep its local central-office simulator isolated. No table assignment is installed on this manual host. Verify the emulator's existing screening permits the selected test route before placing a call.
+CI does not activate the manual fixture. The automated fixture test verifies rejection of unrelated synthetic terminal, route, credential and format values and deduplication of authorization retries. Wait for the readiness file, then use an already installed emulator and direct only its NCC connection to the reported loopback port. Keep its local central-office simulator isolated. With no package, the fixture has no table assignment; verify the emulator's existing screening permits the selected test route before placing a call. If a private baseline package is supplied, the fixture verifies the record order, packed profile, wire identity and every source digest, then uses the typed editor on two empty screening slots and one unused tariff index. It publishes and assigns the complete twelve-record clone only in the isolated test database. The readiness file identifies the changed record types. No-op saves and readback are checked before the listener is released. The source records and shared host assignment are not modified. Do not redistribute private table payloads.
 
 The readiness file confirms the exact quote preflight and listener reachability. The result file separates actual terminal quote requests, simulated authorization sequences, decoded CDRs, reported charge and an idempotent adjustment to the fixture's in-memory synthetic account. A quote alone does not debit the simulated account. A legacy CDR without a charge amount is insufficient to complete the simulated settlement test; no amount is inferred. No result represents processor settlement.

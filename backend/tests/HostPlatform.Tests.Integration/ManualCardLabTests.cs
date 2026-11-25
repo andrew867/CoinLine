@@ -2,14 +2,17 @@ using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
+using System.Security.Cryptography;
 using System.Text.RegularExpressions;
 using HostPlatform.Api.Hosting;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Cards;
 using HostPlatform.Infrastructure.Rating;
+using HostPlatform.Infrastructure.Tables;
 using HostPlatform.Infrastructure.Uploads;
 using HostPlatform.Protocols.Dlog;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +48,7 @@ public sealed class ManualCardLabTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(settings.TimeoutSeconds));
         Guid terminalId;
         Guid accountId;
+        PreparedSet? prepared = null;
         await using (var scope = host.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
@@ -77,13 +81,15 @@ public sealed class ManualCardLabTests
             }
             terminalId = terminal.Id;
             test.TerminalId = terminalId;
+            if (!string.IsNullOrWhiteSpace(settings.TablePackageFile))
+                prepared = await PrepareIsolatedTablesAsync(db, terminal, settings, deadline.Token);
         }
 
         // Verify the loopback listener accepts a connection before publishing readiness.
         using (var probe = new TcpClient())
             await probe.ConnectAsync(IPAddress.Loopback, settings.Port, deadline.Token);
         await WriteJson(settings.ReadyFile, new { listening = true, host = "127.0.0.1", settings.Port,
-            settings.TerminalWireId, settings.Destination, quotedUsd = 0.05m, syntheticOnly = true });
+            settings.TerminalWireId, settings.Destination, quotedUsd = 0.05m, syntheticOnly = true, prepared });
 
         // This test reports only the isolated synthetic ledger. A quote is not a settlement.
         var settled = new HashSet<ushort>();
@@ -91,6 +97,8 @@ public sealed class ManualCardLabTests
         {
             await using var scope = host.Services.CreateAsyncScope();
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var batches = await db.DownloadBatches.AsNoTracking().Include(row => row.Items)
+                .Where(row => row.TerminalId == terminalId).ToListAsync(deadline.Token);
             var quotes = await db.CallRecords.AsNoTracking().Include(row => row.Results)
                 .Where(row => row.TerminalId == terminalId).ToListAsync(deadline.Token);
             var uploads = await db.UploadBatches.AsNoTracking().Include(row => row.Records)
@@ -121,6 +129,8 @@ public sealed class ManualCardLabTests
             var snapshot = new
             {
                 syntheticOnly = true, settings.Destination, quoteObserved, simulatedAccountBalanceUsd = account.Balance,
+                downloads = batches.Select(batch => new { batch.Status, total = batch.Items.Count,
+                    acknowledged = batch.Items.Count(item => item.Succeeded), batch.LastError }).ToArray(),
                 quotes = quotes.Select(row => new { row.DialedDigits, amountsUsd = row.Results.Select(result => result.Amount).ToArray() }).ToArray(),
                 denied = test.DeniedCount,
                 approvedAuthorizationSequences = test.ApprovedCallSequences.Order().ToArray(),
@@ -166,9 +176,103 @@ public sealed class ManualCardLabTests
         Assert.Single(provider.ApprovedCallSequences);
     }
 
+    private sealed record LabRecord(int Number, string Name, int SortOrder, int? Dependency, string Sha256, string PayloadBase64);
+    private sealed record PreparedSet(Guid TableSetId, int Records, int[] ChangedRecordNumbers);
+
+    private static async Task<PreparedSet> PrepareIsolatedTablesAsync(HostPlatformDbContext db, Terminal terminal,
+        LabSettings settings, CancellationToken ct)
+    {
+        var records = JsonSerializer.Deserialize<LabRecord[]>(await File.ReadAllTextAsync(settings.TablePackageFile!, ct), Json)
+            ?? throw new InvalidOperationException("Synthetic table package is missing.");
+        var expected = new[] { 21, 26, 31, 50, 62, 72, 73, 92, 93, 134, 135, 136 };
+        if (!records.OrderBy(record => record.SortOrder).Select(record => record.Number).SequenceEqual(expected))
+            throw new InvalidOperationException("The isolated baseline must contain exactly the twelve standard Multi-pay records.");
+        var profile = FirmwareTableProfiles.Find(FirmwareTableProfiles.LaterMultiPay180)!;
+        var payloads = new Dictionary<int, byte[]>();
+        foreach (var record in records)
+        {
+            var payload = Convert.FromBase64String(record.PayloadBase64);
+            if (payload.Length != profile.VerifiedLengths[record.Number] || payload[0] != record.Number
+                || !Convert.ToHexString(SHA256.HashData(payload)).Equals(record.Sha256, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException($"Synthetic baseline MT{record.Number} did not match its profile or saved hash.");
+            payloads.Add(record.Number, payload);
+        }
+        var access = NativeTableLayouts.Find(21, payloads[21], profile.LayoutFor(21))!;
+        var accessField = access.Sections.SelectMany(section => section.Fields).Single(field => field.Key == "terminalNumber");
+        if (accessField.Read(payloads[21]) != settings.TerminalWireId)
+            throw new InvalidOperationException("The synthetic baseline access record is for a different wire ID.");
+
+        // Use the normal native editor for one unused tariff and two empty screening slots.
+        // No source table is changed, and all bytes beyond those selected fields are preserved.
+        var rates = NativeTableLayouts.Find(73, payloads[73], profile.LayoutFor(73))!;
+        var rateFields = rates.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key);
+        if (rateFields["rate-127.classification"].Read(payloads[73]) != "0")
+            throw new InvalidOperationException("The candidate synthetic tariff is no longer the expected unused slot.");
+        var screening = NativeTableLayouts.Find(92, payloads[92], profile.LayoutFor(92))!;
+        var screenFields = screening.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key);
+        foreach (var slot in new[] { 1, 2 })
+            if (!string.IsNullOrEmpty(screenFields[$"rule-{slot}.pattern"].Read(payloads[92])))
+                throw new InvalidOperationException("A required synthetic test route slot is not empty.");
+        if (screening.Sections.Any(section => section.Fields.FirstOrDefault(field => field.Key.EndsWith(".pattern")) is { } pattern
+                && !string.IsNullOrEmpty(pattern.Read(payloads[92]))
+                && section.Fields.FirstOrDefault(field => field.Key.EndsWith(".rate"))?.Read(payloads[92]) == "127"))
+            throw new InvalidOperationException("The synthetic tariff slot is referenced by an existing screening rule.");
+        var changes = new Dictionary<string, string>();
+        foreach (var (slot, pattern) in new[] { (1, settings.Destination), (2, "1" + settings.Destination) })
+        {
+            var prefix = $"rule-{slot}.";
+            changes[prefix + "pattern"] = pattern;
+            changes[prefix + "wildcards"] = "0";
+            changes[prefix + "classification"] = "5";
+            changes[prefix + "payment"] = "4";
+            changes[prefix + "rate"] = "127";
+            changes[prefix + "answer"] = "true";
+            changes[prefix + "targetCdr"] = "true";
+            foreach (var flag in new[] { "free", "carrier", "fallback", "mute", "preDialDelay", "coinException", "featureGroupB",
+                "denyModemData", "denyDataPort", "restrictedAccess", "translated" })
+                changes[prefix + flag] = "false";
+        }
+        Assert.Equal(payloads[92], screening.Apply(payloads[92], new Dictionary<string, string>()));
+        Assert.Equal(payloads[73], rates.Apply(payloads[73], new Dictionary<string, string>()));
+        payloads[92] = screening.Apply(payloads[92], changes);
+        payloads[73] = rates.Apply(payloads[73], new Dictionary<string, string>
+        {
+            ["rate-127.classification"] = "7", ["rate-127.initialPeriod"] = "60", ["rate-127.initialCharge"] = "5",
+            ["rate-127.additionalPeriod"] = "60", ["rate-127.additionalCharge"] = "5"
+        });
+
+        var changed = records.Where(record => !Convert.ToHexString(SHA256.HashData(payloads[record.Number]))
+            .Equals(record.Sha256, StringComparison.OrdinalIgnoreCase)).Select(record => record.Number).Order().ToArray();
+        Assert.Equal(new[] { 73, 92 }, changed);
+        foreach (var change in changes)
+            Assert.Equal(change.Value, screenFields[change.Key].Read(payloads[92]));
+        Assert.Equal("7", rateFields["rate-127.classification"].Read(payloads[73]));
+        var firmware = new FirmwareVersion { Label = "Later Multi-pay synthetic lab", TableProfileId = profile.Id };
+        terminal.FirmwareVersionId = firmware.Id;
+        var set = new TableSet { Name = "Isolated synthetic card bench", TargetFirmwareVersionId = firmware.Id };
+        var definitions = records.ToDictionary(record => record.Number, record => new TableDefinition
+            { TableNumber = record.Number, Name = $"Synthetic baseline MT{record.Number}" });
+        db.AddRange(firmware, set);
+        db.TableDefinitions.AddRange(definitions.Values);
+        await db.SaveChangesAsync(ct);
+        var tables = new TableDistributionService(db);
+        foreach (var record in records)
+            await tables.UpsertVersionAsync(set.Id, definitions[record.Number].Id, record.Number is 73 or 92 ? 2 : 1,
+                payloads[record.Number], record.SortOrder, record.Dependency is { } dep ? definitions[dep].Id : null, ct);
+        await tables.PublishTableSetAsync(set.Id, ct);
+        await tables.AssignTableSetAsync(terminal.Id, set.Id, null, null, ct);
+        var saved = await db.TableVersions.Include(row => row.TableDefinition).Include(row => row.TablePayload)
+            .Where(row => row.TableSetId == set.Id).ToListAsync(ct);
+        if (saved.Count != expected.Length || saved.Any(row => !TableDistributionService.GetEffectivePayload(row)
+                .AsSpan().SequenceEqual(payloads[row.TableDefinition!.TableNumber])))
+            throw new InvalidOperationException("Isolated table set readback did not match the prepared records.");
+        return new PreparedSet(set.Id, expected.Length, changed);
+    }
+
     private static Task WriteJson(string path, object value) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(value, Json));
 
-    private sealed record LabSettings(string TerminalWireId, string Destination, int Port, int TimeoutSeconds, string ReadyFile, string ResultFile)
+    private sealed record LabSettings(string TerminalWireId, string Destination, int Port, int TimeoutSeconds, string ReadyFile, string ResultFile,
+        string? TablePackageFile = null)
     {
         public void Validate()
         {
