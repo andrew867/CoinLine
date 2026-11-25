@@ -4,6 +4,21 @@ namespace HostPlatform.Tests.Unit;
 
 public sealed class DisplayFeaturePreservationTests
 {
+    [Fact]
+    public void Active_language_swap_changes_only_the_scrolling_nibbles()
+    {
+        var record = Enumerable.Repeat((byte)0x5A, 72).ToArray();
+        record[0] = 26; record[10] = 0x21; record[11] = 0xF3; record[12] = 0xA2;
+        var layout = NativeTableLayouts.Find(26, record, NativeTableLayouts.Later)!;
+        var original = new Dictionary<string, string> { ["languageFirst"] = "1", ["languageSecond"] = "2" };
+        var swapped = new Dictionary<string, string> { ["languageFirst"] = "2", ["languageSecond"] = "1" };
+        Assert.Equal(record, layout.Apply(record, original));
+        var expected = record.ToArray(); expected[10] = 0x12;
+        Assert.Equal(expected, layout.Apply(record, swapped));
+        Assert.Equal(expected, layout.Apply(expected, swapped));
+        Assert.Equal(record, layout.Apply(expected, original));
+    }
+
     [Theory]
     [InlineData(NativeTableLayouts.MultiPay, false)]
     [InlineData(NativeTableLayouts.Later, true)]

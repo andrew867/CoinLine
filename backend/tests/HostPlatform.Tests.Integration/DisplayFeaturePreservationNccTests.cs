@@ -43,13 +43,20 @@ internal static class DisplayFeatureFixture
 public sealed class DisplayFeaturePreservationNccTests(NccListenFixture fx) : IClassFixture<NccListenFixture>
 {
     [Theory]
-    [InlineData(FirmwareTableProfiles.MultiPay200)]
-    [InlineData(FirmwareTableProfiles.LaterMultiPay180)]
-    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180)]
-    public async Task Selected_display_options_deliver_only_expected_bytes_on_original_batch(string profile)
+    [InlineData(FirmwareTableProfiles.MultiPay200, false)]
+    [InlineData(FirmwareTableProfiles.LaterMultiPay180, false)]
+    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180, false)]
+    [InlineData(FirmwareTableProfiles.LaterMultiPay180, true)]
+    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180, true)]
+    public async Task Selected_display_options_deliver_only_expected_bytes_on_original_batch(string profile, bool languageSwap)
     {
         var wire = Convert.FromHexString(Guid.NewGuid().ToString("N")[..10]);
-        var record = DisplayFeatureFixture.Record(profile); var expected = DisplayFeatureFixture.Expected(profile, record);
+        var record = DisplayFeatureFixture.Record(profile);
+        if (languageSwap) record[11] = 0xF3;
+        var expected = languageSwap ? record.ToArray() : DisplayFeatureFixture.Expected(profile, record);
+        if (languageSwap) expected[10] = 0x12;
+        var changes = languageSwap ? new Dictionary<string, string> { ["languageFirst"] = "2", ["languageSecond"] = "1" }
+            : DisplayFeatureFixture.Changes(profile);
         var definition = new TableDefinition { Name = "Synthetic display options", TableNumber = 26 };
         var firmware = new FirmwareVersion { Label = "Synthetic display target", TableProfileId = profile };
         var set = new TableSet { Name = "Synthetic display configuration", TargetFirmwareVersionId = firmware.Id };
@@ -71,7 +78,7 @@ public sealed class DisplayFeaturePreservationNccTests(NccListenFixture fx) : IC
         var read = await fx.Client.GetFromJsonAsync<JsonElement>(path);
         using (var saved = await fx.Client.PutAsJsonAsync(path, new { revision = read.GetProperty("revision").GetInt32(),
             sha256 = read.GetProperty("sha256").GetString(), profile = read.GetProperty("profile").GetString(),
-            changes = DisplayFeatureFixture.Changes(profile) })) saved.EnsureSuccessStatusCode();
+            changes })) saved.EnsureSuccessStatusCode();
         using (var published = await fx.Client.PostAsync($"/api/tables/sets/{set.Id}/publish?confirm=true", null)) published.EnsureSuccessStatusCode();
         using var queued = await fx.Client.PostAsJsonAsync($"/api/terminals/{phoneId}/downloads", new
         { tableSetId = set.Id, scope = "Partial", partialTableDefinitionIds = new[] { definition.Id } });
@@ -131,7 +138,9 @@ public sealed class PostgresDisplayFeaturePreservationTests
         using var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-API-Key", key);
         foreach (var profile in new[] { FirmwareTableProfiles.MultiPay200, FirmwareTableProfiles.LaterMultiPay180, FirmwareTableProfiles.GraphicalMultiPay180 })
         {
-            var input = DisplayFeatureFixture.Record(profile); var expected = DisplayFeatureFixture.Expected(profile, input);
+            var input = DisplayFeatureFixture.Record(profile);
+            if (DisplayFeatureFixture.Later(profile)) input[11] = 0xF3;
+            var expected = DisplayFeatureFixture.Expected(profile, input);
             var definition = new TableDefinition { Name = "Synthetic display options", TableNumber = 26 };
             var firmware = new FirmwareVersion { Label = "Synthetic display target", TableProfileId = profile };
             var set = new TableSet { Name = "Synthetic display configuration", TargetFirmwareVersionId = firmware.Id };
@@ -148,11 +157,24 @@ public sealed class PostgresDisplayFeaturePreservationTests
             var unchanged = new Dictionary<string,string> { ["flashServiceLevel"] = "false", ["displayNumber"] = "true" };
             if (DisplayFeatureFixture.Later(profile)) { Assert.Equal("2", fields["languageCount"].GetProperty("value").GetString()); unchanged["languageCount"] = "2"; }
             using (var saved = await Save(snapshot, unchanged)) saved.EnsureSuccessStatusCode(); await Check(input, 1);
+            var currentRevision = 1;
+            if (DisplayFeatureFixture.Later(profile))
+            {
+                var swapped = input.ToArray(); swapped[10] = 0x12;
+                var changes = new Dictionary<string, string> { ["languageFirst"] = "2", ["languageSecond"] = "1" };
+                using (var moved = await Save(snapshot, changes)) moved.EnsureSuccessStatusCode(); await Check(swapped, ++currentRevision);
+                using (var staleMove = await Save(snapshot, changes)) Assert.Equal(HttpStatusCode.Conflict, staleMove.StatusCode);
+                snapshot = await Read();
+                using (var noop = await Save(snapshot, changes)) noop.EnsureSuccessStatusCode(); await Check(swapped, currentRevision);
+                using (var reversed = await Save(snapshot, new() { ["languageFirst"] = "1", ["languageSecond"] = "2" })) reversed.EnsureSuccessStatusCode();
+                await Check(input, ++currentRevision);
+                snapshot = await Read();
+            }
             using (var rejected = await Save(snapshot, new() { ["spare.display.bit1"] = "true" })) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
-            using (var rejected = await Save(snapshot, new() { ["languageCount"] = "5", ["flashServiceLevel"] = "true" })) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode); await Check(input, 1);
-            using (var edited = await Save(snapshot, DisplayFeatureFixture.Changes(profile))) edited.EnsureSuccessStatusCode(); await Check(expected, 2);
+            using (var rejected = await Save(snapshot, new() { ["languageCount"] = "5", ["flashServiceLevel"] = "true" })) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode); await Check(input, currentRevision);
+            using (var edited = await Save(snapshot, DisplayFeatureFixture.Changes(profile))) edited.EnsureSuccessStatusCode(); await Check(expected, ++currentRevision);
             using (var stale = await Save(snapshot, DisplayFeatureFixture.Changes(profile))) Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
-            snapshot = await Read(); using (var saved = await Save(snapshot, DisplayFeatureFixture.Changes(profile))) saved.EnsureSuccessStatusCode(); await Check(expected, 2);
+            snapshot = await Read(); using (var saved = await Save(snapshot, DisplayFeatureFixture.Changes(profile))) saved.EnsureSuccessStatusCode(); await Check(expected, currentRevision);
             using (var published = await client.PostAsync($"/api/tables/sets/{set.Id}/publish?confirm=true", null)) published.EnsureSuccessStatusCode();
 
             Task<JsonElement> Read() => client.GetFromJsonAsync<JsonElement>(path);

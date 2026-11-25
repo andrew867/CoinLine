@@ -17,6 +17,9 @@
 .table-config-panel details { margin-top: 12px; }
 .table-config-panel summary { cursor: pointer; color: #0e604b; font-weight: 650; margin-bottom: 10px; }
 .table-config-panel :is(input, select) { min-width: 0; }
+.language-order-scroll { overflow-x: auto; }
+.language-order-panel caption { text-align: left; font-weight: 650; padding: 8px 0; }
+.language-order-panel .row-actions { flex-wrap: nowrap; }
 .table-config-ads { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 236px), 1fr)); gap: 11px; margin-bottom: 12px; }
 .table-config-ads fieldset { display: grid; gap: 6px; min-inline-size: 0; padding: 10px 12px; border: 1px solid #dce7e1; border-radius: 9px; }
 .table-config-ads legend { color: #39564a; font-size: .88rem; font-weight: 650; padding-inline: 4px; }
