@@ -128,15 +128,9 @@ public sealed class FirmwareController(
                 await transaction.CommitAsync(ct);
             return Ok(new { firmware.Id, firmware.TableProfileId, revision = firmware.Version, changed = true });
         }
-        catch (DbUpdateConcurrencyException)
-        {
-            return Conflict(new { error = "The firmware configuration changed concurrently. Preview the impact again." });
-        }
-        catch (DbUpdateException ex) when (IsSerializationConflict(ex.GetBaseException()))
-        {
-            return Conflict(new { error = "The firmware configuration changed concurrently. Preview the impact again." });
-        }
-        catch (PostgresException ex) when (IsSerializationConflict(ex))
+        // The Npgsql execution strategy can wrap a serialization failure
+        // in an InvalidOperationException as well as a DbUpdateException.
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsSerializationConflict(ex.GetBaseException()))
         {
             return Conflict(new { error = "The firmware configuration changed concurrently. Preview the impact again." });
         }

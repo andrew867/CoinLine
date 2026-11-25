@@ -150,6 +150,24 @@ public sealed class PostgresFirmwareProfileRevisionTests
         var unchanged = await Preview(proposed);
         Assert.False(unchanged.GetProperty("changed").GetBoolean());
         using (var same = await Apply(client, unchanged, proposed)) Assert.Equal(HttpStatusCode.OK, same.StatusCode);
+
+        // The feature record has the same byte length on both layouts,
+        // but interpreting its native fields under the other layout is unsafe.
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var features = new byte[72]; features[0] = 26;
+            var record = CarrierSchedulerSpareFixture.Version(
+                new TableDefinition { Name = "Fixture terminal features", TableNumber = 26 }, features, 2);
+            record.TableSetId = assigned.Id;
+            db.Add(record);
+            await db.SaveChangesAsync();
+        }
+        var sameSize = await Preview(FirmwareTableProfiles.LaterMultiPay180);
+        Assert.False(sameSize.GetProperty("canApply").GetBoolean());
+        Assert.Contains(sameSize.GetProperty("findings").EnumerateArray(), row => row.GetProperty("scope").GetString() == "Assigned sets" &&
+            row.GetProperty("tableNumber").GetInt32() == 26 && row.GetProperty("blocking").GetBoolean() &&
+            row.GetProperty("message").GetString()!.Contains("different native field layout"));
         var clear = await Preview(null);
         Assert.True(clear.GetProperty("canApply").GetBoolean());
         Assert.Contains(clear.GetProperty("findings").EnumerateArray(), row => row.GetProperty("scope").GetString() == "Profile");
