@@ -257,38 +257,46 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
                 || !string.Equals(existing.PayloadSha256Hex, expectedHash, StringComparison.OrdinalIgnoreCase)))
             throw new DbUpdateConcurrencyException("The table changed after the editor loaded it.");
 
-        var (ok, diag) = ValidatePayload(def, rawPayload);
-        var sha = TablePayloadHasher.Sha256Hex(rawPayload);
-        var checksum = SHA256.HashData(rawPayload);
-
-        var payloadRow = new TablePayload
-        {
-            RawContent = rawPayload,
-            Sha256Hex = sha,
-            LengthBytes = rawPayload.Length
-        };
-        db.TablePayloads.Add(payloadRow);
         var version = existing ?? new TableVersion
         {
             TableSetId = tableSetId,
             TableDefinitionId = tableDefinitionId
         };
-        version.TableRevision = tableRevision;
-        version.TablePayload = payloadRow;
-        version.EmbeddedPayload = null;
-        version.PayloadSha256Hex = sha;
+        StagePayload(version, def, tableRevision, rawPayload);
         version.SortOrder = sortOrder;
         version.DependsOnTableDefinitionId = dependsOnTableDefinitionId;
-        version.ValidationPassed = ok;
-        version.ValidationDiagnosticsJson = diag;
         version.ScreeningDescriptionsJson = screeningDescriptionsJson;
         version.ScreeningLayoutProfile = screeningLayoutProfile;
-        version.Checksum = checksum;
         if (existing == null)
             db.TableVersions.Add(version);
         set.Version++;
         await db.SaveChangesAsync(ct);
         return version;
+    }
+
+    /// <summary>Stage a replacement of an existing tracked draft record without saving, so related records can be committed together.</summary>
+    public void StageDraftPayloadReplacement(TableSet set, TableVersion version, byte[] rawPayload)
+    {
+        if (set.Status != TableSetStatus.Draft || version.TableSetId != set.Id || version.TableDefinition == null
+            || db.Entry(set).State == EntityState.Detached || db.Entry(version).State == EntityState.Detached)
+            throw new InvalidOperationException("Choose an existing tracked record in a draft set.");
+        StagePayload(version, version.TableDefinition, version.TableRevision + 1, rawPayload);
+        set.Version++;
+    }
+
+    private void StagePayload(TableVersion version, TableDefinition definition, int revision, byte[] bytes)
+    {
+        var (ok, diagnostics) = ValidatePayload(definition, bytes);
+        var sha = TablePayloadHasher.Sha256Hex(bytes);
+        var payload = new TablePayload { RawContent = bytes, Sha256Hex = sha, LengthBytes = bytes.Length };
+        db.TablePayloads.Add(payload);
+        version.TableRevision = revision;
+        version.TablePayload = payload;
+        version.EmbeddedPayload = null;
+        version.PayloadSha256Hex = sha;
+        version.ValidationPassed = ok;
+        version.ValidationDiagnosticsJson = diagnostics;
+        version.Checksum = SHA256.HashData(bytes);
     }
 
     public void StageRecordCopy(TableSet destination, IReadOnlyList<TableRecordCopyEntry> changes)
