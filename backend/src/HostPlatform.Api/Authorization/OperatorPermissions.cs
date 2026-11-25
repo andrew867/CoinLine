@@ -123,7 +123,7 @@ public static class OperatorPermissions
             ("InmateFeatures", A, "Create"), ("InmateFeatures", U, "Update"), ("InmateFeatures", D, "Delete"));
         Screen("inmate-assignments", "Inmate terminal configuration", ("TerminalInmateConfiguration", R, "Get"),
             ("TerminalInmateConfiguration", U, "Save"));
-        Screen("smartcards", "Smartcard types", ("Smartcards", R, "Types"));
+        Screen("smartcards", "Smartcard types", ("Smartcards", R, "Types Applications"));
         Screen("protocol-tools", "Protocol tools", ("NccProtocol", R, "Decode Encode"), ("NccProtocol", U, "Replay"));
 
         void Screen(string key, string label, params (string Controller, PermissionOperation Operations, string Actions)[] entries)
