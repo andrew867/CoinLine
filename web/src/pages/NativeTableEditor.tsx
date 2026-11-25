@@ -318,6 +318,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const visibleFields = current?.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
     && !controlledScreeningField(field.key)
     && !replacedDiscountFields.has(field.key)
+    && (field.editor !== 'screen-icon' || !current.fields.some(item => item.key === `${field.key}Id`))
     && ((number !== 35 && number !== 94) || !field.key.startsWith('start.'))
     && (number !== 35 || !field.key.startsWith('adjust.'))
     && (number !== 152 || !/^period-\d+\.(local|intra|inter|international)$/.test(field.key))) ?? []
@@ -464,6 +465,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!canEdit || busy}>
           <legend>{current.label}</legend>
+          {(number === 132 || number === 133) && current.key === 'rotation' && <p className="page-intro">
+            This record retains its own header bytes. The verified graphical terminal uses MT131 to control rotation for all 24 screens.
+          </p>}
           {screeningSlot != null && layout.screening && <ScreeningSlotActions key={current.key} slot={screeningSlot}
             action={screeningActions[screeningSlot]}
             description={screeningDescriptions[screeningSlot] ?? layout.screening.descriptions[screeningSlot] ?? ''}
