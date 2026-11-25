@@ -14,6 +14,7 @@ import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
+import { CardSequencePanel } from './CardSequencePanel'
 
 type Field = {
   key: string
@@ -318,6 +319,16 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         {!layout.editable && <span>Published record</span>}
         {layout.editable && !canEdit && <span>Read-only access</span>}
       </header>
+      {(number === 22 || number === 134) && <CardSequencePanel setId={setId} number={number} revision={layout.revision}
+        sha256={layout.sha256} editable={canEdit} dirty={changed > 0} busy={busy} onBusyChange={setBusy}
+        labels={Object.fromEntries(layout.sections.filter(section => /^card-\d+$/.test(section.key)).map(section => {
+          const low = keyValue(section, 'start'), high = keyValue(section, 'end')
+          return [Number(section.key.slice(5)) + 1, low && high ? `${low} to ${high}` : '']
+        }))} onReload={() => { setLayout(null); setReload(count => count + 1); onSaved() }}
+        onMoved={(to, carrierChanged) => {
+          setMessage(`Card entry moved to position ${to}.${carrierChanged ? ' Matching carrier acceptance was updated.' : ' Carrier acceptance was unchanged.'}`)
+          setSectionKey(`card-${to - 1}`); setSearch(''); setLayout(null); setReload(count => count + 1); onSaved()
+        }} />}
       {number >= 131 && number <= 133 && (
         <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />
       )}

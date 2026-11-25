@@ -60,6 +60,7 @@ public static class OperatorPermissions
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
+            ("CardSequence", R, "Get"), ("CardSequence", U, "Move"),
             ("GraphicalStarter", A, "Create"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),
             ("Tables", R, "ScopeOptions"), ("Tables", U, "ScopeOptions"));

@@ -23,6 +23,8 @@
 | GET | `/api/tables/sets/{id}/records/{number}/fields` | Read editable fields for a known wire profile |
 | POST | `/api/tables/sets/{id}/records/{number}/fields` | Start an optional record from a supported inactive template |
 | PUT | `/api/tables/sets/{id}/records/{number}/fields` | Update selected fields on a draft |
+| GET | `/api/tables/sets/{id}/records/{number}/card-sequence` | Inspect card positions and the observed card/carrier record revisions (MT22 or MT134) |
+| POST | `/api/tables/sets/{id}/records/{number}/card-sequence` | Move a configured card into a blank position and update any affected carrier bits in the same draft save |
 | POST | `/api/tables/sets/{id}/publish` | Publish (**confirm**) |
 | GET | `/api/tables/sets/{id}/assignment-preview` | Preview eligible phones for the requested scope and record selection |
 | POST | `/api/tables/sets/{id}/assignments` | Apply a published set to the eligible phones confirmed by the preview |
@@ -56,6 +58,8 @@ Each advertising slot has `text`, `durationTicks`, `mode`, `blankBefore` and `en
 The schedule request takes the same selection plus `availableAtUtc`, either an ISO 8601 date and time with its offset or null for immediate availability. Each phone can have one open scheduled download. A call-in can pick up the set once it is available. Failed attempts remain ready for the next call. The existing assignment stays effective until the terminal acknowledges the scheduled download. An operator assignment made during delivery takes precedence.
 
 Field updates include the `revision`, `sha256`, `profile` and a `changes` object keyed by field ID. The API rejects stale revisions and leaves bytes outside the changed fields intact. For matching layouts with the same size, pass `profile` in the read query.
+
+The card sequence GET returns `available`, `editable`, a one-based `slots` list with `blank` and `movable` flags, `carrierNumber`, and `cards` and `carriers` stamps containing `revision` and `sha256`. For POST, send distinct one-based `from` and `to` positions and both observed stamps. The destination must be blank. A matching complete carrier record is required. The response contains the updated stamps and `carrierChanged`; when no bitmap bits change, the carrier keeps its original revision. HTTP 409 indicates that either record is stale or missing, or the set has been published. Invalid positions or layouts return HTTP 400. Get requires Table records Read; move requires Table records Update. This is a draft edit, not a queued download.
 
 MT55 offers a 571-byte template for each editor profile. Field IDs use zero-based `key-{row}` prefixes. `customerReference` is a four-byte unsigned value and the `rate` byte carries the tariff index or carrier reference according to the key flags. To clear keys, include `clearQuickAccessKeys` with distinct one-based slots from 1 through 10. Save edits to other slots in the same request. The API rejects an edit and a clear for the same slot.
 
