@@ -21,6 +21,37 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
     public static string ComputePayloadSha256Hex(TableVersion v) =>
         TablePayloadHasher.Sha256Hex(GetEffectivePayload(v));
 
+    public async Task<FirmwareTableProfile?> FindInstalledProfileAsync(Guid? firmwareId, CancellationToken ct)
+    {
+        if (firmwareId == null)
+            return null;
+        return FirmwareTableProfiles.Find(await db.FirmwareVersions.AsNoTracking().Where(row => row.Id == firmwareId)
+            .Select(row => row.TableProfileId).SingleOrDefaultAsync(ct));
+    }
+
+    // Full-set previews need only actual record sizes and layout stamps, not
+    // their binary contents. Normalized payloads take precedence over inline bytes.
+    public async Task<Dictionary<Guid, TableRecordShape[]>> ReadRecordShapesAsync(Guid[] setIds, CancellationToken ct)
+    {
+        var records = await db.TableVersions.AsNoTracking()
+            .Where(row => setIds.Contains(row.TableSetId) && row.TableDefinition != null)
+            .Select(row => new { row.TableSetId, row.TableDefinition!.TableNumber,
+                Length = row.TablePayload != null ? row.TablePayload.RawContent.Length
+                    : row.EmbeddedPayload != null ? row.EmbeddedPayload.Length : 0,
+                row.ScreeningLayoutProfile }).ToListAsync(ct);
+        return records.GroupBy(row => row.TableSetId).ToDictionary(group => group.Key,
+            group => group.Select(row => new TableRecordShape(row.TableNumber, row.Length, row.ScreeningLayoutProfile)).ToArray());
+    }
+
+    private async Task<string?> FullSetProfileIssueAsync(Guid setId, Guid? firmwareId, CancellationToken ct)
+    {
+        var profile = await FindInstalledProfileAsync(firmwareId, ct);
+        if (profile == null)
+            return null;
+        var records = await ReadRecordShapesAsync([setId], ct);
+        return TableSetFirmwareCompatibility.SelectionIssue(profile, records.GetValueOrDefault(setId) ?? []);
+    }
+
     public static TableVersion CopyVersion(TableVersion source) => new()
     {
         TableDefinitionId = source.TableDefinitionId,
@@ -472,6 +503,14 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             throw new InvalidOperationException(ex.Message, ex);
         }
 
+        // A previous or automated NCC pickup may still need a persisted failed
+        // batch for its wire rejection. The operator queue is checked before it
+        // creates anything, and NCC checks stored items again at pickup.
+        if (nccSessionId == null && TableSetFirmwareCompatibility.SelectionIssue(
+            await FindInstalledProfileAsync(terminal.FirmwareVersionId, ct),
+            TableSetFirmwareCompatibility.Shapes(ordered)) is { } profileIssue)
+            throw new InvalidOperationException(profileIssue);
+
         return (StageDownloadBatch(terminalId, tableSetId, ordered, scope, partialDefinitionIds,
             trimmedKey, nccSessionId, retryCount), false);
     }
@@ -506,6 +545,9 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         var access = records.Where(record => record.TableDefinition!.TableNumber == 21).ToArray();
         if (AccessRecordIssue(access, terminal.TerminalIdHex) is { } identityIssue)
             throw new InvalidOperationException(identityIssue);
+        if (TableSetFirmwareCompatibility.SelectionIssue(await FindInstalledProfileAsync(terminal.FirmwareVersionId, ct),
+            TableSetFirmwareCompatibility.Shapes(records)) is { } profileIssue)
+            throw new InvalidOperationException(profileIssue);
         return records;
     }
 
@@ -642,6 +684,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         CheckFirmwareTarget(set, terminal.FirmwareVersionId);
         if (await FindCodeOnlyVersionAsync(tableSetId, ct) != null)
             throw new InvalidOperationException("Use the call-in scheduler for a set that contains only MT94.");
+        if (await FullSetProfileIssueAsync(tableSetId, terminal.FirmwareVersionId, ct) is { } profileIssue)
+            throw new InvalidOperationException(profileIssue);
 
         var existing = await db.TerminalTableAssignments.FirstOrDefaultAsync(a => a.TerminalId == terminalId, ct);
         if (existing != null)
@@ -681,6 +725,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
             throw new InvalidOperationException("No previous table set recorded for rollback.");
         if (a.PreviousTableSet != null)
             CheckFirmwareTarget(a.PreviousTableSet, a.Terminal?.FirmwareVersionId);
+        if (await FullSetProfileIssueAsync(prev, a.Terminal?.FirmwareVersionId, ct) is { } profileIssue)
+            throw new InvalidOperationException(profileIssue);
 
         var cur = a.TableSetId;
         a.TableSetId = prev;
@@ -705,6 +751,8 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         var terminal = await db.Terminals.AsNoTracking().Where(t => t.Id == schedule.TerminalId)
             .Select(t => new { t.SiteId, t.Site!.CustomerId, t.FirmwareVersionId }).SingleAsync(ct);
         if (schedule.TableSet != null && TableSetFirmwareCompatibility.Mismatch(schedule.TableSet, terminal.FirmwareVersionId) != null)
+            return;
+        if (await FullSetProfileIssueAsync(schedule.TableSetId, terminal.FirmwareVersionId, ct) != null)
             return;
         var assignment = await db.TerminalTableAssignments.SingleOrDefaultAsync(a => a.TerminalId == schedule.TerminalId, ct);
         // Leave a newer operator choice in place if it changed while these bytes were in flight.

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiFetch, apiPostBareCreated, apiPostBareOk } from '../api/client'
+import { apiFetch, apiPostBare, apiPostBareOk } from '../api/client'
 
 
 type Step = {
@@ -99,7 +99,9 @@ export function DownloadDetail() {
       return
     setErr(null)
     try {
-      const j = await apiPostBareCreated<{ id: string }>(`/api/downloads/${id}/retry`, { confirm: true })
+      const response = await apiPostBare(`/api/downloads/${id}/retry`, { confirm: true })
+      const j = await response.json().catch(() => null)
+      if (!response.ok) throw new Error(j?.error ?? `Could not retry the download (HTTP ${response.status}).`)
       window.location.href = `/downloads/${j.id}`
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'error')

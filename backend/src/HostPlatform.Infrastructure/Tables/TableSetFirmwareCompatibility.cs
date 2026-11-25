@@ -4,6 +4,7 @@ using HostPlatform.Protocols.Tables;
 namespace HostPlatform.Infrastructure.Tables;
 
 public sealed record TableFirmwareFinding(int TableNumber, bool Blocking, string Message);
+public sealed record TableRecordShape(int TableNumber, int Length, string? ConfirmedLayout);
 
 public static class TableSetFirmwareCompatibility
 {
@@ -161,6 +162,28 @@ public static class TableSetFirmwareCompatibility
             return length != expected
                 ? $"The selected firmware uses {expected:N0} bytes. The record has {length:N0}." : null;
         return profile.CompleteCatalogue ? "This record type is absent from the selected firmware catalogue." : null;
+    }
+
+    public static IEnumerable<TableRecordShape> Shapes(IEnumerable<TableVersion> records) =>
+        records.Where(record => record.TableDefinition != null).Select(record => new TableRecordShape(
+            record.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(record).Length,
+            record.ScreeningLayoutProfile));
+
+    // Unknown or incomplete profiles do not prove that an unlisted record is
+    // unsupported. Reject only contradictions with the known installed profile.
+    public static string? SelectionIssue(FirmwareTableProfile? profile, IEnumerable<TableRecordShape> records)
+    {
+        if (profile == null)
+            return null;
+        foreach (var record in records.OrderBy(record => record.TableNumber))
+        {
+            if (RecordIssue(profile, record.TableNumber, record.Length) is { } issue)
+                return $"MT{record.TableNumber}. {issue}";
+            if (record.ConfirmedLayout != null && profile.VerifiedLengths.ContainsKey(record.TableNumber)
+                && profile.LayoutFor(record.TableNumber) is { } expected && record.ConfirmedLayout != expected)
+                return $"MT{record.TableNumber}. The confirmed record layout differs from the phone's registered firmware layout.";
+        }
+        return null;
     }
 
     private static IReadOnlyList<TableFirmwareFinding> ReviewServiceScreening(IReadOnlyDictionary<int, byte[]> records, bool later)

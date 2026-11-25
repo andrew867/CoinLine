@@ -138,7 +138,7 @@ export function DownloadsPage() {
         Create a batch for one phone’s next call-in. To set a time or target a group, schedule delivery from a published
         set under <Link to="/table-sets">Table sets</Link>.
       </p>
-      {err && <p style={{ color: 'crimson' }}>{err}</p>}
+      {err && <p role="alert" style={{ color: 'crimson' }}>{err}</p>}
       <TableDownloadScheduleList terminalId={preTerm || undefined} />
       {terms && terms.length === 0 && (
         <p style={{ color: '#666' }}>
