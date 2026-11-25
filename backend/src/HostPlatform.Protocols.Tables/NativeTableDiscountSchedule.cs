@@ -36,9 +36,11 @@ public static partial class NativeTableLayouts
                         TableFieldEncoding.Bits, Mask: 0x0F, Choices: discounts));
                     fields.Add(Bits($"{fieldKey}Payment", $"{zoneLabel} payment", position, 0x30,
                         (0, "Disabled"), (1, "Coins"), (2, "Cards"), (3, "Coins and cards")));
+                    fields.AddRange(SpareFlags($"{fieldKey}.spare.flags", $"{zoneLabel} discount flags", position, 0xC0));
                 }
                 return fields.ToArray();
-            })
+            }),
+            Section("reserved", "Reserved configuration", SpareBytes("spare", 85, 10))
         ];
     }
 

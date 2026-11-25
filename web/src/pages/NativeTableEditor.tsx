@@ -261,6 +261,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           {layout.profiles.map((option) => <option key={option} value={option}>{option}</option>)}
         </select>
       </label>}
+      {number === 50 && canInitialize && !!layout.templates?.length && <p className="page-intro">
+        A new coin record starts with all validator windows and acceptance disabled. Configure the installed validator's coin values, volumes and capacity thresholds before placing the record into service.
+      </p>}
       {canInitialize && layout.templates?.map((template) => (
         <button key={`${template.profile}:${template.length}`} type="button" disabled={busy} onClick={() => void initialize(template)}>
           Start record for {template.profile}{template.screeningSlots != null ? ` (${template.screeningSlots} wire slots)` : ''}

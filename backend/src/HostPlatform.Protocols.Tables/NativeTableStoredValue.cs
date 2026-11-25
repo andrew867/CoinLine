@@ -61,6 +61,9 @@ public static partial class NativeTableLayouts
                 new($"{key}.multiplier", "Unit multiplier", offset, BigEndianBits, Mask: 3,
                     Choices: [new(0, "1"), new(1, "5"), new(2, "10"), new(3, "25")])];
         }));
+        if (later)
+            sections.Add(Section("discount-reserved", "Discount rate reserved configuration", SpareBytes("spare.discount", 75, 6)));
+        sections.Add(Section("reserved", "Reserved configuration", SpareBytes("spare", later ? 191 : 195, later ? 34 : 30)));
         sections.Add(Section("stored-value-keys", "Encoded validation keys", Enumerable.Range(0, later ? 8 : 16)
             .Select(index => EncodedKey($"validation-key-{index}", $"Encoded validation key slot {index}", 1 + index * 8)).ToArray()));
         return sections.ToArray();

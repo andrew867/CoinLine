@@ -56,7 +56,7 @@ public static partial class NativeTableLayouts
         if (number == AnswerSupervisionRecord)
             return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
         return IsLocalDialingRecord(number) || CallScreeningWire.IsRecord(number)
-            || number is 22 or 23 or CollectionPolicyWire.CommunicationsType or CollectionPolicyWire.CallCarrierType or CallInRecord or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
+            || number is 22 or 23 or CollectionPolicyWire.CommunicationsType or CollectionPolicyWire.CallCarrierType or CallInRecord or 50 or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
             or SpareTableWire.MessageType or 73 or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or >= 150 and <= 152
             ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
             : [];
@@ -139,17 +139,19 @@ public static partial class NativeTableLayouts
                 Field("adjust.year", "Calendar year offset from 1900", 13), .. DateTimeFields("adjust", 13).Skip(1),
                 Field("adjustment", "Time adjustment (signed seconds)", 19, SignedWord)]));
 
-        yield return Layout(50, 105, [Section("cash", "Cash box and escrow",
+        yield return Layout(50, 105, [Section("cash", "Cash box and escrow", [
             Field("cashBoxVolume", "Cash box capacity", 81, Word), Field("escrowVolume", "Escrow capacity", 83, Word),
             Field("cashBoxThreshold", "Cash box volume threshold", 85, Word),
             Field("cashBoxValue", "Cash box value threshold (cents)", 87, SignedLong, min: 0),
             Field("escrowVolumeThreshold", "Escrow volume threshold", 91, Word),
-            Field("escrowValue", "Escrow value threshold (cents)", 93, SignedLong, min: 0)),
+            Field("escrowValue", "Escrow value threshold (cents)", 93, SignedLong, min: 0),
+            .. SpareBytes("spare", 97, 8)]),
             .. Rows("coin", 16, i => $"Coin slot {i + 1}", (i, key) =>
                 [Field($"{key}.value", "Coin value (cents)", 1 + i * 2, SignedWord, min: 0),
                  Field($"{key}.volume", "Coin volume", 33 + i * 2, Word),
                  Toggle($"{key}.window", "Enable validator window", 65 + i, 1),
-                 Toggle($"{key}.accepted", "Accept coin", 65 + i, 2)])]);
+                 Toggle($"{key}.accepted", "Accept coin", 65 + i, 2),
+                 .. SpareFlags($"{key}.spare.flags", "Coin validator flags", 65 + i, 0xFC)])]);
 
         yield return QuickAccessLayout(later: false);
         yield return QuickAccessLayout(later: true);

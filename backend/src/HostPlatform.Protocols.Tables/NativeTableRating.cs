@@ -29,7 +29,8 @@ public static partial class NativeTableLayouts
         return
         [
             Section("effective", "Tariff effective date",
-                [.. DateTimeFields("effective", 1), Field("telco", "Rate owner code", 7)]),
+                [.. DateTimeFields("effective", 1), Field("telco", "Rate owner code", 7),
+                 .. SpareBytes("spare", 8, 32)]),
             .. Rows("rate", TariffRows, i => $"Rate {i}", (i, key) =>
             {
                 var offset = TariffHeaderLength + i * TariffRowLength;
@@ -44,11 +45,13 @@ public static partial class NativeTableLayouts
 
     private static NativeTableSection[] InternationalRating() =>
     [
-        Section("default", "International fallback",
+        Section("default", "International fallback", [
             Bits("noMatch", "When no destination matches", 1, 3,
                 (0, "Ask CoinLine"), (1, "Use default rate"), (2, "Reject the call"), (3, "Reject the call (alternate encoding)")),
             new NativeTableField("fallback", "Default rate", 2, Maximum: 99, TariffIndexOffset: InternationalRatingOffset,
-                Help: "Used when the fallback is set to Use default rate.")),
+                Help: "Used when the fallback is set to Use default rate."),
+            .. SpareFlags("spare.fallback", "Fallback flags", 1, 0xFC),
+            SpareByte("spare.byte1", "Spare byte", 3)]),
         .. Rows("country", 200, i => $"Destination {i + 1}", (i, key) =>
             [Field($"{key}.country", "Country or destination prefix", 4 + i * 3, Word,
                 help: "Enter the numeric prefix after the international access digits. Zero leaves the slot unused."),

@@ -75,10 +75,17 @@ The field schema includes `isSpare` for a typed reserved control and `displayGly
 | MT33 | Older unsigned `spare.timer` at offsets 12 and 13; later `answerRemovalDelay` uses those same bytes as an assigned parameter. Both layouts expose `spare.general.bit{bit}` at 33 (mask `0xFC`) and `spare.answer.bit{bit}` at 34 (mask `0xF1`). |
 | MT34 | `spare.policy.bit5` (older only), `bit6` and `bit7`, policy byte 13. Later bit 5 is an assigned carrier collection setting. |
 | MT49, 263-byte layout only | `pattern-{slot}.spare.byte1` and `byte2` at row offsets 12 and 13; `spare.byte1` through `byte32` at absolute offsets 231 through 262. |
+| MT50 | `coin-{slot}.spare.flags.bit{bit}` at absolute offset 65 plus slot, mask `0xFC`; `spare.byte1` through `byte8` at 97 through 104. Validator-window and acceptance bits are independent. |
 | MT55 | `key-{slot}.spare.variant.bit{bit}` and `key-{slot}.spare.flags.bit{bit}` at row-relative offsets 55 and 56. Older spare masks are `0xF7` and `0xBE`; later masks are `0xF0` and `0xFE`. Older `key-{slot}.messageKey` uses offset 56 mask `0x40`, and Clear resets it. Both upper/lower fields use Western display glyphs. |
 | MT58 | `spare.byte1` through `spare.byte20`, at absolute offsets 6 through 25. |
+| MT73 | `spare.byte1` through `byte32` at absolute offsets 8 through 39, both verified profiles. |
 | MT92, verified 200- and 180-slot layouts | `rule-{slot}.spare.identifierHigh` at row offset 12; `rule-{slot}.spare.identifier.bit{bit}` at offset 13 (older mask `0xFC`, later `0xA0`); `rule-{slot}.spare.byte1` through `byte3` at offsets 14 through 16. Later `rule-{slot}.pds` is assigned at offset 13 mask `0x10`, and Delete clears that bit. |
+| MT93 | Older: `spare.byte1` through `byte30` at 195 through 224. Later: `spare.discount.byte1` through `byte6` at 75 through 80; `spare.byte1` through `byte34` at 191 through 224. The encoded validation fields stay write-only. |
 | MT95 | `promotion-{slot}.usageThreshold` occupies mask `0x30` at row offset 1, codes 0 disabled, 1 at least 25% used, 2 at least 50% used, 3 at least 75% used. `promotion-{slot}.spare.flags.bit7` uses the same byte; `promotion-{slot}.spare.byte1` uses row offset 8. `spare.byte1` and `byte2` are at absolute offsets 151 and 152. The three `prompt1` through `prompt3` fields use Western display glyphs. The optional 153-byte record is not in the verified complete later Multi-pay or graphical Multi-pay profile catalogues. |
+| MT151 | `spare.fallback.bit{bit}` at 1 (mask `0xFC`) and `spare.byte1` at 3. The no-match selector uses mask `0x03`. |
+| MT152 | `period-{slot}.{zone}.spare.flags.bit6` and `bit7` at period offset 4 plus the local, intra, inter or international zone index, after the start and end time. The ten `spare.byte1` through `byte10` fields occupy 85 through 94. The original full-byte zone key is retained for API compatibility; a save that changes it alongside its component fields is rejected. |
+
+MT50 offers a 105-byte inactive template, shared by the older and both later profiles. It begins with all coin windows and acceptance flags disabled and zero values, volumes and capacities. The coin settings must be calibrated for the target validator before use.
 
 Slots in field keys are zero-based. Explicit spare edits preserve unrelated fields. Blank, Delete and Clear retain the identified spare values; changes to a selected slot cannot be combined with an incompatible staged blank/delete/clear operation in the same save.
 
