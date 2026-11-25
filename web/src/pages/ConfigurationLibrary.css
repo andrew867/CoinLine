@@ -1,0 +1,17 @@
+.configuration-library { display: grid; gap: 18px; }
+.configuration-library-hero { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 18px; padding: 22px; border-radius: 14px; background: #173d32; color: #edf8f1; }
+.configuration-library-hero h1 { color: inherit; margin: 0 0 8px; }
+.configuration-library-hero p { margin: 0; color: #cce3d8; }
+.configuration-library-hero a { color: #edf8f1; font-weight: 650; }
+.configuration-library-filters { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); align-items: end; gap: 14px; }
+.configuration-library-filters label { display: grid; gap: 5px; min-width: 0; }
+.configuration-library-filters :is(input, select) { width: 100%; min-width: 0; }
+.configuration-library-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.configuration-library-summary h2 { margin: 0; }
+.configuration-library-table { overflow-x: auto; margin: 12px 0 20px; }
+.configuration-library-table table { border-collapse: collapse; text-align: left; width: 100%; }
+.configuration-library-table :is(th, td) { padding: 10px; border-bottom: 1px solid #dce7e1; vertical-align: top; }
+.configuration-library-table th { background: #f0f5f2; white-space: nowrap; }
+.configuration-library-table small { display: block; margin-top: 3px; color: #526c61; }
+.configuration-library-table code { font-size: .75rem; overflow-wrap: anywhere; display: block; min-width: 13rem; max-width: 16rem; }
+.configuration-library-warning { color: #a13437 !important; }

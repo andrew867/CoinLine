@@ -121,6 +121,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify configuration library workflow
+        run: npm run e2e -- e2e/configuration-library.spec.ts --output test-results/configuration-library
+        env:
+          CI: "true"
+
       - name: Upload Playwright failure traces
         if: failure()
         uses: actions/upload-artifact@v4
