@@ -184,7 +184,7 @@ public static partial class NativeTableLayouts
         (int, string)[] languages = [(0, "Unused"), (1, "English"), (2, "French"), (3, "Spanish"), (4, "Japanese")];
         return
         [
-            new NativeTableField("languageCount", "Number of languages", 12, Bits, Mask: 0x07, Minimum: 1, Maximum: 4,
+            new NativeTableField("languageCount", "Number of languages", 12, TableFieldEncoding.Bits, Mask: 0x07, Minimum: 1, Maximum: 4,
                 Help: "Edits only the user-language count. Other imported bits and language ordering are retained."),
             Bits("languageFirst", "Default language", 10, 15, languages[1..]), Bits("languageSecond", "Second language", 10, 240, languages),
             Bits("languageThird", "Third language", 11, 15, languages), Bits("languageFourth", "Fourth language", 11, 240, languages)
