@@ -36,7 +36,7 @@ public static partial class NativeTableLayouts
     {
         var candidates = Candidates(number, record);
         // Existing sets without a registered target already use the older editing profile for these records.
-        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 33 or QuickAccessKeyWire.MessageType or 73 ? MultiPay : null);
+        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 33 or QuickAccessKeyWire.MessageType or ServiceRestrictionWire.MessageType or 73 ? MultiPay : null);
         var layout = selection == null ? candidates.Count == 1 ? candidates[0] : null
             : candidates.SingleOrDefault(layout => layout.Profile == selection);
         if (layout == null)
@@ -164,11 +164,8 @@ public static partial class NativeTableLayouts
         yield return QuickAccessLayout(later: false);
         yield return QuickAccessLayout(later: true);
 
-        yield return Layout(58, 26, Section("restriction", "Service restriction window",
-            Select("restriction", "Restriction level", 1, (0, "None"), (1, "Free and emergency calls only"),
-                (2, "No coin or smart-card calls"), (3, "Restrict in-call keypad signaling")),
-            Hour("startHour", "Start hour", 2), Minute("startMinute", "Start minute", 3),
-            Field("durationHours", "Duration hours", 4), Minute("durationMinutes", "Duration minutes", 5)));
+        yield return ServiceRestrictionLayout(later: false);
+        yield return ServiceRestrictionLayout(later: true);
 
         yield return Layout(62, NumberingPlanWire.RecordLength, Section("numbering", "Digit collection and routing",
             Toggle("terminateWhileCollecting", "Accept the terminating key while collecting extra digits", 1, 1),

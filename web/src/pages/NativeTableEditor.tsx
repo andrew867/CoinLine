@@ -9,6 +9,7 @@ import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEdito
 import { LocalDialingImport } from './LocalDialingImport'
 import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
+import { describeServiceRestriction } from './serviceRestrictionSchedule'
 
 type Field = {
   key: string
@@ -315,6 +316,14 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       {number >= 131 && number <= 133 && (
         <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />
       )}
+      {number === 58 && <section className="table-config-panel" aria-label="Daily restriction preview">
+        <h3>Daily restriction preview</h3>
+        <p aria-live="polite">{describeServiceRestriction(Object.fromEntries(layout.sections.flatMap(section =>
+          section.fields.map(field => [field.key, effectiveValue(field)]))), layout.profile === 'Later packed profile')}</p>
+        <p>Restrictions activate when the handset is on hook and its cover is closed. They repeat daily, not on the host clock.</p>
+        {layout.sections.some(section => section.fields.some(field => field.key === 'restriction' && effectiveValue(field) === '4')) &&
+          <p>Mark the permitted entries in Call-Screening List and Quick Access Keys using <strong>Allow in configurable restricted service</strong>.</p>}
+      </section>}
       {layout.profiles && layout.profiles.length > 1 && (
         <div className="table-config-selectors">
           <label>Firmware profile

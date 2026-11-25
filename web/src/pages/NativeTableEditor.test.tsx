@@ -74,3 +74,25 @@ it('offers a missing record template only with Add permission', async () => {
   expect(screen.queryByRole('button', { name: 'Start record for Fixture' })).toBeNull()
   expect(apiPostRaw).not.toHaveBeenCalled()
 })
+
+it('previews edited phone-local service hours and identifies the later permitted-route mode', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+  const timing = (key: string, label: string, value: string, max: number) =>
+    ({ key, label, value, editor: 'number', min: 0, max, maxLength: null, choices: null, help: null })
+  const layout = { supported: true, editable: true, profile: 'Later packed profile', length: 26, revision: 1, sha256: 'fixture-hash',
+    sections: [{ key: 'restriction', label: 'Daily service restriction', fields: [
+      { ...timing('restriction', 'Restriction level', '4', 4), editor: 'select', choices: [{ value: 0, label: 'None' }, { value: 4, label: 'Configurable restricted access' }] },
+      timing('startHour', 'Start hour (phone local time)', '20', 23), timing('startMinute', 'Start minute', '30', 59),
+      timing('durationHours', 'Duration hours', '6', 24), timing('durationMinutes', 'Duration minutes', '15', 59),
+    ] }] }
+  vi.mocked(apiFetch).mockImplementation(async (_, options) => options?.method === 'PUT'
+    ? new Response(null, { status: 204 }) : Response.json(layout))
+  renderEditor(58)
+  expect(await screen.findByText(/20:30 to 02:45 the next day/)).toBeVisible()
+  expect(screen.getByText(/Mark the permitted entries/)).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Duration minutes'), { target: { value: '20' } })
+  expect(screen.getByText(/20:30 to 02:50 the next day/)).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/tables/sets/set-fixture/records/58/fields',
+    expect.objectContaining({ method: 'PUT', body: expect.stringContaining('"durationMinutes":"20"') })))
+})

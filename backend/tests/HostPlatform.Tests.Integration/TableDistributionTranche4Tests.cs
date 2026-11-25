@@ -550,6 +550,61 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Later_service_restriction_editor_reviews_imported_windows_and_keeps_the_unedited_tail()
+    {
+        using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
+        {
+            label = "Service restriction fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180
+        });
+        firmware.EnsureSuccessStatusCode();
+        var targetFirmwareVersionId = (await firmware.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Service restriction window", targetFirmwareVersionId });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+        var fieldsPath = path + "/records/58/fields";
+        var templates = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(NativeTableLayouts.Later, Assert.Single(templates.GetProperty("templates").EnumerateArray()).GetProperty("profile").GetString());
+
+        byte[] record = [58, 4, 20, 30, 24, 15, .. Enumerable.Repeat((byte)0xA5, 20)];
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "Service restriction fixture", tableNumber = 58 });
+        definition.EnsureSuccessStatusCode();
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            tableRevision = 1, payloadBase64 = Convert.ToBase64String(record), sortOrder = 58
+        });
+        imported.EnsureSuccessStatusCode();
+
+        var original = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(NativeTableLayouts.Later, original.GetProperty("profile").GetString());
+        Assert.Contains(original.GetProperty("sections")[0].GetProperty("fields")[0].GetProperty("choices").EnumerateArray(),
+            choice => choice.GetProperty("value").GetInt32() == 4);
+        using (var untouched = await Save(original, new Dictionary<string, string>())) Assert.Equal(HttpStatusCode.NoContent, untouched.StatusCode);
+        var unchanged = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(original.GetProperty("sha256").GetString(), unchanged.GetProperty("sha256").GetString());
+        Assert.True(Assert.Single(await Findings()).GetProperty("blocking").GetBoolean());
+        using (var rejected = await _client.PostAsync(path + "/publish?confirm=true", null)) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+
+        using (var corrected = await Save(unchanged, new Dictionary<string, string> { ["durationHours"] = "6" }))
+            Assert.Equal(HttpStatusCode.NoContent, corrected.StatusCode);
+        record[4] = 6;
+        var edited = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(record)).ToLowerInvariant(), edited.GetProperty("sha256").GetString());
+        var dependency = Assert.Single(await Findings());
+        Assert.False(dependency.GetProperty("blocking").GetBoolean());
+        Assert.Contains("MT55 and MT92", dependency.GetProperty("message").GetString());
+        using var published = await _client.PostAsync(path + "/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+
+        Task<HttpResponseMessage> Save(JsonElement details, Dictionary<string, string> changes) => _client.PutAsJsonAsync(fieldsPath, new
+        {
+            profile = details.GetProperty("profile"), revision = details.GetProperty("revision"), sha256 = details.GetProperty("sha256"), changes
+        });
+        async Task<JsonElement[]> Findings() => (await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("firmwareFindings").EnumerateArray().ToArray();
+    }
+
+    [Fact]
     public async Task Messaging_template_and_updates_keep_the_key_out_of_editor_reads()
     {
         using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Messaging template test" });

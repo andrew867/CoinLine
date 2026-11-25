@@ -56,8 +56,39 @@ public static class TableSetFirmwareCompatibility
                 yield return finding;
             foreach (var finding in ReviewCarrierRoutes(verifiedRecords, later))
                 yield return finding;
+            foreach (var finding in ReviewServiceRestriction(verifiedRecords, later))
+                yield return finding;
             foreach (var finding in ReviewMultiPayRates(verifiedRecords, later))
                 yield return finding;
+        }
+    }
+
+    private static IEnumerable<TableFirmwareFinding> ReviewServiceRestriction(IReadOnlyDictionary<int, byte[]> records, bool later)
+    {
+        if (!records.TryGetValue(ServiceRestrictionWire.MessageType, out var restriction))
+            yield break;
+        if (ServiceRestrictionWire.ConfigurationIssue(restriction, later) is { } issue)
+        {
+            yield return new(ServiceRestrictionWire.MessageType, true, issue);
+            yield break;
+        }
+        if (restriction[1] != ServiceRestrictionWire.ConfigurableAccess)
+            yield break;
+
+        var hasScreening = records.TryGetValue(92, out var screening);
+        var hasKeys = records.TryGetValue(55, out var keys);
+        if ((hasScreening && ServiceRestrictionWire.HasPermittedScreeningSlot(screening!)) ||
+            (hasKeys && ServiceRestrictionWire.HasPermittedQuickAccessKey(keys!)))
+            yield break;
+
+        if (hasScreening && hasKeys)
+            yield return new(ServiceRestrictionWire.MessageType, false,
+                "Configurable restricted access is enabled, but no included dialable screening entry or quick-access key is marked as permitted. Review the permitted routes before applying this window.");
+        else
+        {
+            var missing = !hasScreening && !hasKeys ? "MT55 and MT92" : !hasScreening ? "MT92" : "MT55";
+            yield return new(ServiceRestrictionWire.MessageType, false,
+                $"Configurable restricted access relies on permitted entries in the phone's existing {missing} record(s). No permitted dialable entry was found in the included records.");
         }
     }
 

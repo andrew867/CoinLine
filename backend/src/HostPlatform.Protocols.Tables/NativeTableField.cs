@@ -405,6 +405,9 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             throw new InvalidOperationException(issue);
         if (Number == NativeTableLayouts.TimeDiscountRecord)
             NativeTableLayouts.ValidateTimeDiscountChanges(original, edited);
+        if (Number == ServiceRestrictionWire.MessageType && !original.SequenceEqual(edited) &&
+            ServiceRestrictionWire.ConfigurationIssue(edited, Profile == NativeTableLayouts.Later) is { } restrictionIssue)
+            throw new InvalidOperationException(restrictionIssue);
         return edited;
     }
 

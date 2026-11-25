@@ -2616,25 +2616,37 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         => await AssignSetAsync(await CreateRateTableSetAsync(name, payload));
 
     [Theory]
-    [InlineData(8)]
-    [InlineData(44)]
-    public async Task Terminal_call_sends_only_the_selected_records_and_acknowledges_the_original_batch(int trigger)
+    [InlineData(8, 26)]
+    [InlineData(44, 26)]
+    [InlineData(44, 58)]
+    public async Task Terminal_call_sends_only_the_selected_records_and_acknowledges_the_original_batch(int trigger, int selectedType)
     {
         var terminal = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
             .Single(row => row.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
         var phoneId = terminal.GetProperty("id").GetGuid();
         var definitions = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/tables/definitions", Json)).EnumerateArray()
-            .Where(row => row.GetProperty("tableNumber").GetInt32() is 26 or 73)
+            .Where(row => row.GetProperty("tableNumber").GetInt32() == selectedType || row.GetProperty("tableNumber").GetInt32() == 73)
             .ToDictionary(row => row.GetProperty("tableNumber").GetInt32(), row => row.GetProperty("id").GetGuid());
+        if (!definitions.ContainsKey(selectedType))
+        {
+            using var definition = await fx.Client.PostAsJsonAsync("/api/tables/definitions", new { name = "Selected restriction fixture", tableNumber = selectedType }, Json);
+            definition.EnsureSuccessStatusCode();
+            definitions.Add(selectedType, (await definition.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid());
+        }
         var assignedSet = await CreateRateTableSetAsync("Queued download preserved assignment");
         await AssignSetAsync(assignedSet);
 
         using var source = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = $"Selected download MT{trigger} fixture" }, Json);
         source.EnsureSuccessStatusCode();
         var tableSetId = (await source.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
-        var selected = new byte[72];
-        selected[0] = 26;
+        var selected = new byte[selectedType == 58 ? 26 : 72];
+        selected[0] = (byte)selectedType;
         selected[^1] = 0x43;
+        if (selectedType == 58)
+            selected = NativeTableLayouts.Find(58, selected)!.Apply(selected, new Dictionary<string, string>
+            {
+                ["restriction"] = "2", ["startHour"] = "20", ["durationHours"] = "6"
+            });
         var unrelated = new byte[1192];
         unrelated[0] = 73;
         foreach (var payload in new[] { selected, unrelated })
@@ -2650,7 +2662,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         published.EnsureSuccessStatusCode();
         using var queued = await fx.Client.PostAsJsonAsync($"/api/terminals/{phoneId}/downloads", new
         {
-            tableSetId, scope = "Partial", partialTableDefinitionIds = new[] { definitions[26] }
+            tableSetId, scope = "Partial", partialTableDefinitionIds = new[] { definitions[selectedType] }
         }, Json);
         queued.EnsureSuccessStatusCode();
         var prepared = await queued.Content.ReadFromJsonAsync<JsonElement>(Json);
@@ -2684,7 +2696,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             var record = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
             Assert.Equal(selected, record.Data);
             await call.Stream.WriteAsync(Control((byte)(NccControl.Ack | record.Control)));
-            await call.Stream.WriteAsync(Message(KnownId, [14, 26]));
+            await call.Stream.WriteAsync(Message(KnownId, [14, (byte)selectedType]));
             AssertAck(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
             var end = Decode(await ReadFrameAsync(call.Stream, TimeSpan.FromSeconds(5)));
             Assert.Equal(new byte[] { 13 }, end.Data);
