@@ -195,7 +195,8 @@
         "tags": [
           "Cards"
         ],
-        "summary": "Advertises simulation gates for UI banners — safe without secrets.",
+        "summary": "Reports physical card-write policy and runtime authorization provider registration.",
+        "description": "runtimeAuthorizationProviderRegistered indicates service registration only, not processor connectivity or settlement readiness.",
         "responses": {
           "200": {
             "description": "OK"

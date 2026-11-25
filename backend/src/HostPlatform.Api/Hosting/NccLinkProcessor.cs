@@ -27,7 +27,8 @@ internal sealed class NccLinkProcessor(
     IServiceScopeFactory scopes,
     TimeProvider clock,
     ILogger logger,
-    CancellationToken stoppingToken)
+    CancellationToken stoppingToken,
+    INccCardAuthorizationProvider? cardProvider)
 {
     private const string Actor = "ncc-listener";
     private const byte EndDataMessageType = 13;
@@ -341,8 +342,9 @@ internal sealed class NccLinkProcessor(
         {
             if (_lastDialogueReply is { } reply && ReferenceEquals(_lastInboundMessage, _lastDialogueRequest)
                 && (reply.Data[0] is DlogCallDetailWire.Acknowledgement or DlogCallDetailWire.RequestUpload ||
-                    _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]))
-                await SendDialogueReplyAsync(stream, packet, reply.Data, "call upload retry");
+                    _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]
+                    || (_lastDialogueRequest.Data.Length > 0 && DlogCardAuthorizationWire.IsRequest(_lastDialogueRequest.Data[0]))))
+                await SendDialogueReplyAsync(stream, packet, reply.Data, "immediate dialogue retry");
             return;
         }
 
@@ -382,9 +384,8 @@ internal sealed class NccLinkProcessor(
 
         if (cardAuthorization)
         {
-            // An approval requires a connected authorization provider.
-            if (terminal != null && DlogCardAuthorizationWire.TryBuildDecline(packet.Data, out var decline))
-                await SendDialogueReplyAsync(stream, packet, decline, "card authorization declined");
+            if (terminal != null)
+                await AuthorizeCardAsync(stream, packet, terminal.Id);
             return;
         }
 
@@ -423,6 +424,61 @@ internal sealed class NccLinkProcessor(
                 return;
             await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true, cashboxStatus);
         }
+    }
+
+    private async Task AuthorizeCardAsync(NetworkStream stream, NccWirePacket request, Guid terminalId)
+    {
+        if (!DlogCardAuthorizationWire.TryBuildDecline(request.Data, out var decline))
+            return;
+
+        // A retry of the same dialogue does not create a second authorization.
+        if ((request.Control & NccControl.ReTrans) != 0 && _lastDialogueRequest is { } previous
+            && _lastDialogueReply is { } reply && previous.Data.AsSpan().SequenceEqual(request.Data)
+            && previous.TerminalId.AsSpan().SequenceEqual(request.TerminalId)
+            && NccControl.PacketId(previous.Control) == NccControl.PacketId(request.Control))
+        {
+            await SendDialogueReplyAsync(stream, request, reply.Data, "card authorization retry");
+            return;
+        }
+
+        var response = decline;
+        var outcome = "provider_unavailable";
+        if (cardProvider != null)
+        {
+            try
+            {
+                var decision = await cardProvider.AuthorizeAsync(terminalId, request.Data, stoppingToken);
+                if (decision != null && DlogCardAuthorizationWire.TryBuildDecision(request.Data, decision.Approved,
+                        decision.AuthorizationReference.Span, out var encoded))
+                {
+                    response = encoded;
+                    outcome = decision.Approved ? "approved" : "declined";
+                }
+                else
+                    outcome = "provider_invalid_decision";
+            }
+            catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
+            {
+                // Provider exceptions can contain protected request data. Log only the type.
+                logger.LogWarning("Card authorization provider failed ({ErrorType}).", ex.GetType().Name);
+                outcome = "provider_failed";
+            }
+        }
+
+        var audit = Audit("card_authorization_decision", new { messageType = request.Data[0], outcome }, terminalId);
+        try
+        {
+            await db.SaveChangesAsync(stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            if (audit != null)
+                db.Entry(audit).State = EntityState.Detached;
+            logger.LogWarning("Card decision audit was not stored ({ErrorType}); declining.", ex.GetType().Name);
+            response = decline;
+            outcome = "audit_failed";
+        }
+        await SendDialogueReplyAsync(stream, request, response, $"card authorization {outcome}");
     }
 
     private async Task<byte[]> StoreCallDetailsAsync(byte[] data, Terminal terminal)

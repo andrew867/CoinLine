@@ -462,6 +462,104 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.True(batches.SetEquals(await BatchIdsAsync()));
     }
 
+    [Theory]
+    [InlineData(1, 29, 3, 2, "approve", "approved")]
+    [InlineData(2, 39, 65, 22, "approve", "approved")]
+    [InlineData(2, 39, 65, 22, "decline", "declined")]
+    [InlineData(2, 39, 65, 22, "invalid", "provider_invalid_decision")]
+    [InlineData(2, 39, 65, 22, "exception", "provider_failed")]
+    public async Task Trusted_card_provider_is_fail_closed_retries_are_idempotent_and_audit_is_redacted(
+        byte requestType, int requestLength, byte replyType, int replyLength, string mode, string expectedOutcome)
+    {
+        var request = new byte[requestLength];
+        request[0] = requestType;
+        // Opaque synthetic test pattern; no account number, track data or issuer credential.
+        request[^3] = 0x5A;
+        request[^5] = 0xA5;
+        var provider = new OpaqueTestCardProvider(request, mode);
+        await using var factory = new NccFactory();
+        await using var host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider)));
+        using var client = host.CreateClient();
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "fixture");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        var state = await client.GetFromJsonAsync<JsonElement>("/api/cards/simulation-state");
+        Assert.True(state.GetProperty("runtimeAuthorizationProviderRegistered").GetBoolean());
+        Assert.Equal(0, provider.Calls);
+        Guid terminalId;
+        int beforeBatches;
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            terminalId = (await db.Terminals.SingleAsync(row => row.TerminalIdHex == Convert.ToHexString(KnownId))).Id;
+            beforeBatches = await db.DownloadBatches.CountAsync();
+        }
+        provider.TerminalId = terminalId;
+        using var tcp = new TcpClient();
+        await tcp.ConnectAsync(IPAddress.Loopback, factory.Port);
+        var stream = tcp.GetStream();
+        await stream.WriteAsync(Message(KnownId, request));
+        AssertAck(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
+        var response = Decode(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(replyType, response.Data[0]);
+        Assert.Equal(replyLength, response.Data.Length);
+        Assert.Equal(mode == "approve" ? (byte)0 : (byte)1, response.Data[1]);
+        if (requestType == 2 && mode == "approve")
+            Assert.Equal("TESTREF1"u8.ToArray(), response.Data[2..10]);
+        Assert.Equal(1, provider.Calls);
+
+        // Both full and header-only retransmission preserve the original reply and do not call the provider twice.
+        await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket
+            { Control = NccControl.ReTrans, TerminalId = KnownId, Data = request }));
+        AssertAck(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
+        var repeated = Decode(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(response.Data, repeated.Data);
+        Assert.Equal(response.Control | NccControl.ReTrans, repeated.Control);
+        await stream.WriteAsync(HeaderOnlyRetransmission(KnownId, 0));
+        AssertAck(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(response.Data, Decode(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5))).Data);
+        Assert.Equal(1, provider.Calls);
+        await stream.WriteAsync(Control((byte)(NccControl.Ack | response.Control)));
+        await stream.WriteAsync(Control(NccControl.Clr));
+
+        await using var check = host.Services.CreateAsyncScope();
+        var stored = check.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        var audit = await stored.AuditEvents.SingleAsync(row => row.Action == "card_authorization_decision");
+        var metadata = JsonSerializer.Deserialize<JsonElement>(audit.DetailJson, Json);
+        Assert.Equal(expectedOutcome, metadata.GetProperty("outcome").GetString());
+        Assert.Equal(2, metadata.EnumerateObject().Count());
+        Assert.Equal(requestType, metadata.GetProperty("messageType").GetByte());
+        Assert.Equal(beforeBatches, await stored.DownloadBatches.CountAsync());
+        var sessionId = Guid.Parse(audit.TerminalSessionId!);
+        var frames = await stored.NccSessionFrames.Where(row => row.NccSessionId == sessionId).ToListAsync();
+        var protectedFrames = frames.Where(frame => !frame.SentByHost && frame.WireLength == requestLength + 11).ToArray();
+        Assert.Equal(2, protectedFrames.Length);
+        Assert.All(protectedFrames, frame => Assert.Empty(frame.RawBytes));
+        Assert.All(frames.Where(frame => frame.SentByHost), frame => Assert.Empty(frame.RawBytes));
+    }
+
+    private sealed class OpaqueTestCardProvider(byte[] expectedRequest, string mode) : INccCardAuthorizationProvider
+    {
+        public Guid TerminalId { get; set; }
+        public int Calls { get; private set; }
+
+        public ValueTask<NccCardAuthorizationDecision> AuthorizeAsync(Guid terminalId, ReadOnlyMemory<byte> protectedRequest,
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            if (terminalId != TerminalId || !protectedRequest.Span.SequenceEqual(expectedRequest))
+                return ValueTask.FromResult(new NccCardAuthorizationDecision());
+            if (mode == "exception")
+                throw new InvalidOperationException("Synthetic provider error");
+            return ValueTask.FromResult(new NccCardAuthorizationDecision
+            {
+                Approved = mode is "approve" or "invalid",
+                AuthorizationReference = mode == "invalid" ? new byte[1]
+                    : mode == "approve" && expectedRequest[0] == 2 ? "TESTREF1"u8.ToArray() : []
+            });
+        }
+    }
+
     [Fact]
     public async Task Rate_request_uses_bcd_number_not_ascii_run()
     {
