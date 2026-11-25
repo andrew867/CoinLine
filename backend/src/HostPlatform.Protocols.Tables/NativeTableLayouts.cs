@@ -288,26 +288,35 @@ public static partial class NativeTableLayouts
                     help: "Delay for lines using polarity reversal to signal answer."),
                 Field("wink", "Maximum wink duration (10 ms ticks)", 5, SignedWord, min: 0,
                     help: "Maximum duration of the brief polarity reversal on a wink-signaling line.")),
-             Section("control", "Line control",
-                Field("features", "Supervision feature flags", 1), Field("circuitControl", "Telephony circuit control code", 2)),
+             Section("control", "Line control", [
+                Field("features", "Supervision feature flags", 1), Field("circuitControl", "Telephony circuit control code", 2),
+                .. SpareBytes("spare", 231, 32)]),
              .. Rows("pattern", 16, i => $"Dial pattern {i + 1}", (i, key) =>
              {
                  var offset = 7 + i * 14;
                  return [new NativeTableField($"{key}.digits", "Number pattern", offset, KeypadDial, 10),
                      Field($"{key}.plan", "Numbering plan reference", offset + 10),
-                     Field($"{key}.definition", "Supervision definition code", offset + 11)];
+                     Field($"{key}.definition", "Supervision definition code", offset + 11),
+                     .. SpareBytes($"{key}.spare", offset + 12, 2)];
              })]);
 
         yield return new NativeTableLayout(CodeDownloadWire.MessageType, CodeDownloadWire.RecordLength, Later, CodeDownloadSections());
 
-        yield return new NativeTableLayout(95, 153, Later, [Section("display", "Promotion messages",
-            TextField("prompt1", "First prompt", 91, 20), TextField("prompt2", "Second prompt", 111, 20), TextField("prompt3", "Third prompt", 131, 20)),
+        yield return new NativeTableLayout(95, 153, Later, [Section("display", "Promotion messages", [
+            new NativeTableField("prompt1", "First prompt", 91, DisplayText, 20),
+            new NativeTableField("prompt2", "Second prompt", 111, DisplayText, 20),
+            new NativeTableField("prompt3", "Third prompt", 131, DisplayText, 20),
+            .. SpareBytes("spare", 151, 2)]),
             .. Rows("promotion", 10, i => $"Promotion range {i + 1}", (i, key) =>
             {
                 var offset = 1 + i * 9;
                 return [Field($"{key}.application", "Application ID", offset), Toggle($"{key}.enable", "Enable promotion", offset + 1, 64),
                     Bits($"{key}.faceValue", "Smart-card value index", offset + 1, 15),
-                    Digits($"{key}.start", "First card serial", offset + 2, 3, 6), Digits($"{key}.end", "Last card serial", offset + 5, 3, 6)];
+                    Bits($"{key}.usageThreshold", "Minimum card usage", offset + 1, 0x30,
+                        (0, "Disabled"), (1, "25% used"), (2, "50% used"), (3, "75% used")),
+                    Digits($"{key}.start", "First card serial", offset + 2, 3, 6), Digits($"{key}.end", "Last card serial", offset + 5, 3, 6),
+                    .. SpareFlags($"{key}.spare.flags", "Promotion flags", offset + 1, 0x80),
+                    SpareByte($"{key}.spare.byte1", "Spare byte", offset + 8)];
             })]);
 
         yield return new NativeTableLayout(150, 401, Later, PairedRates(1, "Area code", AreaRatingOffset));
