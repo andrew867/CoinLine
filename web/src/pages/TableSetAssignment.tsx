@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiGetRaw, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { resolveScheduledDownloadReview } from '../api/downloadReviews'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 
 const RecordUpdateRollouts = lazy(async () => ({ default: (await import('./RecordUpdateRollouts')).RecordUpdateRollouts }))
@@ -52,13 +53,14 @@ type UpdatedSet = { id: string; name: string; phoneId?: string | null; phoneDisp
 const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
 const callInParameters = 35
 
-export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false, firmwareSchedule }: {
+export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false, firmwareSchedule, initialSchedulePhone }: {
   setId: string
   revision: number
   versions: SavedRecord[]
   optionalRecords: OptionalRecord[]
   codeOnly?: boolean
   firmwareSchedule?: FirmwareSchedule | null
+  initialSchedulePhone?: string
 }) {
   const canAssign = canPerform('table-assignments', op.update)
   const canPreviewAssignment = canAssign || canPerform('table-assignments', op.read)
@@ -69,14 +71,14 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const canPreviewFull = canPreviewAssignment || canSchedule
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
-  const [targetId, setTargetId] = useState('')
+  const [targetId, setTargetId] = useState(canSchedule && !codeOnly ? initialSchedulePhone ?? '' : '')
   const [secondTarget, setSecondTarget] = useState('')
   const [regions, setRegions] = useState<Option[]>([])
   const [groupRegion, setGroupRegion] = useState('')
   const [targets, setTargets] = useState<Target[] | null>(null)
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mode, setMode] = useState(codeOnly || (!canAssign && canSchedule) ? 'now' : 'assignment')
+  const [mode, setMode] = useState(codeOnly || (canSchedule && (!canAssign || !!initialSchedulePhone)) ? 'now' : 'assignment')
   const [availableAt, setAvailableAt] = useState('')
   const [allowFirmwareReschedule, setAllowFirmwareReschedule] = useState(false)
   const [allocateFirmwareWindow, setAllocateFirmwareWindow] = useState(false)
@@ -291,6 +293,12 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           ? `Scheduled firmware parameters for ${result.scheduled} ${result.scheduled === 1 ? 'phone' : 'phones'}. Replaced ${result.replaced} existing ${result.replaced === 1 ? 'schedule' : 'schedules'}. Skipped ${result.skipped} ${result.skipped === 1 ? 'phone' : 'phones'}.`
           : `Scheduled for ${result.scheduled} ${result.scheduled === 1 ? 'phone' : 'phones'}. Already scheduled for ${result.alreadyScheduled}.`)
         setScheduleRefresh((value) => value + 1)
+        if (!codeOnly && !partialSchedule && scope === 'terminal' && targetId &&
+            targets?.filter(target => target.eligible).length === 1 &&
+            targets.some(target => target.eligible && target.id === targetId) &&
+            (typeof result.scheduled === 'number' && typeof result.alreadyScheduled === 'number' &&
+             result.scheduled + result.alreadyScheduled === 1))
+          resolveScheduledDownloadReview(targetId, setId)
       } else
         setFeedback(`Updated ${result.changed} of ${result.targetCount} eligible phone assignments.`)
       setTargets(null)
@@ -306,7 +314,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const replacements = targets?.filter(target => target.eligible && target.replacesFirmwareScheduleId).length ?? 0
   return (
     <section className="table-config-panel" aria-labelledby="table-assignment-heading">
-      <h2 id="table-assignment-heading">{codeOnly ? 'Schedule firmware parameters' : canPreviewAssignment ? 'Assign this set' : canSchedule ? 'Schedule this set' : 'Update selected records'}</h2>
+      <h2 id="table-assignment-heading">{codeOnly ? 'Schedule firmware parameters' : canSchedule && initialSchedulePhone && deliveryMode !== 'assignment' ? 'Schedule this set' : canPreviewAssignment ? 'Assign this set' : canSchedule ? 'Schedule this set' : 'Update selected records'}</h2>
       <p className="page-intro">{codeOnly ? 'The selected phones pick up these parameters on a routine call-in or callback.'
         : 'Preview the current phones in a scope before assigning a set or scheduling a download.'}</p>
       {(canPreviewFull || canPreviewRecords) && <form className="table-config-selectors" onSubmit={(event) => void preview(event)}>
@@ -317,12 +325,12 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             if ((scope === 'time-area' || scope === 'configuration-id') && next !== 'schedule-records') changeScope('terminal')
             else clearReview()
           }}>
-            {canPreviewFull && <option value="set">{canPreviewAssignment ? 'Assign full set' : 'Schedule full set'}</option>}
+            {canPreviewFull && <option value="set">{canPreviewAssignment && deliveryMode === 'assignment' ? 'Assign full set' : 'Schedule full set'}</option>}
             {canPreviewRecords && <option value="records">Update selected records</option>}
             {canSchedule && <option value="schedule-records">Schedule selected records</option>}
           </select>
         </label>}
-        <label>{schedulesOnly ? 'Schedule by' : 'Assign by'}
+        <label>{schedulesOnly || (!selectedRecords && deliveryMode !== 'assignment') ? 'Schedule by' : 'Assign by'}
           <select disabled={busy} value={scope} onChange={(event) => changeScope(event.target.value as Scope)}>
             {Object.entries(scopes).filter(([value]) => {
               if (value === 'terminal-id-range' || value === 'software-version') return codeOnly
@@ -478,7 +486,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         <button type="submit" disabled={!targetId || busy || (scope === 'software-version' && !secondTarget.trim())
           || (selectedRecords && !copyRecords.length && !removeRecords.length)
           || (configurationScope && !configurationRecord) || (partialSchedule && !selectedDeliveryRecords.length)}>
-          {selectedRecords ? 'Preview record update' : schedulesOnly || !canPreviewAssignment ? 'Preview phones' : 'Preview assignment'}
+          {selectedRecords ? 'Preview record update' : schedulesOnly || !canPreviewAssignment || deliveryMode !== 'assignment' ? 'Preview phones' : 'Preview assignment'}
         </button>
       </form>}
       {updatePreview && <section className="table-config-preview" aria-labelledby="scope-record-review">

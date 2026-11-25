@@ -4,6 +4,7 @@ import { ErrorBanner } from '../components/AppStates'
 import { FieldPreferencesPanel } from '../components/FieldPreferencesPanel'
 import { apiFetch } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
+import { readDownloadReviewPrompt, saveDownloadReviewPrompt } from '../api/downloadReviews'
 
 const headers = { 'Content-Type': 'application/json' }
 
@@ -38,6 +39,9 @@ export function SettingsPage() {
   const [craft, setCraft] = useState<CraftPolicy | null>(null)
   const [firmware, setFirmware] = useState<FirmwarePolicy | null>(null)
   const [serial, setSerial] = useState<SerialModem | null>(null)
+  const [downloadPrompt, setDownloadPrompt] = useState(readDownloadReviewPrompt)
+  const [promptNotice, setPromptNotice] = useState('')
+  const [promptError, setPromptError] = useState('')
 
   useEffect(() => {
     void apiFetch('/api/auth/me', { headers })
@@ -105,6 +109,18 @@ export function SettingsPage() {
       {note && <p>{note}</p>}
 
       <FieldPreferencesPanel />
+
+      <section aria-labelledby="download-review-preference-heading">
+        <h2 id="download-review-preference-heading">Download review prompts</h2>
+        <p className="page-intro">Show a review prompt after saving a phone or changing its configuration. Pending reminders remain in this tab until reviewed or an exact full configuration is scheduled.</p>
+        <label><input type="checkbox" checked={downloadPrompt} onChange={event => { setDownloadPrompt(event.target.checked); setPromptNotice(''); setPromptError('') }} /> Show a download review prompt after phone changes</label>
+        <div><button type="button" onClick={() => {
+          try { saveDownloadReviewPrompt(downloadPrompt); setPromptNotice('Download review preference saved.'); setPromptError('') }
+          catch { setPromptNotice(''); setPromptError('Could not save the browser preference.') }
+        }}>Save download review preference</button></div>
+        {promptNotice && <p role="status">{promptNotice}</p>}
+        {promptError && <p role="alert">{promptError}</p>}
+      </section>
 
       <h2>Live gates</h2>
       <p className="page-intro">

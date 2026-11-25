@@ -1,8 +1,9 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiGet, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
+import { readDownloadReviews } from '../api/downloadReviews'
 import { mayOpenScreen } from '../components/Layout'
 import { TerminalCreatePage } from './TerminalCreatePage'
 
@@ -49,6 +50,7 @@ it('registers a phone with Add-only access using registration choices instead of
     terminalFamilyId: 'mtr19-multipay', terminalIdHex: '0000000101',
   }))
   expect(screen.getByTestId('terminal-create-hex')).toHaveValue('')
+  expect(readDownloadReviews()).toEqual([])
 })
 
 it('filters group choices by the selected site customer and clears an incompatible selection', async () => {
@@ -67,6 +69,22 @@ it('filters group choices by the selected site customer and clears an incompatib
   expect(screen.getByRole('option', { name: 'Second group' })).toBeVisible()
   expect(screen.getByRole('option', { name: 'Global group' })).toBeVisible()
   expect(screen.getByLabelText('Phone group')).toHaveValue('')
+})
+
+it('retains a new-phone review after navigating to the registered phone, without scheduling a download', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { phones: 5 })
+  vi.mocked(apiGet).mockResolvedValue(options)
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ id: 'registered-fixture' }, { status: 201 }))
+  render(<MemoryRouter initialEntries={['/terminals/new']}><Routes>
+    <Route path="/terminals/new" element={<TerminalCreatePage />} />
+    <Route path="/terminals/:id" element={<h1>Registered phone</h1>} />
+  </Routes></MemoryRouter>)
+  await screen.findByRole('option', { name: 'Fixture site (ONE)' })
+  fireEvent.change(screen.getByTestId('terminal-create-hex'), { target: { value: '0000000101' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create terminal' }))
+  expect(await screen.findByRole('heading', { name: 'Registered phone' })).toBeVisible()
+  expect(readDownloadReviews()).toEqual([{ terminalId: 'registered-fixture', tableSetId: null, reason: 'registration' }])
+  expect(apiPostRaw).toHaveBeenCalledTimes(1)
 })
 
 it('blocks direct entry and makes no lookup for a read-only operator', () => {

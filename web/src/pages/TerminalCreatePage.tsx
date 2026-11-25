@@ -6,6 +6,7 @@ import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { EmptyHint, ErrorBanner } from '../components/AppStates'
 import { FirmwareVersionSelect, type FirmwareVersionOption } from '../components/FirmwareVersionSelect'
 import { TerminalFamilySelect, type TerminalFamily } from '../components/TerminalFamilySelect'
+import { rememberDownloadReview, readDownloadReviewPrompt } from '../api/downloadReviews'
 
 
 type SiteOpt = { id: string; name: string; code: string; customerId: string }
@@ -76,7 +77,10 @@ export function TerminalCreatePage() {
         throw new Error(problem?.error || `Could not create terminal (HTTP ${response.status}).`)
       }
       const created = await response.json() as { id: string }
-      if (canRead) nav(`/terminals/${created.id}`)
+      if (canRead) {
+        rememberDownloadReview({ terminalId: created.id, tableSetId: null, reason: 'registration' })
+        nav(`/terminals/${created.id}`)
+      }
       else {
         setNotice('Phone registered. You can register another phone.')
         setTerminalIdHex('')
@@ -101,6 +105,7 @@ export function TerminalCreatePage() {
       )}
       {err && <ErrorBanner message={err} />}
       {notice && <p role="status">{notice}</p>}
+      {notice && !canRead && readDownloadReviewPrompt() && <p>Ask an operator with phone access to review the new phone's download requirements.</p>}
       {options && <form onSubmit={(e) => void onSubmit(e)} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxWidth: 400 }}>
         <label>
           Site

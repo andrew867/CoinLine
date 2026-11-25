@@ -1,5 +1,7 @@
 import { SpecialCallback } from './SpecialCallback'
 import { TerminalInventoryPanel } from './TerminalInventoryPanel'
+import { PhoneDownloadReview, downloadSchedulePath } from '../components/DownloadReviewReminder'
+import { rememberDownloadReview } from '../api/downloadReviews'
 import { TerminalIdentityPanel } from './TerminalIdentityPanel'
 import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 import { InmateAssignmentPanel } from './InmateAssignmentPanel'
@@ -405,6 +407,7 @@ export function TerminalDetail() {
         const body = await response.json().catch(() => null)
         throw new Error(body?.error ?? `Could not assign the set (HTTP ${response.status}).`)
       }
+      if (assign?.tableSetId !== pick) rememberDownloadReview({ terminalId: id, tableSetId: pick, reason: 'assignment' })
       const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
       if (a.ok) setAssign((await a.json()) as Assign)
     } catch (ex) {
@@ -476,8 +479,14 @@ export function TerminalDetail() {
         const body = await response.json().catch(() => null)
         throw new Error(body?.error ?? `Could not roll back the assignment (HTTP ${response.status}).`)
       }
+      rememberDownloadReview({ terminalId: id, tableSetId: assign?.previousTableSetId ?? null, reason: 'assignment' })
       const a = await apiFetch(`/api/terminals/${id}/table-assignment`)
-      if (a.ok) setAssign((await a.json()) as Assign)
+      if (a.ok) {
+        const updated = await a.json() as Assign
+        setAssign(updated)
+        if (assign?.tableSetId !== updated.tableSetId)
+          rememberDownloadReview({ terminalId: id, tableSetId: updated.tableSetId, reason: 'assignment' })
+      }
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'error')
     }
@@ -545,6 +554,8 @@ export function TerminalDetail() {
     setFirmwareNotice('')
     try {
       await apiPut(`/api/terminals/${term.id}/firmware`, { firmwareVersionId: firmwareEdit || null })
+      if (term.firmwareVersionId !== (firmwareEdit || null))
+        rememberDownloadReview({ terminalId: term.id, tableSetId: assign?.tableSetId ?? null, reason: 'firmware' })
       setTerm((current) => current?.id === term.id ? { ...current, firmwareVersionId: firmwareEdit || null } : current)
       setFirmwareEdit(null)
       setFirmwareNotice('Installed firmware saved.')
@@ -572,6 +583,8 @@ export function TerminalDetail() {
     setFamilyNotice('')
     try {
       await apiPut(`/api/terminals/${term.id}/family`, { terminalFamilyId: familyEdit || null })
+      if (term.terminalFamilyId !== (familyEdit || null))
+        rememberDownloadReview({ terminalId: term.id, tableSetId: assign?.tableSetId ?? null, reason: 'family' })
       setTerm((current) => current?.id === term.id ? { ...current, terminalFamilyId: familyEdit || null } : current)
       setFamilyEdit(null)
       setFamilyNotice('Terminal family saved.')
@@ -588,6 +601,8 @@ export function TerminalDetail() {
         <Link to="/terminals">← Phones</Link>{canReadStatus && <> · <Link to={`/field-events?terminalId=${term.id}`}>Terminal status</Link></>}
       </p>
       <h1>{term.displayName}</h1>
+      <PhoneDownloadReview terminalId={term.id} tableSetId={assign?.tableSetId ?? null}
+        canSchedule={terminalActive && canReadTableSets && canRequestReload} canReadAssignment={canReadAssignment} />
       <p>
         Id: <code>{term.id}</code>
       </p>
@@ -617,7 +632,8 @@ export function TerminalDetail() {
         onChanged={value => setTerm(current => current?.id === term.id ? { ...current,
           deactivatedAtUtc: value.deactivatedAtUtc, deletionReviewDate: value.deletionReviewDate } : current)} />}
       <TerminalIdentityPanel key={term.id} terminalId={term.id} wireId={term.terminalIdHex} family={term.terminalFamilyId} />
-      {canPerform('inventory', op.read) && <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id} />}
+      {canPerform('inventory', op.read) && <TerminalInventoryPanel key={`inventory-${term.id}`} terminalId={term.id}
+        onSaved={() => rememberDownloadReview({ terminalId: term.id, tableSetId: assign?.tableSetId ?? null, reason: 'inventory' })} />}
       {canPerform('inmate-assignments', op.read) && <InmateAssignmentPanel key={`inmate-${term.id}-${term.terminalFamilyId}`}
         terminalId={term.id} family={term.terminalFamilyId} />}
       {canPerform('memberships', op.read) && <PhoneGroups key={`groups-${term.id}`} terminalId={term.id} />}
@@ -687,6 +703,7 @@ export function TerminalDetail() {
               : <span>{assign.tableSetName ?? assignedSet?.name ?? assign.tableSetId}</span>}
           </div>
           {canReadTableSets && canPerform('table-records', op.read) && <div><Link to={`/table-sets/${assign.tableSetId}?record=35#config-heading`}>Review routine call-in settings</Link></div>}
+          {terminalActive && canReadTableSets && canRequestReload && <div><Link to={downloadSchedulePath(assign.tableSetId, term.id)}>Schedule assigned configuration</Link></div>}
           {canReadTableSets && term.terminalFamilyId && <div><Link to={`/table-sets/${assign.tableSetId}?family=${encodeURIComponent(term.terminalFamilyId)}#family-review-heading`}>
             Review table requirements for this family</Link></div>}
           {assignedTargetId && assignedTargetId !== term.firmwareVersionId &&
