@@ -1705,6 +1705,56 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("EPurseProfiles");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.FieldEventCodeSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Code")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("Severity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Code")
+                        .IsUnique();
+
+                    b.ToTable("FieldEventCodeSettings", t =>
+                        {
+                            t.HasCheckConstraint("CK_FieldEventCodeSettings_KindCodeSeverity", "(\"Kind\" = 'alarm' AND \"Code\" BETWEEN 0 AND 255 AND (\"Severity\" IS NULL OR \"Severity\" BETWEEN 1 AND 4)) OR (\"Kind\" = 'maintenance' AND \"Code\" BETWEEN 0 AND 65535 AND \"Severity\" IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.FirmwareArtifact", b =>
                 {
                     b.Property<Guid>("Id")

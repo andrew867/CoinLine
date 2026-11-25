@@ -90,6 +90,17 @@ public static class FieldEventSummary
     public static IReadOnlyList<CodeReference> MaintenanceReference() =>
         MaintenanceNames.Select(entry => new CodeReference(entry.Key, entry.Value)).ToArray();
 
+    public static (string Kind, int Code)? ReadCode(int messageType, ReadOnlySpan<byte> raw)
+    {
+        if (messageType is 7 or 16)
+            return ReadAlarm(messageType, raw) is { } alarm ? ("alarm", alarm.Number) : null;
+        if (messageType is not (6 or 15) || raw.IsEmpty || raw[0] != messageType ||
+            !DlogFieldLayouts.TryDecodeFields(messageType, raw, out var fields, out _) ||
+            !TryInt(fields["opcode"], out var code))
+            return null;
+        return ("maintenance", code);
+    }
+
     private static string? FormatMaintenance(JsonObject fields)
     {
         if (!TryInt(fields["opcode"], out var opcode))

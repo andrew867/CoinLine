@@ -254,11 +254,13 @@ The source check included the archived WinHelp project, RTF topics and screen re
 
 ### Host alarm and maintenance catalogues
 
-Terminal status includes a searchable reference for the alarm numbers and maintenance opcodes that CoinLine currently decodes. The reference and report summaries share the same built-in descriptions, so adding a recognized value does not require maintaining a separate WebUI list. Unknown received values remain visible as numeric codes. This is host-side reference data, not a terminal download table.
+Terminal status includes an editable catalogue of recognized alarm numbers and maintenance opcodes. The reference and report summaries share the same built-in descriptions. Operators with the separate catalogue update permission can classify alarm numbers as Critical (1), Major (2), Minor (3), Report (4), or unclassified, and add a custom description to an alarm or maintenance code, including previously unlisted numeric codes. No default severity is inferred for built-in values. A blank description and unclassified severity clear the operator settings without deleting the decoded description or resetting the row revision.
+
+The activity list and message detail retain the decoded meaning and show the current operator description and severity separately. These are current catalogue classifications, not historical severity captured from a phone. The original stored report and its wire acknowledgement are unchanged. Stale revisions and competing creates are rejected; changes are audited without including free-text descriptions in audit details. The catalogue is host configuration, not a terminal download table.
 
 | Workflow | Editor | Encoding / storage | Terminal ACK | Behavior verification |
 | --- | --- | --- | --- | --- |
-| Alarm number and maintenance opcode catalogue | Searchable, read-only built-in reference. Operator-authored descriptions and alarm severity classification remain pending. | Existing decoded code and canonical description; no persistent operator overrides yet. | Not applicable to host reference configuration. | Reference-to-summary consistency and WebUI search/error coverage. |
+| Alarm number and maintenance opcode catalogue | Searchable built-in reference; operator descriptions, new numeric codes, four alarm severity levels plus unclassified, revision-checked save and clear. | Separate persistent kind/code settings with a uniqueness constraint and revision; decoded names and original reports stay unchanged. | Not applicable to host reference configuration. | Reference-to-summary, editing, readback, stale conflict, clear and UI error/search regression coverage. PostgreSQL permission and storage checks are gated separately. |
 | Alarm and maintenance destination rules | Pending, including default and per-code overrides scoped by region, group or phone. | Pending; the legacy routing precedence and destination transport require separate evidence. | Not applicable to host routing configuration. | Pending. |
 
 ### Interrupted transfer evidence
