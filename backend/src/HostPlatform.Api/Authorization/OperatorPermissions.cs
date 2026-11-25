@@ -79,7 +79,7 @@ public static class OperatorPermissions
             ("QuickAccessCustomers", R, "Lookup"));
         Screen("table-assignments", "Table assignments",
             ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
-            ("Terminals", R, "GetTableAssignment TableAssignmentOptions"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
+            ("Terminals", R, "GetTableAssignment TableAssignmentOptions RoutineCallIn"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
         Screen("downloads", "Downloads",
             ("Downloads", R, "List Get"), ("Downloads", U, "Cancel Retry"),
             ("Tables", R, "ListSchedules"), ("Tables", A, "ScheduleForScope PreviewAssignments ScopeOptions"), ("Tables", U, "CancelSchedule"),

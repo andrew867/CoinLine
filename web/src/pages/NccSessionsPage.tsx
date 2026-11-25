@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { apiDownload, apiGet, apiPostBareOk } from '../api/client'
 
 type NccSessionRow = {
@@ -42,6 +42,8 @@ function statusLabel(code: number): string {
 }
 
 export function NccSessionsPage() {
+  const [searchParams] = useSearchParams()
+  const sessionId = searchParams.get('sessionId') ?? ''
   const [rows, setRows] = useState<NccSessionRow[]>([])
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -53,7 +55,10 @@ export function NccSessionsPage() {
     setErr(null)
     setLoading(true)
     try {
-      const q = includeArchived ? '?includeArchived=true' : ''
+      const query = new URLSearchParams()
+      if (includeArchived || sessionId) query.set('includeArchived', 'true')
+      if (sessionId) query.set('sessionId', sessionId)
+      const q = query.toString() ? `?${query}` : ''
       const data = await apiGet<NccSessionRow[]>(`/api/ncc/sessions${q}`)
       setRows(data)
     } catch (e) {
@@ -61,7 +66,7 @@ export function NccSessionsPage() {
     } finally {
       setLoading(false)
     }
-  }, [includeArchived])
+  }, [includeArchived, sessionId])
 
   useEffect(() => {
     void refresh()
@@ -115,7 +120,8 @@ export function NccSessionsPage() {
         <strong> Socket bound</strong> means the management call is still open on this host right now.
       </p>
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+      {sessionId && <p>Showing the selected retained session, including archived records. <Link to="/ncc-sessions">Show all sessions</Link></p>}
+      {!sessionId && <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <input
           type="checkbox"
           checked={includeArchived}
@@ -123,7 +129,7 @@ export function NccSessionsPage() {
           data-testid="ncc-sessions-include-archived"
         />
         Include archived sessions
-      </label>
+      </label>}
 
       {loading && <p role="status">Loading…</p>}
       {!loading && err && (

@@ -600,6 +600,19 @@ public sealed class TerminalsController(
         return Ok(new { t.Id, t.Status });
     }
 
+    [HttpGet("{id:guid}/routine-call-in")]
+    public async Task<ActionResult<object>> RoutineCallIn(Guid id, CancellationToken ct)
+    {
+        if (!OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read))
+            return Forbid();
+        var phone = await db.Terminals.AsNoTracking().Where(row => row.Id == id)
+            .Select(row => new { row.TerminalIdHex }).SingleOrDefaultAsync(ct);
+        if (phone == null) return NotFound();
+        return Ok(await RoutineCallInReviews.ReadAsync(db, id, phone.TerminalIdHex.ToUpperInvariant(),
+            OperatorPermissions.Allows(HttpContext, "downloads", PermissionOperation.Read),
+            OperatorPermissions.Allows(HttpContext, "ncc-sessions", PermissionOperation.Read), ct));
+    }
+
     [HttpGet("{id:guid}/table-assignment")]
     public async Task<ActionResult<object>> GetTableAssignment(Guid id, CancellationToken ct)
     {
