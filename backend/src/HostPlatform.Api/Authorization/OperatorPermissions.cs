@@ -20,7 +20,7 @@ public sealed record PermissionScreen(string Key, string Label, PermissionOperat
 public static class OperatorPermissions
 {
     private sealed record Rule(string Screen, PermissionOperation Operations, bool Any);
-    private static readonly Dictionary<(string Controller, string Action), Rule> Rules = new();
+    private static readonly Dictionary<(string Controller, string Action), List<Rule>> Rules = new();
     private static readonly List<PermissionScreen> Screens = new();
     private static readonly object ContextKey = new();
 
@@ -53,19 +53,21 @@ public static class OperatorPermissions
             ("TerminalGroups", U, "Rename UpdateDetails"), ("TerminalGroups", D, "Delete"));
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
+            ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
             ("Tables", A | U, "FirmwareOptions"));
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
-            ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Apply Continue"));
+            ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),
+            ("Tables", R, "ScopeOptions"), ("Tables", U, "ScopeOptions"));
         Screen("table-assignments", "Table assignments",
-            ("Tables", R, "PreviewAssignments"), ("Tables", U, "AssignToScope"),
+            ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
             ("Terminals", R, "GetTableAssignment TableAssignmentOptions"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
         Screen("downloads", "Downloads",
             ("Downloads", R, "List Get"), ("Downloads", U, "Cancel Retry"),
-            ("Tables", R, "ListSchedules"), ("Tables", A, "ScheduleForScope"), ("Tables", U, "CancelSchedule"),
+            ("Tables", R, "ListSchedules"), ("Tables", A, "ScheduleForScope PreviewAssignments ScopeOptions"), ("Tables", U, "CancelSchedule"),
             ("Terminals", A, "StartDownload RequestTableReload"));
         Screen("callbacks", "Callbacks", ("TerminalCallbacks", R, "Get"), ("TerminalCallbacks", U, "Save Cancel"));
         Screen("calls", "Call records", ("CallRecords", R, "List Get"), ("CallRecords", A, "Create"),
@@ -118,9 +120,13 @@ public static class OperatorPermissions
             {
                 supported |= operations;
                 foreach (var action in actions.Split(' ', StringSplitOptions.RemoveEmptyEntries))
-                    Rules.Add((controller, action), new Rule(key, operations,
+                {
+                    if (!Rules.TryGetValue((controller, action), out var rules))
+                        Rules.Add((controller, action), rules = []);
+                    rules.Add(new Rule(key, operations,
                         (key == "memberships" && operations == (A | D)) ||
                         ((key == "table-sets" || key == "table-records") && operations == (A | U))));
+                }
             }
             Screens.Add(new PermissionScreen(key, label, supported));
         }
@@ -176,10 +182,13 @@ public static class OperatorPermissions
     {
         if (context.Items[ContextKey] is not Dictionary<string, int> profile || controller == "Auth")
             return true;
-        if (!Rules.TryGetValue((controller, action), out var rule))
+        if (!Rules.TryGetValue((controller, action), out var rules))
             return false;
-        var available = profile.GetValueOrDefault(rule.Screen) & (int)rule.Operations;
-        return rule.Any ? available != 0 : available == (int)rule.Operations;
+        return rules.Any(rule =>
+        {
+            var available = profile.GetValueOrDefault(rule.Screen) & (int)rule.Operations;
+            return rule.Any ? available != 0 : available == (int)rule.Operations;
+        });
     }
 }
 

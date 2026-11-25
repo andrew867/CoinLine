@@ -395,6 +395,31 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         return matches.FirstOrDefault();
     }
 
+    [HttpGet("scope-options")]
+    public async Task<ActionResult<object>> ScopeOptions([FromQuery] string targetType, CancellationToken ct)
+    {
+        // Only return the identifiers and labels needed by the fleet selection controls.
+        return targetType switch
+        {
+            "terminal" => Ok(await db.Terminals.AsNoTracking().OrderBy(row => row.DisplayName).ThenBy(row => row.Id)
+                .Select(row => new { row.Id, row.DisplayName }).ToListAsync(ct)),
+            "group" => Ok(await db.TerminalGroups.AsNoTracking().OrderBy(row => row.Name).ThenBy(row => row.Id)
+                .Select(row => new { row.Id, row.Name, row.Code }).ToListAsync(ct)),
+            "site" => Ok(await db.Sites.AsNoTracking().OrderBy(row => row.Name).ThenBy(row => row.Id)
+                .Select(row => new { row.Id, row.Name, row.Code }).ToListAsync(ct)),
+            "customer" => Ok(await db.Customers.AsNoTracking().OrderBy(row => row.Name).ThenBy(row => row.Id)
+                .Select(row => new { row.Id, row.Name, row.Code }).ToListAsync(ct)),
+            "region" => Ok(await db.TerminalInventories.AsNoTracking()
+                .Where(row => row.Details.RegionCode != null && row.Details.RegionCode != "")
+                .GroupBy(row => row.Details.RegionCode!.ToLower()).OrderBy(group => group.Key)
+                .Select(group => new { id = group.Key, name = group.Min(row => row.Details.RegionCode) }).ToListAsync(ct)),
+            "time-area" => Ok(await db.TerminalInventories.AsNoTracking().Where(row => row.Details.TimeAreaCode != null)
+                .Select(row => row.Details.TimeAreaCode).Distinct().OrderBy(code => code)
+                .Select(code => new { id = code, name = code }).ToListAsync(ct)),
+            _ => BadRequest(new { error = "Choose a phone, group, location, customer, region or time area." })
+        };
+    }
+
     [HttpGet("sets/{id:guid}/assignment-preview")]
     public async Task<ActionResult<object>> PreviewAssignments(Guid id, [FromQuery] string targetType,
         [FromQuery] Guid? targetId, [FromQuery] string? regionCode, [FromQuery] string? groupPattern,

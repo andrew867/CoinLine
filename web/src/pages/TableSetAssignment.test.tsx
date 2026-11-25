@@ -1,14 +1,21 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
-import { apiGet, apiGetRaw, apiPostRaw } from '../api/client'
+import { apiFetch, apiGet, apiGetRaw, apiPostRaw } from '../api/client'
+import { consoleSession } from '../api/consoleSession'
 import { TableSetAssignment } from './TableSetAssignment'
+import { TableSetDetail } from './TableSetDetail'
 
-vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiGetRaw: vi.fn(), apiPostRaw: vi.fn(), apiPostBare: vi.fn() }))
-afterEach(cleanup)
+vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiGet: vi.fn(), apiGetRaw: vi.fn(), apiPostRaw: vi.fn(), apiPostBare: vi.fn(),
+  apiPost: vi.fn(), apiPostBareOk: vi.fn(), apiPut: vi.fn() }))
+afterEach(() => {
+  cleanup()
+  vi.resetAllMocks()
+  consoleSession.clear()
+})
 
 it('keeps existing firmware schedules by default and confirms the exact records to replace', async () => {
-  vi.mocked(apiGet).mockImplementation(async path => (path === '/api/terminals'
+  vi.mocked(apiGet).mockImplementation(async path => (path === '/api/tables/scope-options?targetType=terminal'
     ? [{ id: 'phone-fixture', displayName: 'Fixture phone' }] : []) as never)
   const phone = { id: 'phone-fixture', displayName: 'Fixture phone', terminalFamilyLabel: null }
   vi.mocked(apiGetRaw)
@@ -38,7 +45,7 @@ it('keeps existing firmware schedules by default and confirms the exact records 
 })
 
 it('previews the daily firmware window and confirms its exact allocation', async () => {
-  vi.mocked(apiGet).mockImplementation(async path => (path === '/api/terminals'
+  vi.mocked(apiGet).mockImplementation(async path => (path === '/api/tables/scope-options?targetType=terminal'
     ? [{ id: 'window-phone', displayName: 'Window phone' }] : []) as never)
   const start = '2028-02-28T02:00:00Z'
   const end = '2028-02-28T02:30:00Z'
@@ -72,4 +79,46 @@ it('previews the daily firmware window and confirms its exact allocation', async
     firmwareWindow: { startDate: '2028-02-28', dailyStart: '02:00:00', dailyEnd: '02:30:00', activeServers: 2, slotMinutes: 30 },
     firmwarePreviewToken: 'window-token', terminalIds: ['window-phone'],
   }))
+})
+
+it('allows a download-only operator to select one record and schedule it without assignment or registry access', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 1, downloads: 4 })
+  vi.mocked(apiGet).mockImplementation(async path => {
+    if (path === '/api/terminals/families') return [] as never
+    if (path === '/api/tables/scope-options?targetType=terminal') return [{ id: 'phone-fixture', displayName: 'Fixture phone' }] as never
+    if (path === '/api/tables/scope-options?targetType=group') return [{ id: 'group-fixture', name: 'Fixture group', code: 'LAB' }] as never
+    if (path === '/api/tables/scope-options?targetType=region') return [{ id: 'east', name: 'East' }] as never
+    throw new Error(`Unexpected read: ${path}`)
+  })
+  vi.mocked(apiGetRaw).mockResolvedValue(Response.json({ targets: [{ id: 'phone-fixture', displayName: 'Fixture phone', eligible: true }], recordNumbers: [29] }))
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ scheduled: 1, alreadyScheduled: 0 }))
+  const versions = [29, 73].map(tableNumber => ({ id: `record-${tableNumber}`, tableNumber, definitionName: `Fixture ${tableNumber}`,
+    validationPassed: true, payloadLengthBytes: 100, configurationId: null, tableRevision: 1, payloadSha256Hex: 'fixture-hash', warnings: [] }))
+  vi.mocked(apiFetch).mockImplementation(async path => {
+    if (path !== '/api/tables/sets/set-fixture') throw new Error(`Unexpected read: ${path}`)
+    return Response.json({ id: 'set-fixture', name: 'Fixture set', status: 1, revision: 1, optionalRecordRemovals: [], firmwareFindings: [], versions })
+  })
+  render(<MemoryRouter initialEntries={['/table-sets/set-fixture']}>
+    <Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes>
+  </MemoryRouter>)
+  expect(await screen.findByRole('option', { name: 'Fixture phone' })).toBeVisible()
+  expect(screen.queryByRole('option', { name: 'Assign full set' })).toBeNull()
+  expect(screen.queryByRole('option', { name: 'Update selected records' })).toBeNull()
+  fireEvent.change(screen.getByLabelText('Assignment action'), { target: { value: 'schedule-records' } })
+  fireEvent.change(screen.getByLabelText('Schedule by'), { target: { value: 'group' } })
+  expect(await screen.findByRole('option', { name: 'Fixture group (LAB)' })).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Phone group'), { target: { value: 'group-fixture' } })
+  fireEvent.change(screen.getByLabelText('Within region'), { target: { value: 'east' } })
+  fireEvent.click(screen.getByLabelText(/MT29.*Fixture 29/))
+  fireEvent.click(screen.getByRole('button', { name: 'Preview phones' }))
+  expect(await screen.findByText('Records to send MT29')).toBeVisible()
+  expect(screen.queryByRole('option', { name: 'Assign for explicit table requests' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Schedule for 1 phone' }))
+  expect(await screen.findByRole('status')).toHaveTextContent('Scheduled for 1 phone.')
+  expect(apiGetRaw).toHaveBeenCalledWith(expect.stringMatching(/targetType=group&targetId=group-fixture&regionCode=east&recordNumbers=29/))
+  expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/set-fixture/schedules', expect.objectContaining({
+    targetType: 'group', targetId: 'group-fixture', regionCode: 'east', terminalIds: ['phone-fixture'], recordNumbers: [29],
+  }))
+  expect(vi.mocked(apiGet).mock.calls.every(([path]) => path === '/api/terminals/families' || String(path).startsWith('/api/tables/scope-options?'))).toBe(true)
+  expect(apiFetch).toHaveBeenCalledTimes(1)
 })

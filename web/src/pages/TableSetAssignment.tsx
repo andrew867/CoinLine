@@ -6,17 +6,18 @@ import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 
 const RecordUpdateRollouts = lazy(async () => ({ default: (await import('./RecordUpdateRollouts')).RecordUpdateRollouts }))
 
+const scopeOptions = (scope: string) => `/api/tables/scope-options?targetType=${scope}`
 const scopes = {
-  terminal: { label: 'Phone', path: '/api/terminals' },
-  group: { label: 'Phone group', path: '/api/terminal-groups' },
+  terminal: { label: 'Phone', path: scopeOptions('terminal') },
+  group: { label: 'Phone group', path: scopeOptions('group') },
   'group-pattern': { label: 'Group ID pattern', path: null },
-  region: { label: 'Region', path: '/api/terminals/regions' },
-  'time-area': { label: 'Time area', path: '/api/terminals/time-areas' },
+  region: { label: 'Region', path: scopeOptions('region') },
+  'time-area': { label: 'Time area', path: scopeOptions('time-area') },
   'configuration-id': { label: 'Configuration ID', path: null },
   'terminal-id-range': { label: 'Terminal ID range', path: null },
   'software-version': { label: 'Current software version', path: null },
-  site: { label: 'Location', path: '/api/sites' },
-  customer: { label: 'Customer', path: '/api/customers' },
+  site: { label: 'Location', path: scopeOptions('site') },
+  customer: { label: 'Customer', path: scopeOptions('customer') },
 } as const
 
 type Scope = keyof typeof scopes
@@ -59,6 +60,13 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   codeOnly?: boolean
   firmwareSchedule?: FirmwareSchedule | null
 }) {
+  const canAssign = canPerform('table-assignments', op.update)
+  const canPreviewAssignment = canAssign || canPerform('table-assignments', op.read)
+  const canSchedule = canPerform('downloads', op.add)
+  const canReadRollouts = canPerform('table-records', op.read)
+  const canUpdateRecords = canPerform('table-records', op.update)
+  const canPreviewRecords = !codeOnly && (canReadRollouts || canUpdateRecords)
+  const canPreviewFull = canPreviewAssignment || canSchedule
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
   const [targetId, setTargetId] = useState('')
@@ -68,7 +76,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [targets, setTargets] = useState<Target[] | null>(null)
   const [feedback, setFeedback] = useState('')
   const [busy, setBusy] = useState(false)
-  const [mode, setMode] = useState(codeOnly ? 'now' : 'assignment')
+  const [mode, setMode] = useState(codeOnly || (!canAssign && canSchedule) ? 'now' : 'assignment')
   const [availableAt, setAvailableAt] = useState('')
   const [allowFirmwareReschedule, setAllowFirmwareReschedule] = useState(false)
   const [allocateFirmwareWindow, setAllocateFirmwareWindow] = useState(false)
@@ -78,7 +86,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   })
   const [firmwareAllocation, setFirmwareAllocation] = useState<FirmwareAllocation | null>(null)
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
-  const [action, setAction] = useState<AssignmentAction>('set')
+  const [action, setAction] = useState<AssignmentAction>(canPreviewFull ? 'set' : 'records')
   const [actions, setActions] = useState<Record<number, RecordAction>>({})
   const [deliveryRecords, setDeliveryRecords] = useState<number[]>([])
   const [wireSelection, setWireSelection] = useState<number[] | null>(null)
@@ -87,10 +95,6 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [beginWithTerminalId, setBeginWithTerminalId] = useState('')
   const [rolloutRefresh, setRolloutRefresh] = useState(0)
   const [resultSets, setResultSets] = useState<UpdatedSet[]>([])
-  const canAssign = canPerform('table-assignments', op.update)
-  const canSchedule = canPerform('downloads', op.add)
-  const canReadRollouts = canPerform('table-records', op.read)
-  const canUpdateRecords = canPerform('table-records', op.update)
   const choices = new Map((optionalRecords ?? []).map((record) => [record.tableNumber, { name: record.name, removable: true, copyable: false }]))
   for (const record of versions) {
     if (record.tableNumber === 94) continue
@@ -133,6 +137,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   }
 
   useEffect(() => {
+    if (!canPreviewFull && !canPreviewRecords) return
     let current = true
     const path = scopes[scope].path
     void Promise.all([
@@ -145,7 +150,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     })
       .catch(() => { if (current) setFeedback('Could not load assignment targets.') })
     return () => { current = false }
-  }, [scope, hasRegionFilter])
+  }, [scope, hasRegionFilter, canPreviewFull, canPreviewRecords])
 
   function clearReview() {
     setTargets(null)
@@ -178,6 +183,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       await updateRecords(false)
       return
     }
+    if (!canPreviewFull) return
     setTargets(null)
     setWireSelection(null)
     setFirmwareAllocation(null)
@@ -212,7 +218,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   }
 
   async function updateRecords(apply: boolean) {
-    if (!canReadRollouts || (apply && !canUpdateRecords)) return
+    if (!canPreviewRecords || (apply && !canUpdateRecords)) return
     setBusy(true)
     setFeedback('')
     setResultSets([])
@@ -298,10 +304,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const replacements = targets?.filter(target => target.eligible && target.replacesFirmwareScheduleId).length ?? 0
   return (
     <section className="table-config-panel" aria-labelledby="table-assignment-heading">
-      <h2 id="table-assignment-heading">{codeOnly ? 'Schedule firmware parameters' : 'Assign this set'}</h2>
+      <h2 id="table-assignment-heading">{codeOnly ? 'Schedule firmware parameters' : canPreviewAssignment ? 'Assign this set' : canSchedule ? 'Schedule this set' : 'Update selected records'}</h2>
       <p className="page-intro">{codeOnly ? 'The selected phones pick up these parameters on a routine call-in or callback.'
         : 'Preview the current phones in a scope before assigning a set or scheduling a download.'}</p>
-      <form className="table-config-selectors" onSubmit={(event) => void preview(event)}>
+      {(canPreviewFull || canPreviewRecords) && <form className="table-config-selectors" onSubmit={(event) => void preview(event)}>
         {!codeOnly && <label>Assignment action
           <select value={action} disabled={busy} onChange={(event) => {
             const next = event.target.value as AssignmentAction
@@ -309,8 +315,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             if ((scope === 'time-area' || scope === 'configuration-id') && next !== 'schedule-records') changeScope('terminal')
             else clearReview()
           }}>
-            <option value="set">Assign full set</option>
-            {canReadRollouts && <option value="records">Update selected records</option>}
+            {canPreviewFull && <option value="set">{canPreviewAssignment ? 'Assign full set' : 'Schedule full set'}</option>}
+            {canPreviewRecords && <option value="records">Update selected records</option>}
             {canSchedule && <option value="schedule-records">Schedule selected records</option>}
           </select>
         </label>}
@@ -462,9 +468,9 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
         <button type="submit" disabled={!targetId || busy || (scope === 'software-version' && !secondTarget.trim())
           || (selectedRecords && !copyRecords.length && !removeRecords.length)
           || (configurationScope && !configurationRecord) || (partialSchedule && !selectedDeliveryRecords.length)}>
-          {selectedRecords ? 'Preview record update' : schedulesOnly ? 'Preview phones' : 'Preview assignment'}
+          {selectedRecords ? 'Preview record update' : schedulesOnly || !canPreviewAssignment ? 'Preview phones' : 'Preview assignment'}
         </button>
-      </form>
+      </form>}
       {updatePreview && <section className="table-config-preview" aria-labelledby="scope-record-review">
         <h3 id="scope-record-review">Record update review</h3>
         <p>{updatePreview.changeCount} phone assignments will change across {updatePreview.setCount} resulting sets.</p>
@@ -501,10 +507,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
             {item.firmwareStartAtUtc && item.firmwareSlotEndAtUtc &&
               <div>{utcTime(item.firmwareStartAtUtc)} to {utcTime(item.firmwareSlotEndAtUtc)} · Server slot {item.firmwareServerSlot}</div>}
           </li>)}</ul>}
-          <div className="table-config-selectors">
+          {(canSchedule || (!schedulesOnly && canPreviewAssignment)) && <div className="table-config-selectors">
             <label>Delivery
               <select value={deliveryMode} disabled={busy} onChange={(event) => setMode(event.target.value)}>
-                {!schedulesOnly && <option value="assignment">Assign for explicit table requests</option>}
+                {!schedulesOnly && canPreviewAssignment && <option value="assignment">Assign for explicit table requests</option>}
                 {canSchedule && <option value="now">Prepare now for the next call-in</option>}
                 {canSchedule && <option value="later">Prepare at a specific time</option>}
               </select>
@@ -516,14 +522,14 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               (allocateFirmwareWindow && !firmwareAllocation)} onClick={() => void assign()}>
               {deliveryMode === 'assignment' ? 'Assign to' : 'Schedule for'} {eligible} {eligible === 1 ? 'phone' : 'phones'}
             </button>
-          </div>
+          </div>}
         </div>
       )}
       {feedback && <p role="status">{feedback}</p>}
       {resultSets.length > 0 && <ul aria-label="Resulting table sets">{resultSets.map((set) => <li key={set.id}>
         <Link to={`/table-sets/${set.id}`}>{set.name}</Link>
       </li>)}</ul>}
-      {!codeOnly && canReadRollouts && <Suspense fallback={null}><RecordUpdateRollouts setId={setId} refresh={rolloutRefresh} /></Suspense>}
+      {canPreviewRecords && <Suspense fallback={null}><RecordUpdateRollouts setId={setId} refresh={rolloutRefresh} /></Suspense>}
       {canPerform('downloads', op.read) && <TableDownloadScheduleList setId={setId} refresh={scheduleRefresh} />}
     </section>
   )

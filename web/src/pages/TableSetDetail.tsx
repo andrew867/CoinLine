@@ -162,6 +162,9 @@ export function TableSetDetail() {
   if (!d) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
 
   const draft = d.status !== 1
+  const codeOnly = d.versions.length === 1 && d.versions[0].tableNumber === 94
+  const canPreviewScope = canPerform('table-assignments', op.read) || canPerform('table-assignments', op.update) ||
+    canPerform('downloads', op.add) || (!codeOnly && (canReadRecords || canPerform('table-records', op.update)))
   const noVersions = d.versions.length === 0
   const targetSelection = targetEdit ?? d.targetFirmwareVersionId ?? ''
   const targetChanged = targetSelection !== (d.targetFirmwareVersionId ?? '')
@@ -241,9 +244,9 @@ export function TableSetDetail() {
         disabled={recordDirty || targetChanged} onSaved={load} />}
       {canReadRecords && <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
         versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />}
-      {!draft && canPerform('table-assignments', op.read) && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
-        codeOnly={d.versions.length === 1 && d.versions[0].tableNumber === 94} firmwareSchedule={d.firmwareSchedule} />}
-      {!draft && !canPerform('table-assignments', op.read) && canPerform('downloads', op.read) && <TableDownloadScheduleList setId={id} />}
+      {!draft && canPreviewScope && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
+        codeOnly={codeOnly} firmwareSchedule={d.firmwareSchedule} />}
+      {!draft && !canPreviewScope && canPerform('downloads', op.read) && <TableDownloadScheduleList setId={id} />}
       {canReadRecords && <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>
       </p>}
