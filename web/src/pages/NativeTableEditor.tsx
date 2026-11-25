@@ -15,6 +15,7 @@ import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { InterfaceTimingPanel, interfaceTimingKeys } from './InterfaceTimingPanel'
+import { RegionalRatingPreview } from './RegionalRatingPreview'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
@@ -385,6 +386,13 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}
+      {((number === 150 && layout.length === 401) || (number === 151 && layout.length === 604)) &&
+        <RegionalRatingPreview key={`${setId}:${number}`} number={number as 150 | 151}
+          value={key => {
+            const field = layout.sections.find(section => section.key === key.split('.')[0])?.fields.find(item => item.key === key)
+              ?? layout.sections[0]?.fields.find(item => item.key === key)
+            return field && effectiveValue(field)
+          }} onOpen={key => { setSearch(''); setSectionKey(key) }} />}
       {number === 30 && layout.length === 68 && <InterfaceTimingPanel key={`${setId}:${layout.revision}:${layout.sha256}`}
         timers={layout.sections.flatMap(section => section.fields).filter(field =>
           field.editor === 'number' && interfaceTimingKeys.some(key => key === field.key)).map(field => ({
