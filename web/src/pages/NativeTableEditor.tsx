@@ -23,6 +23,8 @@ import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
 import { VisualPromptWorksheet } from './VisualPromptWorksheet'
 import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
 import { RegionalRatingPreview } from './RegionalRatingPreview'
+import { LanguageOrderPanel } from './LanguageOrderPanel'
+import { languageOrderKeys } from './languageOrderPlan'
 
 type Field = {
   key: string
@@ -513,6 +515,25 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           revision={layout.revision} sha256={layout.sha256} reference={keyValue(current, 'reference') ?? null}
           editable={canEdit} dirty={changed !== 0 || busy} onApplied={() => { setReload(count => count + 1); onSaved() }} />
       </>}
+      {showingSettings && number === 26 && layout.length === 72 && current?.key === 'display' &&
+        ['languageCount', ...languageOrderKeys].every(key => current.fields.some(field => field.key === key)) &&
+        <LanguageOrderPanel value={key => {
+          const field = current.fields.find(item => item.key === key)
+          return field && effectiveValue(field)
+        }} editable={canEdit && !busy} onStage={changes => {
+          if (!canEdit || busy) return
+          const updated = { ...edits }
+          for (const [key, value] of Object.entries(changes)) {
+            const field = current.fields.find(item => item.key === key)
+            if (!field || !languageOrderKeys.some(item => item === key)) continue
+            if (field.value === value) delete updated[key]
+            else updated[key] = value
+          }
+          setEdits(updated)
+          onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0
+            || clearedKeys.size > 0 || hasScreeningChanges)
+          setMessage('')
+        }} />}
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!canEdit || busy}>
           <legend>{current.label}</legend>
