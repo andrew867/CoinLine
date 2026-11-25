@@ -809,6 +809,11 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         if (await FullSetProfileIssueAsync(prev, a.Terminal?.FirmwareVersionId, ct) is { } profileIssue)
             throw new InvalidOperationException(profileIssue);
 
+        var priorAccess = await db.TableVersions.AsNoTracking().Include(row => row.TableDefinition).Include(row => row.TablePayload)
+            .Where(row => row.TableSetId == prev && row.TableDefinition!.TableNumber == 21).Take(2).ToListAsync(ct);
+        if (a.Terminal != null && AccessRecordIssue(priorAccess, a.Terminal.TerminalIdHex) is { } identityIssue)
+            throw new InvalidOperationException(identityIssue + " Use a reviewed terminal ID cutover instead of rolling back to an obsolete identity.");
+
         var cur = a.TableSetId;
         a.TableSetId = prev;
         a.PreviousTableSetId = cur;

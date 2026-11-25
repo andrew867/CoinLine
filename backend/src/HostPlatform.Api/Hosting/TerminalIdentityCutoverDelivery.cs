@@ -132,6 +132,77 @@ internal static class TerminalIdentityCutoverDelivery
             return null;
         }
 
+        StageActivation(db, item, phone, assignment!, staged.Id, sessionId, now);
+        ApiAudit.Write(db, null, "ncc", "identity_cutover_confirmed", $"TerminalIdentityCutover:{item.JobId}",
+            new { itemId = item.Id, sessionId, tableSetId = staged.Id }, phone.Id);
+        await db.SaveChangesAsync(ct);
+        if (transaction != null)
+            await transaction.CommitAsync(ct);
+        return phone.Id;
+    }
+
+    // A newer assignment must not be silently overwritten just because the
+    // terminal called with the replacement ID. Review the actual observation
+    // and make the choice explicit using the current assignment revision.
+    public static async Task<RecoveryReview> ReadRecoveryAsync(HostPlatformDbContext db,
+        TerminalIdentityCutoverItem item, CancellationToken ct)
+    {
+        var phone = await db.Terminals.AsNoTracking().SingleAsync(row => row.Id == item.TerminalId, ct);
+        var assignment = await db.TerminalTableAssignments.AsNoTracking().Include(row => row.TableSet)
+            .SingleOrDefaultAsync(row => row.TerminalId == item.TerminalId, ct);
+        var staged = item.StagedTableSetId is { } stagedId ? await ReadSetAsync(db, stagedId, ct) : null;
+        var current = assignment == null ? null : await ReadSetAsync(db, assignment.TableSetId, ct);
+        var commonIssue = item.FinishedAtUtc != null || item.ActivationError == null || item.NewIdentityObservedSessionId == null
+            ? "The job has no unresolved new-identity observation."
+            : phone.DeactivatedAtUtc != null || phone.TerminalIdHex != item.SourceWireId ||
+                phone.FirmwareVersionId != item.SourceFirmwareVersionId
+                ? "The phone identity, firmware or lifecycle changed. Recover the phone before reconciling."
+                : await db.Terminals.AsNoTracking().AnyAsync(row => row.Id != phone.Id && row.TerminalIdHex == item.TargetWireId, ct)
+                    ? "The replacement ID is occupied."
+                    : await db.NccSessions.AsNoTracking().AnyAsync(row => row.Status == NccSessionStatus.Active &&
+                        (row.TerminalId == phone.Id || row.Id == item.NewIdentityObservedSessionId), ct)
+                        ? "Wait until the current management sessions close."
+                        : !await db.NccSessionFrames.AsNoTracking().AnyAsync(frame =>
+                            frame.NccSessionId == item.NewIdentityObservedSessionId && !frame.SentByHost &&
+                            frame.TerminalIdHex == item.TargetWireId, ct)
+                            ? "The observed replacement contact has not been durably recorded." : null;
+        var stagedIssue = commonIssue ?? await ReplacementSetIssueAsync(db, item, phone, staged, requireDispatchedHash: true, ct);
+        var currentIssue = commonIssue ?? await ReplacementSetIssueAsync(db, item, phone, current, requireDispatchedHash: false, ct);
+        return new RecoveryReview(item.Version, assignment?.Id, assignment?.Version,
+            current?.Id, current?.Name, currentIssue, staged?.Id, staged?.Name, stagedIssue);
+    }
+
+    public static async Task ReconcileAsync(HostPlatformDbContext db, TerminalIdentityCutoverItem item,
+        string choice, int expectedRevision, Guid? expectedAssignmentId, int? expectedAssignmentRevision, DateTime now, CancellationToken ct)
+    {
+        var recovery = await ReadRecoveryAsync(db, item, ct);
+        if (recovery.Revision != expectedRevision || recovery.AssignmentId != expectedAssignmentId ||
+            recovery.AssignmentRevision != expectedAssignmentRevision)
+            throw new InvalidOperationException("The job or assignment changed. Review reconciliation again.");
+
+        (Guid? target, string? issue) = choice switch
+        {
+            "staged" => (recovery.StagedSetId, recovery.StagedIssue),
+            "keep-current" => (recovery.CurrentSetId, recovery.CurrentIssue),
+            _ => (null, "Choose the reviewed replacement assignment.")
+        };
+        if (target == null || issue != null || item.NewIdentityObservedSessionId == null)
+            throw new InvalidOperationException(issue ?? "The replacement assignment is unavailable.");
+
+        var phone = await db.Terminals.SingleAsync(row => row.Id == item.TerminalId, ct);
+        var assignment = await db.TerminalTableAssignments.SingleOrDefaultAsync(row => row.TerminalId == phone.Id, ct);
+        if (assignment == null)
+        {
+            var site = await db.Sites.AsNoTracking().SingleAsync(row => row.Id == phone.SiteId, ct);
+            assignment = new TerminalTableAssignment { TerminalId = phone.Id, SiteId = phone.SiteId, CustomerId = site.CustomerId, TableSetId = target.Value, AssignedAtUtc = now };
+            db.TerminalTableAssignments.Add(assignment);
+        }
+        StageActivation(db, item, phone, assignment, target.Value, item.NewIdentityObservedSessionId.Value, now);
+    }
+
+    private static void StageActivation(HostPlatformDbContext db, TerminalIdentityCutoverItem item, Terminal phone,
+        TerminalTableAssignment assignment, Guid targetSet, Guid sessionId, DateTime now)
+    {
         var prior = phone.TerminalIdHex;
         phone.TerminalIdHex = item.TargetWireId;
         phone.Version++;
@@ -140,17 +211,44 @@ internal static class TerminalIdentityCutoverDelivery
             TerminalId = phone.Id, Version = phone.Version, EventType = "wire_id_changed", OccurredAtUtc = now,
             PayloadJson = JsonSerializer.Serialize(new { PreviousValue = prior, CurrentValue = phone.TerminalIdHex })
         });
-        assignment!.PreviousTableSetId = assignment.TableSetId;
-        assignment.TableSetId = staged.Id;
-        assignment.AssignedAtUtc = now;
-        assignment.Version++;
+        if (assignment.TableSetId != targetSet)
+        {
+            assignment.PreviousTableSetId = assignment.TableSetId;
+            assignment.TableSetId = targetSet;
+            assignment.AssignedAtUtc = now;
+            assignment.Version++;
+        }
         item.Activate(sessionId, now);
-        ApiAudit.Write(db, null, "ncc", "identity_cutover_confirmed", $"TerminalIdentityCutover:{item.JobId}",
-            new { itemId = item.Id, sessionId, tableSetId = staged.Id }, phone.Id);
-        await db.SaveChangesAsync(ct);
-        if (transaction != null)
-            await transaction.CommitAsync(ct);
-        return phone.Id;
+    }
+
+    internal sealed record RecoveryReview(int Revision, Guid? AssignmentId, int? AssignmentRevision,
+        Guid? CurrentSetId, string? CurrentSetName, string? CurrentIssue,
+        Guid? StagedSetId, string? StagedSetName, string? StagedIssue);
+
+    private static async Task<string?> ReplacementSetIssueAsync(HostPlatformDbContext db, TerminalIdentityCutoverItem item,
+        Terminal phone, TableSet? set, bool requireDispatchedHash, CancellationToken ct)
+    {
+        if (set == null || set.Status != TableSetStatus.Published)
+            return "A published replacement assignment is required.";
+        if (TableSetFirmwareCompatibility.Mismatch(set, phone.FirmwareVersionId) is { } mismatch)
+            return mismatch;
+        if (set.CustomerId is { } customer && !await db.Sites.AsNoTracking().AnyAsync(row => row.Id == phone.SiteId && row.CustomerId == customer, ct))
+            return "The replacement set belongs to another customer.";
+        var records = set.Versions.Where(row => row.TableDefinition!.TableNumber == 21).ToArray();
+        var profileId = await db.FirmwareVersions.AsNoTracking().Where(row => row.Id == phone.FirmwareVersionId)
+            .Select(row => row.TableProfileId).SingleOrDefaultAsync(ct);
+        var profile = FirmwareTableProfiles.Find(profileId);
+        if (profile is not { ObservedLengthsOnly: false } || !profile.VerifiedLengths.TryGetValue(21, out var length) ||
+            records.Length != 1 || !records[0].ValidationPassed)
+            return "A verified replacement access record is required.";
+        var payload = TableDistributionService.GetEffectivePayload(records[0]);
+        if (payload.Length != length || payload[0] != 21 ||
+            !payload.AsSpan(1, 5).SequenceEqual(Convert.FromHexString(item.TargetWireId)) ||
+            requireDispatchedHash && TablePayloadHasher.Sha256Hex(payload) != item.TargetPayloadSha256Hex)
+            return "The replacement MT21 does not match the observed identity or dispatched fingerprint.";
+        if (!TableDistributionService.HasCompleteDlogRecords(set.Versions))
+            return "The replacement set contains incomplete or duplicate DLOG records.";
+        return TableSetFirmwareCompatibility.SelectionIssue(profile, TableSetFirmwareCompatibility.Shapes(set.Versions));
     }
 
     private static Task<TableSet?> ReadSetAsync(HostPlatformDbContext db, Guid id, CancellationToken ct) =>

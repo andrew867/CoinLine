@@ -248,10 +248,16 @@ Open **Table definitions** to find the master record catalogue. Search by MT num
 
 The registered definitions remain a separate storage directory. A historical stored name is not authoritative wire semantics; for example MT10 is terminal status and MT20 is clock synchronization. MT94 is a separate code-download scheduling record. Viewing the reference catalogue does not change definitions, sets, assignments or payload hashes.
 
-### Terminal ID cutover review
+### Scheduled terminal ID cutover
 
 From **Phones**, select **Review terminal ID cutover**. Enter either an existing and replacement ten-digit decimal terminal ID, or two six-digit NPA-NXX prefixes of equal length. A prefix mapping preserves each phone's final four digits. Limit the inventory to a phone, group, group ID pattern, location, customer, region or time area if needed.
 
 The review shows each registered phone, its current and proposed ID, its published assignment and MT21 record revision. It checks replacement IDs against the entire inventory, including inactive phones, and reports inactive phones, open sessions, unfinished downloads, missing or incompatible access records, and unsupported ID formats. For a verified access profile, expand **Record fingerprints** to compare the current and proposed payload digests; only the terminal ID field is substituted.
 
-This is a read-only worksheet. It neither reserves proposed IDs nor changes a phone, table assignment, download batch or inventory. It does not yet implement automatic scheduled cutover or confirmation on the new identity. Do not interpret an eligible review as a completed terminal change.
+The preview itself is read-only. With Phones update, Table assignments update and Downloads add permissions, select the eligible phones and an optional future local time, then choose **Schedule cutover**. This reserves each replacement ID. It does not immediately change the inventory identity or send a download. A cold INSTALL or memory-recovery request before any possible cutover transfer still uses the original full assigned set.
+
+On an eligible ordinary management call after the due time, the host rechecks the reviewed identity, firmware, assignment and MT21 fingerprint. It prepares an immutable replacement set with the other records unchanged and transmits only MT21, using the old ID for that connection. The Jobs view distinguishes dispatch, MT14 acknowledgement and confirmation from a separate call using the reserved new ID. Only that subsequent contact finalizes the registered identity and assignment.
+
+An unfinished transfer that could have applied MT21 retains the reservation, even if the application or end-of-data acknowledgement was missing, and the host will not send the potentially obsolete configuration. Do not manually change or reuse the reserved ID. A job can be cancelled only if it is known the access record was not attempted. For an unresolved transfer with no new contact, confirm the phone's actual physical state before recovery; an uncertain reservation must not be discarded.
+
+If a new-ID contact was recorded but the assignment changed during delivery, **Review reconciliation** shows the current published assignment and the dispatched replacement. Choose explicitly between a compatible current assignment and the verified dispatched replacement. A stale review is rejected. This action updates Manager after the observed contact; it does not retransmit MT21 or invent an acknowledgement. The previous assignment remains in history, but rolling back to a mismatched obsolete MT21 is rejected. To return to an earlier terminal ID, schedule a separate reviewed cutover. Physical terminal persistence still needs bench qualification.

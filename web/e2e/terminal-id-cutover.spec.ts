@@ -61,3 +61,83 @@ test('reviews a scoped prefix cutover and exposes the exact blocked replacement 
   await page.getByLabel('Replacement ID or prefix').fill('000003')
   await expect(page.getByRole('status')).toHaveCount(0)
 })
+
+test('schedules a reserved identity, cancels unsent work and reconciles an independently observed replacement', async ({ page, baseURL }) => {
+  if (!baseURL) throw new Error('A local fixture origin is required.')
+  const origin = new URL(baseURL).origin
+  const token = 'fixture-cutover-manager'
+  const path = '/api/terminals/identity-cutover'
+  const phoneId = '00000000-0000-4000-8000-000000000401'
+  const base = { id: phoneId, displayName: 'Workshop phone', currentId: '0000010001', replacementId: '0000020001',
+    tableSetId: 'fixture-set', tableSetName: 'Workshop configuration', tableSetRevision: 1, accessRevision: 2,
+    accessLength: 18, sourceHash: 'a'.repeat(64), replacementHash: 'b'.repeat(64), eligible: true, issues: [] }
+  const queued = { id: 'fixture-queued', jobId: 'fixture-job', terminalId: phoneId, sourceWireId: base.currentId,
+    targetWireId: base.replacementId, dueAtUtc: '2026-12-01T00:00:00Z', state: 'scheduled', revision: 0, canCancel: true }
+  const observed = { ...queued, id: 'fixture-observed', terminalId: 'fixture-other-phone', sourceWireId: '0000010002',
+    targetWireId: '0000020002', state: 'activation_blocked', revision: 6, canCancel: false,
+    activationError: 'The reviewed assignment changed.', newIdentityObservedAtUtc: '2026-12-01T01:00:00Z' }
+  let items: (typeof queued & { activationError?: string | null; newIdentityObservedAtUtc?: string })[] = [observed]
+  const writes: { path: string; body: unknown }[] = []
+  await page.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url())
+    if (url.origin !== origin) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    if (url.pathname === '/api/auth/login' && request.method() === 'POST')
+      return route.fulfill({ json: { token, displayName: 'Workshop manager', role: 'Operator',
+        permissions: { overview: 1, phones: 3, 'table-assignments': 3, 'table-records': 1, downloads: 4 } } })
+    if (request.headers().authorization !== 'Bearer ' + token) return route.fulfill({ status: 401 })
+    if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
+      openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
+    if (url.pathname === path + '/preview') return route.fulfill({ json: { eligibleCount: 1, blockedCount: 0,
+      scheduled: false, reviewToken: 'reviewed-snapshot', targets: [base] } })
+    if (url.pathname === path + '/jobs') {
+      if (request.method() === 'GET') return route.fulfill({ json: items })
+      writes.push({ path: url.pathname, body: request.postDataJSON() })
+      items = [queued, observed]
+      return route.fulfill({ status: 201, json: { jobId: queued.jobId, items: [queued] } })
+    }
+    if (url.pathname.endsWith('/cancel')) {
+      writes.push({ path: url.pathname, body: request.postDataJSON() })
+      items = [{ ...queued, state: 'cancelled', revision: 1, canCancel: false }, observed]
+      return route.fulfill({ json: items[0] })
+    }
+    if (url.pathname.endsWith('/recovery')) return route.fulfill({ json: {
+      revision: observed.revision, assignmentId: 'fixture-assignment', assignmentRevision: 2,
+      currentSetId: 'fixture-newer', currentSetName: 'Current configuration', currentIssue: 'The access record has the old ID.',
+      stagedSetId: 'fixture-staged', stagedSetName: 'Dispatched replacement', stagedIssue: null } })
+    if (url.pathname.endsWith('/reconcile')) {
+      writes.push({ path: url.pathname, body: request.postDataJSON() })
+      items = [items[0], { ...observed, state: 'activated', revision: 7, activationError: null }]
+      return route.fulfill({ json: items[1] })
+    }
+    return route.fulfill({ status: 404 })
+  })
+  await signIn(page)
+  await page.goto('/terminals/identity-cutover')
+  await page.getByLabel('Existing ID or prefix').fill('0000010001')
+  await page.getByLabel('Replacement ID or prefix').fill('0000020001')
+  await page.getByRole('button', { name: 'Preview cutover' }).click()
+  await expect(page.getByLabel('Select Workshop phone')).toBeChecked()
+  await page.getByRole('button', { name: 'Schedule cutover for 1 phone' }).click()
+  await expect(page.getByText(/Scheduled 1 phone/)).toBeVisible()
+  const scheduledRow = page.getByRole('row').filter({ hasText: '0000020001' })
+  const conflictRow = page.getByRole('row').filter({ hasText: '0000020002' })
+  await expect(scheduledRow).toContainText('Scheduled, awaiting ordinary call-in')
+  await expect(conflictRow).toContainText('New ID observed; reconciliation required')
+  await expect(conflictRow.getByRole('button', { name: 'Cancel cutover' })).toHaveCount(0)
+  await scheduledRow.getByRole('button', { name: 'Cancel cutover' }).click()
+  await expect(scheduledRow).toContainText('Cancelled before possible application')
+  await conflictRow.getByRole('button', { name: 'Review reconciliation' }).click()
+  await expect(page.getByLabel('Keep current assignment')).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Confirm reviewed replacement' })).toBeDisabled()
+  await page.getByLabel('Use the dispatched replacement set').check()
+  await page.getByRole('button', { name: 'Confirm reviewed replacement' }).click()
+  await expect(conflictRow).toContainText('New identity confirmed')
+  expect(writes).toEqual([
+    { path: path + '/jobs', body: { mapping: { source: base.currentId, replacement: base.replacementId, scope: 'all' },
+      terminalIds: [phoneId], reviewToken: 'reviewed-snapshot', dueAtUtc: null } },
+    { path: path + '/jobs/fixture-job/items/fixture-queued/cancel', body: { revision: 0 } },
+    { path: path + '/jobs/fixture-job/items/fixture-observed/reconcile', body: { choice: 'staged', revision: 6,
+      assignmentId: 'fixture-assignment', assignmentRevision: 2 } },
+  ])
+})

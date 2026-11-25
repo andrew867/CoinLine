@@ -2,6 +2,7 @@ using System.Data;
 using System.Security.Cryptography;
 using System.Text.Json;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
@@ -124,6 +125,38 @@ public sealed class TerminalIdCutoverController(HostPlatformDbContext db, TableD
         catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
         catch (Exception ex) when (WriteConflict(ex))
         { return Conflict(new { error = "This cutover changed. Review the current state." }); }
+    }
+
+    [HttpGet("jobs/{jobId:guid}/items/{itemId:guid}/recovery")]
+    public async Task<ActionResult> Recovery(Guid jobId, Guid itemId, CancellationToken ct)
+    {
+        if (!CanReview()) return Forbid();
+        var item = await db.TerminalIdentityCutoverItems.AsNoTracking()
+            .SingleOrDefaultAsync(row => row.JobId == jobId && row.Id == itemId, ct);
+        return item == null ? NotFound() : Ok(await TerminalIdentityCutoverDelivery.ReadRecoveryAsync(db, item, ct));
+    }
+
+    [HttpPost("jobs/{jobId:guid}/items/{itemId:guid}/reconcile")]
+    public async Task<ActionResult> Reconcile(Guid jobId, Guid itemId, ReconcileRequest request, CancellationToken ct)
+    {
+        if (!CanManage()) return Forbid();
+        try
+        {
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            var item = await db.TerminalIdentityCutoverItems.SingleOrDefaultAsync(row => row.JobId == jobId && row.Id == itemId, ct);
+            if (item == null) return NotFound();
+            await TerminalIdentityCutoverDelivery.ReconcileAsync(db, item, request.Choice, request.Revision,
+                request.AssignmentId, request.AssignmentRevision, clock.GetUtcNow().UtcDateTime, ct);
+            ApiAudit.Write(db, HttpContext, "terminals", "reconcile_identity_cutover", $"TerminalIdentityCutover:{jobId}",
+                new { itemId, request.Choice }, item.TerminalId);
+            await db.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return Ok(JobItemView(item));
+        }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+        catch (Exception ex) when (WriteConflict(ex))
+        { return Conflict(new { error = "The job or assignment changed. Review reconciliation again." }); }
     }
 
     private bool CanReview() =>
@@ -251,6 +284,7 @@ public sealed class TerminalIdCutoverController(HostPlatformDbContext db, TableD
         Guid? TargetId = null, string? RegionCode = null, string? GroupPattern = null, string? TimeAreaCode = null);
     public sealed record ScheduleRequest(Mapping? Mapping, Guid[]? TerminalIds, string? ReviewToken, DateTimeOffset? DueAtUtc);
     public sealed record CancelRequest(int Revision);
+    public sealed record ReconcileRequest(string Choice, int Revision, Guid? AssignmentId, int? AssignmentRevision);
     private sealed record PreviewResult(string Source, string Replacement, PreviewTarget[] Targets,
         int EligibleCount, int BlockedCount, bool Scheduled, string ReviewToken);
     private sealed record PreviewTarget(Guid Id, string DisplayName, string CurrentId, string? ReplacementId,

@@ -46,6 +46,26 @@ public sealed class TerminalIdentityCutoverStateTests
     }
 
     [Fact]
+    public void Observed_conflicting_assignment_retains_reservation_until_reconciled()
+    {
+        var row = new TerminalIdentityCutoverItem { DueAtUtc = Due };
+        row.BeginDispatch(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), Due);
+        row.MarkPossiblyApplied(Due.AddSeconds(1));
+        row.MarkApplicationAcknowledged(Due.AddSeconds(2));
+        row.EndTransfer(Due.AddSeconds(3), null);
+        var observed = Guid.NewGuid();
+        row.BlockActivation(observed, Due.AddSeconds(4), "The assignment changed.");
+        Assert.Equal("activation_blocked", row.State());
+        Assert.Equal(observed, row.NewIdentityObservedSessionId);
+        Assert.Null(row.ActivatedAtUtc);
+        Assert.Null(row.FinishedAtUtc);
+        Assert.Throws<InvalidOperationException>(() => row.Cancel(Due.AddSeconds(5)));
+        row.Activate(observed, Due.AddSeconds(6));
+        Assert.Equal("activated", row.State());
+        Assert.Null(row.ActivationError);
+    }
+
+    [Fact]
     public void An_undispatched_or_demonstrably_unsent_record_can_be_cancelled()
     {
         var queued = new TerminalIdentityCutoverItem { DueAtUtc = Due };

@@ -32,7 +32,10 @@ public sealed class PostgresTerminalIdCutoverNccTests
         using var api = factory.CreateClient();
         api.DefaultRequestHeaders.Add("X-API-Key", key);
 
-        foreach (var (profile, loseAck) in new[] { (FirmwareTableProfiles.MultiPay200, false), (FirmwareTableProfiles.GraphicalMultiPay180, true) })
+        foreach (var (profile, loseAck, conflict) in new[] {
+            (FirmwareTableProfiles.MultiPay200, false, false),
+            (FirmwareTableProfiles.GraphicalMultiPay180, true, false),
+            (FirmwareTableProfiles.LaterMultiPay180, false, true) })
         {
             var seed = await AccessRolloutFixture.Seed(factory.Services, profile);
             var rollout = AccessRolloutFixture.Endpoint(seed);
@@ -127,11 +130,52 @@ public sealed class PostgresTerminalIdCutoverNccTests
                 Assert.Equal(21, Assert.Single(batch.Items).TableVersion!.TableDefinition!.TableNumber);
             }
 
+            if (conflict)
+            {
+                await using var scope = factory.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                var changed = await db.TerminalTableAssignments.SingleAsync(row => row.TerminalId == phone.Id);
+                changed.TableSetId = seed.Basis;
+                changed.Version++;
+                await db.SaveChangesAsync();
+            }
             using (var socket = await Connect(port))
             {
                 var stream = socket.GetStream();
                 await Send(stream, target, 0, [8]); AssertAck(await Read(stream));
-                await ExpectAndAck(stream, target, 13, clear: true);
+                if (conflict) await Send(stream, target, NccControl.Clr);
+                else await ExpectAndAck(stream, target, 13, clear: true);
+            }
+            if (conflict)
+            {
+                await WaitUntil(async () => (await Current()).State() == "activation_blocked");
+                var observed = await Current();
+                Assert.NotNull(observed.NewIdentityObservedSessionId);
+                await WaitUntil(async () =>
+                {
+                    await using var scope = factory.Services.CreateAsyncScope();
+                    var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                    return await db.NccSessions.AnyAsync(row => row.Id == observed.NewIdentityObservedSessionId
+                        && row.Status == NccSessionStatus.Closed) &&
+                        !await db.NccSessions.AnyAsync(row => row.TerminalId == phone.Id && row.Status == NccSessionStatus.Active);
+                });
+                var recoveryRoute = $"{endpoint}/jobs/{jobId}/items/{observed.Id}";
+                var recovery = await api.GetFromJsonAsync<JsonElement>(recoveryRoute + "/recovery");
+                Assert.Equal(JsonValueKind.Null, recovery.GetProperty("stagedIssue").ValueKind);
+                Assert.NotEqual(JsonValueKind.Null, recovery.GetProperty("currentIssue").ValueKind);
+                var request = new
+                {
+                    choice = "staged", revision = recovery.GetProperty("revision").GetInt32(),
+                    assignmentId = recovery.GetProperty("assignmentId").GetGuid(),
+                    assignmentRevision = recovery.GetProperty("assignmentRevision").GetInt32()
+                };
+                using (var stale = await api.PostAsJsonAsync(recoveryRoute + "/reconcile", request with { revision = request.revision - 1 }))
+                    Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+                Assert.Equal("activated", (await AccessRolloutFixture.Post(api, recoveryRoute + "/reconcile", request))
+                    .GetProperty("state").GetString());
+                using var socket = await Connect(port);
+                await Send(socket.GetStream(), target, 0, [8]); AssertAck(await Read(socket.GetStream()));
+                await ExpectAndAck(socket.GetStream(), target, 13, clear: true);
             }
             await WaitUntil(async () => (await Current()).ActivatedAtUtc != null);
             var confirmed = await Current();
@@ -142,7 +186,7 @@ public sealed class PostgresTerminalIdCutoverNccTests
                 var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
                 Assert.Equal(target, (await db.Terminals.SingleAsync(row => row.Id == phone.Id)).TerminalIdHex);
                 var assignment = await db.TerminalTableAssignments.SingleAsync(row => row.TerminalId == phone.Id);
-                Assert.Equal(sourceSet, assignment.PreviousTableSetId);
+                Assert.Equal(conflict ? seed.Basis : sourceSet, assignment.PreviousTableSetId);
                 Assert.Equal(confirmed.StagedTableSetId, assignment.TableSetId);
                 var records = await db.TableVersions.Include(row => row.TableDefinition).Include(row => row.TablePayload)
                     .Where(row => row.TableSetId == assignment.TableSetId).ToListAsync();
@@ -150,11 +194,17 @@ public sealed class PostgresTerminalIdCutoverNccTests
                 Assert.Equal(expected, TableDistributionService.GetEffectivePayload(records.Single(row => row.TableDefinition!.TableNumber == 21)));
                 Assert.Equal(seed.Unrelated, TableDistributionService.GetEffectivePayload(records.Single(row => row.TableDefinition!.TableNumber == 50)));
                 Assert.True(await db.TerminalEvents.AnyAsync(row => row.TerminalId == phone.Id && row.EventType == "wire_id_changed"));
-                Assert.True(await db.NccSessionFrames.AnyAsync(row => row.NccSessionId == confirmed.ActivationSessionId && row.TerminalMatched && row.TerminalIdHex == target));
+                Assert.True(await db.NccSessionFrames.AnyAsync(row => row.NccSession!.TerminalId == phone.Id && row.TerminalMatched && row.TerminalIdHex == target));
             }
             var history = await api.GetFromJsonAsync<JsonElement>($"/api/terminals/{phone.Id}/identity");
             Assert.Equal(oldWire, history.GetProperty("previousId").GetProperty("value").GetString());
             Assert.NotEqual(JsonValueKind.Null, history.GetProperty("firstContactAtUtc").ValueKind);
+            if (!conflict)
+            {
+                using var rollback = await api.PostAsync($"/api/terminals/{phone.Id}/table-assignment/rollback?confirm=true", null);
+                Assert.Equal(HttpStatusCode.BadRequest, rollback.StatusCode);
+                Assert.Contains("obsolete identity", await rollback.Content.ReadAsStringAsync());
+            }
 
             async Task<TerminalIdentityCutoverItem> Current()
             {
