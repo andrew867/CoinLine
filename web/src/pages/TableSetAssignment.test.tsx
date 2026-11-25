@@ -122,3 +122,37 @@ it('allows a download-only operator to select one record and schedule it without
   expect(vi.mocked(apiGet).mock.calls.every(([path]) => path === '/api/terminals/families' || String(path).startsWith('/api/tables/scope-options?'))).toBe(true)
   expect(apiFetch).toHaveBeenCalledTimes(1)
 })
+
+it('personalizes MT21 only after an explicit choice and a fresh per-phone preview', async () => {
+  consoleSession.save('fixture', '', undefined, 'Admin')
+  vi.mocked(apiGet).mockImplementation(async path => path === '/api/tables/scope-options?targetType=group'
+    ? [{ id: 'group-fixture', name: 'Fixture access group' }] as never : [] as never)
+  const phone = { id: 'phone-fixture', displayName: 'Fixture phone', terminalIdHex: '0000000002', baseSetName: 'Existing set' }
+  vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json({ previewToken: 'plain-token', changeCount: 0, setCount: 0, pendingCount: 0,
+    targets: [{ ...phone, reason: 'This set carries another phone’s wire ID.', changes: [] }] }))
+    .mockResolvedValueOnce(Response.json({ previewToken: 'personalized-token', changeCount: 1, setCount: 1, pendingCount: 0,
+      targets: [{ ...phone, reason: null, changes: [{ tableNumber: 21, action: 'replace', required: false, personalized: true }] }] }))
+    .mockResolvedValueOnce(Response.json({ changed: 1, sets: [{ id: 'personalized-set', name: 'Personalized set', phoneDisplayName: 'Fixture phone' }] }))
+  render(<MemoryRouter><TableSetAssignment setId="source-fixture" revision={2} optionalRecords={[]}
+    versions={[{ tableNumber: 21, definitionName: 'Access settings', payloadLengthBytes: 48, validationPassed: true, configurationId: null }]} /></MemoryRouter>)
+  fireEvent.change(screen.getByLabelText('Assignment action'), { target: { value: 'records' } })
+  fireEvent.change(screen.getByLabelText(/Assign by|Update by/), { target: { value: 'group' } })
+  await screen.findByRole('option', { name: 'Fixture access group' })
+  fireEvent.change(screen.getByLabelText('Phone group'), { target: { value: 'group-fixture' } })
+  expect(screen.queryByLabelText(/Use each phone's registered wire ID/)).toBeNull()
+  fireEvent.change(screen.getByLabelText(/MT21.*Access settings/), { target: { value: 'copy' } })
+  expect(screen.getByLabelText(/Use each phone's registered wire ID/)).not.toBeChecked()
+  fireEvent.click(screen.getByRole('button', { name: 'Preview record update' }))
+  expect(await screen.findByText(/another phone’s wire ID/)).toBeVisible()
+  expect(vi.mocked(apiPostRaw).mock.calls[0][1]).not.toHaveProperty('personalizeAccessIdentity')
+  fireEvent.click(screen.getByLabelText(/Use each phone's registered wire ID/))
+  expect(screen.queryByText(/another phone’s wire ID/)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Preview record update' }))
+  expect(await screen.findByText('Replace MT21 (registered phone ID)')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenLastCalledWith('/api/tables/sets/source-fixture/record-updates/preview',
+    expect.objectContaining({ copyRecords: [21], personalizeAccessIdentity: true }))
+  fireEvent.click(screen.getByRole('button', { name: 'Update 1 phone' }))
+  expect(await screen.findByRole('link', { name: 'Personalized set · Fixture phone' })).toHaveAttribute('href', '/table-sets/personalized-set')
+  expect(apiPostRaw).toHaveBeenLastCalledWith('/api/tables/sets/source-fixture/record-updates',
+    expect.objectContaining({ previewToken: 'personalized-token', personalizeAccessIdentity: true, copyRecords: [21] }))
+})

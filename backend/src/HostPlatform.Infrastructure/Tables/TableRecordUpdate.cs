@@ -3,7 +3,7 @@ using HostPlatform.Protocols.Tables;
 
 namespace HostPlatform.Infrastructure.Tables;
 
-public sealed record TableRecordUpdateChange(int TableNumber, string Action, bool Required = false);
+public sealed record TableRecordUpdateChange(int TableNumber, string Action, bool Required = false, bool Personalized = false);
 public sealed record TableRecordUpdatePlan(TableSet Set, IReadOnlyList<TableRecordUpdateChange> Changes);
 
 public static class TableRecordUpdate
@@ -17,8 +17,20 @@ public static class TableRecordUpdate
     };
 
     public static TableRecordUpdatePlan Prepare(TableSet source, TableSet basis, FirmwareVersion? firmware,
-        int[] copyNumbers, int[] removeNumbers)
+        int[] copyNumbers, int[] removeNumbers, string? registeredAccessWireId = null)
     {
+        if (registeredAccessWireId != null)
+        {
+            if (!copyNumbers.Contains(21))
+                throw new InvalidOperationException("Select MT21 for copying before personalizing its terminal identity.");
+            var access = source.Versions.Where(version => version.TableDefinition!.TableNumber == 21).Take(2).ToArray();
+            if (access.Length != 1)
+                throw new InvalidOperationException("Choose exactly one source access record.");
+            var profile = FirmwareTableProfiles.Find(firmware?.TableProfileId);
+            if (profile?.VerifiedLengths.TryGetValue(21, out var expected) == true
+                && TableDistributionService.GetEffectivePayload(access[0]).Length != expected)
+                throw new InvalidOperationException("The source MT21 length does not match the phone's registered firmware profile.");
+        }
         var copy = copyNumbers.Length != 0;
         var name = $"Update · {basis.Name}";
         var target = basis.TargetFirmwareVersion ?? (copy ? source.TargetFirmwareVersion : null);
@@ -35,13 +47,13 @@ public static class TableRecordUpdate
         var lastSortOrder = result.Versions.Select(version => version.SortOrder).DefaultIfEmpty(-1).Max();
         if (copy)
         {
-            var plan = TableRecordCopy.Prepare(source, result, copyNumbers);
+            var plan = TableRecordCopy.Prepare(source, result, copyNumbers, registeredAccessWireId);
             foreach (var entry in plan)
             {
                 var number = entry.Source.TableDefinition!.TableNumber;
                 if (removeNumbers.Contains(number))
                     throw new InvalidOperationException($"MT{number} is required by a selected source record and cannot be removed in the same update.");
-                operations.Add(new(number, entry.Action, entry.Required));
+                operations.Add(new(number, entry.Action, entry.Required, registeredAccessWireId != null && number == 21 && copyNumbers.Contains(21)));
                 if (entry.Action == "keep")
                     continue;
 

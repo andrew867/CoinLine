@@ -42,13 +42,13 @@ type RecordAction = '' | 'copy' | 'remove'
 type AssignmentAction = 'set' | 'records' | 'schedule-records'
 type UpdateTarget = Omit<Target, 'eligible'> & {
   baseSetName: string | null
-  changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean }[]
+  changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean; personalized?: boolean }[]
 }
 type UpdatePreview = {
   changeCount: number; setCount: number; previewToken: string; targets: UpdateTarget[]
   rolloutId: string | null; pendingCount: number
 }
-type UpdatedSet = { id: string; name: string }
+type UpdatedSet = { id: string; name: string; phoneId?: string | null; phoneDisplayName?: string | null }
 const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
 const callInParameters = 35
 
@@ -91,6 +91,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [deliveryRecords, setDeliveryRecords] = useState<number[]>([])
   const [wireSelection, setWireSelection] = useState<number[] | null>(null)
   const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null)
+  const [personalizeAccessIdentity, setPersonalizeAccessIdentity] = useState(false)
   const [stopOnIssue, setStopOnIssue] = useState(false)
   const [beginWithTerminalId, setBeginWithTerminalId] = useState('')
   const [rolloutRefresh, setRolloutRefresh] = useState(0)
@@ -226,6 +227,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
     try {
       const response = await apiPostRaw(`/api/tables/sets/${setId}/record-updates${apply ? '' : '/preview'}`, {
         ...scopeSelection, sourceRevision: revision, copyRecords, removeRecords, stopOnIssue,
+        ...(personalizeAccessIdentity && copyRecords.includes(21) ? { personalizeAccessIdentity: true } : {}),
         beginWithTerminalId: stopOnIssue ? beginWithTerminalId.trim() || undefined : undefined,
         ...(apply ? { previewToken: updatePreview?.previewToken, rolloutId: updatePreview?.rolloutId } : {}),
       })
@@ -402,6 +404,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               MT{number} · {choice.name}
               <select value={actions[number] ?? ''} onChange={(event) => {
                 setActions({ ...actions, [number]: event.target.value as RecordAction })
+                if (number === 21 && event.target.value !== 'copy') setPersonalizeAccessIdentity(false)
                 setUpdatePreview(null)
                 setFeedback('')
                 setResultSets([])
@@ -412,6 +415,13 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               </select>
             </label>)}
           {removeRecords.length > 0 && <p>Removal affects future data sets. A phone can retain the already installed record.</p>}
+          {copyRecords.includes(21) && <div className="table-config-selectors">
+            <label className="native-table-toggle">
+              <input type="checkbox" checked={personalizeAccessIdentity} onChange={event => { setPersonalizeAccessIdentity(event.target.checked); clearReview() }} />
+              Use each phone's registered wire ID in MT21
+            </label>
+            <p>When selected, each resulting set gets its own phone identity in the verified access record. The source manager numbers and all other settings are copied unchanged. Review the other settings before applying.</p>
+          </div>}
           <label className="native-table-toggle">
             <input type="checkbox" checked={stopOnIssue} onChange={event => { setStopOnIssue(event.target.checked); clearReview() }} />
             Pause rollout at the first blocked phone
@@ -474,13 +484,14 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       {updatePreview && <section className="table-config-preview" aria-labelledby="scope-record-review">
         <h3 id="scope-record-review">Record update review</h3>
         <p>{updatePreview.changeCount} phone assignments will change across {updatePreview.setCount} resulting sets.</p>
+        {personalizeAccessIdentity && <p>This updates the desired assignments; it does not prepare a download. Open a resulting phone set to schedule MT21 for delivery.</p>}
         {updatePreview.pendingCount > 0 && <p>{updatePreview.pendingCount} phones will wait for rollout recovery.</p>}
         <ul>{updatePreview.targets.map((phone) => <li key={phone.id}>
           <strong>{phone.displayName}</strong>{phone.terminalFamilyLabel && ` · ${phone.terminalFamilyLabel}`}
           {phone.terminalIdHex && ` · ${phone.terminalIdHex}`}
           {phone.baseSetName && ` · ${phone.baseSetName}`}
-          {phone.reason ? <p>{phone.reason}</p> : <p>{phone.changes.map(({ tableNumber, action, required }) =>
-            `${changeLabels[action]} MT${tableNumber}${required ? ' (required)' : ''}`).join(', ')}</p>}
+          {phone.reason ? <p>{phone.reason}</p> : <p>{phone.changes.map(({ tableNumber, action, required, personalized }) =>
+            `${changeLabels[action]} MT${tableNumber}${required ? ' (required)' : ''}${personalized ? ' (registered phone ID)' : ''}`).join(', ')}</p>}
         </li>)}</ul>
         {canUpdateRecords && (updatePreview.changeCount > 0 || (updatePreview.rolloutId && updatePreview.targets.length > 0)) &&
           <button type="button" disabled={busy} onClick={() => void updateRecords(true)}>
@@ -527,7 +538,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       )}
       {feedback && <p role="status">{feedback}</p>}
       {resultSets.length > 0 && <ul aria-label="Resulting table sets">{resultSets.map((set) => <li key={set.id}>
-        <Link to={`/table-sets/${set.id}`}>{set.name}</Link>
+        <Link to={`/table-sets/${set.id}`}>{set.name}{set.phoneDisplayName && ` · ${set.phoneDisplayName}`}</Link>
       </li>)}</ul>}
       {canPreviewRecords && <Suspense fallback={null}><RecordUpdateRollouts setId={setId} refresh={rolloutRefresh} /></Suspense>}
       {canPerform('downloads', op.read) && <TableDownloadScheduleList setId={setId} refresh={scheduleRefresh} />}
