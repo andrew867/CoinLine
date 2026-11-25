@@ -180,6 +180,41 @@ public sealed class ManualCardLabTests
     }
 
     [Fact]
+    public void New_install_craft_access_uses_seven_decimal_digits_and_not_the_five_digit_pin()
+    {
+        var record = new byte[37];
+        record[0] = 31;
+        record[3] = 0x1A; // Representative malformed imported field, not a real credential.
+        record[31] = 0x80;
+        record[32] = 0xAD;
+        var code = string.Concat(Enumerable.Range(0, 7));
+        var edited = ApplyNewInstallCraftAccess(record, code);
+        var expected = record.ToArray();
+        new byte[] { 0x01, 0x23, 0x45, 0x6E }.CopyTo(expected, 1);
+        Assert.Equal(expected, edited);
+        var layout = NativeTableLayouts.Find(31, edited, NativeTableLayouts.Later)!;
+        Assert.Null(layout.Sections.Single(section => section.Key == "craft").Fields.Single(field => field.Key == "craftAccessCode").Read(edited));
+        Assert.Equal(edited, layout.Apply(edited, new Dictionary<string, string>()));
+        Assert.Throws<InvalidOperationException>(() => ApplyNewInstallCraftAccess(record, new string('1', 5)));
+        Assert.Throws<InvalidOperationException>(() => ApplyNewInstallCraftAccess(record, "12345A7"));
+        var observation = new LabSettings("2025550100", "3335550123", 12345, 60,
+            "ready.json", "result.json", "baseline.json", ObserveExistingUploadOnly: true);
+        observation.Validate();
+        Assert.Throws<InvalidOperationException>(() => (observation with { NewInstallCraftAccessCode = code }).Validate());
+        (observation with { ObserveExistingUploadOnly = false, NewInstallCraftAccessCode = code }).Validate();
+    }
+
+    private static byte[] ApplyNewInstallCraftAccess(byte[] source, string code)
+    {
+        if (code.Length != 7 || code.Any(character => !char.IsAsciiDigit(character)))
+            throw new InvalidOperationException("A new synthetic INSTALL requires a separate seven-digit Craft access code.");
+        var layout = NativeTableLayouts.Find(31, source, NativeTableLayouts.Later)
+            ?? throw new InvalidOperationException("A recognized later MT31 record is required.");
+        Assert.Equal(source, layout.Apply(source, new Dictionary<string, string>()));
+        return layout.Apply(source, new Dictionary<string, string> { ["craftAccessCode"] = code });
+    }
+
+    [Fact]
     public async Task Synthetic_fixture_is_restricted_and_repeated_authorizations_share_one_reference()
     {
         const string route = "3335550123";
@@ -270,9 +305,14 @@ public sealed class ManualCardLabTests
             ["rate-127.additionalPeriod"] = "60", ["rate-127.additionalCharge"] = "5"
         });
 
+        // Only a new isolated INSTALL may replace the imported access field. Never
+        // derive it from the separate five-digit PIN or change an observation retry.
+        if (settings.NewInstallCraftAccessCode is { } craftCode)
+            payloads[31] = ApplyNewInstallCraftAccess(payloads[31], craftCode);
+
         var changed = records.Where(record => !Convert.ToHexString(SHA256.HashData(payloads[record.Number]))
             .Equals(record.Sha256, StringComparison.OrdinalIgnoreCase)).Select(record => record.Number).Order().ToArray();
-        Assert.Equal(new[] { 73, 92 }, changed);
+        Assert.Equal(settings.NewInstallCraftAccessCode is not null && changed.Contains(31) ? new[] { 31, 73, 92 } : new[] { 73, 92 }, changed);
         foreach (var change in changes)
             Assert.Equal(change.Value, screenFields[change.Key].Read(payloads[92]));
         Assert.Equal("7", rateFields["rate-127.classification"].Read(payloads[73]));
@@ -286,7 +326,7 @@ public sealed class ManualCardLabTests
         await db.SaveChangesAsync(ct);
         var tables = new TableDistributionService(db);
         foreach (var record in records)
-            await tables.UpsertVersionAsync(set.Id, definitions[record.Number].Id, record.Number is 73 or 92 ? 2 : 1,
+            await tables.UpsertVersionAsync(set.Id, definitions[record.Number].Id, changed.Contains(record.Number) ? 2 : 1,
                 payloads[record.Number], record.SortOrder, record.Dependency is { } dep ? definitions[dep].Id : null, ct);
         await tables.PublishTableSetAsync(set.Id, ct);
         await tables.AssignTableSetAsync(terminal.Id, set.Id, null, null, ct);
@@ -301,7 +341,7 @@ public sealed class ManualCardLabTests
     private static Task WriteJson(string path, object value) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(value, Json));
 
     private sealed record LabSettings(string TerminalWireId, string Destination, int Port, int TimeoutSeconds, string ReadyFile, string ResultFile,
-        string? TablePackageFile = null, bool ObserveExistingUploadOnly = false)
+        string? TablePackageFile = null, bool ObserveExistingUploadOnly = false, string? NewInstallCraftAccessCode = null)
     {
         public void Validate()
         {
@@ -310,6 +350,9 @@ public sealed class ManualCardLabTests
                 || Port is < 1024 or > 65535 || TimeoutSeconds is < 30 or > 1800 || string.IsNullOrWhiteSpace(ReadyFile)
                 || string.IsNullOrWhiteSpace(ResultFile) || Path.GetFullPath(ReadyFile) == Path.GetFullPath(ResultFile))
                 throw new InvalidOperationException("Use reserved synthetic line IDs and a distinct local fixture output path.");
+            if (NewInstallCraftAccessCode is { } code && (ObserveExistingUploadOnly || string.IsNullOrWhiteSpace(TablePackageFile)
+                    || code.Length != 7 || code.Any(character => !char.IsAsciiDigit(character))))
+                throw new InvalidOperationException("A separate seven-digit Craft access code may be supplied only for a new isolated INSTALL package.");
         }
     }
 
