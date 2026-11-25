@@ -15,12 +15,14 @@ import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { InterfaceTimingPanel, interfaceTimingKeys } from './InterfaceTimingPanel'
+import { TimeDiscountCalendar } from './TimeDiscountCalendar'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
 import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
 import { VisualPromptWorksheet } from './VisualPromptWorksheet'
 import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
+import { RegionalRatingPreview } from './RegionalRatingPreview'
 
 type Field = {
   key: string
@@ -369,6 +371,13 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       {number >= 131 && number <= 133 && (
         <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />
       )}
+      {((number === 150 && layout.length === 401) || (number === 151 && layout.length === 604)) &&
+        <RegionalRatingPreview key={`${setId}:${number}`} number={number as 150 | 151}
+          value={key => {
+            const field = layout.sections.find(section => section.key === key.split('.')[0])?.fields.find(item => item.key === key)
+              ?? layout.sections[0]?.fields.find(item => item.key === key)
+            return field && effectiveValue(field)
+          }} onOpen={key => { setSearch(''); setSectionKey(key) }} />}
       {number === 58 && <section className="table-config-panel" aria-label="Daily restriction preview">
         <h3>Daily restriction preview</h3>
         <p aria-live="polite">{describeServiceRestriction(Object.fromEntries(layout.sections.flatMap(section =>
@@ -382,6 +391,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         return field && effectiveValue(field)
       }} />}
       {(number === 32 || number === 34) && <CollectionPolicyPreview number={number} later={layout.profile === 'Later packed profile'} value={key => {
+        const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
+        return field && effectiveValue(field)
+      }} />}
+      {number === 152 && layout.length === 95 && <TimeDiscountCalendar key={setId} value={key => {
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}

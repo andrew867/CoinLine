@@ -78,4 +78,34 @@ public static partial class NativeTableLayouts
         }
         return false;
     }
+
+    internal static IReadOnlyList<string> TimeDiscountScheduleFindings(ReadOnlySpan<byte> record)
+    {
+        var findings = new List<string>();
+        string[] days = ["Weekdays", "Saturday", "Sunday", "Holidays"];
+        for (var day = 0; day < days.Length; day++)
+        {
+            var first = ReadDiscountWindow(record.Slice(DiscountPeriodStart + day * 2 * DiscountPeriodSize, 4));
+            var second = ReadDiscountWindow(record.Slice(DiscountPeriodStart + (day * 2 + 1) * DiscountPeriodSize, 4));
+            if (first is null || second is null)
+            {
+                findings.Add($"{days[day]} has an out-of-range discount period time. Review the stored hours and minutes; imported bytes are retained.");
+                continue;
+            }
+            if (Enumerable.Range(0, 1440).Any(minute => DiscountWindowContains(first.Value, minute) && DiscountWindowContains(second.Value, minute)))
+                findings.Add($"{days[day]} discount periods overlap. The terminal selects period 1 first, even if its payment option does not apply. Review the schedule.");
+        }
+        return findings;
+    }
+
+    private static (int Start, int End)? ReadDiscountWindow(ReadOnlySpan<byte> time)
+    {
+        if (time[0] > 23 || time[1] > 59 || time[2] > 24 || time[3] > 59 || (time[2] == 24 && time[3] != 0))
+            return null;
+        return (time[0] * 60 + time[1], time[2] * 60 + time[3]);
+    }
+
+    private static bool DiscountWindowContains((int Start, int End) window, int minute) =>
+        window.Start < window.End ? minute >= window.Start && minute < window.End
+            : window.Start > window.End && (minute >= window.Start || minute < window.End);
 }

@@ -112,7 +112,11 @@ public static partial class NativeTableLayouts
             Toggle("establishedAds", "Display advertisements during connected calls", 22, 4),
             Toggle("showClock", "Display date and time on hook", 22, 8),
             Toggle("clock12Hour", "Use a 12-hour clock", 22, 16),
-            Toggle("displayNumber", "Display called number", 24, 1), Toggle("hideCalling", "Suppress the calling prompt", 24, 128),
+            Toggle("displayNumber", "Display called number", 24, 1),
+            Toggle("flashServiceLevel", "Flash degraded-service status messages", 24, 2),
+            Toggle("hideCalling", "Suppress the calling prompt", 24, 128),
+            .. SpareFlags("spare.advertising", "Advertising and date display", 22, 0xE0),
+            .. SpareFlags("spare.display", "Display prompt control", 24, 0x7C),
             .. (later ? LaterLanguages() : [Bits("defaultLanguage", "Default language slot", 23, 1, (0, "Language 1"), (1, "Language 2"))])]),
         Section("callSetup", "Call setup", [
             Select("incomingMode", "Incoming call handling", 6, (0, "No answer"), (1, "Ring for voice calls"),
@@ -180,7 +184,8 @@ public static partial class NativeTableLayouts
         (int, string)[] languages = [(0, "Unused"), (1, "English"), (2, "French"), (3, "Spanish"), (4, "Japanese")];
         return
         [
-            Field("languageCount", "Number of languages", 12, min: 1, max: 4),
+            new NativeTableField("languageCount", "Number of languages", 12, TableFieldEncoding.Bits, Mask: 0x07, Minimum: 1, Maximum: 4,
+                Help: "Edits only the user-language count. Other imported bits and language ordering are retained."),
             Bits("languageFirst", "Default language", 10, 15, languages[1..]), Bits("languageSecond", "Second language", 10, 240, languages),
             Bits("languageThird", "Third language", 11, 15, languages), Bits("languageFourth", "Fourth language", 11, 240, languages)
         ];

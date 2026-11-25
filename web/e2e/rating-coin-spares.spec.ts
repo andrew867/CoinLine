@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { signIn } from './auth'
 
-test('edits coin and time-of-day settings without changing unrelated packed values', async ({ page, baseURL }) => {
+test('edits coin, international and time-of-day settings without changing unrelated packed values', async ({ page, baseURL }) => {
   if (!baseURL) throw new Error('The console fixture requires a local base URL.')
   const origin = new URL(baseURL).origin
   const setId = '00000000-0000-4000-8000-000000000601'
@@ -30,6 +30,18 @@ test('edits coin and time-of-day settings without changing unrelated packed valu
         field('period-0.local.spare.flags.bit6', 'Local discount flags spare bit 6 (0x40)', 'true', 'checkbox', true),
       ] },
       { key: 'reserved', label: 'Reserved configuration', fields: [field('spare.byte10', 'Spare byte 10', '90', 'number', true)] },
+    ] },
+    { number: 151, profile: 'Later packed profile', length: 604, name: 'International set-based rating', revision: 1, sections: [
+      { key: 'default', label: 'International fallback', fields: [
+        field('noMatch', 'When no destination matches', '0'),
+        { ...field('fallback', 'Default rate', '0'), max: 99, tariffIndexOffset: 28 },
+      ] },
+      ...Array.from({ length: 200 }, (_, index) => ({
+        key: `country-${index}`, label: `Destination ${index + 1}`, fields: [
+          { ...field(`country-${index}.country`, 'Country or destination prefix', index === 0 ? '44' : index >= 198 ? '44123' : '0'), max: 65535 },
+          { ...field(`country-${index}.rate`, 'Destination rate', index === 199 ? '1' : '2'), max: 100, tariffIndexOffset: 28, tariffFallbackCode: 100 },
+        ],
+      })),
     ] },
   ]
   const saved = new Map<number, Record<string, string>>()
@@ -103,4 +115,23 @@ test('edits coin and time-of-day settings without changing unrelated packed valu
   await page.getByLabel('Section or entry').selectOption('reserved')
   await page.getByText('Spare fields', { exact: true }).click()
   await expect(page.getByLabel('Spare byte 10')).toHaveValue('129')
+
+  await page.goto(`/table-sets/${setId}?record=151`)
+  const preview = page.getByRole('region', { name: 'Set-based rating preview' })
+  await preview.getByLabel('Test international destination prefix').fill('4412345')
+  await expect(preview).toContainText('Destination 199, prefix 44123')
+  await expect(preview).toContainText('Later matching entries ignored: 200.')
+  await expect(preview).toContainText('MT73 rate 30')
+  await preview.getByRole('button', { name: 'Open selected entry' }).click()
+  await expect(page.getByLabel('Section or entry')).toHaveValue('country-198')
+  await page.getByLabel('Destination rate').selectOption('99')
+  await expect(preview).toContainText('MT73 rate 127')
+  await page.getByRole('button', { name: 'Save record' }).click()
+  await expect(page.getByText('Changes saved to this draft.')).toBeVisible()
+  expect(saved.get(151)).toEqual({ 'country-198.rate': '99' })
+  await page.reload()
+  await preview.getByLabel('Test international destination prefix').fill('4412345')
+  await expect(preview).toContainText('MT73 rate 127')
+  await preview.getByLabel('Test international destination prefix').fill('55')
+  await expect(preview).toContainText('External rating | No destination matched')
 })

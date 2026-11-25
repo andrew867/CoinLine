@@ -62,7 +62,7 @@ jobs:
           CI: "true"
 
       - name: Verify console workflow fixtures
-        run: npm run e2e -- e2e/failed-download.spec.ts e2e/quick-access-customers.spec.ts e2e/advertising-editor.spec.ts e2e/native-spare-fields.spec.ts e2e/call-setup-spares.spec.ts e2e/rating-coin-spares.spec.ts e2e/graphical-spare-fields.spec.ts e2e/carrier-scheduler-spares.spec.ts e2e/card-terminal-routing.spec.ts e2e/numbering-profile.spec.ts e2e/per-phone-access-rollout.spec.ts
+        run: npm run e2e -- e2e/failed-download.spec.ts e2e/quick-access-customers.spec.ts e2e/advertising-editor.spec.ts e2e/native-spare-fields.spec.ts e2e/call-setup-spares.spec.ts e2e/rating-coin-spares.spec.ts e2e/graphical-spare-fields.spec.ts e2e/carrier-scheduler-spares.spec.ts e2e/card-terminal-routing.spec.ts e2e/numbering-profile.spec.ts e2e/per-phone-access-rollout.spec.ts e2e/display-feature-preservation.spec.ts
         env:
           CI: "true"
 
@@ -73,6 +73,11 @@ jobs:
 
       - name: Verify communications performance histogram workflow
         run: npm run e2e -- e2e/performance-buckets.spec.ts --output test-results/performance-buckets
+        env:
+          CI: "true"
+
+      - name: Verify discount calendar workflow
+        run: npm run e2e -- e2e/discount-calendar.spec.ts --output test-results/discount-calendar
         env:
           CI: "true"
 
