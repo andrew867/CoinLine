@@ -421,7 +421,8 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
             var discountByte = Number == NativeTableLayouts.TimeDiscountRecord && whole.Encoding == TableFieldEncoding.UInt8
                 && whole.Key.StartsWith("period-", StringComparison.Ordinal);
             var packedIcon = NativeTableLayouts.IsGraphicalRecord(Number) && whole.Encoding == TableFieldEncoding.GraphicalIcon;
-            if ((!packedTime && !discountByte && !packedIcon) || !changes.TryGetValue(whole.Key, out var packed))
+            var packedSchedulerSpare = Number == CodeDownloadWire.MessageType && whole.Key == "spareParameters";
+            if ((!packedTime && !discountByte && !packedIcon && !packedSchedulerSpare) || !changes.TryGetValue(whole.Key, out var packed))
                 continue;
             foreach (var (key, value) in changes)
             {

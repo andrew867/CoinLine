@@ -1,6 +1,6 @@
 namespace HostPlatform.Protocols.Tables;
 
-/// <summary>Reusable, profile-specific carrier fields. Target card-range and screening positions are never copied implicitly.</summary>
+/// <summary>Reusable, profile-specific carrier fields. Target card-range and screening positions and reserved fields are never copied implicitly.</summary>
 public static class CarrierLibraryWire
 {
     public static bool IsSupported(int number) => number is 23 or 135;
@@ -60,7 +60,7 @@ public static class CarrierLibraryWire
     }
 
     public static byte[] Apply(int number, ReadOnlySpan<byte> record, int slot, ReadOnlySpan<byte> row,
-        bool keepCardAcceptance, byte? screeningEntry)
+        bool keepCardAcceptance, byte? screeningEntry, bool copySpareFields = false)
     {
         CheckRecord(number, record, slot);
         var source = Expand(number, row);
@@ -75,7 +75,7 @@ public static class CarrierLibraryWire
         var offset = slot * Stride(number);
         foreach (var field in Fields(number))
         {
-            if (field.Key.EndsWith(".screeningEntry", StringComparison.Ordinal)) continue;
+            if (field.Key.EndsWith(".screeningEntry", StringComparison.Ordinal) || (field.IsSpare && !copySpareFields)) continue;
             if (field.Encoding is TableFieldEncoding.Flag or TableFieldEncoding.Bits)
             {
                 var target = field.Offset + offset;

@@ -398,7 +398,8 @@ public static partial class NativeTableLayouts
             CarrierReference("localPrimary", "Local primary carrier reference", 7),
             CarrierReference("localCoin", "Local coin carrier reference", 8),
             CarrierReference("localCard", "Local credit-card carrier reference", 9)
-        } : [])]),
+        } : []),
+        .. SpareBytes("spare", header + count * stride, header == 10 ? 10 : 2)]),
         .. Rows("carrier", count, i => $"Carrier {i}", (i, key) =>
         {
             var offset = header + i * stride;
@@ -410,6 +411,7 @@ public static partial class NativeTableLayouts
                 Toggle($"{key}.promptNumber", "Ask for the destination number", control, 1),
                 Toggle($"{key}.stripLocalPrefix", "Remove the dialed prefix for local calls", control, 2),
                 Toggle($"{key}.stripIntraPrefix", "Remove the dialed prefix for intra-area calls", control, 4),
+                .. SpareFlags($"{key}.spare.control", "Carrier selection control", control, 0xF8),
                 Toggle($"{key}.carrierCard", "Use carrier-card processing", control + 1, 1),
                 Toggle($"{key}.carrierPrompt", "Show the carrier's display name", control + 1, 2),
                 Toggle($"{key}.acceptCash", "Accept coins and stored-value cards", control + 1, 4),
@@ -429,6 +431,9 @@ public static partial class NativeTableLayouts
                     Toggle($"{key}.interCardRate", "Use terminal rates for inter-area credit-card calls", control + 4, 16),
                     Toggle($"{key}.interCashRate", "Use terminal rates for inter-area coin or stored-value calls", control + 4, 32)
                 } : []),
+                .. (cardCount == 32 ? SpareFlags($"{key}.spare.rate", "Terminal rate acceptance", control + 4, 0xC0)
+                    : [SpareByte($"{key}.spare.byte1", "Carrier row spare byte", control + 4),
+                       .. SpareFlags($"{key}.spare.cardBitmap", "Card bitmap", offset + 5, 0xF0)]),
                 .. Enumerable.Range(0, cardCount).Select(card => Toggle($"{key}.card-{card}", $"Accept card range {card + 1}",
                     offset + 3 + card / 8, 1 << card % 8))];
         })];

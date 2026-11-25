@@ -102,9 +102,9 @@ public sealed class CarrierLibraryController(HostPlatformDbContext db, TableDist
         if (TableSetFirmwareCompatibility.RecordIssue(profile, entry.TableNumber, raw.Length) is { } issue) return BadRequest(new { error = issue });
         try
         {
-            var updated = CarrierLibraryWire.Apply(entry.TableNumber, raw, body.Slot, entry.RowPayload, body.KeepCardAcceptance.Value, body.ScreeningEntry);
+            var updated = CarrierLibraryWire.Apply(entry.TableNumber, raw, body.Slot, entry.RowPayload, body.KeepCardAcceptance.Value, body.ScreeningEntry, body.CopySpareFields);
             if (raw.AsSpan().SequenceEqual(updated)) return NoContent();
-            Audit("apply", entry, new { entry.TableNumber, revision = entry.Version, setId = set.Id, row = body.Slot });
+            Audit("apply", entry, new { entry.TableNumber, revision = entry.Version, setId = set.Id, row = body.Slot, body.CopySpareFields });
             await tables.UpsertVersionAsync(set.Id, record.TableDefinitionId, record.TableRevision + 1, updated, record.SortOrder,
                 record.DependsOnTableDefinitionId, ct, body.RecordRevision, body.RecordSha256);
             return NoContent();
@@ -117,7 +117,7 @@ public sealed class CarrierLibraryController(HostPlatformDbContext db, TableDist
     public sealed record EntryInput(string? Code, string? Description, int TableNumber, Dictionary<string, string>? Changes,
         int? Revision = null, SourceRow? Source = null);
     public sealed record ApplyInput(Guid SetId, int Slot, int LibraryRevision, int RecordRevision, string? RecordSha256,
-        bool? KeepCardAcceptance, byte? ScreeningEntry = null);
+        bool? KeepCardAcceptance, byte? ScreeningEntry = null, bool CopySpareFields = false);
 
     private Task<List<TableVersion>> ReadRecord(Guid setId, int number, CancellationToken ct) => db.TableVersions.AsNoTracking()
         .Include(record => record.TablePayload).Where(record => record.TableSetId == setId && record.TableDefinition!.TableNumber == number).ToListAsync(ct);
@@ -167,7 +167,7 @@ public sealed class CarrierLibraryController(HostPlatformDbContext db, TableDist
         var record = CarrierLibraryWire.Expand(number, row);
         return CarrierLibraryWire.Fields(number).Select(field => new {
             field.Key, field.Label, field.Editor, min = field.LowerBound, max = field.UpperBound, maxLength = field.TextLimit,
-            field.Choices, field.Help, value = field.Read(record)
+            field.Choices, field.Help, field.IsSpare, value = field.Read(record)
         });
     }
 
