@@ -23,13 +23,19 @@ test('reviews marked restricted routes without changing companion records', asyn
     restrictedRoutes: [
       { number: 92, availability: 'included', routes: [
         { slot: 1, destination: '33355501??', classification: 3, classificationLabel: 'Local', dialable: true,
-          status: 'configured_dialable', trailingWildcards: 2, translated: false },
+          status: 'configured_dialable', trailingWildcards: 2, translated: false, freeCall: false },
         { slot: 2, destination: '3335550102', classification: 11, classificationLabel: 'Denied', dialable: false,
           status: 'denied', trailingWildcards: 0, translated: false },
         { slot: 3, destination: '', classification: 3, classificationLabel: 'Local', dialable: false,
           status: 'blank', trailingWildcards: 0, translated: false },
       ] },
       { number: 55, availability: 'missing', routes: [] },
+      { number: 133, availability: 'included', routes: [
+        { slot: 1, positionLabel: 'Screen 21, panel 2, key 1', destination: '3335550102', classification: 3,
+          classificationLabel: 'Local', dialable: true, status: 'configured_dialable', freeCall: true },
+        { slot: 2, positionLabel: 'Screen 21, panel 2, key 2', destination: '', classification: 3,
+          classificationLabel: 'Local', dialable: false, status: 'navigation_only', freeCall: false },
+      ] },
     ],
   })
   const set = () => ({ id: setId, name: 'Workshop restricted service', status: 0, revision: 1, customerId: null, isDefault: false,
@@ -65,9 +71,12 @@ test('reviews marked restricted routes without changing companion records', asyn
   await signIn(page)
   await page.goto(`/table-sets/${setId}?record=58`)
   const review = page.getByRole('region', { name: 'Permitted routes review' })
-  await expect(review.getByText('1 configured dialable candidate in the included records.')).toBeVisible()
+  await expect(review.getByText('2 configured dialable candidates in the included records.')).toBeVisible()
   await expect(review.getByRole('row').filter({ hasText: 'Entry 1' })).toContainText('33355501??')
   await expect(review.getByRole('row').filter({ hasText: 'Entry 1' })).toContainText('2 trailing wildcard digits')
+  await expect(review.getByRole('row').filter({ hasText: 'Entry 1' })).toContainText('Review marked paid route')
+  await expect(review.getByRole('row').filter({ hasText: 'Screen 21, panel 2, key 1' })).toContainText('Free')
+  await expect(review.getByRole('row').filter({ hasText: 'Screen 21, panel 2, key 2' })).toContainText('Navigation only; no dialed destination')
   await expect(review.getByRole('row').filter({ hasText: 'Entry 2' })).toContainText('Denied call classification')
   await expect(review.getByRole('row').filter({ hasText: 'Entry 3' })).toContainText('Blank destination')
   await expect(review.getByText('Not included in this set. The terminal may retain an existing record.')).toBeVisible()
@@ -80,5 +89,5 @@ test('reviews marked restricted routes without changing companion records', asyn
   await expect(page.getByLabel('Restriction level')).toHaveValue('0')
   await expect(review).toHaveCount(0)
   await page.getByLabel('Restriction level').selectOption('4')
-  await expect(review.getByText('1 configured dialable candidate in the included records.')).toBeVisible()
+  await expect(review.getByText('2 configured dialable candidates in the included records.')).toBeVisible()
 })
