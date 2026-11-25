@@ -63,6 +63,8 @@ public class TableVersion : AuditableEntity
     public string? ScreeningLayoutProfile { get; set; }
     /// <summary>Host-side Configuration ID used to select assignments for this message type.</summary>
     public string? ConfigurationId { get; set; }
+    /// <summary>Host-only card master definition identity and applied revision by one-based card position.</summary>
+    public string? CardMasterLinksJson { get; set; }
 }
 
 public class TerminalTableAssignment : AuditableEntity

@@ -484,6 +484,63 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("CardCredentials");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.CardMasterDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Archived")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<string>("CodeKey")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<byte[]>("RowPayload")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<int>("TableNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TableNumber", "CodeKey")
+                        .IsUnique();
+
+                    b.ToTable("CardMasterDefinitions");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.CardProduct", b =>
                 {
                     b.Property<Guid>("Id")
@@ -3203,6 +3260,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<string>("CardMasterLinksJson")
+                        .HasColumnType("jsonb");
 
                     b.Property<byte[]>("Checksum")
                         .HasColumnType("bytea");
