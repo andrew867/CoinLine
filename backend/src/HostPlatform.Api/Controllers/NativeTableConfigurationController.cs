@@ -72,6 +72,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             layout.Length,
             revision = version.TableRevision,
             sha256 = version.PayloadSha256Hex,
+            graphicalLinks = number is >= 131 and <= 133 ? await ReadGraphicalLinks(id, ct) : null,
             numberingPlan = number == NumberingPlanWire.MessageType && NumberingPlanWire.Supports(raw)
                 ? NumberingPlanWire.Read(raw, later: layout.Profile == NativeTableLayouts.Later) : null,
             numberingFormatCapacity = number == NumberingPlanWire.MessageType
@@ -285,6 +286,21 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     private Task<List<TableVersion>> ReadVersions(Guid set, int number, CancellationToken ct) => db.TableVersions
         .AsNoTracking().Include(v => v.TablePayload).Where(v => v.TableSetId == set && v.TableDefinition!.TableNumber == number)
         .Take(2).ToListAsync(ct);
+
+    private async Task<GraphicalLinkReview> ReadGraphicalLinks(Guid id, CancellationToken ct)
+    {
+        var records = new Dictionary<int, byte[]>();
+        var ambiguous = new HashSet<int>();
+        foreach (var number in new[] { 131, 132, 133 })
+        {
+            var versions = await ReadVersions(id, number, ct);
+            if (versions.Count == 1)
+                records.Add(number, TableDistributionService.GetEffectivePayload(versions[0]));
+            else if (versions.Count > 1)
+                ambiguous.Add(number);
+        }
+        return NativeTableLayouts.ReviewGraphicalLinks(records, ambiguous);
+    }
 
     private static SortedDictionary<int, string> ReadScreeningDescriptions(string? json) =>
         json == null ? [] : JsonSerializer.Deserialize<SortedDictionary<int, string>>(json) ?? [];

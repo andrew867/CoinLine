@@ -6,6 +6,7 @@ import { CarrierLibraryPanel } from './CarrierLibraryPanel'
 import { CarrierBrandingPreview } from './CarrierLibraryPage'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
+import { GraphicalLinkReviewPanel, type GraphicalLinkReview } from './GraphicalLinkReviewPanel'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
 import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
 import { LocalDialingImport } from './LocalDialingImport'
@@ -58,6 +59,7 @@ type Layout = {
   revision: number
   sha256: string
   sections: Section[]
+  graphicalLinks?: GraphicalLinkReview | null
   numberingPlan?: NumberingPlan | null
   numberingFormatCapacity?: number | null
   spareBytes?: string | null
@@ -378,9 +380,11 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           setMessage(`Card position ${position} ${operation}.${carrierChanged ? ' Matching carrier acceptance was updated.' : ' Carrier acceptance was unchanged.'}`)
           setSectionKey(`card-${position - 1}`); setSearch(''); setLayout(null); setReload(count => count + 1); onSaved()
         }} />}
-      {number >= 131 && number <= 133 && (
+      {number >= 131 && number <= 133 && <>
         <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />
-      )}
+        <GraphicalLinkReviewPanel review={layout.graphicalLinks ?? null} number={number}
+          onOpenSection={key => { setSearch(''); setSectionKey(key) }} />
+      </>}
       {((number === 150 && layout.length === 401) || (number === 151 && layout.length === 604)) &&
         <RegionalRatingPreview key={`${setId}:${number}`} number={number as 150 | 151}
           value={key => {
