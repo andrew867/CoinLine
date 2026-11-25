@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { apiFetch, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { NativeBitmapField } from './NativeBitmapField'
+import { CarrierLibraryPanel } from './CarrierLibraryPanel'
+import { CarrierBrandingPreview } from './CarrierLibraryPage'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
@@ -299,6 +301,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const screeningSlot = layout.screening && current ? screeningNumber(current) : null
   const keyCleared = selectedKey != null && clearedKeys.has(selectedKey)
   const carrierReference = selectedKey != null && current && keyValue(current, 'free') === 'true' && keyValue(current, 'featureGroupB') === 'true'
+  const carrierRow = (number === 23 || number === 135) && current?.key.startsWith('carrier-') ? Number(current.key.slice(8)) : null
   const displayFields = current?.showDisplayPreview ? current.fields
     : selectedKey != null && current ? current.fields.filter(field => field.key.endsWith('.upper') || field.key.endsWith('.lower')) : []
   const areaField = layout.sections[0]?.fields.find(field => field.key === 'areaCode')
@@ -415,6 +418,12 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           </label>
         </div>
       )}
+      {showingSettings && current && carrierRow != null && <>
+        <CarrierBrandingPreview name={keyValue(current, 'name') ?? ''} />
+        <CarrierLibraryPanel key={`${setId}:${number}:${carrierRow}`} setId={setId} number={number} slot={carrierRow}
+          revision={layout.revision} sha256={layout.sha256} reference={keyValue(current, 'reference') ?? null}
+          editable={canEdit} dirty={changed !== 0 || busy} onApplied={() => { setReload(count => count + 1); onSaved() }} />
+      </>}
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!canEdit || busy}>
           <legend>{current.label}</legend>

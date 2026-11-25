@@ -662,6 +662,60 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("CardWriteEvents");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.CarrierLibraryEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<string>("CodeKey")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<byte[]>("RowPayload")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<int>("TableNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TableNumber", "CodeKey")
+                        .IsUnique();
+
+                    b.ToTable("CarrierLibraryEntries");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.CdrUploadRequest", b =>
                 {
                     b.Property<Guid>("Id")

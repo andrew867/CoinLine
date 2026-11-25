@@ -62,6 +62,8 @@ public static class OperatorPermissions
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),
             ("Tables", R, "ScopeOptions"), ("Tables", U, "ScopeOptions"));
+        Screen("carrier-library", "Carrier library", ("CarrierLibrary", R, "List Get Schema Apply"),
+            ("CarrierLibrary", A, "Create Schema"), ("CarrierLibrary", U, "Update"), ("CarrierLibrary", D, "Delete"));
         Screen("table-assignments", "Table assignments",
             ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
             ("Terminals", R, "GetTableAssignment TableAssignmentOptions"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
