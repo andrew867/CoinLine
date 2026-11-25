@@ -1,8 +1,10 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text.Json;
 using HostPlatform.Domain;
+using HostPlatform.Infrastructure;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
 using HostPlatform.Protocols.Ncc;
@@ -28,6 +30,27 @@ public sealed class PostgresObservedFirmwareProfilesTests
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
         using var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var password = Guid.NewGuid().ToString("N");
+        var account = new OperatorAccount
+        {
+            Username = "fixture-" + Guid.NewGuid().ToString("N"), DisplayName = "Synthetic profile operator",
+            Role = OperatorRole.Operator, PasswordHash = OperatorPassword.Hash(password),
+            PermissionProfileJson = JsonSerializer.Serialize(new Dictionary<string, int>
+            { ["firmware-registry"] = 5, ["table-sets"] = 7, ["table-records"] = 7 })
+        };
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.OperatorAccounts.Add(account);
+            await db.SaveChangesAsync();
+        }
+        using (var login = await client.PostAsJsonAsync("/api/auth/login", new { username = account.Username, password }))
+        {
+            login.EnsureSuccessStatusCode();
+            var session = await login.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("Operator", session.GetProperty("role").GetString());
+            client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", session.GetProperty("token").GetString());
+        }
         var list = await client.GetFromJsonAsync<JsonElement>("/api/firmware/table-profiles");
         var observed = list.EnumerateArray().Where(row => row.GetProperty("observedLengthsOnly").GetBoolean()).ToArray();
         Assert.Equal(10, observed.Length);
