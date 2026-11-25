@@ -21,6 +21,13 @@
 .table-config-ads fieldset { display: grid; gap: 6px; min-inline-size: 0; padding: 10px 12px; border: 1px solid #dce7e1; border-radius: 9px; }
 .table-config-ads legend { color: #39564a; font-size: .88rem; font-weight: 650; padding-inline: 4px; }
 .table-config-ads .table-config-check { display: flex; gap: 5px; align-items: center; }
+.advertising-glyph-palette { margin-bottom: 12px; padding: 12px; border: 1px solid #dce7e1; border-radius: 9px; }
+.advertising-glyph-buttons { display: flex; flex-wrap: wrap; gap: 5px; }
+.advertising-glyph-buttons button { min-width: 2.1rem; font-family: Consolas, monospace; }
+.advertising-spares { margin-top: 4px !important; border-top: 1px solid #dce7e1; padding-top: 6px; }
+.advertising-spares summary { font-size: .88rem; margin-bottom: 4px; }
+.advertising-spares .page-intro, .advertising-import-notice { font-size: .8rem; color: #526c61; }
+.advertising-spares label { margin-bottom: 4px; }
 .table-config-simulator {
   display: flex;
   align-items: start;
