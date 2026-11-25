@@ -18,7 +18,8 @@ public sealed record TableFieldChoice(int Value, string Label);
 public sealed record NativeTableField(
     string Key, string Label, int Offset, TableFieldEncoding Encoding = TableFieldEncoding.UInt8,
     int Size = 1, int Mask = 0, int? Minimum = null, int? Maximum = null,
-    IReadOnlyList<TableFieldChoice>? Choices = null, string? Help = null, int? BitmapTypeOffset = null, int? TariffIndexOffset = null)
+    IReadOnlyList<TableFieldChoice>? Choices = null, string? Help = null, int? BitmapTypeOffset = null, int? TariffIndexOffset = null,
+    int? TariffFallbackCode = null)
 {
     public string Editor => Encoding switch
     {

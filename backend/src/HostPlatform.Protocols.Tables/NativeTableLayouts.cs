@@ -332,7 +332,9 @@ public static partial class NativeTableLayouts
                 [.. Enumerable.Range(0, 15).Select(digits => (digits, digits.ToString())), (15, "Unlimited")]),
             Bits($"{key}.classification", "Call classification", offset + 1, 15, CallKinds),
             Bits($"{key}.payment", "Payment classification", offset + 1, 240, PaymentKinds),
-            Field($"{key}.rate", "Rate index", offset + 2, help: "Use 255 for an unrated free call."),
+            Field($"{key}.rate", "Rate index", offset + 2, help: later
+                ? "Use 255 to keep toll-free data-port calls unrated as well as free voice calls."
+                : "Use 255 for an unrated free call."),
             Toggle($"{key}.free", "Free call", offset, 1),
             Toggle($"{key}.answer", "Require answer supervision", offset, 2),
             Toggle($"{key}.carrier", "Apply carrier selection", offset, 4),

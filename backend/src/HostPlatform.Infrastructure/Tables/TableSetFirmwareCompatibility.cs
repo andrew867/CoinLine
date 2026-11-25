@@ -46,8 +46,8 @@ public static class TableSetFirmwareCompatibility
                 verifiedRecords.Add(number, data);
         }
 
-        if (profile?.Id == FirmwareTableProfiles.MultiPay200)
-            foreach (var finding in ReviewMultiPayRates(verifiedRecords))
+        if (profile?.Id is FirmwareTableProfiles.MultiPay200 or FirmwareTableProfiles.LaterMultiPay180)
+            foreach (var finding in ReviewMultiPayRates(verifiedRecords, profile.Id == FirmwareTableProfiles.LaterMultiPay180))
                 yield return finding;
     }
 
@@ -61,11 +61,11 @@ public static class TableSetFirmwareCompatibility
         return profile.CompleteCatalogue ? "This record type is absent from the selected firmware catalogue." : null;
     }
 
-    private static IEnumerable<TableFirmwareFinding> ReviewMultiPayRates(IReadOnlyDictionary<int, byte[]> records)
+    private static IEnumerable<TableFirmwareFinding> ReviewMultiPayRates(IReadOnlyDictionary<int, byte[]> records, bool later)
     {
         const int tariffType = 73;
         const int screeningType = 92;
-        const int localExchangeType = 101;
+        const int quickAccessType = 55;
         const int screeningRowSize = 17;
         const int tariffCount = 128;
         const int deniedCall = 11;
@@ -74,7 +74,8 @@ public static class TableSetFirmwareCompatibility
         const int fallbackRoute = 8;
         const int featureGroupB = 128;
 
-        var usesDirectTariff = false;
+        var tariffSources = new SortedSet<int>();
+        records.TryGetValue(26, out var features);
         if (records.TryGetValue(screeningType, out var screening))
         {
             for (var offset = 1; offset < screening.Length; offset += screeningRowSize)
@@ -82,7 +83,7 @@ public static class TableSetFirmwareCompatibility
                 var flags = screening[offset];
                 var classification = screening[offset + 1];
                 var call = classification & 15;
-                var payment = (classification >> 4) & 7;
+                var payment = classification >> 4;
                 var rate = screening[offset + 2];
                 var firstDigit = screening[offset + 4] >> 4;
                 if (firstDigit == 0 || call == deniedCall || (flags & (fallbackRoute | featureGroupB)) != 0)
@@ -91,22 +92,99 @@ public static class TableSetFirmwareCompatibility
                 var row = (offset - 1) / screeningRowSize + 1;
                 if ((flags & freeFlag) != 0)
                 {
-                    if (rate != byte.MaxValue)
+                    if (!later && rate != byte.MaxValue)
                         yield return new(screeningType, true, $"Screening rule {row} is marked free. Set its rate index to 255 for an unrated call.");
+                    else if (later && call == 9 && rate != byte.MaxValue && (flags & carrierRoute) == 0 && (screening[offset + 13] & 2) == 0 &&
+                             (features == null || (features[54] & 1) != 0))
+                        yield return new(screeningType, false, $"Screening rule {row} is free for voice calls, but a toll-free data-port call may be rated. Use index 255 if it should also be free.");
                     continue;
                 }
 
-                if ((flags & carrierRoute) != 0 || payment < 3)
+                if ((flags & carrierRoute) != 0 || !IsPaidClassification(payment, later))
                     continue;
                 if (rate >= tariffCount)
                     yield return new(screeningType, true, $"Screening rule {row} references tariff {rate}. MT73 has tariff indices 0 to 127.");
                 else
-                    usesDirectTariff = true;
+                    tariffSources.Add(screeningType);
             }
         }
 
-        var usesExchangeTariff = records.TryGetValue(localExchangeType, out var exchange) && (exchange[1] != 0 || (exchange[2] & 0xF0) != 0);
-        if ((usesDirectTariff || usesExchangeTariff) && !records.ContainsKey(tariffType))
-            yield return new(tariffType, false, "Screening or local exchange rules refer to MT73 tariffs. This set relies on the terminal's existing MT73 record.");
+        if (records.TryGetValue(quickAccessType, out var keys))
+        {
+            const int informationKey = 64;
+            for (var offset = 1; offset < keys.Length; offset += QuickAccessKeyWire.SlotLength)
+            {
+                var classification = keys[offset + 1];
+                if ((keys[offset + 3] >> 4) == 0 || (classification & 15) == deniedCall ||
+                    (keys[offset] & (freeFlag | carrierRoute | featureGroupB | informationKey)) != 0 ||
+                    !IsPaidClassification(classification >> 4, later))
+                    continue;
+                var key = (offset - 1) / QuickAccessKeyWire.SlotLength + 1;
+                var rate = keys[offset + 2];
+                if (rate >= tariffCount)
+                    yield return new(quickAccessType, true, $"Quick-access key {key} references tariff {rate}. MT73 has tariff indices 0 to 127.");
+                else
+                    tariffSources.Add(quickAccessType);
+            }
+        }
+
+        var areaField = new NativeTableField("areaCode", "Area code", 1, TableFieldEncoding.LocalDialingArea);
+        var exchangeAreas = new Dictionary<string, int>();
+        foreach (var (number, exchange) in records.Where(record => later
+                     ? record.Key is >= 136 and <= 149 or 154 or 155
+                     : record.Key is >= 101 and <= 107))
+        {
+            if (exchange[1] == 0 && (exchange[2] & 0xF0) == 0)
+                continue;
+            tariffSources.Add(number);
+            var area = areaField.Read(exchange);
+            if (area == null)
+                yield return new(number, false, "The local dialing area is not a recognized three-digit area code. Check the imported record before using it.");
+            else if (!exchangeAreas.TryAdd(area, number))
+                yield return new(number, false, $"Area code {area} is also configured in MT{exchangeAreas[area]}. The phone searches the local dialing segments in record order.");
+        }
+
+        if (later)
+        {
+            if (features != null && (features[13] & 1) != 0 && !records.ContainsKey(150))
+                yield return new(150, false, "MT26 enables area-code set-based rating. This set relies on the terminal's existing MT150 record.");
+            if (features != null && (features[13] & 2) != 0 && !records.ContainsKey(151))
+                yield return new(151, false, "MT26 enables international set-based rating. This set relies on the terminal's existing MT151 record.");
+
+            if (records.TryGetValue(150, out var areaRates) && areaRates.Skip(1).Any(value => (value >> 4) > 1 || (value & 15) > 1))
+                tariffSources.Add(150);
+
+            if (records.TryGetValue(151, out var international))
+            {
+                var usesDefault = (international[1] & 3) == 1;
+                if (usesDefault && international[2] >= 100)
+                    yield return new(151, true, "The international default rate must be 0 to 99. A larger value can select a tariff outside MT73.");
+                else if (usesDefault && international[2] >= 2)
+                    tariffSources.Add(151);
+
+                var usesFallback = false;
+                for (var offset = 4; offset < international.Length; offset += 3)
+                {
+                    if (international[offset] == 0 && international[offset + 1] == 0)
+                        continue;
+                    var rate = international[offset + 2];
+                    if (rate is >= 2 and <= 99)
+                        tariffSources.Add(151);
+                    else if (rate >= 100)
+                        usesFallback = true;
+                }
+                if (usesFallback && usesDefault && international[2] < 2)
+                {
+                    tariffSources.Add(151);
+                    yield return new(151, false, "An international destination uses the fallback action with default code 0 or 1. For such destinations this firmware reads MT73 rate 28 or 29 instead of applying the usual host-rating or reject sentinel.");
+                }
+            }
+        }
+
+        if (tariffSources.Count > 0 && !records.ContainsKey(tariffType))
+            yield return new(tariffType, false, $"{string.Join(", ", tariffSources.Select(number => $"MT{number}"))} refer to MT73 tariffs. This set relies on the terminal's existing MT73 record.");
     }
+
+    private static bool IsPaidClassification(int payment, bool later) =>
+        later ? payment is >= 3 and <= 11 : (payment & 7) >= 3;
 }

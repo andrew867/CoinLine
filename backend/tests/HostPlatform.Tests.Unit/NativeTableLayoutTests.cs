@@ -140,8 +140,17 @@ public sealed class NativeTableLayoutTests
         Assert.Equal(new byte[] { 151, 0xA1, 63, 0xB7 }, intlUpdated[..4]);
         Assert.Equal(new byte[] { 0x39, 0x30, 99 }, intlUpdated[^3..]);
         Assert.All(intlUpdated[4..^3], value => Assert.Equal(0, value));
+        var destinationRate = intlLayout.Sections[^1].Fields.Single(field => field.Key == "country-199.rate");
+        Assert.Equal(100, destinationRate.TariffFallbackCode);
+        var useFallback = intlLayout.Apply(intlUpdated, new Dictionary<string, string> { ["country-199.rate"] = "100" });
+        Assert.Equal(intlUpdated[..^1], useFallback[..^1]);
+        Assert.Equal(100, useFallback[^1]);
         Assert.Throws<InvalidOperationException>(() => intlLayout.Apply(intlUpdated,
-            new Dictionary<string, string> { ["country-199.rate"] = "100" }));
+            new Dictionary<string, string> { ["country-199.rate"] = "101" }));
+        Assert.Throws<InvalidOperationException>(() => intlLayout.Apply(intlUpdated,
+            new Dictionary<string, string> { ["fallback"] = "100" }));
+        useFallback[^1] = 255;
+        Assert.Equal(useFallback, intlLayout.Apply(useFallback, new Dictionary<string, string> { ["country-199.rate"] = "255" }));
     }
 
     [Theory]

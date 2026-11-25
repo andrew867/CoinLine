@@ -89,6 +89,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                     maxLength = field.TextLimit,
                     field.Choices,
                     field.TariffIndexOffset,
+                    field.TariffFallbackCode,
                     field.Help,
                     value = field.Read(raw)
                 })

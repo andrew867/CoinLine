@@ -53,6 +53,7 @@ public static partial class NativeTableLayouts
             [Field($"{key}.country", "Country or destination prefix", 4 + i * 3, Word,
                 help: "Enter the numeric prefix after the international access digits. Zero leaves the slot unused."),
              new NativeTableField($"{key}.rate", "Destination rate", 6 + i * 3,
-                 Maximum: 99, TariffIndexOffset: InternationalRatingOffset)])
+                 Maximum: 100, TariffIndexOffset: InternationalRatingOffset, TariffFallbackCode: 100,
+                 Help: "Code 100 uses the configured fallback action, as do larger codes in imported records.")])
     ];
 }

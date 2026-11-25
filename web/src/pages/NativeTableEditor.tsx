@@ -21,6 +21,7 @@ type Field = {
   maxLength: number | null
   choices: { value: number; label: string }[] | null
   tariffIndexOffset?: number | null
+  tariffFallbackCode?: number | null
   help: string | null
 }
 
@@ -508,11 +509,13 @@ function FieldInput({ field, value, dirty, mandatory, onChange }: {
   const clearingPin = pin && value === 'clear'
   const passwordLength = pin ? `1,${field.maxLength}` : field.maxLength
   const tariffOffset = field.tariffIndexOffset
+  const lastTariffCode = field.tariffFallbackCode == null ? field.max : field.tariffFallbackCode - 1
   const choices = field.choices ?? (tariffOffset == null ? null : [
     { value: 0, label: 'Ask CoinLine' }, { value: 1, label: 'Reject the call' },
-    ...Array.from({ length: field.max - 1 }, (_, index) => ({
+    ...Array.from({ length: lastTariffCode - 1 }, (_, index) => ({
       value: index + 2, label: `MT73 rate ${index + 2 + tariffOffset}`,
     })),
+    ...(field.tariffFallbackCode == null ? [] : [{ value: field.tariffFallbackCode, label: 'Use configured fallback action' }]),
   ])
   const input = (
     <label className="native-table-field" data-dirty={dirty}>

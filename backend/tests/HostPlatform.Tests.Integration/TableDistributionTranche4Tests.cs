@@ -299,6 +299,62 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Later_rating_review_blocks_invalid_international_default_and_accepts_corrected_partial_set()
+    {
+        using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
+        {
+            label = "International review fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180
+        });
+        firmware.EnsureSuccessStatusCode();
+        var targetFirmwareVersionId = (await firmware.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "International review fixture", targetFirmwareVersionId });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+        using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = "International review MT151", tableNumber = 151 });
+        definition.EnsureSuccessStatusCode();
+        var bytes = new byte[604];
+        bytes[0] = 151;
+        bytes[1] = 0xA1;
+        bytes[2] = 100;
+        bytes[3] = 0xB7;
+        bytes[4] = 1;
+        bytes[6] = 255;
+        using var imported = await _client.PostAsJsonAsync("/api/tables/versions", new
+        {
+            tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            tableRevision = 1, payloadBase64 = Convert.ToBase64String(bytes), sortOrder = 0
+        });
+        imported.EnsureSuccessStatusCode();
+        var invalid = Assert.Single((await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("firmwareFindings").EnumerateArray());
+        Assert.True(invalid.GetProperty("blocking").GetBoolean());
+        Assert.Equal(151, invalid.GetProperty("tableNumber").GetInt32());
+        using (var blocked = await _client.PostAsync(path + "/publish?confirm=true", null))
+            Assert.Equal(HttpStatusCode.BadRequest, blocked.StatusCode);
+
+        var fieldsPath = path + "/records/151/fields";
+        var original = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        var destination = original.GetProperty("sections")[1].GetProperty("fields")[1];
+        Assert.Equal(100, destination.GetProperty("tariffFallbackCode").GetInt32());
+        Assert.Equal("255", destination.GetProperty("value").GetString());
+        using var saved = await _client.PutAsJsonAsync(fieldsPath, new
+        {
+            profile = original.GetProperty("profile"), revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["fallback"] = "99", ["country-0.rate"] = "100" }
+        });
+        Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        bytes[2] = 99;
+        bytes[6] = 100;
+        var updated = await _client.GetFromJsonAsync<JsonElement>(fieldsPath);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(), updated.GetProperty("sha256").GetString());
+        var warning = Assert.Single((await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("firmwareFindings").EnumerateArray());
+        Assert.False(warning.GetProperty("blocking").GetBoolean());
+        Assert.Equal(73, warning.GetProperty("tableNumber").GetInt32());
+        using var published = await _client.PostAsync(path + "/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+    }
+
+    [Fact]
     public async Task Later_compiled_target_selects_its_native_editor_and_rejects_unlisted_or_wrong_length_records()
     {
         using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
