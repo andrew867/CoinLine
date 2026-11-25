@@ -38,7 +38,8 @@ public sealed class FirmwareTableProfileTests
         Assert.DoesNotContain(131, later.VerifiedLengths.Keys);
         Assert.False(earlier.CompleteCatalogue);
         Assert.True(later.CompleteCatalogue);
-        Assert.Empty(later.TerminalAcknowledgedRecords);
+        Assert.Equal(new[] { 21, 26, 31, 50, 62, 72, 73, 92, 93, 134, 135, 136 }, later.TerminalAcknowledgedRecords.Order().ToArray());
+        Assert.DoesNotContain(35, later.TerminalAcknowledgedRecords);
         Assert.Contains(92, earlier.TerminalAcknowledgedRecords);
         Assert.DoesNotContain(33, earlier.TerminalAcknowledgedRecords);
     }

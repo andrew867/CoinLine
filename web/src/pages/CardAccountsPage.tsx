@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
+import { RuntimeCardAuthorizationStatus } from '../components/RuntimeCardAuthorizationStatus'
 
 type Row = {
   id: string
@@ -67,6 +68,7 @@ export function CardAccountsPage() {
   return (
     <div>
       <h1>Card accounts</h1>
+      <RuntimeCardAuthorizationStatus />
       <p style={{ color: '#555', maxWidth: 720 }}>
         Responses mask opaque credential tokens. PAN fields are last-four display only (PCI scope).
       </p>

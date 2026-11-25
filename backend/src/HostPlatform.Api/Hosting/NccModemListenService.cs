@@ -45,7 +45,7 @@ public sealed class NccModemListenService(
         else if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_NCC_PORT"), out var envPort) && envPort is > 0 and < 65536)
             port = envPort;
 
-        var listener = new TcpListener(IPAddress.Any, port);
+        var listener = new TcpListener(env.IsEnvironment("Testing") ? IPAddress.Loopback : IPAddress.Any, port);
         try
         {
             listener.Start();
@@ -92,7 +92,8 @@ public sealed class NccModemListenService(
         var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
         var tables = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
         var dlog = scope.ServiceProvider.GetRequiredService<DlogTransactionEngine>();
-        var processor = new NccLinkProcessor(db, tables, dlog, outbound, scopes, clock, logger, stoppingToken);
+        var cardProvider = scope.ServiceProvider.GetService<INccCardAuthorizationProvider>();
+        var processor = new NccLinkProcessor(db, tables, dlog, outbound, scopes, clock, logger, stoppingToken, cardProvider);
         await processor.RunAsync(client);
     }
 

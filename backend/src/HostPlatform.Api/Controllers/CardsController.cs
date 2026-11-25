@@ -1,5 +1,6 @@
 using System.Text.Json;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Options;
 using HostPlatform.Api.Security;
 using HostPlatform.Domain;
@@ -24,13 +25,14 @@ public sealed class CardsController(
 {
     private readonly CardPaymentOptions _opts = cardOptions.Value;
 
-    /// <summary>Advertises simulation gates for UI banners — safe without secrets.</summary>
+    /// <summary>Reports physical card-write policy and runtime authorization provider registration.</summary>
     [HttpGet("simulation-state")]
-    public ActionResult<object> SimulationState() =>
+    public ActionResult<object> SimulationState([FromServices] IServiceProviderIsService registrations) =>
         Ok(new
         {
             simulationMode = false,
             hostLedgerEnabled = true,
+            runtimeAuthorizationProviderRegistered = registrations.IsService(typeof(INccCardAuthorizationProvider)),
             physicalCardWritesDisabled = _opts.PhysicalCardWritesDisabled,
             banner =
                 "The host ledger records card payments and call charges. Writing a physical card stays off."
