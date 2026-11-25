@@ -86,6 +86,28 @@ public sealed class TableServiceScreeningTests
         Assert.Equal(92, partial.TableNumber);
     }
 
+    [Fact]
+    public void Iopr_reference_is_optional_but_an_enabled_route_requires_a_literal_screening_number()
+    {
+        var spare = Record(72, 1001);
+        var screening = Record(92, 3061);
+        Assert.Empty(Review(FirmwareTableProfiles.LaterMultiPay180, spare, screening));
+        spare[345] = 181;
+        var invalid = Review(FirmwareTableProfiles.LaterMultiPay180, spare, screening);
+        Assert.Contains(invalid, item => item.TableNumber == 72 && item.Blocking && item.Message.Contains("entry 181"));
+        spare[345] = 180;
+        var blank = Review(FirmwareTableProfiles.LaterMultiPay180, spare, screening);
+        Assert.Contains(blank, item => item.TableNumber == 72 && item.Blocking && item.Message.Contains("blank MT92 entry 180"));
+        Number(screening, 180, 0x12);
+        var feature = Assert.Single(Review(FirmwareTableProfiles.LaterMultiPay180, spare, screening));
+        Assert.False(feature.Blocking);
+        Assert.Contains("IOPR-enabled firmware", feature.Message);
+        var partial = Review(FirmwareTableProfiles.LaterMultiPay180, spare);
+        Assert.Equal(2, partial.Length);
+        Assert.All(partial, item => Assert.False(item.Blocking));
+        Assert.Contains(partial, item => item.TableNumber == 92 && item.Message.Contains("MT72"));
+    }
+
     private static byte[] Record(int number, int length)
     {
         var record = new byte[length];

@@ -36,6 +36,31 @@ public sealed class SpareTableWireTests
     }
 
     [Fact]
+    public void Iopr_configuration_preserves_the_purse_and_reserved_areas_and_uses_one_based_screening()
+    {
+        var original = NewRecord();
+        original[280] = 0xA5;
+        original[354] = 0xBE;
+        original[^1] = 0xCF;
+        original.AsSpan(350, 4).Fill(0xEE);
+        var layout = NativeTableLayouts.Find(72, original)!;
+        var iopr = Assert.Single(layout.Sections, section => section.Key == "operator");
+        Assert.Equal("IOPR configuration", iopr.Label);
+        var updated = layout.Apply(original, new Dictionary<string, string>
+        {
+            ["screenReference"] = "180", ["spillTimeout"] = "12", ["operatorTerminator"] = "12",
+            ["operatorAccessTone"] = "13", ["operatorCallTone"] = "15", ["sessionTimeout"] = "30"
+        });
+        var expected = original.ToArray();
+        new byte[] { 180, 12, 12, 0xDF, 30 }.CopyTo(expected, 345);
+        Assert.Equal(expected, updated);
+        Assert.Throws<InvalidOperationException>(() => layout.Apply(original, new Dictionary<string, string> { ["screenReference"] = "181" }));
+        updated[345] = 255;
+        Assert.Equal(updated, layout.Apply(updated, new Dictionary<string, string> { ["screenReference"] = "255" }));
+        Assert.Null(iopr.Fields.Single(field => field.Key == "operatorPin").Read(updated));
+    }
+
+    [Fact]
     public void Spare_byte_view_masks_every_credential_and_edits_only_selected_offsets()
     {
         var record = NewRecord();

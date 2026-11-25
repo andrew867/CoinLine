@@ -137,6 +137,12 @@ public static class TableSetFirmwareCompatibility
             }
         }
 
+        if (later && records.TryGetValue(SpareTableWire.MessageType, out var spare) && spare[345] != 0)
+        {
+            ReviewReference(SpareTableWire.MessageType, "IOPR access", spare[345], required: true, literalRequired: true);
+            findings.Add(new(SpareTableWire.MessageType, false, "IOPR is configured. The packed layout is known, but this feature requires an IOPR-enabled firmware build and compatible terminal mode."));
+        }
+
         if (omittedScreeningSources.Count > 0)
             findings.Add(new(screeningType, false, $"{string.Join(", ", omittedScreeningSources.Select(number => $"MT{number}"))} refer to call-screening entries. This set relies on the terminal's existing MT92 record."));
         return findings;

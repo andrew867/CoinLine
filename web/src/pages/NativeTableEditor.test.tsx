@@ -3,8 +3,9 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { NativeTableEditor } from './NativeTableEditor'
+import { TableSetConfiguration } from './TableSetConfiguration'
 
-vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiPostRaw: vi.fn() }))
+vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiPostRaw: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn() }))
 
 afterEach(() => {
   cleanup()
@@ -16,6 +17,20 @@ function renderEditor(number = 55) {
   render(<NativeTableEditor setId="set-fixture" number={number} revision={1} exchangeFile={null}
     onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} />)
 }
+
+it('identifies MT72 and its native IOPR configuration from the table-set editor', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 1 })
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ supported: true, editable: false, profile: 'Later packed profile',
+    length: 1001, revision: 1, sha256: 'fixture-hash', sections: [{ key: 'operator', label: 'IOPR configuration', fields: [
+      { key: 'screenReference', label: 'IOPR access number (MT92 entry)', editor: 'number', value: '180', min: 0, max: 180,
+        maxLength: null, choices: null, help: 'Zero disables IOPR.' },
+    ] }] }))
+  render(<TableSetConfiguration setId="set-fixture" draft={false} initialRecord={72}
+    versions={[{ tableDefinitionId: 'fixture-definition', tableNumber: 72, definitionName: 'Spare table', tableRevision: 1, sortOrder: 0,
+      dependsOnTableDefinitionId: null }]} onSaved={vi.fn()} recordDirty={false} onRecordDirty={vi.fn()} />)
+  expect(screen.getByRole('option', { name: 'MT72 · Spare table, e-purse and IOPR' })).toBeVisible()
+  expect(await screen.findByRole('spinbutton', { name: /IOPR access number/ })).toHaveValue(180)
+})
 
 it('does not let Read plus Add edit an existing draft record', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 5 })

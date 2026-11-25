@@ -72,7 +72,8 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         var request = new
         {
             profile = original.GetProperty("profile"), revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
-            changes = new Dictionary<string, string> { ["dailyCash"] = "4000000000", ["operatorPin"] = "258" },
+            changes = new Dictionary<string, string> { ["dailyCash"] = "4000000000", ["operatorPin"] = "258", ["screenReference"] = "180",
+                ["operatorAccessTone"] = "13", ["operatorCallTone"] = "15", ["sessionTimeout"] = "30" },
             spareBytes = new[] { new SpareBytePatch(1000, 0xDE) }
         };
         using var saved = await _client.PutAsJsonAsync(path, request);
@@ -82,11 +83,14 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         Assert.Equal(2, result.GetProperty("revision").GetInt32());
         var bytes = result.GetProperty("spareBytes").GetString()!;
         Assert.EndsWith("DE", bytes);
+        Assert.Equal("B40000DF1E", bytes.Substring((345 - 1) * 2, 10));
         Assert.Equal("????????", bytes.Substring(698, 8));
+        Assert.Contains(result.GetProperty("sections").EnumerateArray(), section => section.GetProperty("label").GetString() == "IOPR configuration");
         var fields = result.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
             .ToDictionary(field => field.GetProperty("key").GetString()!);
         Assert.Equal("4000000000", fields["dailyCash"].GetProperty("value").GetString());
         Assert.Equal(JsonValueKind.Null, fields["operatorPin"].GetProperty("value").ValueKind);
+        Assert.Equal(180, fields["screenReference"].GetProperty("max").GetInt32());
 
         using var blocked = await _client.PutAsJsonAsync(path, new
         {

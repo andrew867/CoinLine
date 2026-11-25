@@ -13,7 +13,7 @@ public static class TableRecordUpdate
     {
         [23] = "Carrier screens", [29] = "Text advertising", [32] = "Communications statistics", [33] = "Modem settings",
         [34] = "Call and carrier statistics", [35] = "Call-in settings", [55] = "Quick access keys", [58] = "Service restrictions",
-        [68] = "Audio-Gram settings", [72] = "Spare table", [85] = "Visual prompts, language 1", [86] = "Visual prompts, language 2"
+        [68] = "Audio-Gram settings", [72] = "Spare table, e-purse and IOPR", [85] = "Visual prompts, language 1", [86] = "Visual prompts, language 2"
     };
 
     public static TableRecordUpdatePlan Prepare(TableSet source, TableSet basis, FirmwareVersion? firmware,

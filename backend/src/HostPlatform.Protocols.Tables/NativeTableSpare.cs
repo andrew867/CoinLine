@@ -89,14 +89,15 @@ public static partial class NativeTableLayouts
             Field("controllerDisconnect", "Disconnect after communication failure (seconds)", 339, Word),
             Field("controllerRestart", "Expected controller restart time (seconds)", 341, Word),
             Field("controllerAlarmDebounce", "Controller alarm debounce (seconds)", 343, Word)),
-        Section("operator", "Alternate operator access",
-            Field("screenReference", "Call-screening entry reference", 345),
-            Field("spillTimeout", "Timeout before sending digits (10 ms ticks)", 346),
-            Select("operatorTerminator", "Terminating key to send", 347, [(0, "None"), .. MessagingTones.Where(tone => tone.Item1 != 0)]),
-            Bits("operatorAccessTone", "Access answer tone", 348, 0xF0, MessagingTones),
-            Bits("operatorCallTone", "Call answer tone", 348, 0x0F, MessagingTones),
-            Field("sessionTimeout", "Session timeout (seconds)", 349),
-            new NativeTableField("operatorPin", "Terminal PIN", 350, PaddedCredentialBcd, 4,
+        Section("operator", "IOPR configuration",
+            Field("screenReference", "IOPR access number (MT92 entry)", 345, max: 180,
+                help: "Zero disables IOPR. A one-based screening entry selects the access number on an IOPR-enabled firmware build."),
+            Field("spillTimeout", "Delay before sending PIN or destination (10 ms ticks)", 346),
+            Select("operatorTerminator", "Terminating digit after PIN or destination", 347, [(0, "None"), .. MessagingTones.Where(tone => tone.Item1 != 0)]),
+            Bits("operatorAccessTone", "IOPR access answer tone", 348, 0xF0, MessagingTones),
+            Bits("operatorCallTone", "IOPR destination answer tone", 348, 0x0F, MessagingTones),
+            Field("sessionTimeout", "IOPR session timeout (seconds)", 349, help: "Zero leaves the timeout disabled."),
+            new NativeTableField("operatorPin", "IOPR terminal PIN", 350, PaddedCredentialBcd, 4,
                 Help: "Enter 1 to 8 digits to replace the PIN. Leave blank to keep it, or select Clear PIN."))
     ];
 
