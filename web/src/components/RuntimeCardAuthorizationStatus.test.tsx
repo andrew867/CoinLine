@@ -34,3 +34,11 @@ it('describes the opt-in provider as synthetic without promising settlement', as
   expect(screen.getByText(/Only explicitly bound test accounts and local test routes/)).toBeVisible()
   expect(screen.getByText(/Physical card writes are disabled/)).toBeVisible()
 })
+
+
+it('reports separate optional simulated CDR posting without implying reconciliation', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ runtimeAuthorizationProviderRegistered: true, labAuthorizationEnabled: true, labSettlementEnabled: true, physicalCardWritesDisabled: true })
+  render(<RuntimeCardAuthorizationStatus />)
+  expect(await screen.findByText(/Synthetic CDR ledger posting is enabled/)).toBeVisible()
+  expect(screen.getByText(/payment reconciliation remains separate/)).toBeVisible()
+})

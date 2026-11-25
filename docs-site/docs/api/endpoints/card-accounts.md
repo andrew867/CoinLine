@@ -13,7 +13,7 @@ Major routes:
 | POST | `/api/cards/accounts/{id}/adjust-balance` | Reason required |
 | POST | `/api/cards/read-events` | Simulated reads |
 | POST | `/api/cards/transactions` | Create txn |
-| GET | `/api/cards/transactions` | List recorded payments |
+| GET | `/api/cards/transactions` | List recorded payments; source indicates a matched synthetic call-detail posting or unclassified entry |
 | GET | `/api/cards/authorization-attempts` | Latest 500 redacted authorization decisions or historical unknown observations; optional `terminalId` filter, card payments read permission |
 | GET/POST | `/api/cards/reconciliation-batches` | Batches |
 | POST | `/api/cards/reconciliation-batches/{id}/post` etc. | State transitions (**confirm**) |
