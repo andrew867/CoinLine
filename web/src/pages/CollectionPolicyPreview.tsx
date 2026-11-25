@@ -1,4 +1,5 @@
 import { optionalCdrCollection, summaryCollection, thresholdDescription } from './collectionPolicy'
+import { PerformanceBucketPreview } from './PerformanceBucketPreview'
 
 type Props = { number: number; later: boolean; value: (key: string) => string | null | undefined }
 
@@ -16,6 +17,7 @@ export function CollectionPolicyPreview({ number, later, value }: Props) {
         {value('enabled') !== '0' && <div><dt>Optional CDR call-in threshold</dt><dd>{thresholdDescription(value('detailThreshold'))}</dd></div>}
       </>}
     </dl>
+    {number === 32 && <PerformanceBucketPreview value={value} />}
     <p>These fields configure what the phone collects and when its stored-record counts trigger a call-in. They do not change the host's reporting filters.</p>
   </section>
 }
