@@ -77,12 +77,13 @@ public static partial class NativeTableLayouts
 {
     private static NativeTableLayout CallCarrierStatisticsLayout(bool later) => new(CollectionPolicyWire.CallCarrierType, 19,
         later ? Later : MultiPay,
-        [Section("summary", "Call and carrier statistics",
+        [Section("summary", "Call and carrier statistics", [
             Hour("startHour", "Collection start hour (phone local time)", 1), Minute("startMinute", "Collection start minute", 2),
             Field("days", "Collection interval (days)", 3, help: "Zero disables call statistics."),
             Field("threshold", "Statistics upload threshold", 4, help: "Zero disables call-ins triggered by this record count."),
             Bits("carrierStatistics", "Carrier statistics", 13, later ? 0x22 : 2,
-                [(0, "Disabled"), (1, "Per carrier"), .. later ? new[] { (17, "Combined carrier summary") } : []])),
+                [(0, "Disabled"), (1, "Per carrier"), .. later ? new[] { (17, "Combined carrier summary") } : []]),
+            .. SpareFlags("spare.policy", "Collection policy", 13, later ? 0xC0 : 0xE0)]),
          Section("detail", "Optional CDR logging",
             Bits("enabled", "Optional CDR mode", 13, CollectionPolicyWire.OptionalCdrMask,
                 (0, "Normal calls only (optional CDRs disabled)"), (1, "All call attempts"), (4, "Completed calls only"),

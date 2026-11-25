@@ -50,10 +50,11 @@ public static partial class NativeTableLayouts
 {
     private static NativeTableLayout ServiceRestrictionLayout(bool later) => new(ServiceRestrictionWire.MessageType,
         ServiceRestrictionWire.RecordLength, later ? Later : MultiPay,
-        [Section("restriction", "Daily service restriction",
+        [Section("restriction", "Daily service restriction", [
             Select("restriction", "Restriction level", 1, [(0, "None"), (1, "Free and emergency calls only"),
                 (2, "No coin or smart-card calls"), (3, "Restrict in-call keypad signaling in coin or smart-card mode"),
                 .. later ? new[] { (ServiceRestrictionWire.ConfigurableAccess, "Configurable restricted access") } : []]),
             Hour("startHour", "Start hour (phone local time)", 2), Minute("startMinute", "Start minute", 3),
-            Field("durationHours", "Duration hours", 4, max: 24), Minute("durationMinutes", "Duration minutes", 5))]);
+            Field("durationHours", "Duration hours", 4, max: 24), Minute("durationMinutes", "Duration minutes", 5),
+            .. SpareBytes("spare", 6, 20)])]);
 }

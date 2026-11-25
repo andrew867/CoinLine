@@ -11,8 +11,12 @@ export function normalizedAdvertisingText(text: string) {
   return text.normalize('NFC')
 }
 
-export function authorableAdvertisingText(text: string) {
+export function authorableDisplayText(text: string, width: number) {
   const cells = Array.from(normalizedAdvertisingText(text))
-  return cells.length <= advertisingDisplayWidth && cells.every(character =>
+  return cells.length <= width && cells.every(character =>
     (character >= ' ' && character <= '~') || westernDisplayGlyphs.includes(character))
+}
+
+export function authorableAdvertisingText(text: string) {
+  return authorableDisplayText(text, advertisingDisplayWidth)
 }

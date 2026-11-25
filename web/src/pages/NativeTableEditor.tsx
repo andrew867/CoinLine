@@ -16,6 +16,7 @@ import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
+import { authorableDisplayText } from './advertisingGlyphs'
 
 type Field = {
   key: string
@@ -29,6 +30,8 @@ type Field = {
   choices: { value: number; label: string }[] | null
   tariffIndexOffset?: number | null
   tariffFallbackCode?: number | null
+  isSpare?: boolean
+  displayGlyphs?: boolean
   help: string | null
 }
 
@@ -308,6 +311,14 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const carrierRow = (number === 23 || number === 135) && current?.key.startsWith('carrier-') ? Number(current.key.slice(8)) : null
   const displayFields = current?.showDisplayPreview ? current.fields
     : selectedKey != null && current ? current.fields.filter(field => field.key.endsWith('.upper') || field.key.endsWith('.lower')) : []
+  const visibleFields = current?.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
+    && !controlledScreeningField(field.key)
+    && !replacedDiscountFields.has(field.key)
+    && ((number !== 35 && number !== 94) || !field.key.startsWith('start.'))
+    && (number !== 35 || !field.key.startsWith('adjust.'))
+    && (number !== 152 || !/^period-\d+\.(local|intra|inter|international)$/.test(field.key))) ?? []
+  const spareFields = visibleFields.filter(field => field.isSpare)
+  const editedSpareCount = spareFields.filter(field => field.key in edits).length
   const areaField = layout.sections[0]?.fields.find(field => field.key === 'areaCode')
   const exchangeFields = areaField ? layout.sections.slice(1).flatMap(section => section.fields) : []
   const exchangeSegment = areaField && exchangeFields.length === exchangeCount
@@ -472,23 +483,18 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
             <figure className="native-table-prompt-preview">
               <figcaption>Terminal display preview</figcaption>
               <div className="table-config-vfd" role="img" aria-label={displayFields.map((field) => {
-                const text = edits[field.key] ?? field.value
+                const text = effectiveValue(field)?.normalize('NFC') ?? null
                 return `${field.label}, ${text === null ? 'unmapped glyphs' : text.trim() || 'blank'}`
               }).join('. ')}>
                 {displayFields.map((field) => (
                   <div key={field.key} aria-hidden="true">
-                    {(edits[field.key] ?? field.value ?? 'Unmapped glyphs').padEnd(20)}
+                    {(effectiveValue(field)?.normalize('NFC') ?? 'Unmapped glyphs').padEnd(20)}
                   </div>
                 ))}
               </div>
             </figure>
           )}
-          {!keyCleared && !changingCardFamily && current.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
-            && !controlledScreeningField(field.key)
-            && !replacedDiscountFields.has(field.key)
-            && ((number !== 35 && number !== 94) || !field.key.startsWith('start.'))
-            && (number !== 35 || !field.key.startsWith('adjust.'))
-            && (number !== 152 || !/^period-\d+\.(local|intra|inter|international)$/.test(field.key))).map((field) => (
+          {!keyCleared && !changingCardFamily && visibleFields.filter(field => !field.isSpare).map((field) => (
             <FieldInput key={field.key} field={carrierReference && field.key.endsWith('.rate') ? { ...field, label: 'Carrier reference' } : field}
               value={edits[field.key] ?? field.value ?? ''}
               mandatory={selectedKey != null && (field.key.endsWith('.number') || field.key.endsWith('.customerReference'))
@@ -497,6 +503,13 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           ))}
           {!keyCleared && customerReferenceField && canEdit && <QuickAccessCustomerLookup key={customerReferenceField.key}
             value={effectiveValue(customerReferenceField) ?? ''} onSelect={value => edit(customerReferenceField, value)} />}
+          {!keyCleared && !changingCardFamily && spareFields.length > 0 && <details key={`spares:${current.key}`} className="native-spare-fields">
+            <summary>Spare fields{editedSpareCount > 0 ? ` (${editedSpareCount} changed)` : ''}</summary>
+            <p className="page-intro">These typed values have no assigned behavior in the verified profile. Normal field edits, blanking and clearing leave them intact. Change them only for a documented firmware use.</p>
+            <div className="native-spare-grid">{spareFields.map(field =>
+              <FieldInput key={field.key} field={field} value={edits[field.key] ?? field.value ?? ''}
+                dirty={field.key in edits} onChange={value => edit(field, value)} />)}</div>
+          </details>}
         </fieldset>
       )}
       {canEdit && (
@@ -555,6 +568,8 @@ function FieldInput({ field, value, dirty, mandatory, onChange }: {
   const pin = field.editor === 'password-pin'
   const clearingPin = pin && value === 'clear'
   const passwordLength = pin ? `1,${field.maxLength}` : field.maxLength
+  const glyphWidth = field.displayGlyphs ? field.maxLength : null
+  const invalidGlyphs = glyphWidth != null && dirty && !authorableDisplayText(value, glyphWidth)
   const tariffOffset = field.tariffIndexOffset
   const lastTariffCode = field.tariffFallbackCode == null ? field.max : field.tariffFallbackCode - 1
   const choices = field.choices ?? (tariffOffset == null ? null : [
@@ -579,13 +594,15 @@ function FieldInput({ field, value, dirty, mandatory, onChange }: {
           max={numeric && dirty ? field.max : undefined} step={numeric || calendar || time ? 1 : undefined}
           autoComplete={password ? 'new-password' : undefined} inputMode={password && !hex ? 'numeric' : undefined}
           pattern={password && field.maxLength ? `[${hex ? '0-9A-Fa-f' : '0-9'}]{${passwordLength}}` : undefined}
-          maxLength={field.maxLength ?? undefined} required={(numeric || time) && dirty}
+          maxLength={glyphWidth != null ? glyphWidth * 2 : field.maxLength ?? undefined} required={(numeric || time) && dirty}
+          aria-invalid={invalidGlyphs || undefined}
           onChange={(event) => {
             const next = event.target.value
             if (!pin || /^[0-9]*$/.test(next)) onChange(next)
           }} />
       )}
       {field.help && <small>{field.help}</small>}
+      {invalidGlyphs && <small role="alert">Enter at most {glyphWidth} display cells using ASCII or supported Western glyphs.</small>}
       {field.value === null && !dirty && !password && <small>{
         calendar ? 'No valid terminal date and time is set.' : time ? 'No valid terminal time of day is set.' : 'Stored characters are outside this editor’s format.'
       }</small>}
