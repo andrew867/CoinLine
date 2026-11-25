@@ -1,10 +1,11 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch } from '../api/client'
 import { DlogTransactionDetail } from './DlogTransactionDetail'
 
 vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiDownload: vi.fn() }))
+afterEach(() => { cleanup(); vi.resetAllMocks() })
 
 it('shows the alarm and phone clock while keeping hex and JSON in the technical record', async () => {
   vi.mocked(apiFetch).mockImplementation(async (path) => {
@@ -44,4 +45,5 @@ it('shows the alarm and phone clock while keeping hex and JSON in the technical 
   fireEvent.click(screen.getByText('Technical record'))
   expect(screen.getByTestId('hex-viewer')).toBeVisible()
   expect(screen.getByRole('heading', { name: 'Decoded JSON' })).toBeVisible()
+  expect(await screen.findByText('No records.')).toBeVisible()
 })
