@@ -93,6 +93,32 @@ public sealed class CollectionPolicyWireTests
         Assert.Contains(findings, finding => finding.Message.Contains("daily instead"));
     }
 
+    [Theory]
+    [InlineData(FirmwareTableProfiles.MultiPay200)]
+    [InlineData(FirmwareTableProfiles.LaterMultiPay180)]
+    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180)]
+    public void Communication_histogram_review_detects_only_active_out_of_range_or_wrapping_pairs(string profile)
+    {
+        var record = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(32)));
+        record[9] = 0xA5; record[10] = 0x5A; record[11] = 0xFF; record[12] = 0xFF;
+        var layout = NativeTableLayouts.Find(32, record)!;
+        var atLimit = layout.Apply(record, new Dictionary<string, string>
+        {
+            ["days"] = "1", ["interval-0.start"] = "5", ["interval-0.duration"] = "13106"
+        });
+        Assert.Empty(Review(profile, atLimit));
+        var wrapped = layout.Apply(atLimit, new Dictionary<string, string> { ["interval-0.duration"] = "13107" });
+        Assert.Contains("wraps", Assert.Single(Review(profile, wrapped)).Message);
+        wrapped[5] = 0xFF; wrapped[6] = 0xFF;
+        var findings = Review(profile, wrapped);
+        Assert.Equal(2, findings.Length);
+        Assert.All(findings, finding => Assert.False(finding.Blocking));
+        Assert.Contains(findings, finding => finding.Message.Contains("Dial complete to carrier") && finding.Message.Contains("nonnegative"));
+        Assert.Equal(record[9..13], wrapped[9..13]);
+        Assert.Equal(wrapped, layout.Apply(wrapped, new Dictionary<string, string>()));
+        Assert.Empty(Review(profile, layout.Apply(wrapped, new Dictionary<string, string> { ["days"] = "0" })));
+    }
+
     private static TableFirmwareFinding[] Review(string profile, byte[] record)
     {
         var firmware = new FirmwareVersion { TableProfileId = profile };

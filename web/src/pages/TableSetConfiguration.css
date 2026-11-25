@@ -190,6 +190,12 @@
 .native-table-summary > div { min-width: 130px; padding: 8px 10px; border-radius: 8px; background: #eef6f1; }
 .native-table-summary dt { color: #526c61; font-size: .84rem; }
 .native-table-summary dd { margin: 3px 0 0; font-weight: 650; }
+.performance-bucket-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: .75rem; }
+.performance-bucket-measurement { padding: .7rem .9rem; border: 1px solid #dce7e1; border-radius: .4rem; }
+.performance-bucket-measurement h4 { margin: 0 0 .6rem; }
+.performance-bucket-measurement dl { display: grid; gap: .35rem; margin: 0; }
+.performance-bucket-measurement dl > div { display: grid; grid-template-columns: minmax(70px, .75fr) 2fr; gap: .5rem; }
+.performance-bucket-measurement dd { margin: 0; font-variant-numeric: tabular-nums; }
 .native-table-bitmap { display: grid; gap: 8px; grid-column: 1 / -1; }
 .native-table-bitmap canvas { width: min(100%, 336px); height: auto; image-rendering: pixelated; border-radius: 8px; }
 .native-table-bitmap label { display: grid; gap: 5px; }

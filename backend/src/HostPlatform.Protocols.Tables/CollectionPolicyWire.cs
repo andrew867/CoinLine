@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Numerics;
 
 namespace HostPlatform.Protocols.Tables;
@@ -50,7 +51,11 @@ public static class CollectionPolicyWire
                 findings.Add(new(false, "The first report timestamp is after the start time. The terminal repeats its report checkpoints daily instead of using the configured multi-day interval."));
         }
         if (!callCarrier)
+        {
+            if (duration != 0)
+                ReviewPerformanceBuckets(record, findings);
             return findings;
+        }
 
         var policy = record[13];
         var cdr = policy & OptionalCdrMask;
@@ -71,6 +76,20 @@ public static class CollectionPolicyWire
     }
 
     private static bool ValidTime(int hour, int minute) => hour <= 23 && minute <= 59;
+
+    private static void ReviewPerformanceBuckets(ReadOnlySpan<byte> record, List<CollectionPolicyFinding> findings)
+    {
+        foreach (var (index, label) in new[] { (0, "Access to dial complete"), (1, "Dial complete to carrier"),
+            (3, "Carrier to first packet"), (4, "User waiting time") })
+        {
+            var start = BinaryPrimitives.ReadInt16LittleEndian(record[(1 + index * 4)..]);
+            var interval = BinaryPrimitives.ReadInt16LittleEndian(record[(3 + index * 4)..]);
+            if (start < 0 || interval < 0)
+                findings.Add(new(false, $"{label}: imported histogram timing is outside the nonnegative authorable range. Review the original values before deployment."));
+            else if (start + 5 * interval > ushort.MaxValue)
+                findings.Add(new(false, $"{label}: the fifth histogram boundary after the start exceeds the 16-bit timing limit and wraps on the terminal. Review the start and interval."));
+        }
+    }
 }
 
 public static partial class NativeTableLayouts
