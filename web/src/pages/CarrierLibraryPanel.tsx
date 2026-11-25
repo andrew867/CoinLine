@@ -20,6 +20,7 @@ export function CarrierLibraryPanel({ setId, number, slot, revision, sha256, ref
   const canRead = canPerform('carrier-library', op.read), canAdd = canPerform('carrier-library', op.add)
   const [entries, setEntries] = useState<CarrierEntry[]>([])
   const [selected, setSelected] = useState(''), [keep, setKeep] = useState('clear'), [screen, setScreen] = useState('')
+  const [copySpareFields, setCopySpareFields] = useState(false)
   const [code, setCode] = useState(''), [description, setDescription] = useState('')
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false)
   const choice = entries.find(entry => entry.id === selected)
@@ -38,8 +39,9 @@ export function CarrierLibraryPanel({ setId, number, slot, revision, sha256, ref
     try {
       await check(await apiFetch(`${endpoint}/${choice.id}/apply`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ setId, slot, libraryRevision: choice.revision, recordRevision: revision, recordSha256: sha256,
-          keepCardAcceptance: keep === 'keep', screeningEntry: choice.featureGroupB ? Number(screen) : undefined }) }))
+          keepCardAcceptance: keep === 'keep', screeningEntry: choice.featureGroupB ? Number(screen) : undefined, copySpareFields }) }))
       setNotice('Carrier definition applied to this draft row.')
+      setCopySpareFields(false)
       onApplied()
     } catch (err) { setError(err instanceof Error ? err.message : 'Could not apply the carrier definition.') }
     finally { setBusy(false) }
@@ -59,17 +61,19 @@ export function CarrierLibraryPanel({ setId, number, slot, revision, sha256, ref
   if (!canRead && !canAdd) return null
   return <section className="table-config-panel" aria-label="Reusable carrier definitions">
     <h3>Carrier library</h3>
-    <p><Link to="/carrier-library">Manage carrier definitions</Link>. Applying a definition copies its reusable fields into this row; it never changes a published set or silently copies card-range positions.</p>
+    <p><Link to="/carrier-library">Manage carrier definitions</Link>. Applying a definition copies its reusable fields into this row; it never changes a published set or silently copies card-range positions or reserved row fields.</p>
     {dirty && <p>Save the current record edits before applying or saving a library definition.</p>}
     {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
     {canRead && editable && <div className="table-config-selectors">
       <label>Library carrier<select value={selected} disabled={busy || dirty} onChange={event => {
         const entry = entries.find(row => row.id === event.target.value)
-        setSelected(event.target.value); setScreen(''); setKeep(entry?.reference === reference ? 'keep' : 'clear')
+        setSelected(event.target.value); setScreen(''); setKeep(entry?.reference === reference ? 'keep' : 'clear'); setCopySpareFields(false)
       }}><option value="">Select a carrier definition</option>{entries.map(entry => <option key={entry.id} value={entry.id}>{entry.code} · {entry.displayName || `Reference ${entry.reference}`}</option>)}</select></label>
       {choice && <>
         <label>Card acceptance for this row<select value={keep} disabled={busy || dirty} onChange={event => setKeep(event.target.value)}>
           <option value="clear">Clear accepted card ranges</option><option value="keep">Keep this row's accepted card ranges</option></select></label>
+        <label>Reserved fields for this row<select value={copySpareFields ? 'copy' : 'keep'} disabled={busy || dirty} onChange={event => setCopySpareFields(event.target.value === 'copy')}>
+          <option value="keep">Keep destination reserved fields</option><option value="copy">Copy definition reserved fields</option></select></label>
         {choice.featureGroupB && <label>Target call-screening entry<input inputMode="numeric" value={screen} disabled={busy || dirty}
           onChange={event => setScreen(event.target.value)} /><small>Choose the matching access number in this set's MT92. Library suggestion: {choice.screeningEntry ?? 'none'}.</small></label>}
         <button type="button" disabled={busy || dirty || (choice.featureGroupB && !validScreen)} onClick={() => void apply()}>Apply carrier definition</button>

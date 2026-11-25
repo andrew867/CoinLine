@@ -26,7 +26,8 @@ public static partial class NativeTableLayouts
                 Enumerable.Range(group * 32, 32).Select(sector =>
                     Toggle($"sector-{sector}", $"Request 4 KiB code block {sector}", 36 + sector / 8, 1 << (sector % 8))).ToArray())),
         Section("reserved", "Reserved code-download bytes",
-            new NativeTableField("spareParameters", "Encoded spare parameters", 74, HexBytes, 26))
+            [new NativeTableField("spareParameters", "Encoded spare parameters", 74, HexBytes, 26),
+             .. SpareBytes("spare", 74, 26)])
     ];
 
     private static void InitializeCodeDownloadRecord(Span<byte> record)

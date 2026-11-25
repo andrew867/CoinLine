@@ -319,6 +319,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     && !controlledScreeningField(field.key)
     && !replacedDiscountFields.has(field.key)
     && (field.editor !== 'screen-icon' || !current.fields.some(item => item.key === `${field.key}Id`))
+    && (number !== 94 || field.key !== 'spareParameters' || !current.fields.some(item => item.isSpare))
     && ((number !== 35 && number !== 94) || !field.key.startsWith('start.'))
     && (number !== 35 || !field.key.startsWith('adjust.'))
     && (number !== 152 || !/^period-\d+\.(local|intra|inter|international)$/.test(field.key))) ?? []

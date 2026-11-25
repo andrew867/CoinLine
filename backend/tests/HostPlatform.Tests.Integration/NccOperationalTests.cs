@@ -1726,7 +1726,8 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         {
             ["enabled"] = "true", ["startAt"] = start.ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
             ["server"] = "1234", ["targetRom"] = "ROMTEST", ["targetApp"] = "A001", ["sector-0"] = "true",
-            ["serverAuthentication"] = Convert.ToHexString(Enumerable.Range(0, 6).Select(index => (byte)(0xA0 + index)).ToArray())
+            ["serverAuthentication"] = Convert.ToHexString(Enumerable.Range(0, 6).Select(index => (byte)(0xA0 + index)).ToArray()),
+            ["spare.byte1"] = "165", ["spare.byte26"] = "129"
         };
         using var saved = await fx.Client.PutAsJsonAsync(fieldsPath, new
         {
@@ -1772,6 +1773,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
 
             var template = NativeTableLayouts.CreateDraftTemplate(Assert.Single(NativeTableLayouts.DraftTemplates(94)));
             var expected = NativeTableLayouts.Find(94, template)!.Apply(template, settings);
+            Assert.Equal(165, expected[74]); Assert.Equal(129, expected[99]);
             await using (var callIn = await OpenAsync())
             {
                 await callIn.Stream.WriteAsync(Message(KnownId, [8]));
