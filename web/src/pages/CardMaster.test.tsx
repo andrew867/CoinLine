@@ -46,6 +46,32 @@ it('creates a named master definition separately from card accounts and shows it
   expect(screen.getByText('3: revision 1 (older)')).toBeVisible()
 })
 
+it('groups reserved row fields separately and saves only the intended master change', async () => {
+  consoleSession.save('fixture', '', undefined, 'Admin')
+  const laterEntry = { ...entry, tableNumber: 134 }
+  const laterSections = [{ ...sections[0], fields: [...sections[0].fields,
+    field('card-0.spare.control.bit7', 'Additional card control spare bit 7', 'true', { editor: 'checkbox', isSpare: true })] }]
+  vi.mocked(apiFetch).mockImplementation(async (url, init) => {
+    if (init?.method === 'PUT') return Response.json({ entry: { ...laterEntry, revision: 3 }, sections: laterSections })
+    if (String(url).endsWith('/usage')) return Response.json({ assignedPhones: 0, outdatedAssignedPhones: 0, configurations: [] })
+    if (String(url).includes('/schema')) return Response.json({ sections })
+    if (String(url).endsWith('/card-fixture')) return Response.json({ entry: laterEntry, sections: laterSections })
+    return Response.json([laterEntry])
+  })
+  render(<MemoryRouter><CardMasterPage /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole('button', { name: 'LAB' }))
+  const disclosure = (await screen.findByText('Spare fields')).closest('details')!
+  expect(disclosure.open).toBe(false)
+  disclosure.open = true
+  expect(screen.getByText(/copied with its row/)).toBeVisible()
+  fireEvent.click(screen.getByLabelText('Additional card control spare bit 7'))
+  expect(screen.getByLabelText(/Carrier reference/)).toHaveValue(7)
+  fireEvent.click(screen.getByRole('button', { name: 'Save card definition' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/card-master/card-fixture', expect.objectContaining({ method: 'PUT' })))
+  const request = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'PUT')
+  expect(JSON.parse(String(request?.[1]?.body)).changes).toEqual({ 'card-0.spare.control.bit7': 'false' })
+})
+
 function panelProps() {
   return { endpoint: '/api/tables/sets/set-one/records/22/card-sequence', setId: 'set-one', number: 22,
     cards: { revision: 2, sha256: 'cards' }, carriers: { revision: 3, sha256: 'carriers' },
