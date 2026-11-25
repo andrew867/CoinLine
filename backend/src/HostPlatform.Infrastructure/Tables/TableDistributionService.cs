@@ -11,6 +11,11 @@ namespace HostPlatform.Infrastructure.Tables;
 public record TableTargetScope(string TargetType, Guid? TargetId, string? RegionCode = null,
     string? GroupPattern = null, string? TimeAreaCode = null);
 
+public sealed record CoveredPartialWork(IReadOnlyList<DownloadBatch> Batches, IReadOnlyList<ScheduledTableDownload> Schedules)
+{
+    public bool HasChanges => Batches.Count != 0 || Schedules.Count != 0;
+}
+
 public sealed class TableDistributionService(HostPlatformDbContext db)
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
@@ -572,6 +577,82 @@ public sealed class TableDistributionService(HostPlatformDbContext db)
         schedule.Version++;
         if (schedule.LastBatch is { Status: DownloadBatchStatus.Pending } batch)
             CancelBatch(batch, reason);
+    }
+
+    /// <summary>
+    /// Stage cancellation of older, redundant partial work only after every
+    /// exact version was acknowledged in a successful full installation.
+    /// No partial item is marked as sent or acknowledged by another batch.
+    /// </summary>
+    public async Task<CoveredPartialWork> StageCoveredPartialDownloadsAsync(DownloadBatch installation, CancellationToken ct)
+    {
+        if (installation.Scope != DownloadScope.Full || installation.Status != DownloadBatchStatus.Completed
+            || installation.CompletedAtUtc == null || installation.NccSessionId == null || installation.Items.Count == 0
+            || installation.Items.Any(item => !item.Succeeded || item.LastAckStatus != "ack"))
+            return new([], []);
+
+        var covered = installation.Items.Select(item => item.TableVersionId).ToHashSet();
+        var prior = installation.CreatedAtUtc;
+        var pending = await db.DownloadBatches.Include(batch => batch.Items)
+            .Where(batch => batch.TerminalId == installation.TerminalId && batch.Id != installation.Id
+                && batch.Scope == DownloadScope.Partial && batch.Status == DownloadBatchStatus.Pending
+                && batch.NccSessionId == null && batch.ScheduleId == null && batch.CreatedAtUtc <= prior)
+            .OrderBy(batch => batch.Id).ToListAsync(ct);
+        var batches = pending.Where(batch => Covers(batch.Items.Select(item => item.TableVersionId))).ToList();
+
+        var due = await db.ScheduledTableDownloads.Include(schedule => schedule.LastBatch).ThenInclude(batch => batch!.Items)
+            .Where(schedule => schedule.TerminalId == installation.TerminalId && schedule.RecordNumbers != null
+                && schedule.CreatedAtUtc <= prior && schedule.AvailableAtUtc <= prior && schedule.NccSessionId == null
+                && schedule.CompletedAtUtc == null && schedule.CancelledAtUtc == null)
+            .OrderBy(schedule => schedule.Id).ToListAsync(ct);
+        var schedules = new List<ScheduledTableDownload>();
+        foreach (var schedule in due)
+        {
+            bool exact;
+            if (schedule.LastBatch is { } attempt)
+            {
+                if (attempt.Scope != DownloadScope.Partial || attempt.Status is not
+                    (DownloadBatchStatus.Pending or DownloadBatchStatus.Failed or DownloadBatchStatus.Cancelled)
+                    || (attempt.Status == DownloadBatchStatus.Pending && attempt.NccSessionId != null))
+                    continue;
+                exact = Covers(attempt.Items.Select(item => item.TableVersionId));
+            }
+            else
+            {
+                if (schedule.LastBatchId != null)
+                    continue;
+                // A not-yet-prepared due selection is pinned to its published
+                // source set; resolve the actual versions and required records.
+                var set = await db.TableSets.AsNoTracking().Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                    .Include(row => row.Versions).ThenInclude(row => row.TablePayload)
+                    .SingleOrDefaultAsync(row => row.Id == schedule.TableSetId && row.Status == TableSetStatus.Published, ct);
+                if (set == null)
+                    continue;
+                try { exact = Covers(SelectDataDownloadRecords(set.Versions.ToArray(), schedule.RecordNumbers!).Select(row => row.Id)); }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException) { continue; }
+            }
+            if (!exact)
+                continue;
+            schedules.Add(schedule);
+        }
+
+        // All resolution is complete before changing any tracked rows.
+        var reason = $"Superseded by completed full installation {installation.Id}: exact requested versions were acknowledged.";
+        foreach (var batch in batches)
+            CancelBatch(batch, reason);
+        foreach (var schedule in schedules)
+        {
+            if (schedule.LastBatch is { Status: DownloadBatchStatus.Pending } batch)
+                batches.Add(batch);
+            StageScheduleCancellation(schedule, installation.CompletedAtUtc.Value, reason);
+        }
+        return new(batches, schedules);
+
+        bool Covers(IEnumerable<Guid> ids)
+        {
+            var selected = ids.ToArray();
+            return selected.Length > 0 && selected.All(covered.Contains);
+        }
     }
 
     private DownloadBatch StageDownloadBatch(Guid terminalId, Guid tableSetId, IReadOnlyList<TableVersion> ordered,
