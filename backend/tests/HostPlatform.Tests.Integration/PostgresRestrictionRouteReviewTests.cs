@@ -89,6 +89,34 @@ public sealed class PostgresRestrictionRouteReviewTests
         await Check(versions[1].Id, expected, 2);
         await Check(versions[2].Id, keys, 1);
 
+        var graphical = new FirmwareVersion { Label = "Fixture graphical target", TableProfileId = FirmwareTableProfiles.GraphicalMultiPay180 };
+        var graphicalSet = new TableSet { Name = "Fixture graphical restricted routes", TargetFirmwareVersionId = graphical.Id };
+        var graphicDefinition = new TableDefinition { Name = "Fixture graphical keys", TableNumber = 133 };
+        var baseGraphic = GraphicalStarterWire.Create(enableSampleMenu: true)[133];
+        var graphic = NativeTableLayouts.Find(133, baseGraphic)!.Apply(baseGraphic, new Dictionary<string, string>
+        {
+            ["screen-4.panel-1.button-0.unrestricted"] = "true", ["screen-4.panel-1.button-0.digits"] = "3335550102",
+            ["screen-4.panel-1.button-0.type"] = "3", ["screen-4.panel-1.button-0.free"] = "true",
+            ["button-24.unrestricted"] = "true", ["button-24.digits"] = "3335550103"
+        });
+        var graphicVersion = NativeSpareFixture.Version(graphicDefinition, graphic, 2);
+        graphicalSet.Versions.Add(NativeSpareFixture.Version(new TableDefinition
+            { Name = "Graphical fixture MT58", TableNumber = 58 }, restrict, 1));
+        graphicalSet.Versions.Add(graphicVersion);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.AddRange(graphical, graphicalSet); await db.SaveChangesAsync();
+        }
+        var graphicalReview = await Read(graphicalSet.Id);
+        Assert.Equal(5, graphicalReview.GetProperty("restrictedRoutes").GetArrayLength());
+        Assert.Equal("missing", RouteRecord(graphicalReview, 131).GetProperty("availability").GetString());
+        var graphicalRoute = Assert.Single(RouteRecord(graphicalReview, 133).GetProperty("routes").EnumerateArray());
+        Assert.Contains("Panel 2", graphicalRoute.GetProperty("positionLabel").GetString());
+        Assert.True(graphicalRoute.GetProperty("freeCall").GetBoolean());
+        Assert.Equal("3335550102", graphicalRoute.GetProperty("destination").GetString());
+        await Check(graphicVersion.Id, graphic, 1);
+
         Task<JsonElement> Read(Guid id, string? profile = null) => client.GetFromJsonAsync<JsonElement>(
             $"/api/tables/sets/{id}/records/58/fields" + (profile == null ? "" : "?profile=" + Uri.EscapeDataString(profile)));
         static JsonElement RouteRecord(JsonElement review, int number) => review.GetProperty("restrictedRoutes").EnumerateArray()

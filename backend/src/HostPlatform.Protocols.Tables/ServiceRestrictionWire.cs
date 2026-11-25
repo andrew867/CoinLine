@@ -1,7 +1,8 @@
 namespace HostPlatform.Protocols.Tables;
 
 public sealed record RestrictedRoute(int Slot, string? Destination, int Classification, string? ClassificationLabel,
-    bool Dialable, string Status, int? TrailingWildcards = null, bool? Translated = null);
+    bool Dialable, string Status, int? TrailingWildcards = null, bool? Translated = null,
+    string? PositionLabel = null, bool? FreeCall = null);
 
 public sealed record RestrictedRouteRecord(int Number, string Availability, RestrictedRoute[] Routes);
 
@@ -38,6 +39,8 @@ public static class ServiceRestrictionWire
     // advisory review of saved table bytes, not a terminal call simulation.
     public static RestrictedRouteRecord ReadRestrictedRoutes(int number, ReadOnlySpan<byte> record)
     {
+        if (number is >= 131 and <= 133)
+            return ReadGraphicalRestrictedRoutes(number, record);
         var rowLength = number == 92 ? CallScreeningWire.ExpandedSlotLength : number == 55 ? QuickAccessKeyWire.SlotLength : 0;
         var length = number == 92 ? 3061 : number == 55 ? QuickAccessKeyWire.RecordLength : 0;
         if (rowLength == 0 || record.Length != length || record[0] != number
@@ -65,7 +68,43 @@ public static class ServiceRestrictionWire
             routes.Add(new(slot, destination, classification,
                 classificationField.Choices?.FirstOrDefault(choice => choice.Value == classification)?.Label,
                 status == "configured_dialable", status, screening ? row[3] : null,
-                screening ? (row[13] & 0x40) != 0 : null));
+                screening ? (row[13] & 0x40) != 0 : null, FreeCall: (row[0] & 1) != 0));
+        }
+        return new(number, "included", routes.ToArray());
+    }
+
+    private static RestrictedRouteRecord ReadGraphicalRestrictedRoutes(int number, ReadOnlySpan<byte> record)
+    {
+        if (NativeTableLayouts.Find(number, record, NativeTableLayouts.Later) is not { } layout)
+            return new(number, "incompatible", []);
+        var routes = new List<RestrictedRoute>();
+        foreach (var section in layout.Sections)
+        {
+            if (section.GraphicalScreenIndex is not { } screen)
+                continue;
+            var flag = section.Fields.FirstOrDefault(field => field.Key == section.Key + ".unrestricted");
+            if (flag == null || flag.Read(record) != "true")
+                continue;
+            var kindField = layout.Sections.Single(row => row.Key == $"screen-{screen}").Fields
+                .Single(field => field.Key == $"screen-{screen}.kind");
+            var kind = record[kindField.Offset];
+            // The compatible graphical implementation selects a panel's
+            // buttons for mixed screens and main buttons for bitmap/text.
+            if ((kind != (byte)'B' && kind != (byte)'T' && kind != (byte)'M')
+                || (kind == (byte)'M') != section.Key.Contains(".panel-", StringComparison.Ordinal))
+                continue;
+            var fields = section.Fields.ToDictionary(field => field.Key);
+            var destination = fields[section.Key + ".digits"].Read(record);
+            var classificationField = fields[section.Key + ".type"];
+            var classification = int.Parse(classificationField.Read(record)!, System.Globalization.CultureInfo.InvariantCulture);
+            var status = classification == 11 ? "denied" : destination == null ? "unreadable_number"
+                : destination.Length == 0 ? record[fields[section.Key + ".next"].Offset] == 255 ? "blank" : "navigation_only"
+                : "configured_dialable";
+            var keyIndex = int.Parse(section.Key[(section.Key.LastIndexOf('-') + 1)..], System.Globalization.CultureInfo.InvariantCulture) % 6 + 1;
+            routes.Add(new(keyIndex, destination, classification,
+                classificationField.Choices?.FirstOrDefault(choice => choice.Value == classification)?.Label,
+                status == "configured_dialable", status, PositionLabel: section.Label,
+                FreeCall: fields[section.Key + ".free"].Read(record) == "true"));
         }
         return new(number, "included", routes.ToArray());
     }

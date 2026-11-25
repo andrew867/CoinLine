@@ -262,7 +262,9 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     private async Task<RestrictedRouteRecord[]> ReadRestrictionRoutes(Guid setId, FirmwareTableProfile? firmware, CancellationToken ct)
     {
         var result = new List<RestrictedRouteRecord>();
-        foreach (var number in new[] { 92, 55 })
+        var numbers = firmware?.Id == FirmwareTableProfiles.GraphicalMultiPay180
+            ? new[] { 92, 55, 131, 132, 133 } : new[] { 92, 55 };
+        foreach (var number in numbers)
         {
             var versions = await ReadVersions(setId, number, ct);
             if (versions.Count != 1)
