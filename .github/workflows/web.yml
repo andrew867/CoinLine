@@ -91,6 +91,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify restricted route review workflow
+        run: npm run e2e -- e2e/restriction-route-review.spec.ts --output test-results/restriction-route-review
+        env:
+          CI: "true"
+
       - name: Verify discount calendar workflow
         run: npm run e2e -- e2e/discount-calendar.spec.ts --output test-results/discount-calendar
         env:

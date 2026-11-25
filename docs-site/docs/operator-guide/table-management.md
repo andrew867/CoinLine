@@ -225,6 +225,12 @@ Open **Terminal status** to filter decoded alarms, maintenance reports, status f
 
 Open an alarm to see its name and number, the phone that reported it, and when CoinLine recorded it. The phone's own timestamp appears separately when the record contains a valid clock. Unlisted alarms retain their numeric code. Expand **Technical record** to inspect the decoded JSON or download the captured bytes.
 
+## Configurable service restrictions
+
+On the later packed profile, select configurable restricted access in MT58 to review saved permitted entries in the included MT92 Call-Screening List and MT55 Quick Access Keys. The review shows exact entry/key positions, decoded destination or pattern, wildcard/translation markers, classification and marked-but-blank, denied, information-only or unmapped entries. Missing companions in a partial set are explicitly unknown; the terminal may retain an existing record. Unverified profiles are not decoded as if their lengths established field meanings.
+
+This is a read-only review of stored companion bytes, independent of the daily schedule edit. It does not change the markings in MT55 or MT92, or establish actual authorization, rating, connection or device restriction behavior. Change the marking in the appropriate native editor and reopen MT58 to review the saved companion record.
+
 ## Inmate Feature Configurations
 
 From **Table sets**, open **Inmate Feature Configurations**. The editor covers PIN entry, call processing, voice announcements, disconnect warnings, recording equipment, call timers and other settings. Enter a name of up to six characters and an optional description. Use **Copy as new** to reuse the current settings under a new name.
