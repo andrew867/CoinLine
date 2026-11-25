@@ -110,7 +110,8 @@ public static class OperatorPermissions
             ("Craft", A, "StartSession EnqueueCommand"), ("Craft", U, "EndSession SimulateCommand ExecuteLiveCommand CancelCommand"));
         Screen("firmware-registry", "Firmware registry",
             ("Firmware", R, "Packages TableProfiles FirmwareVersions PackageDetail Targets"),
-            ("Firmware", A, "CreateFirmwareVersion CreatePackage AddArtifact AddCompatibilityRule CreateTarget"));
+            ("Firmware", A, "CreateFirmwareVersion CreatePackage AddArtifact AddCompatibilityRule CreateTarget"),
+            ("Firmware", U, "PreviewFirmwareTableProfile SetFirmwareTableProfile"));
         Screen("firmware-jobs", "Firmware jobs",
             ("Firmware", R, "ExecutionPolicy ListJobs Job"), ("Terminals", A, "StartFirmwareJob"),
             ("Firmware", U, "SimulateJob ExecuteLiveJob ApproveJob CancelJob"), ("Tables", U, "QueueFirmwareCancellation"));

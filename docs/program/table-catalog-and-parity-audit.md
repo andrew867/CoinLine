@@ -217,6 +217,8 @@ The graphical starter creates three editable records using twenty bundled 112 by
 
 ### Maximizer terminal type references
 
+Registered firmware can be classified or corrected in place through a reviewed profile change. The impact review distinguishes published and assigned records, draft advisories, selected records in pending or scheduled transfers, and active sessions. Apply retains the existing build and assignment identities, records and download selections, and records an audit event. This is a host registry workflow; it does not add field-layout, acknowledgment or behavioral evidence for a firmware profile.
+
 The phone inventory can store and filter on the terminal family described in the desktop help. These type numbers identify a family for comparing its required and optional table lists with the registered firmware. The phone's separate operating mode is configured in MT26 and reported in MT60.
 
 | Firmware topic | Desktop terminal types |

@@ -9,6 +9,7 @@ Packages, artifacts, compatibility rules, targets, jobs:
 | Policy | `GET /api/firmware/execution-policy` |
 | Catalog | `GET/POST .../packages`, `GET .../packages/{id}`, artifacts POST |
 | Versions | `GET/POST .../versions` |
+| Revise a build's layout | `POST .../versions/{id}/table-profile/preview`, `PUT .../versions/{id}/table-profile` |
 | Table layouts | `GET .../table-profiles` |
 | Targets | `GET/POST .../targets` |
 | Jobs | `GET/POST .../jobs`, `GET .../jobs/{id}`, `simulate`, `approve`, `cancel` |
@@ -19,5 +20,7 @@ Register a build with `label`, optional `buildId` and optional `tableProfileId` 
 
 !!! danger "Live flashing"
     **`Firmware:AllowLiveFlashing`** default **false**. DLA/XMODEM **`HARDWARE VALIDATION REQUIRED`**.
+
+To revise a registered build, preview with `{"tableProfileId":"mtr19-multipay-200"}`. Use explicit `null` to remove its verified profile reference. The preview returns affected counts, grouped findings, `canApply` and a `previewToken`. Apply with the same `tableProfileId` and token. Both endpoints require Firmware registry Update permission. An incompatible published targeted or currently assigned record, incompatible queued selection, active NCC session or active transfer blocks the change; draft findings and unobserved lengths are advisory. Scheduled and queued partial transfers are reviewed using their selected records and dependencies, not unrelated source records. A changed configuration or blocking finding returns HTTP 409. Apply updates only the registered firmware reference, its revision and audit history. It does not rewrite tables, reassign phones, schedule downloads or certify device operation.
 
 **UI:** `/firmware/packages`, `/firmware/jobs`, etc.
