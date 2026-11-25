@@ -33,6 +33,7 @@ public sealed class CardsController(
             simulationMode = false,
             hostLedgerEnabled = true,
             runtimeAuthorizationProviderRegistered = registrations.IsService(typeof(INccCardAuthorizationProvider)),
+            labAuthorizationEnabled = _opts.LabAuthorization?.Enabled == true,
             physicalCardWritesDisabled = _opts.PhysicalCardWritesDisabled,
             banner =
                 "The host ledger records card payments and call charges. Writing a physical card stays off."
@@ -401,6 +402,53 @@ public sealed class CardsController(
                 reportedCardType = t.ReportedCardType,
                 t.CreatedAtUtc
             }).ToListAsync(ct));
+    }
+
+    /// <summary>Redacted authorization observations and decisions, not settled payments.</summary>
+    [HttpGet("authorization-attempts")]
+    public async Task<ActionResult<IEnumerable<object>>> AuthorizationAttempts([FromQuery] Guid? terminalId, CancellationToken ct)
+    {
+        var query = db.AuditEvents.AsNoTracking().Where(row => row.Category == "ncc");
+        if (terminalId.HasValue)
+            query = query.Where(row => row.TerminalId == terminalId.Value);
+        var decisions = await query.Where(row => row.Action == CardAuthorizationAudit.DecisionAction)
+            .OrderByDescending(row => row.CreatedAtUtc).ThenByDescending(row => row.Id).Take(500).ToListAsync(ct);
+        var attempts = decisions.Select(row => (Row: row, Detail: CardAuthorizationAudit.Read(row.DetailJson)))
+            .Where(entry => entry.Detail != null).Select(entry => (entry.Row, Detail: entry.Detail!)).ToList();
+
+        // Older listeners preserved a redacted request observation but not its
+        // outcome. Represent that as unknown, rather than inventing a decline.
+        var observations = await query.Where(row => row.Action == "frame_stored" &&
+            (row.DetailJson.Contains("\"redactedMessageType\":1}") || row.DetailJson.Contains("\"redactedMessageType\":2}") ||
+             row.DetailJson.Contains("\"redactedMessageType\":1,") || row.DetailJson.Contains("\"redactedMessageType\":2,")))
+            .OrderByDescending(row => row.CreatedAtUtc).ThenByDescending(row => row.Id).Take(500).ToListAsync(ct);
+        var sessionKeys = observations.Select(row => row.TerminalSessionId).OfType<string>().Distinct().ToArray();
+        var known = await query.Where(row => row.TerminalSessionId != null && sessionKeys.Contains(row.TerminalSessionId)
+            && (row.Action == CardAuthorizationAudit.DecisionAction || row.Action == CardAuthorizationAudit.ReplayAction))
+            .Select(row => new { row.TerminalSessionId, row.DetailJson }).ToListAsync(ct);
+        var recorded = known.Select(row => (row.TerminalSessionId, Detail: CardAuthorizationAudit.Read(row.DetailJson)))
+            .Where(row => row.Detail != null).Select(row => (row.TerminalSessionId, row.Detail!.MessageType)).ToHashSet();
+        foreach (var observation in observations)
+        {
+            if (CardAuthorizationAudit.RedactedRequestType(observation.DetailJson) is not { } type)
+                continue;
+            if (observation.TerminalSessionId != null && !recorded.Add((observation.TerminalSessionId, type)))
+                continue;
+            attempts.Add((observation, new CardAuthorizationAuditDetail(type, "unknown", "unrecorded")));
+        }
+
+        var latest = attempts.OrderByDescending(entry => entry.Row.CreatedAtUtc).ThenByDescending(entry => entry.Row.Id).Take(500).ToArray();
+        var ids = latest.Select(entry => entry.Row.TerminalId).OfType<Guid>().Distinct().ToArray();
+        var phones = await db.Terminals.AsNoTracking().Where(row => ids.Contains(row.Id))
+            .Select(row => new { row.Id, row.DisplayName }).ToDictionaryAsync(row => row.Id, row => row.DisplayName, ct);
+        return Ok(latest.Select(entry => new
+        {
+            entry.Row.Id, entry.Row.TerminalId,
+            terminalDisplayName = entry.Row.TerminalId is { } id ? phones.GetValueOrDefault(id) : null,
+            nccSessionId = Guid.TryParse(entry.Row.TerminalSessionId, out var parsed) ? (Guid?)parsed : null,
+            entry.Row.CreatedAtUtc, entry.Detail.MessageType, entry.Detail.Outcome, entry.Detail.Provider,
+            entry.Detail.Reason, entry.Detail.CardAccountId, entry.Detail.QuoteId, entry.Detail.QuotedAmountUsd, entry.Detail.CallSequence
+        }));
     }
 
     [HttpGet("reconciliation-pending")]

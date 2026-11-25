@@ -15,4 +15,9 @@ public sealed class NccCardAuthorizationDecision
 {
     public bool Approved { get; init; }
     public ReadOnlyMemory<byte> AuthorizationReference { get; init; }
+    internal SyntheticAuthorizationEvidence? SyntheticEvidence { get; init; }
 }
+
+internal sealed record SyntheticAuthorizationEvidence(string Reason, Guid? CardAccountId = null,
+    Guid? QuoteId = null, decimal? QuotedAmountUsd = null, ushort? CallSequence = null,
+    Guid? DecisionId = null, bool Replayed = false);
