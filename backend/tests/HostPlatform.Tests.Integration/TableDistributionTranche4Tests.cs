@@ -299,6 +299,81 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Imported_numbering_and_operator_routes_are_reviewed_before_publication_and_can_be_corrected()
+    {
+        using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
+        {
+            label = "Routing review fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180
+        });
+        firmware.EnsureSuccessStatusCode();
+        var targetFirmwareVersionId = (await firmware.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var created = await _client.PostAsJsonAsync("/api/tables/sets", new { name = "Routing review fixture", targetFirmwareVersionId });
+        created.EnsureSuccessStatusCode();
+        var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var path = $"/api/tables/sets/{id}";
+        var numbering = new byte[353];
+        numbering[0] = 62;
+        new byte[] { 7, 0, 0, 48, 3, 1, 2 }.CopyTo(numbering, 33);
+        new byte[] { 7, 0, 0, 48, 4, 1, 3 }.CopyTo(numbering, 40);
+        numbering[60] = 0x5A;
+        numbering[345] = (byte)'$';
+        var features = new byte[72];
+        features[0] = 26;
+        features[15] = 180; // An enabled reroute points to the last, currently blank slot.
+        var screening = new byte[3061];
+        screening[0] = 92;
+        await Import(numbering);
+        await Import(features);
+        await Import(screening);
+
+        var findings = await Findings();
+        Assert.Equal(2, findings.Length);
+        Assert.All(findings, finding => Assert.True(finding.GetProperty("blocking").GetBoolean()));
+        Assert.Contains(findings, finding => finding.GetProperty("tableNumber").GetInt32() == 62 && finding.GetProperty("message").GetString()!.Contains("circular"));
+        Assert.Contains(findings, finding => finding.GetProperty("tableNumber").GetInt32() == 26 && finding.GetProperty("message").GetString()!.Contains("blank MT92 entry 180"));
+        using (var rejected = await _client.PostAsync(path + "/publish?confirm=true", null))
+            Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+
+        var numberingPath = path + "/records/62/fields";
+        var original = await _client.GetFromJsonAsync<JsonElement>(numberingPath);
+        var plan = original.GetProperty("numberingPlan").Deserialize<NumberingPlanChanges>(JsonOpts)!;
+        plan.Dial![1] = plan.Dial[1] with { NoMatch = null };
+        using (var saved = await _client.PutAsJsonAsync(numberingPath, new
+        {
+            profile = original.GetProperty("profile"), revision = original.GetProperty("revision"), sha256 = original.GetProperty("sha256"),
+            changes = new Dictionary<string, string>(), numberingPlan = plan
+        })) Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        numbering[40] = 0;
+        var corrected = await _client.GetFromJsonAsync<JsonElement>(numberingPath);
+        Assert.Equal(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(numbering)).ToLowerInvariant(), corrected.GetProperty("sha256").GetString());
+        Assert.Equal(26, Assert.Single(await Findings()).GetProperty("tableNumber").GetInt32());
+
+        var screeningPath = path + "/records/92/fields";
+        var screeningFields = await _client.GetFromJsonAsync<JsonElement>(screeningPath);
+        using (var saved = await _client.PutAsJsonAsync(screeningPath, new
+        {
+            profile = screeningFields.GetProperty("profile"), revision = screeningFields.GetProperty("revision"), sha256 = screeningFields.GetProperty("sha256"),
+            changes = new Dictionary<string, string> { ["rule-179.pattern"] = "1234" }
+        })) Assert.Equal(HttpStatusCode.NoContent, saved.StatusCode);
+        Assert.Empty(await Findings());
+        using var published = await _client.PostAsync(path + "/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
+
+        async Task<JsonElement[]> Findings() => (await _client.GetFromJsonAsync<JsonElement>(path)).GetProperty("firmwareFindings").EnumerateArray().ToArray();
+        async Task Import(byte[] bytes)
+        {
+            using var definition = await _client.PostAsJsonAsync("/api/tables/definitions", new { name = $"Routing fixture MT{bytes[0]}", tableNumber = bytes[0] });
+            definition.EnsureSuccessStatusCode();
+            using var version = await _client.PostAsJsonAsync("/api/tables/versions", new
+            {
+                tableSetId = id, tableDefinitionId = (await definition.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+                tableRevision = 1, payloadBase64 = Convert.ToBase64String(bytes), sortOrder = bytes[0]
+            });
+            version.EnsureSuccessStatusCode();
+        }
+    }
+
+    [Fact]
     public async Task Later_rating_review_blocks_invalid_international_default_and_accepts_corrected_partial_set()
     {
         using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new

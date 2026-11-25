@@ -47,8 +47,16 @@ public static class TableSetFirmwareCompatibility
         }
 
         if (profile?.Id is FirmwareTableProfiles.MultiPay200 or FirmwareTableProfiles.LaterMultiPay180)
-            foreach (var finding in ReviewMultiPayRates(verifiedRecords, profile.Id == FirmwareTableProfiles.LaterMultiPay180))
+        {
+            var later = profile.Id == FirmwareTableProfiles.LaterMultiPay180;
+            if (verifiedRecords.TryGetValue(NumberingPlanWire.MessageType, out var numbering))
+                foreach (var finding in NumberingPlanWire.Review(numbering))
+                    yield return new(NumberingPlanWire.MessageType, finding.Blocking, finding.Message);
+            foreach (var finding in ReviewServiceScreening(verifiedRecords, later))
                 yield return finding;
+            foreach (var finding in ReviewMultiPayRates(verifiedRecords, later))
+                yield return finding;
+        }
     }
 
     public static string? RecordIssue(FirmwareTableProfile? profile, int number, int length)
@@ -59,6 +67,100 @@ public static class TableSetFirmwareCompatibility
             return length != expected
                 ? $"The selected firmware uses {expected:N0} bytes. The record has {length:N0}." : null;
         return profile.CompleteCatalogue ? "This record type is absent from the selected firmware catalogue." : null;
+    }
+
+    private static IReadOnlyList<TableFirmwareFinding> ReviewServiceScreening(IReadOnlyDictionary<int, byte[]> records, bool later)
+    {
+        const int screeningType = 92;
+        const int screeningRowSize = 17;
+        var slotCount = later ? 180 : 200;
+        records.TryGetValue(screeningType, out var screening);
+        var findings = new List<TableFirmwareFinding>();
+        var omittedScreeningSources = new SortedSet<int>();
+
+        if (records.TryGetValue(26, out var features))
+        {
+            if ((features[5] & 16) != 0)
+            {
+                ReviewOperator(48, "Intra-area alternate operator access");
+                ReviewOperator(53, "Basic alternate operator access");
+                if (later)
+                {
+                    if (features[16] != 0) ReviewOperator(16, "Inter-area alternate operator access");
+                    if (features[17] != 0) ReviewOperator(17, "International alternate operator access");
+                }
+            }
+
+            if (later)
+            {
+                if (features[15] != 0) ReviewOperator(15, "International operator reroute");
+                if (features[20] != 0) ReviewOperator(20, "Intra-area operator reroute");
+                if (features[21] != 0) ReviewOperator(21, "Inter-area operator reroute");
+            }
+
+            void ReviewOperator(int offset, string name)
+            {
+                if (features[offset] == 0)
+                    findings.Add(new(26, false, $"{name} is unset while alternate operator service is enabled. Confirm the dialing rules cannot select this route, or choose an MT92 entry."));
+                else
+                    ReviewReference(26, name, features[offset], required: true, literalRequired: true);
+            }
+        }
+
+        var carrierType = later ? 135 : 23;
+        if (records.TryGetValue(carrierType, out var carriers))
+        {
+            var start = later ? 10 : 4;
+            var stride = later ? 33 : 32;
+            var count = later ? 33 : 21;
+            for (var index = 0; index < count; index++)
+            {
+                var offset = start + index * stride;
+                if (carriers[offset] == byte.MaxValue || (carriers[offset + stride - 5] & 128) == 0)
+                    continue;
+                ReviewReference(carrierType, $"Carrier {index} Feature Group B", carriers[offset + stride - 1], required: true, literalRequired: false);
+            }
+        }
+
+        if (later && records.TryGetValue(134, out var cards))
+        {
+            for (var index = 0; index < 32; index++)
+            {
+                var offset = 1 + index * 36;
+                if (cards[offset + 6] is < 10 or > 16 || (cards[offset + 33] & 0x12) == 0)
+                    continue;
+                var reference = cards[offset + 34];
+                var label = $"Stored-value card range {index + 1} reload";
+                if (reference > slotCount)
+                    findings.Add(new(134, false, $"{label} references entry {reference}. This firmware defaults an out-of-range reload reference to entry 1."));
+                ReviewReference(134, label, reference is 0 || reference > slotCount ? 1 : reference, required: false, literalRequired: false);
+            }
+        }
+
+        if (omittedScreeningSources.Count > 0)
+            findings.Add(new(screeningType, false, $"{string.Join(", ", omittedScreeningSources.Select(number => $"MT{number}"))} refer to call-screening entries. This set relies on the terminal's existing MT92 record."));
+        return findings;
+
+        void ReviewReference(int source, string label, int reference, bool required, bool literalRequired)
+        {
+            if (reference < 1 || reference > slotCount)
+            {
+                findings.Add(new(source, required, $"{label} references entry {reference}. Choose an MT92 entry from 1 to {slotCount}."));
+                return;
+            }
+            if (screening == null)
+            {
+                omittedScreeningSources.Add(source);
+                return;
+            }
+            var offset = 1 + (reference - 1) * screeningRowSize + 4;
+            var dialField = new NativeTableField("number", "Access number", offset, TableFieldEncoding.KeypadDial, 8);
+            var number = dialField.Read(screening);
+            if (number == "")
+                findings.Add(new(source, required, $"{label} points to blank MT92 entry {reference}. Choose an entry with an access number."));
+            else if (number == null)
+                findings.Add(new(source, literalRequired, $"{label} points to MT92 entry {reference}, which does not contain a literal dialable number. Review the access pattern."));
+        }
     }
 
     private static IEnumerable<TableFirmwareFinding> ReviewMultiPayRates(IReadOnlyDictionary<int, byte[]> records, bool later)

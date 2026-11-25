@@ -101,7 +101,8 @@ public static partial class NativeTableLayouts
                         Toggle($"{key}.summaryRequired", "Require a summary card", offset + 33, 4),
                         Toggle($"{key}.showBalance", "Display remaining balance", offset + 33, 8),
                         Toggle($"{key}.reloadOnly", "Use only for magnetic-card reload", offset + 33, 16),
-                        Field($"{key}.reloadScreen", "Reload call-screening entry", offset + 34)));
+                        Field($"{key}.reloadScreen", "Reload call-screening entry", offset + 34, max: 180,
+                            help: "One-based MT92 entry. Zero uses the firmware default, entry 1.")));
                     break;
             }
             if (kind == CardDataKind.StoredValue && (later || standard == 10))

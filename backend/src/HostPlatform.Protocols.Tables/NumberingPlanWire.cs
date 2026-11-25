@@ -4,6 +4,7 @@ public sealed record NumberingRule(string Id, string? NoMatch, string? Match, in
     int[] Digits, string? Conversion = null, int? MaximumDigits = null);
 
 public sealed record NumberingPlanChanges(NumberingRule[]? Dial, NumberingRule[]? Format);
+public sealed record NumberingPlanFinding(bool Blocking, string Message);
 
 public static class NumberingPlanWire
 {
@@ -44,8 +45,78 @@ public static class NumberingPlanWire
             packedFormat.CopyTo(format);
     }
 
-    private static List<Node>? Parse(ReadOnlySpan<byte> data, bool dial)
+    public static IReadOnlyList<NumberingPlanFinding> Review(ReadOnlySpan<byte> record)
     {
+        if (!Supports(record))
+            throw new InvalidOperationException("The record does not match the supported numbering plan.");
+        var findings = new List<NumberingPlanFinding>();
+        ReviewSection(record.Slice(DialStart, DialLength), dial: true, findings);
+        ReviewSection(record.Slice(FormatStart, FormatLength), dial: false, findings);
+        return findings;
+    }
+
+    private static void ReviewSection(ReadOnlySpan<byte> data, bool dial, List<NumberingPlanFinding> findings)
+    {
+        var name = dial ? "Dialing rules" : "Display formatting";
+        var nodes = Parse(data, dial, out var failure);
+        if (nodes == null)
+        {
+            findings.Add(failure!);
+            return;
+        }
+        if (nodes.Count == 0)
+        {
+            if (dial)
+                findings.Add(new(false, "The numbering plan has no dialing rules. Verify that this is intentional for the target firmware."));
+            return;
+        }
+
+        var byId = nodes.ToDictionary(node => node.Rule.Id, node => node.Rule);
+        if (HasFallbackCycle(byId))
+            findings.Add(new(true, $"{name} contain a circular fallback path that does not advance through the digits."));
+        else
+        {
+            try { ValidatePaths(nodes[0].Rule, byId, name); }
+            catch (InvalidOperationException)
+            {
+                findings.Add(new(false, $"{name} contain a circular path involving a match link. Verify the imported path; a match can advance through the digits."));
+            }
+        }
+
+        if (!dial)
+            return;
+        for (var index = 0; index < nodes.Count; index++)
+        {
+            var rule = nodes[index].Rule;
+            if (rule.Conversion != null && ((rule.Tag & 0xF0) != 0x10 || (byId[rule.Conversion].Tag & 0xF0) != 0x10))
+                findings.Add(new(true, $"Dialing rule {index + 1} has a conversion link that does not connect two prefix rules."));
+            if (rule.MaximumDigits is { } maximum && (maximum <= rule.Digits.Length || rule.Match != null))
+                findings.Add(new(false, $"Dialing rule {index + 1} has an unusual additional-digit limit or match link. Review the rule before using it."));
+        }
+    }
+
+    private static bool HasFallbackCycle(IReadOnlyDictionary<string, NumberingRule> byId)
+    {
+        foreach (var rule in byId.Values)
+        {
+            var visited = new HashSet<string>();
+            var current = rule;
+            while (current.NoMatch != null)
+            {
+                if (!visited.Add(current.Id))
+                    return true;
+                current = byId[current.NoMatch];
+            }
+        }
+        return false;
+    }
+
+    private static List<Node>? Parse(ReadOnlySpan<byte> data, bool dial) => Parse(data, dial, out _);
+
+    private static List<Node>? Parse(ReadOnlySpan<byte> data, bool dial, out NumberingPlanFinding? failure)
+    {
+        failure = null;
+        var name = dial ? "Dialing rules" : "Display formatting";
         if (data.IndexOfAnyExcept((byte)0) < 0)
             return [];
 
@@ -57,17 +128,31 @@ public static class NumberingPlanWire
         {
             if (nodes.ContainsKey(offset))
                 continue;
-            if (offset > data.Length - header - 1)
+            if (nodes.Values.Any(node => offset > node.Offset && offset < node.Offset + node.Length))
+            {
+                failure = new(true, $"{name} contain a link at byte {offset} that overlaps another rule.");
                 return null;
+            }
+            if (offset > data.Length - header - 1)
+            {
+                failure = new(true, $"{name} contain a link to byte {offset}, outside the available rule area.");
+                return null;
+            }
 
             var control = data[offset + 2];
             var digitsStart = offset + header;
             var count = dial ? data[offset + 5] : data[digitsStart..].IndexOf((byte)0);
             var extra = dial && (control & (MoreDigits | ConversionAllowed)) == 0 ? 0 : 1;
             if (count <= 0 || digitsStart + count + extra > data.Length)
+            {
+                failure = new(false, $"{name} have an unrecognized or incomplete pattern at byte {offset}. The imported layout needs verification.");
                 return null;
+            }
             if (dial && (control & (MoreDigits | ConversionAllowed)) == (MoreDigits | ConversionAllowed))
+            {
+                failure = new(false, $"{name} have conflicting additional-digit and conversion flags at byte {offset}. The imported layout needs verification.");
                 return null;
+            }
 
             var noMatch = data[offset];
             var match = data[offset + 1];
@@ -89,7 +174,10 @@ public static class NumberingPlanWire
         foreach (var node in nodes.Values)
         {
             if (node.Offset < end)
+            {
+                failure = new(true, $"{name} contain a link at byte {node.Offset} that overlaps another rule.");
                 return null;
+            }
             end = node.Offset + node.Length;
         }
         return nodes.Values.ToList();
@@ -99,6 +187,9 @@ public static class NumberingPlanWire
     {
         var name = dial ? "Dialing rules" : "Display formatting";
         var previous = Parse(original, dial) ?? throw new InvalidOperationException($"{name} contain an unrecognized layout.");
+        if (rules.Length > 0 && rules.Length == previous.Count &&
+            rules.Select((rule, index) => SameRule(rule, previous[index].Rule)).All(matches => matches))
+            return original.ToArray();
         if (dial && rules.Length == 0)
             throw new InvalidOperationException("Keep at least one dialing rule.");
         if (rules.Length > original.Length / (dial ? 7 : 6))
@@ -192,6 +283,10 @@ public static class NumberingPlanWire
         }
         return result;
     }
+
+    private static bool SameRule(NumberingRule? current, NumberingRule previous) =>
+        current?.Digits != null && current.Digits.SequenceEqual(previous.Digits) &&
+        (current with { Digits = previous.Digits }) == previous;
 
     private static void ValidatePaths(NumberingRule root, IReadOnlyDictionary<string, NumberingRule> byId, string name)
     {

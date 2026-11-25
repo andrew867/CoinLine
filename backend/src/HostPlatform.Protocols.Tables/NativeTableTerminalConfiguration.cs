@@ -130,8 +130,10 @@ public static partial class NativeTableLayouts
             Toggle("automatedCardService", "Allow automated card service", 5, 1), Toggle("routeManualEntry", "Route manual card entry through the operator network", 5, 2),
             Toggle("alternateOperator", "Allow alternate operator service", 5, 16), Toggle("stripLeadingDigit", "Strip a leading zero or one", 5, 32),
             Toggle("stripLocalAreaCode", "Strip the local area code", 5, 128),
-            Field("intraOperatorReference", "Intra-area operator screening reference", 48),
-            Field("operatorReference", "Operator screening reference", 53),
+            Field("intraOperatorReference", "Intra-area operator screening reference", 48, max: later ? 180 : 200,
+                help: "One-based MT92 entry. Zero is unset; select a valid access number when alternate operator service is enabled."),
+            Field("operatorReference", "Operator screening reference", 53, max: later ? 180 : 200,
+                help: "One-based MT92 entry. Zero is unset; select a valid access number when alternate operator service is enabled."),
             .. (later ? LaterRouting() : [])]),
         Section("dataPort", "Data port",
             Field("dataDisplayDelay", "Connected data display delay (seconds)", 9),
@@ -175,12 +177,17 @@ public static partial class NativeTableLayouts
         Toggle("dialAround", "Enable pound-key redial", 13, 4), Toggle("timeAndCharge", "Show time and charge together", 13, 8),
         Toggle("roundUp", "Round charges up on the terminal", 13, 16), Toggle("sevenDigitNoWait", "Dial after seven digits without waiting", 13, 32),
         Field("dialAroundDelay", "Pound-key redial timer", 14),
-        Field("internationalOperatorReroute", "International operator reroute screening reference", 15),
-        Field("interAreaOperatorAccess", "Inter-area alternate operator screening reference", 16),
-        Field("internationalOperatorAccess", "International alternate operator screening reference", 17),
+        Field("internationalOperatorReroute", "International operator reroute screening reference", 15, max: 180,
+            help: "Zero disables this route; 1 to 180 selects an MT92 access number."),
+        Field("interAreaOperatorAccess", "Inter-area alternate operator screening reference", 16, max: 180,
+            help: "Zero disables this route; 1 to 180 selects an MT92 access number."),
+        Field("internationalOperatorAccess", "International alternate operator screening reference", 17, max: 180,
+            help: "Zero disables this route; 1 to 180 selects an MT92 access number."),
         Field("dataCollectionGrace", "Data port grace before collection", 18), Field("operatorCollectionDelay", "Operator reroute collection delay", 19),
-        Field("intraAreaOperatorReroute", "Intra-area operator reroute screening reference", 20),
-        Field("interAreaOperatorReroute", "Inter-area operator reroute screening reference", 21)
+        Field("intraAreaOperatorReroute", "Intra-area operator reroute screening reference", 20, max: 180,
+            help: "Zero disables this route; 1 to 180 selects an MT92 access number."),
+        Field("interAreaOperatorReroute", "Inter-area operator reroute screening reference", 21, max: 180,
+            help: "Zero disables this route; 1 to 180 selects an MT92 access number.")
     ];
 
     private static NativeTableSection[] InstallationSections(bool later) =>

@@ -16,6 +16,7 @@ public sealed class NumberingPlanWireTests
         record[345] = (byte)'$';
 
         var plan = NumberingPlanWire.Read(record);
+        Assert.Empty(NumberingPlanWire.Review(record));
         Assert.Collection(plan.Dial!,
             rule => Assert.Equal("row-12", rule.Conversion),
             rule => Assert.Equal("row-0", rule.Conversion));
@@ -28,6 +29,61 @@ public sealed class NumberingPlanWireTests
         NumberingPlanWire.Apply(updated, plan);
         record[51] = 4;
         Assert.Equal(record, updated);
+    }
+
+    [Theory]
+    [InlineData(180, "outside")]
+    [InlineData(3, "overlaps")]
+    [InlineData(7, "circular")]
+    public void Imported_dialing_links_are_reviewed_without_altering_the_record(int pointer, string reason)
+    {
+        var record = EmptyRecord();
+        new byte[] { (byte)pointer, 0, 0, 48, 3, 1, 2 }.CopyTo(record, 33);
+        new byte[] { 7, 0, 0, 48, 4, 1, 3 }.CopyTo(record, 40);
+        record[345] = (byte)'$';
+        var original = record.ToArray();
+        var finding = Assert.Single(NumberingPlanWire.Review(record));
+        Assert.True(finding.Blocking);
+        Assert.Contains(reason, finding.Message);
+        Assert.Equal(original, record);
+    }
+
+    [Fact]
+    public void Unrecognized_imported_patterns_and_empty_dialing_plans_are_advisory()
+    {
+        var record = EmptyRecord();
+        Assert.False(Assert.Single(NumberingPlanWire.Review(record)).Blocking);
+        record[35] = 0x12;
+        record[38] = 1;
+        record[39] = 2;
+        Assert.False(Assert.Single(NumberingPlanWire.Review(record)).Blocking);
+    }
+
+    [Fact]
+    public void An_imported_cycle_involving_a_match_link_is_advisory_and_an_unchanged_save_preserves_it()
+    {
+        var record = EmptyRecord();
+        new byte[] { 7, 0, 0, 48, 3, 1, 2 }.CopyTo(record, 33);
+        new byte[] { 0, 7, 0, 48, 4, 1, 3 }.CopyTo(record, 40);
+        record[60] = 0x5A;
+        var original = record.ToArray();
+        var finding = Assert.Single(NumberingPlanWire.Review(record));
+        Assert.False(finding.Blocking);
+        Assert.Contains("match link", finding.Message);
+        var plan = NumberingPlanWire.Read(record);
+        NumberingPlanWire.Apply(record, plan);
+        Assert.Equal(original, record);
+    }
+
+    [Fact]
+    public void Display_format_links_are_reviewed_as_a_separate_rule_area()
+    {
+        var record = EmptyRecord();
+        new byte[] { 0, 0, 0, 48, 3, 1, 2 }.CopyTo(record, 33);
+        new byte[] { 132, 0, 4, 191, 0x91, 0 }.CopyTo(record, 213);
+        var finding = Assert.Single(NumberingPlanWire.Review(record));
+        Assert.True(finding.Blocking);
+        Assert.Contains("Display formatting", finding.Message);
     }
 
     [Fact]

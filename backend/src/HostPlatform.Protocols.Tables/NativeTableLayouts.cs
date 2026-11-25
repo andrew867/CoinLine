@@ -409,7 +409,7 @@ public static partial class NativeTableLayouts
                 Toggle($"{key}.featureGroupBSpillOrder", "Use the alternate Feature Group B spill order", control + 1, 64),
                 Toggle($"{key}.featureGroupB", "Use Feature Group B", control + 1, 128),
                 Field($"{key}.featureGroupBTimeout", "Feature Group B timeout (10 ms ticks)", control + 2, Word),
-                Field($"{key}.screeningEntry", "Call-screening entry", control + 5,
+                Field($"{key}.screeningEntry", "Call-screening entry", control + 5, max: header == 10 ? 180 : 200,
                     help: "Feature Group B requires a one-based rule number from the call-screening list."),
                 .. (cardCount == 32 ? new[] {
                     Toggle($"{key}.localCardRate", "Use terminal rates for local credit-card calls", control + 4, 1),
@@ -429,15 +429,17 @@ public static partial class NativeTableLayouts
         var start = later ? 10 : 4;
         var stride = later ? 33 : 32;
         var count = later ? 33 : 21;
+        var slotCount = later ? 180 : 200;
         for (var index = 0; index < count; index++)
         {
             const int featureGroupB = 128;
             var startOfRow = start + index * stride;
             var control = startOfRow + stride - 5;
             var screening = startOfRow + stride - 1;
-            if ((record[control] & featureGroupB) != 0 && record[screening] == 0 &&
-                ((original[control] & featureGroupB) == 0 || original[screening] != 0))
-                throw new InvalidOperationException($"Choose a call-screening entry for Feature Group B on carrier {index}.");
+            if (record[startOfRow] != byte.MaxValue && (record[control] & featureGroupB) != 0 &&
+                (record[screening] == 0 || record[screening] > slotCount) &&
+                (original[startOfRow] == byte.MaxValue || (original[control] & featureGroupB) == 0 || original[screening] != record[screening]))
+                throw new InvalidOperationException($"Choose a call-screening entry from 1 to {slotCount} for Feature Group B on carrier {index}.");
         }
     }
 

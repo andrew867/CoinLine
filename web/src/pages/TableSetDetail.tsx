@@ -219,7 +219,10 @@ export function TableSetDetail() {
           {' '}{d.tableProfileEvidence.terminalAcknowledgedCount} with OEM-emulator acknowledgements.
           {d.tableProfileEvidence.completeCatalogue && ' Records outside the compiled catalogue cannot be published for this target.'}</p>}
         {!!d.firmwareFindings?.length && <ul>{d.firmwareFindings.map((finding) => (
-          <li key={`${finding.tableNumber}:${finding.message}`}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}</li>
+          <li key={`${finding.tableNumber}:${finding.message}`}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}
+            {canReadRecords && !recordDirty && d.versions.some(version => version.tableNumber === finding.tableNumber) &&
+              <> <Link to={`/table-sets/${id}?record=${finding.tableNumber}#config-heading`}>Review MT{finding.tableNumber}</Link></>}
+          </li>
         ))}</ul>}
       </section>
       <TerminalFamilyReview key={`${id}:${initialFamily}`} setId={id} initialFamily={initialFamily}
