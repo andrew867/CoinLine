@@ -68,11 +68,11 @@ test('excludes an incompatible phone from a full assignment but queues a compati
   expect(assignmentRequests).toEqual([{ targetType: 'group', targetId: groupId, terminalIds: [phones[0].id] }])
 
   await page.goto('/downloads')
-  await page.getByLabel('Terminal', { exact: true }).selectOption(phones[1].id)
+  await page.getByRole('combobox', { name: 'Terminal', exact: true }).selectOption(phones[1].id)
   await page.getByRole('button', { name: 'Create batch' }).click()
   await expect(page.getByRole('alert').filter({ hasText: reason })).toBeVisible()
   await expect(page.getByRole('link', { name: 'View queued batch' })).toHaveCount(0)
-  await page.getByLabel('Records', { exact: true }).selectOption('Partial')
+  await page.getByRole('combobox', { name: 'Records', exact: true }).selectOption('Partial')
   await page.getByLabel('MT30 · Display timing').check()
   await expect(page.getByLabel('MT92 · Call screening')).not.toBeChecked()
   await page.getByRole('button', { name: 'Create batch' }).click()
