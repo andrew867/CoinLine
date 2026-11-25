@@ -116,4 +116,22 @@ public sealed class DlogFieldLayoutTests
         Assert.Equal("Unlisted maintenance opcode 4660", FieldEventSummary.TryBuild(6, [6, 0x34, 0x12]));
         Assert.Null(FieldEventSummary.TryBuild(6, [6, 0x34]));
     }
+
+    [Fact]
+    public void Field_event_reference_and_decoded_reports_use_the_same_labels()
+    {
+        var alarms = FieldEventSummary.AlarmReference();
+        Assert.Contains(alarms, row => row.Code == 22 && row.Description == "Memory lost");
+        Assert.DoesNotContain(alarms, row => row.Code == 42);
+        Assert.Equal(alarms.Count, alarms.Select(row => row.Code).Distinct().Count());
+        foreach (var row in alarms)
+            Assert.Equal($"{row.Description} (alarm {row.Code})",
+                FieldEventSummary.TryBuild(16, [16, (byte)row.Code]));
+
+        var maintenance = FieldEventSummary.MaintenanceReference();
+        Assert.Equal(new[] { 996, 997, 998, 999 }, maintenance.Select(row => row.Code));
+        foreach (var row in maintenance)
+            Assert.Equal($"{row.Description} (opcode {row.Code})",
+                FieldEventSummary.TryBuild(6, [6, (byte)(row.Code & 255), (byte)(row.Code >> 8)]));
+    }
 }

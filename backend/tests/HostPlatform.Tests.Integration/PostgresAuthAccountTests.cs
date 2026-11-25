@@ -63,6 +63,12 @@ public sealed class PostgresAuthAccountTests
         await SignIn(adminClient, admin);
         using (var catalog = await adminClient.GetAsync("/api/auth/permission-catalog"))
             catalog.EnsureSuccessStatusCode();
+        var eventReference = await adminClient.GetFromJsonAsync<JsonElement>("/api/field-events/reference");
+        Assert.Contains(eventReference.GetProperty("alarms").EnumerateArray(), row =>
+            row.GetProperty("code").GetInt32() == 22 && row.GetProperty("description").GetString() == "Memory lost");
+        var existingFixture = eventReference.GetProperty("alarms").EnumerateArray()
+            .SingleOrDefault(row => row.GetProperty("code").GetInt32() == 254);
+        var fixtureRevision = existingFixture.ValueKind == JsonValueKind.Undefined ? 0 : existingFixture.GetProperty("revision").GetInt32();
         const string groups = "/api/terminal-groups";
         const string phones = "/api/terminals";
         var profilePath = $"/api/auth/accounts/{user.Id}/permissions";
@@ -86,6 +92,17 @@ public sealed class PostgresAuthAccountTests
             Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
         using (var denied = await userClient.GetAsync("/api/field-events"))
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.GetAsync("/api/field-events/reference"))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.PutAsJsonAsync("/api/field-events/reference/alarm/254",
+            new { operatorDescription = "Fixture", severity = 4, revision = fixtureRevision }))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var savedCode = await adminClient.PutAsJsonAsync("/api/field-events/reference/alarm/254",
+            new { operatorDescription = "Fixture " + Guid.NewGuid().ToString("N"), severity = 4, revision = fixtureRevision }))
+            savedCode.EnsureSuccessStatusCode();
+        using (var staleCode = await adminClient.PutAsJsonAsync("/api/field-events/reference/alarm/254",
+            new { operatorDescription = "Stale", severity = 3, revision = fixtureRevision }))
+            Assert.Equal(HttpStatusCode.Conflict, staleCode.StatusCode);
         using (var denied = await userClient.GetAsync("/api/auth/accounts"))
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using var created = await userClient.PostAsJsonAsync(groups, new { name = "Fixture profile group" });

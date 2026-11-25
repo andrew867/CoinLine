@@ -111,6 +111,11 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             .Select(l => new { l.Id, l.RequestTransactionId, l.ResponseTransactionId, l.LinkRule })
             .ToListAsync(ct);
         var alarm = FieldEventSummary.ReadAlarm(x.MessageType, x.RawPayload);
+        var eventCode = FieldEventSummary.ReadCode(x.MessageType, x.RawPayload);
+        var eventSetting = eventCode is { } key
+            ? await db.FieldEventCodeSettings.AsNoTracking()
+                .SingleOrDefaultAsync(row => row.Kind == key.Kind && row.Code == key.Code, ct)
+            : null;
         var fieldEvent = FieldEventCatalog.TryDescribe(x.MessageType, out var title)
             ? new
             {
@@ -118,6 +123,8 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
                 category = FieldEventCatalog.Category(x.MessageType),
                 summary = x.MessageType is 7 or 16 ? alarm?.Summary : FieldEventSummary.TryBuild(x.MessageType, x.RawPayload),
                 alarmNumber = alarm?.Number,
+                operatorDescription = eventSetting?.Description,
+                severity = eventSetting?.Severity,
                 phoneTime = alarm?.PhoneTime
             }
             : null;

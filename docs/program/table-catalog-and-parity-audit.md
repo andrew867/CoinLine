@@ -253,6 +253,17 @@ The family checklist was verified with Playwright and isolated PostgreSQL. An op
 
 The source check included the archived WinHelp project, RTF topics and screen references for call screening, quick-access keys, service levels, advertising, carrier screens and rating. CoinLine uses those workflows in its own interface. The archive confirms the desktop screen responsibilities and does not establish that each server setting has a terminal wire field.
 
+### Host alarm and maintenance catalogues
+
+Terminal status includes an editable catalogue of recognized alarm numbers and maintenance opcodes. The reference and report summaries share the same built-in descriptions. Operators with the separate catalogue update permission can classify alarm numbers as Critical (1), Major (2), Minor (3), Report (4), or unclassified, and add a custom description to an alarm or maintenance code, including previously unlisted numeric codes. No default severity is inferred for built-in values. A blank description and unclassified severity clear the operator settings without deleting the decoded description or resetting the row revision.
+
+The activity list and message detail retain the decoded meaning and show the current operator description and severity separately. These are current catalogue classifications, not historical severity captured from a phone. The original stored report and its wire acknowledgement are unchanged. Stale revisions and competing creates are rejected; changes are audited without including free-text descriptions in audit details. The catalogue is host configuration, not a terminal download table.
+
+| Workflow | Editor | Encoding / storage | Terminal ACK | Behavior verification |
+| --- | --- | --- | --- | --- |
+| Alarm number and maintenance opcode catalogue | Searchable built-in reference; operator descriptions, new numeric codes, four alarm severity levels plus unclassified, revision-checked save and clear. | Separate persistent kind/code settings with a uniqueness constraint and revision; decoded names and original reports stay unchanged. | Not applicable to host reference configuration. | Reference-to-summary, editing, readback, stale conflict, clear and UI error/search regression coverage. PostgreSQL permission and storage checks are gated separately. |
+| Alarm and maintenance destination rules | Pending, including default and per-code overrides scoped by region, group or phone. | Pending; the legacy routing precedence and destination transport require separate evidence. | Not applicable to host routing configuration. | Pending. |
+
 ### Interrupted transfer evidence
 
 The NCC download timeline distinguishes a missing fragment link acknowledgement from a missing MT14 table acknowledgement. If a transfer stops before the next record, those records are marked not sent, not terminal-rejected. A missing end-of-data link acknowledgement fails the batch without erasing earlier table acknowledgements. A controlled TCP graphical-set fixture exercises the 9,224-byte MT131 record followed by MT132 and MT133, covering missing link and table acknowledgements and an explicit table rejection. The browser workflow opens the failed phone download and identifies both the actual missing acknowledgement and a subsequent unsent record. This does not establish new firmware behavior acceptance.

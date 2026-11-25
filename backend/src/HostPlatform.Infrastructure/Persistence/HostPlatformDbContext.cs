@@ -16,6 +16,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<CarrierLibraryEntry> CarrierLibraryEntries => Set<CarrierLibraryEntry>();
     public DbSet<CardMasterDefinition> CardMasterDefinitions => Set<CardMasterDefinition>();
     public DbSet<QuickAccessCustomer> QuickAccessCustomers => Set<QuickAccessCustomer>();
+    public DbSet<FieldEventCodeSetting> FieldEventCodeSettings => Set<FieldEventCodeSetting>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
@@ -164,6 +165,16 @@ public class HostPlatformDbContext : DbContext
             b.Property(c => c.RowPayload).HasColumnType("bytea");
             b.Property(c => c.Version).IsConcurrencyToken();
             b.HasIndex(c => new { c.TableNumber, c.CodeKey }).IsUnique();
+        });
+        modelBuilder.Entity<FieldEventCodeSetting>(b =>
+        {
+            b.Property(c => c.Kind).HasMaxLength(16);
+            b.Property(c => c.Description).HasMaxLength(160);
+            b.Property(c => c.Version).IsConcurrencyToken();
+            b.HasIndex(c => new { c.Kind, c.Code }).IsUnique();
+            b.ToTable(t => t.HasCheckConstraint("CK_FieldEventCodeSettings_KindCodeSeverity",
+                "(\"Kind\" = 'alarm' AND \"Code\" BETWEEN 0 AND 255 AND (\"Severity\" IS NULL OR \"Severity\" BETWEEN 1 AND 4)) OR "
+                + "(\"Kind\" = 'maintenance' AND \"Code\" BETWEEN 0 AND 65535 AND \"Severity\" IS NULL)"));
         });
         modelBuilder.Entity<QuickAccessCustomer>(b =>
         {

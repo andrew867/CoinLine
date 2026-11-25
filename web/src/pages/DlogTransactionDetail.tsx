@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { HexViewer } from '../components/HexViewer'
 import { JsonPanel } from '../components/JsonPanel'
 import { apiDownload, apiFetch } from '../api/client'
+import { alarmSeverityLabel } from './fieldEventLabels'
 
 
 type Detail = {
@@ -18,7 +19,7 @@ type Detail = {
   immediateClear: boolean
   rawPayloadHex: string
   decodedJson: string
-  fieldEvent: { title: string; category: string; summary: string | null; phoneTime: string | null } | null
+  fieldEvent: { title: string; category: string; summary: string | null; phoneTime: string | null; operatorDescription?: string | null; severity?: number | null } | null
   idempotencyKey: string
   capturedAtUtc: string
   sessionCorrelationId: string | null
@@ -120,6 +121,8 @@ export function DlogTransactionDetail() {
             )}
           </>
         )}
+        {fieldEvent?.operatorDescription && <><dt>Operator description</dt><dd>{fieldEvent.operatorDescription}</dd></>}
+        {fieldEvent?.severity != null && <><dt>Current severity</dt><dd>{alarmSeverityLabel(fieldEvent.severity)}</dd></>}
         <dt>Recorded by CoinLine</dt>
         <dd><time dateTime={detail.capturedAtUtc}>{new Date(detail.capturedAtUtc).toLocaleString()}</time></dd>
         <dt>Phone</dt>

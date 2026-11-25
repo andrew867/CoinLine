@@ -89,6 +89,19 @@
 .terminal-status-event-content a:hover { text-decoration: underline; }
 .terminal-status-event-type, .terminal-status-source { color: #526c61; font-size: .82rem; }
 
+.field-event-reference { display: grid; gap: 14px; padding: 0 22px 22px; }
+.field-event-reference > p { margin: 0; color: #526c61; }
+.field-event-reference > label { display: grid; gap: 5px; max-width: 420px; }
+.field-event-reference table { width: 100%; border-collapse: collapse; text-align: left; }
+.field-event-reference :is(th, td) { padding: 8px 10px; border-bottom: 1px solid #e8eeea; }
+.field-event-reference th:first-child { width: 6rem; }
+.field-event-reference > section { overflow-x: auto; }
+.field-event-code-picker, .field-event-code-actions { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; }
+.field-event-code-picker label, .field-event-code-editor label { display: grid; gap: 5px; }
+.field-event-code-picker input { width: 9rem; }
+.field-event-code-editor { display: grid; gap: 12px; padding: 16px; border-radius: 12px; border: 1px solid #cbdad1; background: #f4f8f6; }
+.field-event-code-editor :is(h3, p) { margin: 0; }
+
 @media (max-width: 720px) {
   .terminal-status-tools { grid-template-columns: 1fr; }
   .terminal-status-metrics > * { padding: 13px 11px; }

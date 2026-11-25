@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api/client'
+import { FieldEventReference } from './FieldEventReference'
+import { alarmSeverityLabel } from './fieldEventLabels'
 import './FieldEventsPage.css'
 
 const categories = {
@@ -18,6 +20,8 @@ type FieldEvent = {
   terminalName: string | null
   title: string
   summary: string | null
+  operatorDescription?: string | null
+  severity?: number | null
   category: Category
   capturedAtUtc: string
 }
@@ -88,7 +92,7 @@ export function FieldEventsPage() {
   const needle = query.trim().toLowerCase()
   const visible = items.filter((event) =>
     (category === 'all' || event.category === category) &&
-    (!needle || `${event.summary ?? ''} ${event.title} ${event.terminalName ?? ''}`.toLowerCase().includes(needle)),
+    (!needle || `${event.summary ?? ''} ${event.title} ${event.terminalName ?? ''} ${event.operatorDescription ?? ''} ${event.severity == null ? '' : alarmSeverityLabel(event.severity)}`.toLowerCase().includes(needle)),
   )
 
   return (
@@ -174,6 +178,8 @@ export function FieldEventsPage() {
                 <div className="terminal-status-event-content">
                   <span className="terminal-status-event-type">{event.title}</span>
                   <Link to={`/dlog/${event.id}`}>{event.summary ?? 'Report details unavailable'}</Link>
+                  {event.operatorDescription && <span>Operator description: {event.operatorDescription}</span>}
+                  {event.severity != null && <span className="terminal-status-event-type">Current severity: {alarmSeverityLabel(event.severity)}</span>}
                   {!terminalId && (event.terminalId
                     ? <Link className="terminal-status-source" to={`?terminalId=${encodeURIComponent(event.terminalId)}`}>{event.terminalName ?? 'Registered phone'}</Link>
                     : <span className="terminal-status-source">Unmatched phone</span>)}
@@ -184,6 +190,7 @@ export function FieldEventsPage() {
           </ol>
         )}
       </section>
+      <FieldEventReference />
     </div>
   )
 }
