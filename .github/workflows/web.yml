@@ -81,6 +81,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify phone profile compatibility preflight
+        run: npm run e2e -- e2e/phone-profile-preflight.spec.ts --output test-results/phone-profile-preflight
+        env:
+          CI: "true"
+
       - name: Upload Playwright failure traces
         if: failure()
         uses: actions/upload-artifact@v4

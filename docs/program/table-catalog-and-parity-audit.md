@@ -257,6 +257,8 @@ For the inter-area test route, the firmware displayed **Selected carrier not sup
 
 The local lab assignment was updated with the corrected MT92 and the new MT23. The existing advertising and every other record kept its original payload hash. The OEM acknowledged all 12 records and displayed both configured advertising messages on hook after a warm restart.
 
+Full assignment and selected-delivery preflight now use the installed phone profile, including when the source set is untargeted. Full assignments review every resulting record. Partial download selections review only the chosen records and their required dependencies. Known size, absence from a complete catalogue, or explicitly confirmed incompatible layout produces a record-specific exclusion before queuing; a pickup still rechecks the prepared versions. Missing profile evidence is not certification. This is a host-side compatibility safeguard, not a physical firmware acceptance result.
+
 ## Suggested implementation order
 
 1. Expand the verified firmware profiles beyond the lab Multi-pay build. Verify later table lengths against matching terminal images before adding them to the catalog.

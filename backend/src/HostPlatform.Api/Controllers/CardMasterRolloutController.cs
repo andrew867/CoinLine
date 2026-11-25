@@ -83,11 +83,9 @@ public sealed class CardMasterRolloutController(HostPlatformDbContext db, TableD
                 if (reason == null && prepared.Plan is { } plan)
                 {
                     var profile = FirmwareTableProfiles.Find(phone.FirmwareVersion?.TableProfileId);
-                    foreach (var version in plan.Records)
-                    {
-                        var number = version.TableDefinition!.TableNumber;
-                        reason ??= TableSetFirmwareCompatibility.RecordIssue(profile, number, TableDistributionService.GetEffectivePayload(version).Length);
-                    }
+                    // This rollout changes the full assignment as well as
+                    // scheduling its selected card record.
+                    reason = TableSetFirmwareCompatibility.SelectionIssue(profile, TableSetFirmwareCompatibility.Shapes(plan.Set.Versions));
                     reason ??= TableDistributionService.AccessRecordIssue(plan.Set.Versions.Where(row => row.TableDefinition!.TableNumber == 21).Take(2).ToArray(), phone.TerminalIdHex);
                     if (reason == null) eligible.Add((assignment, plan));
                 }

@@ -15,6 +15,8 @@ Start returns a `Pending` batch with the selected versions already prepared. Sen
 
 Cancel a pending batch before the phone starts receiving it. Retry creates another pending batch using the original scope. MT94 uses the separate firmware scheduler.
 
+Start and retry reject a known installed firmware size, record type or explicitly confirmed layout conflict with HTTP 400 and a message identifying the record. The checks cover only the requested records and their dependency closure. A rejected request creates no batch; an unrelated record in a partial source set does not prevent a compatible selection. Unclassified firmware and types without verified lengths in an incomplete catalogue are not rejected merely for being unknown. The NCC pickup repeats the compatibility check on the prepared versions before sending; a historical or newly incompatible queued batch records a not-sent failure.
+
 **UI:** `/downloads`, `/downloads/:id`
 
 **Entities:** `DownloadBatch`, `DownloadBatchItem`

@@ -1106,18 +1106,14 @@ internal sealed class NccLinkProcessor(
             }
         }
 
-        var profileId = await db.FirmwareVersions.AsNoTracking().Where(version => version.Id == terminal.FirmwareVersionId)
-            .Select(version => version.TableProfileId).FirstOrDefaultAsync(stoppingToken);
-        var profile = FirmwareTableProfiles.Find(profileId);
-        foreach (var version in items.Select(item => item.TableVersion).OfType<TableVersion>())
+        var installedFirmwareId = await db.Terminals.AsNoTracking().Where(phone => phone.Id == terminal.Id)
+            .Select(phone => phone.FirmwareVersionId).SingleAsync(stoppingToken);
+        var profile = await tables.FindInstalledProfileAsync(installedFirmwareId, stoppingToken);
+        if (TableSetFirmwareCompatibility.SelectionIssue(profile,
+            TableSetFirmwareCompatibility.Shapes(items.Select(item => item.TableVersion).OfType<TableVersion>())) is { } issue)
         {
-            if (version.TableDefinition is { } definition &&
-                TableSetFirmwareCompatibility.RecordIssue(profile, definition.TableNumber,
-                    TableDistributionService.GetEffectivePayload(version).Length) is { } issue)
-            {
-                await RejectBatchBeforeSendAsync(stream, terminalId, items, $"MT{definition.TableNumber}. {issue}", cashboxStatus);
-                return;
-            }
+            await RejectBatchBeforeSendAsync(stream, terminalId, items, issue, cashboxStatus);
+            return;
         }
 
         await StartFirmwareTableTransferAsync(stream, terminalId, items, cashboxStatus);
