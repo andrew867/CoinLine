@@ -8,7 +8,7 @@ export type CarrierEntry = {
   id: string; code: string; description: string; tableNumber: number; revision: number; reference: string;
   displayName: string | null; featureGroupB: boolean; screeningEntry: string | null
 }
-type Field = { key: string; label: string; editor: string; value: string | null; min: number; max: number; maxLength: number | null; choices: { value: number; label: string }[] | null; help: string | null }
+type Field = { key: string; label: string; editor: string; value: string | null; min: number; max: number; maxLength: number | null; choices: { value: number; label: string }[] | null; help: string | null; isSpare?: boolean }
 type Details = { entry: CarrierEntry; fields: Field[] }
 type Schema = { fields: Field[] }
 const endpoint = '/api/carrier-library'
@@ -109,6 +109,16 @@ export function CarrierLibraryPage() {
 
   const value = (field: Field) => changes[field.key] ?? field.value ?? ''
   const name = fields?.find(field => field.key === 'carrier-0.name')
+  const renderField = (field: Field) => <label key={field.key} className={field.editor === 'checkbox' ? 'native-table-toggle' : 'native-table-field'}>
+          {field.editor === 'checkbox' ? <><input type="checkbox" checked={value(field) === 'true'} onChange={event => setChanges(old => ({ ...old, [field.key]: String(event.target.checked) }))} />{field.label}</> : <>
+            <span>{field.label}</span>
+            {field.choices ? <select value={value(field)} onChange={event => setChanges(old => ({ ...old, [field.key]: event.target.value }))}>
+              {!field.choices.some(choice => String(choice.value) === value(field)) && <option value={value(field)}>Stored value {value(field)}</option>}
+              {field.choices.map(choice => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select> :
+              <input type={field.editor === 'number' ? 'number' : 'text'} value={value(field)} min={field.editor === 'number' ? field.min : undefined}
+                max={field.editor === 'number' ? field.max : undefined} maxLength={field.maxLength ?? undefined} onChange={event => setChanges(old => ({ ...old, [field.key]: event.target.value }))} />}
+          </>}{field.help && <small>{field.help}</small>}
+        </label>
   return <div>
     <p><Link to="/table-sets">Table sets</Link></p><h1>Carrier library</h1>
     <p className="page-intro">Create reusable carrier definitions for each terminal layout. Apply them to individual rows of a draft carrier table. Card acceptance and screening positions are assigned in that target set, and published snapshots never change when a library entry is edited.</p>
@@ -133,16 +143,12 @@ export function CarrierLibraryPage() {
       </fieldset>
       {name && <CarrierBrandingPreview name={value(name)} />}
       <fieldset disabled={!editable || busy} className="native-table-fields"><legend>Carrier settings, MT{number}</legend>
-        {fields.map(field => <label key={field.key} className={field.editor === 'checkbox' ? 'native-table-toggle' : 'native-table-field'}>
-          {field.editor === 'checkbox' ? <><input type="checkbox" checked={value(field) === 'true'} onChange={event => setChanges(old => ({ ...old, [field.key]: String(event.target.checked) }))} />{field.label}</> : <>
-            <span>{field.label}</span>
-            {field.choices ? <select value={value(field)} onChange={event => setChanges(old => ({ ...old, [field.key]: event.target.value }))}>
-              {!field.choices.some(choice => String(choice.value) === value(field)) && <option value={value(field)}>Stored value {value(field)}</option>}
-              {field.choices.map(choice => <option value={choice.value} key={choice.value}>{choice.label}</option>)}</select> :
-              <input type={field.editor === 'number' ? 'number' : 'text'} value={value(field)} min={field.editor === 'number' ? field.min : undefined}
-                max={field.editor === 'number' ? field.max : undefined} maxLength={field.maxLength ?? undefined} onChange={event => setChanges(old => ({ ...old, [field.key]: event.target.value }))} />}
-          </>}{field.help && <small>{field.help}</small>}
-        </label>)}
+        {fields.filter(field => !field.isSpare).map(renderField)}
+        {fields.some(field => field.isSpare) && <details className="native-spare-fields">
+          <summary>Spare fields</summary>
+          <p className="page-intro">Reserved row values have no assigned behavior in the verified layout. A library application keeps the destination values unless the operator explicitly copies these fields.</p>
+          <div className="native-spare-grid">{fields.filter(field => field.isSpare).map(renderField)}</div>
+        </details>}
       </fieldset>
       <div className="row-actions">{editable && <button type="submit" disabled={busy || !code.trim()}>Save carrier</button>}
         {id && canDelete && <button type="button" disabled={busy} onClick={() => void remove()}>Delete definition</button>}
