@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
@@ -47,6 +47,38 @@ it('adds the complete graphical starter without importing unrelated records', as
     { enableSampleMenu: true }))
   expect(await screen.findByText(/3 graphical records added/)).toBeVisible()
   expect(saved).toHaveBeenCalledTimes(1)
+})
+
+it('previews globe frames at half-second intervals and static advertisements at five seconds', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 5 })
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ supported: false, reason: 'Choose a template',
+    templates: [{ profile: 'Later packed profile', length: 9224 }] }))
+  render(<TableSetConfiguration setId="set-fixture" draft initialRecord={131}
+    versions={[]} onSaved={vi.fn()} recordDirty={false} onRecordDirty={vi.fn()} />)
+  fireEvent.click(screen.getByText('Start graphical advertising from sample artwork'))
+  await screen.findByText('Choose a template')
+  vi.useFakeTimers()
+  try {
+    fireEvent.click(screen.getByRole('button', { name: 'Play sample animation' }))
+    expect(screen.getByText(/Screen 1 of 20.*500 ms/)).toBeVisible()
+    act(() => vi.advanceTimersByTime(499))
+    expect(screen.getByText(/Screen 1 of 20/)).toBeVisible()
+    act(() => vi.advanceTimersByTime(1))
+    expect(screen.getByText(/Screen 2 of 20/)).toBeVisible()
+    for (let count = 0; count < 15; count++)
+      act(() => vi.advanceTimersByTime(500))
+    expect(screen.getByText(/Screen 17 of 20.*5 seconds/)).toBeVisible()
+    act(() => vi.advanceTimersByTime(4999))
+    expect(screen.getByText(/Screen 17 of 20/)).toBeVisible()
+    act(() => vi.advanceTimersByTime(1))
+    expect(screen.getByText(/Screen 18 of 20/)).toBeVisible()
+    for (let count = 0; count < 3; count++)
+      act(() => vi.advanceTimersByTime(5000))
+    expect(screen.getByText(/Screen 1 of 20.*500 ms/)).toBeVisible()
+    fireEvent.click(screen.getByRole('button', { name: 'Pause sample animation' }))
+  } finally {
+    vi.useRealTimers()
+  }
 })
 
 it('does not let Read plus Add edit an existing draft record', async () => {

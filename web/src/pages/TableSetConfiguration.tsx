@@ -116,11 +116,12 @@ function GraphicalStarterPanel({ setId, onSaved }: { setId: string; onSaved: () 
   const [message, setMessage] = useState('')
   const [playing, setPlaying] = useState(false)
   const [frame, setFrame] = useState(0)
+  const dwellMs = frame < 16 ? 500 : 5000
   useEffect(() => {
     if (!playing || starterFrames.length === 0) return
-    const timer = window.setInterval(() => setFrame(current => (current + 1) % starterFrames.length), 500)
-    return () => window.clearInterval(timer)
-  }, [playing])
+    const timer = window.setTimeout(() => setFrame(current => (current + 1) % starterFrames.length), dwellMs)
+    return () => window.clearTimeout(timer)
+  }, [playing, frame, dwellMs])
 
   async function create() {
     setBusy(true)
@@ -141,15 +142,15 @@ function GraphicalStarterPanel({ setId, onSaved }: { setId: string; onSaved: () 
 
   return <details onToggle={event => { if (!event.currentTarget.open) setPlaying(false) }}>
     <summary>Start graphical advertising from sample artwork</summary>
-    <p>Add MT131, MT132 and MT133 with sixteen 500 ms bitmap frames and an example menu.
+    <p>Add MT131, MT132 and MT133 with sixteen 500 ms globe frames, four static advertisements shown for five seconds each, and an example menu.
       Existing different records are never replaced. Usage statistics and connected-call advertising are disabled initially.</p>
     {starterFrames.length > 0 && <div className="row-actions">
-      <img src={starterFrames[frame]} alt="Graphical starter globe artwork preview" width={224} height={144}
+      <img src={starterFrames[frame]} alt="Graphical starter artwork preview" width={224} height={144}
         style={{ imageRendering: 'pixelated', maxWidth: '100%', height: 'auto' }} />
       <button type="button" onClick={() => setPlaying(value => !value)}>
         {playing ? 'Pause sample animation' : 'Play sample animation'}
       </button>
-      <span>Frame {frame + 1} of {starterFrames.length}</span>
+      <span>Screen {frame + 1} of {starterFrames.length} · {frame < 16 ? 'Globe frame, 500 ms' : 'Static advertisement, 5 seconds'}</span>
     </div>}
     <label><input type="checkbox" checked={enableSampleMenu}
       onChange={event => setEnableSampleMenu(event.target.checked)} disabled={busy} />

@@ -25,8 +25,8 @@ if __name__ == "__main__":
     source = root / "web" / "src" / "assets" / "graphical-starter"
     destination = root / "backend" / "src" / "HostPlatform.Protocols.Tables" / "Assets" / "GraphicalStarter"
     destination.mkdir(parents=True, exist_ok=True)
-    for frame in range(1, 17):
+    for frame in range(1, 21):
         name = f"frame-{frame:02d}"
         with Image.open(source / f"{name}.png") as image:
             (destination / f"{name}.bin").write_bytes(pack_bitmap(image))
-    print("Packed 16 graphical starter frames.")
+    print("Packed 16 globe frames and 4 static advertisements.")
