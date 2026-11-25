@@ -11,6 +11,7 @@ import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActio
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { MessagingServicePreview } from './MessagingServicePreview'
+import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 
 type Field = {
   key: string
@@ -326,6 +327,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           <p>Mark the permitted entries in Call-Screening List and Quick Access Keys using <strong>Allow in configurable restricted service</strong>.</p>}
       </section>}
       {number === 68 && <MessagingServicePreview value={key => {
+        const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
+        return field && effectiveValue(field)
+      }} />}
+      {(number === 32 || number === 34) && <CollectionPolicyPreview number={number} later={layout.profile === 'Later packed profile'} value={key => {
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}

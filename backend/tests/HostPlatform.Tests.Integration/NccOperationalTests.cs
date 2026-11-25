@@ -731,7 +731,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         BinaryPrimitives.WriteUInt16LittleEndian(carriers.AsSpan(73), 4);
         var extended = StatisticsReport(71, 244);
         extended[13] = 2;
-        extended[14] = 9;
+        extended[14] = 253;
         extended[129] = 0xFE;
         BinaryPrimitives.WriteUInt16LittleEndian(extended.AsSpan(21), 11);
         var messaging = StatisticsReport(69, 213);
@@ -813,7 +813,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(0, carrierRows[0].GetProperty("reference").GetInt32());
         Assert.Equal(4, StatisticsCounter(carrierRows[1], "Local", "Coins"));
         Assert.Equal(2, reports[71].GetProperty("carrierFormat").GetInt32());
-        Assert.Equal(11, StatisticsCounter(Assert.Single(reports[71].GetProperty("carriers").EnumerateArray()), "Local", "Mondex"));
+        var combinedCarrier = Assert.Single(reports[71].GetProperty("carriers").EnumerateArray());
+        Assert.Equal(253, combinedCarrier.GetProperty("reference").GetInt32());
+        Assert.Equal(11, StatisticsCounter(combinedCarrier, "Local", "Mondex"));
         Assert.Equal(3, StatisticsCounter(reports[69], "Stored-value cards", "Local"));
         Assert.Equal(5, StatisticsCounter(reports[69], "Other messaging counters", "No-answer counter"));
         Assert.True(tablesBefore.SetEquals(await BatchIdsAsync()));
@@ -2620,6 +2622,8 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     [InlineData(44, 26)]
     [InlineData(44, 58)]
     [InlineData(44, 68)]
+    [InlineData(44, 32)]
+    [InlineData(44, 34)]
     public async Task Terminal_call_sends_only_the_selected_records_and_acknowledges_the_original_batch(int trigger, int selectedType)
     {
         var terminal = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json)).EnumerateArray()
@@ -2630,17 +2634,17 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             .ToDictionary(row => row.GetProperty("tableNumber").GetInt32(), row => row.GetProperty("id").GetGuid());
         if (!definitions.ContainsKey(selectedType))
         {
-            using var definition = await fx.Client.PostAsJsonAsync("/api/tables/definitions", new { name = "Selected restriction fixture", tableNumber = selectedType }, Json);
+            using var definition = await fx.Client.PostAsJsonAsync("/api/tables/definitions", new { name = $"Selected record fixture MT{selectedType}", tableNumber = selectedType }, Json);
             definition.EnsureSuccessStatusCode();
             definitions.Add(selectedType, (await definition.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid());
         }
         var assignedSet = await CreateRateTableSetAsync("Queued download preserved assignment");
         await AssignSetAsync(assignedSet);
 
-        using var source = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = $"Selected download MT{trigger} fixture" }, Json);
+        using var source = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = $"Selected download MT{selectedType} on MT{trigger} fixture" }, Json);
         source.EnsureSuccessStatusCode();
         var tableSetId = (await source.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
-        var selected = new byte[selectedType == 58 ? 26 : 72];
+        var selected = new byte[selectedType switch { 32 => 33, 34 => 19, 58 => 26, _ => 72 }];
         selected[0] = (byte)selectedType;
         selected[^1] = 0x43;
         if (selectedType == 58)
@@ -2653,6 +2657,24 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             {
                 ["statistics"] = "1", ["lineReleaseDelay"] = "300", ["spare4"] = "100"
             });
+        else if (selectedType == 32)
+        {
+            selected[9] = 0x43;
+            selected[^1] = 0;
+            selected = NativeTableLayouts.Find(32, selected)!.Apply(selected, new Dictionary<string, string>
+            {
+                ["days"] = "1", ["threshold"] = "2", ["interval-0.start"] = "10", ["interval-0.duration"] = "20"
+            });
+        }
+        else if (selectedType == 34)
+        {
+            selected[13] = 0xC0;
+            selected = NativeTableLayouts.Find(34, selected)!.Apply(selected, new Dictionary<string, string>
+            {
+                ["days"] = "1", ["threshold"] = "2", ["carrierStatistics"] = "1", ["enabled"] = "4",
+                ["detailThreshold"] = "40", ["detailHour"] = "20", ["detailHours"] = "6"
+            });
+        }
         var unrelated = new byte[1192];
         unrelated[0] = 73;
         foreach (var payload in new[] { selected, unrelated })

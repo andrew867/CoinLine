@@ -27,7 +27,7 @@ public static class FirmwareTableProfiles
             false, new HashSet<int>()),
         new(LaterMultiPay180, "MTR 2.x Multi-pay, 180-entry, double-compressed LCD",
             NativeTableLayouts.Later, LaterCatalogue(), new HashSet<int>(), true,
-            new HashSet<int> { 30, 32, 34, 35, 50, 62 })
+            new HashSet<int> { 30, 32, 35, 50, 62 })
     ];
 
     public static FirmwareTableProfile? Find(string? id) => Catalog.SingleOrDefault(profile => profile.Id == id);

@@ -249,6 +249,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     {
         22 or 134 => "Card acceptance",
         23 or 135 => "Carrier screens",
+        CollectionPolicyWire.CommunicationsType => "Communications statistics settings",
+        CollectionPolicyWire.CallCarrierType => "Call and carrier statistics settings",
         NativeTableLayouts.CallInRecord => "Time and call-in settings",
         NativeTableLayouts.AnswerSupervisionRecord => "Answer supervision",
         SpareTableWire.MessageType => "Spare table, e-purse and IOPR",
