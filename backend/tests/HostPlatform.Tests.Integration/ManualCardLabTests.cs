@@ -43,7 +43,7 @@ public sealed class ManualCardLabTests
             ?? throw new InvalidOperationException("Missing synthetic lab settings.");
         settings.Validate();
         var test = new SyntheticCardFixtureProvider(settings.Destination);
-        await using var host = new LabFactory(settings.Port, test);
+        await using var host = new LabFactory(settings.Port, settings.ObserveExistingUploadOnly ? null : test);
         using var client = host.CreateClient();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(settings.TimeoutSeconds));
         Guid terminalId;
@@ -89,7 +89,8 @@ public sealed class ManualCardLabTests
         using (var probe = new TcpClient())
             await probe.ConnectAsync(IPAddress.Loopback, settings.Port, deadline.Token);
         await WriteJson(settings.ReadyFile, new { listening = true, host = "127.0.0.1", settings.Port,
-            settings.TerminalWireId, settings.Destination, quotedUsd = 0.05m, syntheticOnly = true, prepared });
+            settings.TerminalWireId, settings.Destination, quotedUsd = 0.05m, syntheticOnly = true,
+            settings.ObserveExistingUploadOnly, prepared });
 
         // This test reports only the isolated synthetic ledger. A quote is not a settlement.
         var settled = new HashSet<ushort>();
@@ -107,9 +108,8 @@ public sealed class ManualCardLabTests
             var calls = uploads.SelectMany(batch => batch.Records.Select(record =>
                 TerminalUploads.ReadMetadata<DlogCallDetailWire.CallDetail>(record.DecodedMetadataJson)))
                 .OfType<DlogCallDetailWire.CallDetail>().ToArray();
-            var completed = calls.Where(call => test.ApprovedCallSequences.Contains(call.Sequence)
-                && (call.DialedDigits == settings.Destination || call.DialedDigits == "1" + settings.Destination)
-                && call.Payment is "Credit card" or "Calling card" or "Debit card" or "Card").ToArray();
+            var observed = calls.Where(call => IsSyntheticRouteCardCall(call, settings.Destination)).ToArray();
+            var completed = observed.Where(call => IsCompletedAuthorizedCall(call, test.ApprovedCallSequences)).ToArray();
             var account = await db.CardAccounts.Include(row => row.CardBalance).Include(row => row.CardProduct)
                 .SingleAsync(row => row.Id == accountId, deadline.Token);
             var quoteObserved = quotes.Any(row => (row.DialedDigits == settings.Destination || row.DialedDigits == "1" + settings.Destination)
@@ -128,12 +128,17 @@ public sealed class ManualCardLabTests
             }
             var snapshot = new
             {
-                syntheticOnly = true, settings.Destination, quoteObserved, simulatedAccountBalanceUsd = account.Balance,
+                syntheticOnly = true, settings.Destination, settings.ObserveExistingUploadOnly, quoteObserved,
+                simulatedAccountBalanceUsd = account.Balance,
                 downloads = batches.Select(batch => new { batch.Status, total = batch.Items.Count,
                     acknowledged = batch.Items.Count(item => item.Succeeded), batch.LastError }).ToArray(),
                 quotes = quotes.Select(row => new { row.DialedDigits, amountsUsd = row.Results.Select(result => result.Amount).ToArray() }).ToArray(),
                 denied = test.DeniedCount,
                 approvedAuthorizationSequences = test.ApprovedCallSequences.Order().ToArray(),
+                observedCallDetails = calls.Select(call => new { call.MessageType, call.Sequence, call.CallType,
+                    call.DurationSeconds, call.Payment, matchesSyntheticRoute = IsSyntheticRouteCardCall(call, settings.Destination),
+                    matchingCompletedAuthorization = completed.Contains(call), reportedChargeCents = call.AmountCharged,
+                    reportedCollectionCents = call.AmountCollected }).ToArray(),
                 uploadedCalls = completed.Select(call => new { call.Sequence, call.DurationSeconds, call.Payment,
                     reportedChargeCents = call.AmountCharged, reportedCollectionCents = call.AmountCollected }).ToArray(),
                 simulatedCharges = completed.Where(call => settled.Contains(call.Sequence) && call.AmountCharged.HasValue)
@@ -142,12 +147,36 @@ public sealed class ManualCardLabTests
                 processorSettlement = false
             };
             await WriteJson(settings.ResultFile, snapshot);
-            if (quoteObserved && completed.Length > 0 && settled.Count > 0)
+            if (settings.ObserveExistingUploadOnly ? observed.Length > 0 : quoteObserved && completed.Length > 0 && settled.Count > 0)
                 return;
             try { await Task.Delay(1000, deadline.Token); }
             catch (OperationCanceledException) when (deadline.IsCancellationRequested) { break; }
         }
-        Assert.Fail("No matching completed test-card call was reported before the manual fixture deadline. See the safe result file.");
+        Assert.Fail(settings.ObserveExistingUploadOnly
+            ? "No test-route card detail was reported before the observation deadline. See the safe result file."
+            : "No matching completed test-card call was reported before the manual fixture deadline. See the safe result file.");
+    }
+
+    private static bool IsSyntheticRouteCardCall(DlogCallDetailWire.CallDetail call, string destination) =>
+        (call.DialedDigits == destination || call.DialedDigits == "1" + destination)
+        && call.Payment is "Credit card" or "Calling card" or "Debit card" or "Card";
+
+    private static bool IsCompletedAuthorizedCall(DlogCallDetailWire.CallDetail call, IReadOnlyCollection<ushort> approved) =>
+        approved.Contains(call.Sequence) && call.DurationSeconds is > 0
+        && call.CallType is "Local" or "Intra-area toll" or "Inter-area toll" or "International" or "Operator" or "Operator-assisted";
+
+    [Fact]
+    public void Observed_old_call_or_incomplete_attempt_cannot_match_a_new_authorization()
+    {
+        const string route = "3335550123";
+        var detail = new DlogCallDetailWire.CallDetail(53, 2, route, false, 0,
+            "Inter-area toll", "Credit card", null, 10, 5, 0);
+        Assert.True(IsSyntheticRouteCardCall(detail, route));
+        Assert.False(IsCompletedAuthorizedCall(detail, new ushort[] { 3 }));
+        Assert.False(IsCompletedAuthorizedCall(detail with { CallType = "Unanswered" }, new ushort[] { 2 }));
+        Assert.False(IsCompletedAuthorizedCall(detail with { DurationSeconds = 0 }, new ushort[] { 2 }));
+        Assert.False(IsSyntheticRouteCardCall(detail with { DialedDigits = "3335550124" }, route));
+        Assert.True(IsCompletedAuthorizedCall(detail, new ushort[] { 2 }));
     }
 
     [Fact]
@@ -272,7 +301,7 @@ public sealed class ManualCardLabTests
     private static Task WriteJson(string path, object value) => File.WriteAllTextAsync(path, JsonSerializer.Serialize(value, Json));
 
     private sealed record LabSettings(string TerminalWireId, string Destination, int Port, int TimeoutSeconds, string ReadyFile, string ResultFile,
-        string? TablePackageFile = null)
+        string? TablePackageFile = null, bool ObserveExistingUploadOnly = false)
     {
         public void Validate()
         {
@@ -284,7 +313,7 @@ public sealed class ManualCardLabTests
         }
     }
 
-    private sealed class LabFactory(int port, SyntheticCardFixtureProvider provider) : WebApplicationFactory<Program>
+    private sealed class LabFactory(int port, SyntheticCardFixtureProvider? provider) : WebApplicationFactory<Program>
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
@@ -295,7 +324,8 @@ public sealed class ManualCardLabTests
             builder.UseSetting("SipModem:Enabled", "false");
             builder.UseSetting("SerialModem:Enabled", "false");
             builder.UseSetting("Observability:MetricsEnabled", "false");
-            builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider));
+            if (provider is not null)
+                builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider));
         }
     }
 
