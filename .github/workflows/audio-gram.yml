@@ -24,3 +24,16 @@ jobs:
       - uses: actions/checkout@v4
       - name: Local AGI and delivery spool tests
         run: python3 -m unittest discover -s services/audiogram -p 'test_*.py' -v
+
+  local-pbx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install distribution Asterisk package
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends asterisk
+          sudo systemctl stop asterisk || true
+      - name: Record and deliver synthetic audio through Local channels
+        run: python3 services/audiogram/smoke_asterisk.py
