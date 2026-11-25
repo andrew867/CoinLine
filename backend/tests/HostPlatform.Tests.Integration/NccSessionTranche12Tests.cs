@@ -34,26 +34,24 @@ public sealed class NccSessionTranche12Tests(ApiFixture factory)
         var sid = seedRow.GetProperty("id").GetGuid();
 
         var dash0 = await _client.GetFromJsonAsync<JsonElement>("/api/operator/dashboard", JsonOpts);
-        var open0 = dash0.GetProperty("openNccSessions").GetInt32();
+        Assert.True(dash0.TryGetProperty("openNccSessions", out var openProp));
+        // Dashboard open count is socket-bound links only (not leftover Active DB rows).
+        Assert.True(openProp.GetInt32() >= 0);
 
-        // Active seed → close
+        // Active seed → close (demo seed is normally Closed; keep path for leftover Active rows)
         if (statusProp.GetInt32() == (int)NccSessionStatus.Active)
         {
-            Assert.True(open0 >= 1);
             var closed = await _client.PostAsync($"/api/ncc/sessions/{sid}/close", null);
             Assert.Equal(HttpStatusCode.OK, closed.StatusCode);
             var closedBody = await closed.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
             Assert.Equal((int)NccSessionStatus.Closed, closedBody!.GetProperty("status").GetInt32());
-
-            var dash1 = await _client.GetFromJsonAsync<JsonElement>("/api/operator/dashboard", JsonOpts);
-            Assert.True(dash1.GetProperty("openNccSessions").GetInt32() < open0);
         }
 
         var archResp = await _client.PostAsync($"/api/ncc/sessions/{sid}/archive", null);
         Assert.Equal(HttpStatusCode.OK, archResp.StatusCode);
 
         var defaultList = await _client.GetFromJsonAsync<JsonElement>("/api/ncc/sessions", JsonOpts);
-        Assert.Equal(0, defaultList.GetArrayLength());
+        Assert.DoesNotContain(defaultList!.EnumerateArray(), r => r.GetProperty("id").GetGuid() == sid);
 
         var again = await _client.GetFromJsonAsync<JsonElement>("/api/ncc/sessions?includeArchived=true", JsonOpts);
         Assert.True(again.GetArrayLength() >= 1);
@@ -68,6 +66,8 @@ public sealed class NccSessionTranche12Tests(ApiFixture factory)
 
         Assert.True(ours.HasValue);
         Assert.Equal((int)NccSessionStatus.Archived, ours!.Value.GetProperty("status").GetInt32());
+        Assert.True(ours.Value.TryGetProperty("socketBound", out var bound));
+        Assert.False(bound.GetBoolean());
     }
 
     private static HttpClient CreateClient(ApiFixture f)

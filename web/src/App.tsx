@@ -1,5 +1,6 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
+import { LoginPage } from './pages/LoginPage'
 import { AuditEventsPage } from './pages/AuditEventsPage'
 import { CustomerDetail } from './pages/CustomerDetail'
 import { CustomersPage } from './pages/CustomersPage'
@@ -14,9 +15,14 @@ import { TableDefinitionDetail } from './pages/TableDefinitionDetail'
 import { TableDefinitions } from './pages/TableDefinitions'
 import { TableSetDetail } from './pages/TableSetDetail'
 import { TableSets } from './pages/TableSets'
+import { InmateFeaturesPage } from './pages/InmateFeaturesPage'
 import { TableVersions } from './pages/TableVersions'
+import { FieldEventsPage } from './pages/FieldEventsPage'
+import { OperatorsPage } from './pages/OperatorsPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { SitesPage } from './pages/SitesPage'
 import { TerminalCreatePage } from './pages/TerminalCreatePage'
+import { TerminalGroupsPage } from './pages/TerminalGroupsPage'
 import { TerminalDetail } from './pages/TerminalDetail'
 import { TerminalsList } from './pages/TerminalsList'
 import { RatePlansPage } from './pages/RatePlansPage'
@@ -47,16 +53,21 @@ import { NotFoundPage } from './pages/NotFoundPage'
 import { StatusPage } from './pages/StatusPage'
 import { UploadDetail } from './pages/UploadDetail'
 import { UploadsPage } from './pages/UploadsPage'
+import { consoleSession } from './api/consoleSession'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route element={<RequireSignIn />}>
         <Route element={<Layout />}>
           <Route path="/" element={<Dashboard />} />
           <Route path="/customers/:id" element={<CustomerDetail />} />
           <Route path="/customers" element={<CustomersPage />} />
           <Route path="/sites" element={<SitesPage />} />
+          <Route path="/terminal-groups" element={<TerminalGroupsPage />} />
+          <Route path="/operators" element={<OperatorsPage />} />
           <Route path="/terminals/new" element={<TerminalCreatePage />} />
           <Route path="/terminals/:id" element={<TerminalDetail />} />
           <Route path="/terminals" element={<TerminalsList />} />
@@ -70,8 +81,10 @@ export default function App() {
           <Route path="/table-versions" element={<TableVersions />} />
           <Route path="/table-sets/:id" element={<TableSetDetail />} />
           <Route path="/table-sets" element={<TableSets />} />
+          <Route path="/inmate-features/:id?" element={<InmateFeaturesPage />} />
           <Route path="/downloads/:id" element={<DownloadDetail />} />
           <Route path="/downloads" element={<DownloadsPage />} />
+          <Route path="/field-events" element={<FieldEventsPage />} />
           <Route path="/uploads/:id" element={<UploadDetail />} />
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/rate-plans/:id" element={<RatePlanDetail />} />
@@ -99,22 +112,16 @@ export default function App() {
           <Route path="/firmware/jobs" element={<FirmwareJobsPage />} />
           <Route path="/audit" element={<AuditEventsPage />} />
           <Route path="/status" element={<StatusPage />} />
-          <Route
-            path="/settings"
-            element={
-              <div>
-                <h1>Settings</h1>
-                <p>
-                  API base uses the Vite dev proxy to <code>http://localhost:5006</code>. Production uses{' '}
-                  <code>X-API-Key</code> when <code>Security:Mode=ApiKey</code> — see{' '}
-                  <code>docs/configuration/secrets-and-config.md</code>.
-                </p>
-              </div>
-            }
-          />
+          <Route path="/settings" element={<SettingsPage />} />
           <Route path="*" element={<NotFoundPage />} />
+        </Route>
         </Route>
       </Routes>
     </BrowserRouter>
   )
+}
+
+function RequireSignIn() {
+  if (!consoleSession.token()) return <Navigate to="/login" replace />
+  return <Outlet />
 }

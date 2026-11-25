@@ -53,14 +53,14 @@ export function RatingQuoteTool() {
 
   return (
     <div>
-      <h1>Rating quote (test)</h1>
+      <h1>Price a call</h1>
       <p style={{ color: '#a60', maxWidth: 720 }}>
         Quotes use the <strong>published</strong> rate-plan version only. This tool is for lab validation — not an
-        assertion of production rating parity with payphones or reference terminal firmware.
+        assertion of production rating parity with payphones or MTR212.
       </p>
       {planListLoading && <p role="status">Loading rate plans…</p>}
       {!planListLoading && plans.length === 0 && !err && (
-        <p role="status">No rate plans available — create one via API or seed.</p>
+        <p role="status">No rate plans yet. Create one from Rate plans.</p>
       )}
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!planListLoading && plans.length > 0 && (

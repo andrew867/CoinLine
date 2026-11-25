@@ -1,11 +1,8 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = {
-  'Content-Type': 'application/json',
-  'X-Operator-Id': 'ui@local',
-  'X-Operator-Role': 'Admin',
-}
+const headers = { 'Content-Type': 'application/json' }
 
 type ReplayResult = {
   transactions: { id: string; messageType: number; capturedAtUtc: string; rawPayloadHex: string }[]
@@ -44,7 +41,7 @@ export function DlogReplayDebug() {
       if (fromUtc.trim()) body.fromUtc = new Date(fromUtc).toISOString()
       if (toUtc.trim()) body.toUtc = new Date(toUtc).toISOString()
 
-      const r = await fetch('/api/dlog/replay?confirm=true', { method: 'POST', headers, body: JSON.stringify(body) })
+      const r = await apiFetch('/api/dlog/replay?confirm=true', { method: 'POST', headers, body: JSON.stringify(body) })
       if (!r.ok) throw new Error(`Replay ${r.status}`)
       setResult((await r.json()) as ReplayResult)
     } catch (e) {

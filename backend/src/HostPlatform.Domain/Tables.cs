@@ -25,6 +25,8 @@ public class TableSet : AuditableEntity
     public string Name { get; set; } = string.Empty;
     public Guid? CustomerId { get; set; }
     public Customer? Customer { get; set; }
+    public Guid? TargetFirmwareVersionId { get; set; }
+    public FirmwareVersion? TargetFirmwareVersion { get; set; }
     public bool IsDefault { get; set; }
     public TableSetStatus Status { get; set; } = TableSetStatus.Draft;
     public DateTime? PublishedAtUtc { get; set; }
@@ -55,6 +57,12 @@ public class TableVersion : AuditableEntity
     public bool ValidationPassed { get; set; } = true;
     /// <summary>JSON array of diagnostics; use HARDWARE_VALIDATION_REQUIRED for unproven layout checks.</summary>
     public string? ValidationDiagnosticsJson { get; set; }
+    /// <summary>Host-only screening descriptions, keyed by one-based slot.</summary>
+    public string? ScreeningDescriptionsJson { get; set; }
+    /// <summary>Confirmed editor layout when the message type and length match more than one screening format.</summary>
+    public string? ScreeningLayoutProfile { get; set; }
+    /// <summary>Host-side Configuration ID used to select assignments for this message type.</summary>
+    public string? ConfigurationId { get; set; }
 }
 
 public class TerminalTableAssignment : AuditableEntity
@@ -71,6 +79,42 @@ public class TerminalTableAssignment : AuditableEntity
     public Guid? PreviousTableSetId { get; set; }
     public TableSet? PreviousTableSet { get; set; }
     public DateTime AssignedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
+public class ScheduledTableDownload : AuditableEntity
+{
+    public Guid TerminalId { get; set; }
+    public Terminal? Terminal { get; set; }
+    public Guid TableSetId { get; set; }
+    public TableSet? TableSet { get; set; }
+    public Guid? SourceTableSetId { get; set; }
+    public TableSet? SourceTableSet { get; set; }
+    public DateTime? FirmwareSlotEndAtUtc { get; set; }
+    public DateTime AvailableAtUtc { get; set; }
+    public int[]? RecordNumbers { get; set; }
+    public Guid? NccSessionId { get; set; }
+    public NccSession? NccSession { get; set; }
+    public Guid? LastBatchId { get; set; }
+    public DownloadBatch? LastBatch { get; set; }
+    public DateTime? PreparedAtUtc { get; set; }
+    public DateTime? StartedAtUtc { get; set; }
+    public DateTime? CompletedAtUtc { get; set; }
+    public DateTime? CancelledAtUtc { get; set; }
+    public string? CancellationReason { get; set; }
+}
+
+public class TableRecordUpdateRun : AuditableEntity
+{
+    public Guid SourceSetId { get; set; }
+    public string RequestJson { get; set; } = string.Empty;
+    public string TargetsJson { get; set; } = string.Empty;
+    public string PreviewToken { get; set; } = string.Empty;
+    public int NextTarget { get; set; }
+    public int ChangedCount { get; set; }
+    public int SkippedCount { get; set; }
+    public string? FailureReason { get; set; }
+    public DateTime? EndedAtUtc { get; set; }
+    public bool Stopped { get; set; }
 }
 
 /// <summary>Customer-scoped pin of a specific table version for a definition (MVP — optional layer).</summary>
@@ -108,9 +152,13 @@ public class DownloadBatch : AuditableEntity
 {
     /// <summary>Optional operator-supplied key for idempotent download orchestration (same response when replayed).</summary>
     public string? ClientIdempotencyKey { get; set; }
+    /// <summary>Retains schedule ownership across delivery attempts.</summary>
+    public Guid? ScheduleId { get; set; }
 
     public Guid TerminalId { get; set; }
     public Terminal? Terminal { get; set; }
+    public Guid? NccSessionId { get; set; }
+    public NccSession? NccSession { get; set; }
     public Guid TableSetId { get; set; }
     public TableSet? TableSet { get; set; }
     public DownloadBatchStatus Status { get; set; } = DownloadBatchStatus.Pending;

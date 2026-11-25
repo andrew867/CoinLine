@@ -1,6 +1,6 @@
 # CoinLine implementation gap register
 
-**Last updated:** 2026-05-02 (Pass 1 partial): Added `HostPlatform.Transport`, XMODEM core (`XmodemSender`, `XmodemCodec`, `XmodemPerfectReceiver`), unified `DlXmodemTransportAdapter` (memory-loop simulation + gated `ExecuteLiveTransferAsync`), UART/EEPROM catalogs, modem pacing/state helpers, env-bound `DlTransport` options in API. **GAP-0001 / GAP-0007 remain open** until worker-backed live job execution, transcript/events APIs, OpenAPI regeneration, and docs-site pass are completed.
+**Last updated:** 2026-05-02 (Pass 1 partial): Added `HostPlatform.Transport`, XMODEM core (`XmodemSender`, `XmodemCodec`, `XmodemPerfectReceiver`), unified `DlXmodemTransportAdapter` (memory-loop simulation + gated `ExecuteLiveTransferAsync`), UART/EEPROM catalogs, modem pacing/state helpers, and env-bound `DlTransport` options in API. **GAP-0001 / GAP-0007 remain open** until worker-backed live job execution, transcript/events APIs, OpenAPI regeneration, and public documentation checks are completed.
 
 **Scan scope:** `coinline/backend`, `coinline/web`, `coinline/docs-site`, `coinline/docs`, `coinline/fixtures`, `coinline/tools`, `coinline/scripts`.
 
@@ -18,7 +18,7 @@
 
 | ID | File | Symbol / area | Current | Required | Domain | Test | HW | Tranche | Status |
 |----|------|-----------------|---------|----------|--------|------|----|---------|--------|
-| GAP-0001 | `backend/src/HostPlatform.Firmware/DlXmodemTransportAdapter.cs` | XMODEM/DL transport | **In progress:** real adapter + `HostPlatform.Transport`; memory duplex simulation exercises framing | Finish live harness docs, full negative-path matrix, transcript persistence, OpenAPI export | Firmware | Unit (`XmodemCodecTests`, `DlXmodemTransportAdapterTests`) + `FirmwareTranche8Tests` | Yes | 8 | in_progress |
+| GAP-0001 | `backend/src/HostPlatform.Firmware/DlXmodemTransportAdapter.cs` | XMODEM/DL transport | **In progress:** real adapter + `HostPlatform.Transport`; memory duplex simulation exercises framing | Finish live harness docs, full negative-path matrix, transcript persistence, OpenAPI + sanitizer | Firmware | Unit (`XmodemCodecTests`, `DlXmodemTransportAdapterTests`) + `FirmwareTranche8Tests` | Yes | 8 | in_progress |
 | GAP-0002 | `backend/src/HostPlatform.Api/Middleware/DevOperatorMiddleware.cs` | Dev operator | TODO: production auth | OIDC/API key + roles | API | Authz tests | No | 12 | open |
 | GAP-0003 | `backend/src/HostPlatform.Rating/RatingEngine.cs` | `RatingEngine` | Rules + tariff catalog (destination + time bands); SetRated/TableRated use host plan | Deterministic quotes + audit trail | Rating | Unit + `RatingTranche5Tests` | Yes | 5 | closed |
 | GAP-0004 | `backend/src/HostPlatform.Infrastructure/Rating/RatingWorkflow.cs` | Segments / labels | Airtime source–aware segments + `DetailJson` | Persisted labels match quote path | Rating | Integration | Yes | 5 | closed |
@@ -28,7 +28,7 @@
 | GAP-0008 | `HostPlatform.Protocols.Dlog/DlogCorrelationRules.cs` | Correlation catalogue | Heuristic classifier diagnostics | Documented pairs + `fixtures/dlog/correlation_pairs.fixture.json` aligned in protocol tests | DLOG | `DlogCorrelationCatalogFixtureTests` | Yes | 9 | closed |
 | GAP-0009 | `HostPlatform.Infrastructure/Dlog/DlogTransactionEngine.cs` | Session pairing | Bidirectional ingest | Bidirectional pairing (request-first + response-first ingest); `DlogTranche9Tests` | DLOG | Integration | Yes | 9 | closed |
 | GAP-0010 | `web/src` (various) | Management Console | NCC Sessions list + lifecycle actions; other workflows partial | Full operator UX per workflow | UI | Playwright e2e | No | 11 | open |
-| GAP-0011 | `docs-site/docs/reference/branding.md` | Support placeholders | GitHub Issues portal; email noted not published | Customer values before public launch | Docs | Review | No | 13 | closed |
+| GAP-0011 | `docs-site/docs/reference/branding.md` | Support placeholders | GitHub Issues portal; email noted not published | Customer values before public launch | Docs | Sanitizer + review | No | 13 | closed |
 | GAP-0012 | `backend/src/HostPlatform.Infrastructure/Persistence/SeedData.cs` | Table seed rows | "MVP placeholder" descriptions | Accurate catalog text | Tables | `SeedDataTableCatalogTranche10Tests` | No | 10 | closed |
 | GAP-0013 | `backend/src/HostPlatform.Domain/RatingAndCards.cs` | Time bands | `DayOfWeekMask` + minute-of-day evaluated in `RatingEngine` | Field GA still needs bench clock/SKU proof | Rating | `RatingTariffCatalogQuoteTests` | Yes | 5 | closed |
 | GAP-0014 | NCC / DLOG / Table / Rating APIs | OpenAPI | Controllers listed | Regenerated + reviewed per tranche | API | OpenAPI snapshot | No | 1–13 | closed |

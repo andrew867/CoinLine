@@ -3,7 +3,7 @@ using HostPlatform.Domain;
 namespace HostPlatform.Infrastructure.Cards;
 
 /// <summary>
-/// Authoritative balance mutations for card accounts — simulation-first; production settlement remains gated.
+/// Balance mutations for card accounts. Chip writes are a separate gate.
 /// </summary>
 public interface ICardAccountLedger
 {

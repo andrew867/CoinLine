@@ -283,6 +283,16 @@ public sealed class ControllersApiTests(ApiFixture factory)
     }
 
     [Fact]
+    public async Task Serial_modem_status_is_off_by_default()
+    {
+        var r = await _client.GetAsync("/api/serial-modem");
+        Assert.Equal(HttpStatusCode.OK, r.StatusCode);
+        var body = await r.Content.ReadFromJsonAsync<JsonElement>(JsonOpts);
+        Assert.False(body.GetProperty("enabled").GetBoolean());
+        Assert.Equal("off", body.GetProperty("phase").GetString());
+    }
+
+    [Fact]
     public async Task Audit_and_ncc_routes()
     {
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/audit/events")).StatusCode);

@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test'
+import { signIn } from './auth'
 
-test('simulation banner and card products create', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
+  await signIn(page)
+})
+
+test('host ledger note and card products create', async ({ page }) => {
   await page.goto('/')
-  await expect(
-    page
-      .getByText(/simulation mode|card simulation banner could not load|unavailable/i)
-      .first(),
-  ).toBeVisible({ timeout: 15000 })
+  await expect(page.getByText(/Host ledger is on/i).first()).toBeVisible({ timeout: 15000 })
 
   await page.goto('/card-products')
   await expect(page.getByRole('heading', { name: 'Card products' })).toBeVisible()

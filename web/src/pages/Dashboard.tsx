@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ErrorBanner, LoadingBlock } from '../components/AppStates'
-import { JsonPanel } from '../components/JsonPanel'
+import { terminalStatusLabel } from '../components/StatusBadge'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Dash = {
   terminalsByStatus: { status: number; count: number }[]
@@ -11,41 +11,37 @@ type Dash = {
   openNccSessions: number
   failedDownloads: number
   uploadAlerts: { failed: number; quarantined: number }
-  recentUploadBatches: {
-    id: string
-    terminalId: string | null
-    status: number
-    createdAtUtc: string
-    updatedAtUtc: string
-    previewBytes: number
-  }[]
-  recentFirmwareJobs: {
-    id: string
-    terminalId: string
-    status: number
-    simulationMode: boolean
-    createdAtUtc: string
-    firmwarePackageId: string
-  }[]
-  recentAuditEvents: {
-    id: string
-    category: string
-    action: string
-    actor: string
-    resource: string
-    terminalId: string | null
-    createdAtUtc: string
-  }[]
-  hardwareValidationNotice?: string
+}
+
+type Pending = { paymentCount: number; paymentTotal: number; callCount: number }
+type SipModem = {
+  listening?: boolean
+  registered?: boolean
+  assignedNumber?: string | null
+  registrar?: string | null
+  activeCalls?: number
+  registrationNote?: string | null
+}
+
+type RecentAlarm = {
+  id: string
+  title: string
+  summary: string | null
+  terminalName: string | null
+  capturedAtUtc: string
 }
 
 export function Dashboard() {
   const [dash, setDash] = useState<Dash | null>(null)
+  const [pending, setPending] = useState<Pending | null>(null)
+  const [alarms, setAlarms] = useState<number | null>(null)
+  const [recentAlarms, setRecentAlarms] = useState<RecentAlarm[]>([])
+  const [sip, setSip] = useState<SipModem | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
     let c = false
-    fetch('/api/operator/dashboard', { headers })
+    apiFetch('/api/operator/dashboard')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Dash>
@@ -56,148 +52,121 @@ export function Dashboard() {
       .catch((e) => {
         if (!c) setErr(e instanceof Error ? e.message : 'error')
       })
+    apiFetch('/api/cards/reconciliation-pending')
+      .then((r) => (r.ok ? (r.json() as Promise<Pending>) : null))
+      .then((j) => {
+        if (!c && j) setPending(j)
+      })
+      .catch(() => {})
+    apiFetch('/api/field-events?take=5')
+      .then((r) => (r.ok ? (r.json() as Promise<{ total: number; items?: RecentAlarm[] }>) : null))
+      .then((j) => {
+        if (!c && j) {
+          setAlarms(j.total)
+          setRecentAlarms(j.items ?? [])
+        }
+      })
+      .catch(() => {})
+    apiFetch('/api/sip-modem')
+      .then((r) => (r.ok ? (r.json() as Promise<SipModem>) : null))
+      .then((j) => {
+        if (!c && j) setSip(j)
+      })
+      .catch(() => {})
     return () => {
       c = true
     }
   }, [])
 
+  const phones = dash?.terminalsByStatus.reduce((n, x) => n + x.count, 0) ?? 0
+  const money = (pending?.callCount ?? 0) + (pending?.paymentCount ?? 0)
+
   return (
     <div>
-      <h1>CoinLine — Dashboard</h1>
-      <p style={{ color: '#555' }}>
-        Operator snapshot for CoinLine Server — links jump into terminal, download, firmware, DLOG, or audit views.
+      <h1>Home</h1>
+      <p className="page-intro">
+        Host ledger is on. A phone that calls in is priced, and its tables are sent. Physical card writes stay off.
       </p>
-      {dash?.hardwareValidationNotice && (
-        <p role="note" style={{ background: '#fff9e6', border: '1px solid #e6d69a', padding: 10, maxWidth: 900 }}>
-          {dash.hardwareValidationNotice}
+      {sip?.listening && (
+        <p className="page-intro">
+          SIP audio modem is listening
+          {sip.registered ? ', registered' : ''}
+          {sip.assignedNumber ? ` for ${sip.assignedNumber}` : ''}.
+          {typeof sip.activeCalls === 'number' ? ` Active calls: ${sip.activeCalls}.` : ''}{' '}
+          <Link to="/status">Platform status</Link>
         </p>
       )}
       {err && <ErrorBanner message={err} />}
-      {!dash && !err && <LoadingBlock label="Loading operator dashboard…" />}
-      {dash && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
-          <section style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12 }}>
-            <h2 style={{ marginTop: 0, fontSize: 16 }}>Terminals by status</h2>
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
-              {dash.terminalsByStatus.map((x) => (
-                <li key={x.status}>
-                  Status {x.status}: <strong>{x.count}</strong>{' '}
-                  <Link to="/terminals" style={{ fontSize: 13 }}>
-                    open list
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </section>
-          <section style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12 }}>
-            <h2 style={{ marginTop: 0, fontSize: 16 }}>Sessions & transport</h2>
-            <p style={{ margin: '4px 0' }}>
-              Active craft sessions: <strong>{dash.activeCraftSessions}</strong> ·{' '}
-              <Link to="/craft">Craft</Link>
-            </p>
-            <p style={{ margin: '4px 0' }}>
-              Open NCC sessions: <strong>{dash.openNccSessions}</strong> ·{' '}
-              <Link to="/ncc-sessions">NCC</Link>
-            </p>
-          </section>
-          <section style={{ border: '1px solid #ddd', borderRadius: 6, padding: 12 }}>
-            <h2 style={{ marginTop: 0, fontSize: 16 }}>Downloads & uploads</h2>
-            <p style={{ margin: '4px 0' }}>
-              Failed download batches:{' '}
-              <strong style={{ color: dash.failedDownloads ? '#a30' : undefined }}>{dash.failedDownloads}</strong> ·{' '}
-              <Link to="/downloads">Downloads</Link>
-            </p>
-            <p style={{ margin: '4px 0', fontSize: 13 }}>
-              Upload alerts — failed {dash.uploadAlerts.failed}, quarantined {dash.uploadAlerts.quarantined} ·{' '}
-              <Link to="/uploads">Uploads</Link>
-            </p>
-          </section>
-        </div>
-      )}
+      {!dash && !err && <LoadingBlock label="Loading the fleet…" />}
       {dash && (
         <>
-          <h2 style={{ marginTop: 24 }}>Recent firmware jobs</h2>
-          {dash.recentFirmwareJobs.length === 0 ? (
-            <p style={{ color: '#666' }}>None.</p>
-          ) : (
-            <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 14 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
-                  <th>Job</th>
-                  <th>Terminal</th>
-                  <th>Status</th>
-                  <th>Sim</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dash.recentFirmwareJobs.map((j) => (
-                  <tr key={j.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td>
-                      <Link to={`/firmware/jobs/${j.id}`}>{j.id.slice(0, 8)}…</Link>
-                    </td>
-                    <td>
-                      <Link to={`/terminals/${j.terminalId}`}>{j.terminalId.slice(0, 8)}…</Link>
-                    </td>
-                    <td>{j.status}</td>
-                    <td>{j.simulationMode ? 'yes' : 'no'}</td>
-                  </tr>
+          <div className="stat-grid">
+            <Link className="stat" to="/terminals">
+              <strong>{phones}</strong>
+              <span>Phones</span>
+            </Link>
+            <Link className="stat" to="/ncc-sessions">
+              <strong>{dash.openNccSessions}</strong>
+              <span>Phones on a call</span>
+            </Link>
+            <Link className="stat" to="/downloads?status=failed">
+              <strong>{dash.failedDownloads}</strong>
+              <span>Failed downloads</span>
+            </Link>
+            <Link className="stat" to="/field-events">
+              <strong>{alarms ?? 0}</strong>
+              <span>Terminal reports</span>
+            </Link>
+            <Link className="stat" to="/card-reconciliation">
+              <strong>{money}</strong>
+              <span>Items waiting to reconcile</span>
+            </Link>
+          </div>
+          <h2>Phones by status</h2>
+          <ul>
+            {dash.terminalsByStatus.map((x) => (
+              <li key={x.status}>
+                {terminalStatusLabel(x.status)}: <strong>{x.count}</strong>
+              </li>
+            ))}
+          </ul>
+          {recentAlarms.length > 0 && (
+            <>
+              <h2>Recent terminal reports</h2>
+              <ul>
+                {recentAlarms.map((a) => (
+                  <li key={a.id}>
+                    <Link to={`/dlog/${a.id}`}>
+                      {a.summary ?? a.title}
+                    </Link>
+                    {a.terminalName ? ` · ${a.terminalName}` : ''} ·{' '}
+                    {new Date(a.capturedAtUtc).toLocaleString()}
+                  </li>
                 ))}
-              </tbody>
-            </table>
+              </ul>
+              <p className="page-intro">
+                <Link to="/field-events">Terminal status</Link>
+              </p>
+            </>
           )}
-          <h2>Recent uploads</h2>
-          {dash.recentUploadBatches.length === 0 ? (
-            <p style={{ color: '#666' }}>None.</p>
-          ) : (
-            <ul>
-              {dash.recentUploadBatches.map((u) => (
-                <li key={u.id}>
-                  {u.terminalId ? (
-                    <Link to={`/terminals/${u.terminalId}`}>Terminal</Link>
-                  ) : (
-                    '—'
-                  )}{' '}
-                  · status {u.status} · {u.previewBytes} bytes · {new Date(u.createdAtUtc).toLocaleString()}
-                </li>
-              ))}
-            </ul>
-          )}
-          <h2>Audit (recent)</h2>
-          <p style={{ fontSize: 13, color: '#555' }}>
-            Operator actions across categories — full search on <Link to="/audit">Audit events</Link>.
+          <p className="page-intro">
+            Uploads needing a look: {dash.uploadAlerts.failed} failed, {dash.uploadAlerts.quarantined} quarantined.{' '}
+            <Link to="/uploads">Open uploads</Link>. Technician sessions open: {dash.activeCraftSessions}.{' '}
+            <Link to="/craft">Open craft</Link>.
           </p>
-          {dash.recentAuditEvents.length === 0 ? (
-            <p style={{ color: '#666' }}>None.</p>
-          ) : (
-            <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
-                  <th>When</th>
-                  <th>Category / action</th>
-                  <th>Actor</th>
-                  <th>Terminal</th>
-                </tr>
-              </thead>
-              <tbody>
-                {dash.recentAuditEvents.map((a) => (
-                  <tr key={a.id} style={{ borderBottom: '1px solid #eee' }}>
-                    <td>{new Date(a.createdAtUtc).toLocaleString()}</td>
-                    <td>
-                      {a.category}/{a.action}
-                    </td>
-                    <td>{a.actor}</td>
-                    <td>
-                      {a.terminalId ? <Link to={`/terminals/${a.terminalId}`}>open</Link> : '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
         </>
       )}
-      <h2 style={{ marginTop: 24 }}>Health</h2>
-      <JsonPanel title="Health" url="/health" />
+      {pending && (
+        <p className="page-intro">
+          Waiting on the books: {pending.callCount} calls and {pending.paymentCount} card payments
+          {pending.paymentCount ? ` (${moneyLabel(pending.paymentTotal)})` : ''}.{' '}
+          <Link to="/card-reconciliation">Reconcile</Link>
+        </p>
+      )}
     </div>
   )
+}
+
+function moneyLabel(amount: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount)
 }

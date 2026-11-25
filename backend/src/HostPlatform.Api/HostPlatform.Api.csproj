@@ -31,8 +31,10 @@
     <ProjectReference Include="..\HostPlatform.Firmware\HostPlatform.Firmware.csproj" />
     <ProjectReference Include="..\HostPlatform.Infrastructure\HostPlatform.Infrastructure.csproj" />
     <ProjectReference Include="..\HostPlatform.Protocols.Dlog\HostPlatform.Protocols.Dlog.csproj" />
+    <ProjectReference Include="..\HostPlatform.Protocols.Tables\HostPlatform.Protocols.Tables.csproj" />
     <ProjectReference Include="..\HostPlatform.Protocols.Ncc\HostPlatform.Protocols.Ncc.csproj" />
     <ProjectReference Include="..\HostPlatform.Rating\HostPlatform.Rating.csproj" />
+    <ProjectReference Include="..\HostPlatform.SipModem\HostPlatform.SipModem.csproj" />
   </ItemGroup>
 
 </Project>

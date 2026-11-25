@@ -97,7 +97,7 @@ export function CardProductsPage() {
         </label>
         <label>
           Code
-          <input value={code} onChange={(e) => setCode(e.target.value)} required style={{ display: 'block' }} />
+          <input data-field-kind="key" value={code} onChange={(e) => setCode(e.target.value)} required style={{ display: 'block' }} />
         </label>
         <label>
           Default card type (enum int)

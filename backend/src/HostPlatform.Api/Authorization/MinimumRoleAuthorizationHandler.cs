@@ -1,5 +1,6 @@
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure;
+using HostPlatform.Api.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 
@@ -12,14 +13,15 @@ public sealed class MinimumRoleAuthorizationHandler(IWebHostEnvironment env)
         AuthorizationHandlerContext context,
         MinimumRoleRequirement requirement)
     {
-        if (env.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase))
+        if (env.EnvironmentName.Equals("Testing", StringComparison.OrdinalIgnoreCase) &&
+            !context.User.HasClaim(OperatorAuthenticationHandler.NamedAccountClaim, "true"))
         {
             context.Succeed(requirement);
             return Task.CompletedTask;
         }
 
         var role = OperatorContext.Current?.Role ?? OperatorRole.Viewer;
-        if (role >= requirement.MinimumRole)
+        if (context.User.Identity?.IsAuthenticated == true && role >= requirement.MinimumRole)
             context.Succeed(requirement);
 
         return Task.CompletedTask;

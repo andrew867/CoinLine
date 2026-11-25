@@ -8,8 +8,17 @@ RUN dotnet publish src/HostPlatform.Api/HostPlatform.Api.csproj -c Release -o /a
 FROM mcr.microsoft.com/dotnet/aspnet:9.0 AS runtime
 WORKDIR /app
 COPY --from=build /app/publish .
-RUN useradd -r -u 10001 hpapi && chown -R hpapi:hpapi /app
+# Payload root used when Platform__PayloadStorage__RootPath points here. Compose bind-mounts over this path.
+# minimodem is the Bell 202 file check. The live call uses those same 1200 Hz / 2200 Hz tones.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends minimodem \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 10001 hpapi \
+    && mkdir -p /var/coinline/payloads \
+    && chown -R hpapi:hpapi /app /var/coinline/payloads
 USER hpapi
 ENV ASPNETCORE_URLS=http://0.0.0.0:5006
 EXPOSE 5006
+EXPOSE 4000
+EXPOSE 5060/udp
 ENTRYPOINT ["dotnet", "HostPlatform.Api.dll"]

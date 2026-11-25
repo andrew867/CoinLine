@@ -1,0 +1,121 @@
+.terminal-status-view {
+  width: min(100%, 1100px);
+  margin: 20px auto 0;
+  display: grid;
+  gap: 18px;
+}
+
+.terminal-status-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 156px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+  padding: clamp(22px, 4vw, 38px);
+  border-radius: 20px;
+  color: #f0fbf5;
+  background: linear-gradient(115deg, #142d27 5%, #1c493c 70%, #235845);
+  box-shadow: 0 12px 32px #14392a18;
+}
+
+.terminal-status-hero::before {
+  position: absolute;
+  z-index: -1;
+  content: '';
+  inset: -70% -10% -70% 53%;
+  transform: rotate(-12deg);
+  background: repeating-radial-gradient(ellipse at center, transparent 0 18px, #d1f0db20 19px 20px);
+  mask-image: linear-gradient(90deg, transparent, #000 48%);
+}
+
+.terminal-status-hero h1 {
+  font-size: clamp(1.9rem, 4vw, 3rem);
+  line-height: 1.1;
+  letter-spacing: -.045em;
+  color: inherit;
+}
+
+.terminal-status-hero p { color: #c9e3d7; margin: 10px 0 0; }
+.terminal-status-hero button { flex-shrink: 0; background: #f2faf5; color: #174535; font-weight: 650; padding: 9px 17px; }
+.terminal-status-hero button:hover { background: #d9f1e4; }
+
+.terminal-status-metrics { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.terminal-status-metrics > * {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 17px 19px;
+  border: 1px solid #dce7e1;
+  border-radius: 14px;
+  background: #fff;
+  color: #223a30;
+  text-decoration: none;
+}
+
+.terminal-status-metrics a:hover { border-color: #78aa94; }
+.terminal-status-metrics span { font-size: .86rem; color: #526c61; }
+.terminal-status-metrics strong { font-size: 1.75rem; line-height: 1; font-variant-numeric: tabular-nums; }
+
+.terminal-status-panel { border: 1px solid #dce7e1; border-radius: 17px; background: #fff; overflow: hidden; }
+.terminal-status-panel-heading, .terminal-status-tools { padding: 18px 22px; }
+.terminal-status-panel-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.terminal-status-panel-heading h2 { font-size: 1.23rem; margin: 0; }
+.terminal-status-panel-heading span, .terminal-status-events time { color: #526c61; font-size: .8rem; }
+.terminal-status-tools { display: grid; grid-template-columns: 1.1fr .9fr 1.2fr; gap: 12px; background: #f4f8f6; border-block: 1px solid #e4ede8; }
+.terminal-status-tools label { min-width: 0; color: #39564a; font-weight: 600; display: grid; gap: 5px; }
+.terminal-status-tools :is(input, select) { min-width: 0; width: 100%; border-color: #cbdad1; }
+
+.terminal-status-phone { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; padding: 14px 22px; background: #edf6f1; }
+.terminal-status-phone a { font-weight: 650; }
+.terminal-status-phone span { margin-left: 10px; }
+.terminal-status-phone :is(span, p) { color: #526c61; font-size: .85rem; }
+.terminal-status-phone p { margin: 0; }
+.terminal-status-state { margin: 0; padding: 28px 22px; color: #526c61; }
+.terminal-status-state p { margin: 4px 0 0; }
+
+.terminal-status-events { list-style: none; margin: 0; padding: 0 22px; }
+.terminal-status-events li { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 12px; padding: 14px 0; align-items: start; }
+.terminal-status-events li + li { border-top: 1px solid #e8eeea; }
+.terminal-status-marker { width: 8px; height: 8px; margin-top: 5px; border-radius: 50%; background: #46836c; }
+.terminal-status-marker[data-category='alarm'] { background: #a54246; }
+.terminal-status-marker[data-category='attention'] { background: #a3772a; }
+.terminal-status-marker[data-category='maintenance'] { background: #5676a2; }
+.terminal-status-marker[data-category='cash'] { background: #755a8f; }
+.terminal-status-event-content { display: grid; justify-items: start; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.terminal-status-event-content > a:first-of-type { color: #1c332a; font-weight: 640; text-decoration: none; }
+.terminal-status-event-content a:hover { text-decoration: underline; }
+.terminal-status-event-type, .terminal-status-source { color: #526c61; font-size: .82rem; }
+
+@media (max-width: 720px) {
+  .terminal-status-tools { grid-template-columns: 1fr; }
+  .terminal-status-metrics > * { padding: 13px 11px; }
+  .terminal-status-events li { grid-template-columns: 8px minmax(0, 1fr); gap: 5px 10px; }
+  .terminal-status-events time { grid-column: 2; }
+}
+
+@media (max-width: 650px) {
+  .shell:has(.terminal-status-view) { display: block; }
+  .shell:has(.terminal-status-view) .sidebar {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .shell:has(.terminal-status-view) .sidebar .nav-group { display: contents; }
+  .shell:has(.terminal-status-view) .sidebar :is(.brand-note, .nav-label) { display: none; }
+  .shell:has(.terminal-status-view) .sidebar :is(.brand, .nav-group a, .sign-out) { margin: 0; }
+  .shell:has(.terminal-status-view) .sidebar .sign-out { width: auto; }
+  .shell:has(.terminal-status-view) .content { padding: 12px 12px 32px; }
+  .terminal-status-view { margin-top: 12px; }
+}
+
+@media (max-width: 390px) {
+  .terminal-status-hero { flex-wrap: wrap; gap: 12px; }
+  .terminal-status-metrics { gap: 6px; }
+}

@@ -2,8 +2,8 @@ import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -47,7 +47,7 @@ export function AuditEventsPage() {
     if (debouncedQ) params.set('q', debouncedQ)
     if (terminalFilter.trim()) params.set('terminalId', terminalFilter.trim())
     let cancelled = false
-    void fetch(`/api/audit/events?${params}`, { headers })
+    void apiFetch(`/api/audit/events?${params}`)
       .then(async (r) => {
         if (!r.ok) throw new Error(String(r.status))
         const j: unknown = await r.json()

@@ -10,12 +10,18 @@ public class HostPlatformDbContext : DbContext
     public DbSet<Customer> Customers => Set<Customer>();
     public DbSet<Site> Sites => Set<Site>();
     public DbSet<TerminalGroup> TerminalGroups => Set<TerminalGroup>();
+    public DbSet<TerminalGroupMembership> TerminalGroupMemberships => Set<TerminalGroupMembership>();
     public DbSet<FirmwareVersion> FirmwareVersions => Set<FirmwareVersion>();
+    public DbSet<InmateFeatureConfiguration> InmateFeatureConfigurations => Set<InmateFeatureConfiguration>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
+    public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
+    public DbSet<TerminalInmateConfiguration> TerminalInmateConfigurations => Set<TerminalInmateConfiguration>();
+    public DbSet<TerminalCallbackRequest> TerminalCallbackRequests => Set<TerminalCallbackRequest>();
     public DbSet<TerminalEvent> TerminalEvents => Set<TerminalEvent>();
     public DbSet<TerminalStatusRecord> TerminalStatusRecords => Set<TerminalStatusRecord>();
     public DbSet<NccSession> NccSessions => Set<NccSession>();
+    public DbSet<NccSessionFrame> NccSessionFrames => Set<NccSessionFrame>();
     public DbSet<NccFrameCapture> NccFrameCaptures => Set<NccFrameCapture>();
     public DbSet<CapturedHardwareSession> CapturedHardwareSessions => Set<CapturedHardwareSession>();
     public DbSet<DlogTransaction> DlogTransactions => Set<DlogTransaction>();
@@ -33,6 +39,8 @@ public class HostPlatformDbContext : DbContext
     public DbSet<SiteTableOverride> SiteTableOverrides => Set<SiteTableOverride>();
     public DbSet<TerminalTableOverride> TerminalTableOverrides => Set<TerminalTableOverride>();
     public DbSet<TerminalTableAssignment> TerminalTableAssignments => Set<TerminalTableAssignment>();
+    public DbSet<ScheduledTableDownload> ScheduledTableDownloads => Set<ScheduledTableDownload>();
+    public DbSet<TableRecordUpdateRun> TableRecordUpdateRuns => Set<TableRecordUpdateRun>();
     public DbSet<DownloadBatch> DownloadBatches => Set<DownloadBatch>();
     public DbSet<DownloadBatchItem> DownloadBatchItems => Set<DownloadBatchItem>();
     public DbSet<RatePlan> RatePlans => Set<RatePlan>();
@@ -78,6 +86,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<FirmwareUpdateSafetyCheck> FirmwareUpdateSafetyChecks => Set<FirmwareUpdateSafetyCheck>();
     public DbSet<FirmwareUpdateStep> FirmwareUpdateSteps => Set<FirmwareUpdateStep>();
     public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
+    public DbSet<OperatorAccount> OperatorAccounts => Set<OperatorAccount>();
     public DbSet<SubsystemHeartbeat> SubsystemHeartbeats => Set<SubsystemHeartbeat>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -86,17 +95,68 @@ public class HostPlatformDbContext : DbContext
         {
             b.HasOne(t => t.Site).WithMany(s => s.Terminals).HasForeignKey(t => t.SiteId);
             b.HasOne(t => t.TerminalGroup).WithMany(g => g.Terminals).HasForeignKey(t => t.TerminalGroupId);
+            b.Property(t => t.Version).IsConcurrencyToken();
+            b.Property(t => t.TerminalFamilyId).HasMaxLength(48);
             b.HasOne(t => t.TransportEndpoint).WithMany().HasForeignKey(t => t.TransportEndpointId);
             b.HasOne(t => t.FirmwareVersion).WithMany().HasForeignKey(t => t.FirmwareVersionId);
         });
+        modelBuilder.Entity<TerminalInventory>(b =>
+        {
+            b.HasOne<Terminal>().WithOne().HasForeignKey<TerminalInventory>(inventory => inventory.TerminalId);
+            b.Property(inventory => inventory.Version).IsConcurrencyToken();
+            b.OwnsOne(inventory => inventory.Details, details =>
+            {
+                details.Property(profile => profile.EquipmentCost).HasPrecision(12, 2);
+                details.Property(profile => profile.LoopMileageCost).HasPrecision(12, 2);
+            });
+            b.Navigation(inventory => inventory.Details).IsRequired();
+        });
+        modelBuilder.Entity<TerminalInmateConfiguration>(b =>
+        {
+            b.HasOne<Terminal>().WithOne().HasForeignKey<TerminalInmateConfiguration>(row => row.TerminalId);
+            b.HasOne(row => row.FeatureConfiguration).WithMany().HasForeignKey(row => row.FeatureConfigurationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            b.Property(row => row.SetupConfigurationId).HasMaxLength(6);
+            b.Property(row => row.Version).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<TerminalGroupMembership>(b =>
+        {
+            b.HasKey(m => new { m.TerminalId, m.TerminalGroupId });
+            b.HasOne<Terminal>().WithMany(t => t.AdditionalGroups).HasForeignKey(m => m.TerminalId);
+            b.HasOne<TerminalGroup>().WithMany().HasForeignKey(m => m.TerminalGroupId).OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<Site>(b => b.HasOne(s => s.Customer).WithMany(c => c.Sites).HasForeignKey(s => s.CustomerId));
-        modelBuilder.Entity<TerminalGroup>(b => b.HasOne(g => g.Customer).WithMany().HasForeignKey(g => g.CustomerId));
+        modelBuilder.Entity<TerminalGroup>(b =>
+        {
+            b.HasOne(g => g.Customer).WithMany().HasForeignKey(g => g.CustomerId);
+            b.Property(g => g.Code).HasMaxLength(6);
+            b.Property(g => g.Version).IsConcurrencyToken();
+        });
 
-        modelBuilder.Entity<TableSet>(b => b.HasOne(ts => ts.Customer).WithMany().HasForeignKey(ts => ts.CustomerId));
+        modelBuilder.Entity<FirmwareVersion>().Property(f => f.TableProfileId).HasMaxLength(48);
+        modelBuilder.Entity<InmateFeatureConfiguration>(b =>
+        {
+            b.Property(c => c.Name).HasMaxLength(6);
+            b.Property(c => c.NameKey).HasMaxLength(24);
+            b.Property(c => c.Description).HasMaxLength(80);
+            b.Property(c => c.SettingsJson).HasColumnType("jsonb");
+            b.Property(c => c.Version).IsConcurrencyToken();
+            b.HasIndex(c => c.NameKey).IsUnique();
+        });
+        modelBuilder.Entity<TableSet>(b =>
+        {
+            b.HasOne(ts => ts.Customer).WithMany().HasForeignKey(ts => ts.CustomerId);
+            b.HasOne(ts => ts.TargetFirmwareVersion).WithMany().HasForeignKey(ts => ts.TargetFirmwareVersionId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<TableSet>().Property(set => set.Version).IsConcurrencyToken();
         modelBuilder.Entity<TableVersion>(b =>
         {
             b.Property(tv => tv.EmbeddedPayload).HasColumnName("Payload");
+            b.Property(tv => tv.TableRevision).IsConcurrencyToken();
+            b.Property(tv => tv.ConfigurationId).HasMaxLength(6);
+            b.HasIndex(tv => new { tv.ConfigurationId, tv.TableDefinitionId });
             b.HasOne(tv => tv.TableSet).WithMany(ts => ts.Versions).HasForeignKey(tv => tv.TableSetId);
             b.HasOne(tv => tv.TableDefinition).WithMany().HasForeignKey(tv => tv.TableDefinitionId);
             b.HasOne(tv => tv.TablePayload).WithMany().HasForeignKey(tv => tv.TablePayloadId).OnDelete(DeleteBehavior.SetNull);
@@ -128,6 +188,7 @@ public class HostPlatformDbContext : DbContext
 
         modelBuilder.Entity<TerminalTableAssignment>(b =>
         {
+            b.Property(a => a.Version).IsConcurrencyToken();
             b.HasOne(a => a.Terminal).WithMany().HasForeignKey(a => a.TerminalId);
             b.HasOne(a => a.TableSet).WithMany().HasForeignKey(a => a.TableSetId);
             b.HasOne(a => a.PreviousTableSet).WithMany().HasForeignKey(a => a.PreviousTableSetId)
@@ -137,10 +198,44 @@ public class HostPlatformDbContext : DbContext
             b.HasIndex(a => a.TerminalId).IsUnique();
         });
 
+        modelBuilder.Entity<TerminalCallbackRequest>(b =>
+        {
+            b.Property(request => request.Version).IsConcurrencyToken();
+            b.HasOne(request => request.Terminal).WithMany().HasForeignKey(request => request.TerminalId);
+            b.HasIndex(request => request.TerminalId).IsUnique();
+        });
+
+        modelBuilder.Entity<TableRecordUpdateRun>(b =>
+        {
+            b.Property(run => run.Version).IsConcurrencyToken();
+            b.HasOne<TableSet>().WithMany().HasForeignKey(run => run.SourceSetId);
+            b.HasIndex(run => new { run.SourceSetId, run.EndedAtUtc });
+        });
+
+        modelBuilder.Entity<ScheduledTableDownload>(b =>
+        {
+            b.Property(s => s.Version).IsConcurrencyToken();
+            b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId);
+            b.HasOne(s => s.TableSet).WithMany().HasForeignKey(s => s.TableSetId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(s => s.SourceTableSet).WithMany().HasForeignKey(s => s.SourceTableSetId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(s => s.NccSession).WithMany().HasForeignKey(s => s.NccSessionId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne(s => s.LastBatch).WithMany().HasForeignKey(s => s.LastBatchId).OnDelete(DeleteBehavior.SetNull);
+            b.HasIndex(s => s.TerminalId).IsUnique()
+                .HasFilter("\"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
+            b.HasIndex(s => new { s.TableSetId, s.AvailableAtUtc });
+            b.HasIndex(s => s.AvailableAtUtc)
+                .HasFilter("\"LastBatchId\" IS NULL AND \"NccSessionId\" IS NULL AND \"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
+        });
+
         modelBuilder.Entity<DownloadBatch>(b =>
         {
             b.HasOne(d => d.Terminal).WithMany().HasForeignKey(d => d.TerminalId);
             b.HasOne(d => d.TableSet).WithMany().HasForeignKey(d => d.TableSetId);
+            b.HasOne(d => d.NccSession).WithMany().HasForeignKey(d => d.NccSessionId).OnDelete(DeleteBehavior.SetNull);
+            b.Property(d => d.Status).IsConcurrencyToken();
+            b.HasIndex(d => d.TerminalId);
+            b.HasIndex(d => d.TerminalId, "IX_DownloadBatches_TerminalId_ActiveTransfer").IsUnique()
+                .HasFilter($"\"NccSessionId\" IS NOT NULL AND \"Status\" = {(int)DownloadBatchStatus.Running}");
         });
 
         modelBuilder.Entity<DownloadBatchItem>(b =>
@@ -296,6 +391,15 @@ public class HostPlatformDbContext : DbContext
 
         modelBuilder.Entity<FirmwareUpdateStep>(b => b.HasOne(s => s.FirmwareUpdateJob).WithMany(j => j.Steps).HasForeignKey(s => s.FirmwareUpdateJobId));
 
+        modelBuilder.Entity<OperatorAccount>(b =>
+        {
+            b.HasIndex(a => a.Username).IsUnique();
+            b.Property(a => a.Username).HasMaxLength(64);
+            b.Property(a => a.DisplayName).HasMaxLength(120);
+            b.Property(a => a.SessionGeneration).IsConcurrencyToken();
+            b.Property(a => a.PermissionProfileJson).HasColumnType("jsonb");
+        });
+
         modelBuilder.Entity<SubsystemHeartbeat>(b =>
         {
             b.HasKey(x => x.Subsystem);
@@ -334,6 +438,11 @@ public class HostPlatformDbContext : DbContext
         modelBuilder.Entity<TerminalEvent>(b => b.HasOne(e => e.Terminal).WithMany(t => t.Events).HasForeignKey(e => e.TerminalId));
         modelBuilder.Entity<TerminalStatusRecord>(b => b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId));
         modelBuilder.Entity<NccSession>(b => b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId));
+        modelBuilder.Entity<NccSessionFrame>(b =>
+        {
+            b.HasOne(f => f.NccSession).WithMany().HasForeignKey(f => f.NccSessionId);
+            b.HasIndex(f => new { f.NccSessionId, f.Sequence });
+        });
 
         modelBuilder.Entity<CapturedHardwareSession>(b =>
         {

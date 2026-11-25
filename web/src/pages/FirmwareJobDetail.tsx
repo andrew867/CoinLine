@@ -77,6 +77,16 @@ export function FirmwareJobDetail() {
     await refresh()
   }
 
+  async function runLive() {
+    if (!id) return
+    setActionMsg(null)
+    const r = await apiPostRaw(`/api/firmware/jobs/${id}/execute-live`)
+    const j = await r.json().catch(() => ({}))
+    if (!r.ok) setActionMsg(`Live execute failed: ${r.status} ${JSON.stringify(j)}`)
+    else setActionMsg(`Live execute finished — status ${(j as { status?: number }).status ?? '?'}`)
+    await refresh()
+  }
+
   async function runApprove() {
     if (!id) return
     setActionMsg(null)
@@ -185,6 +195,11 @@ export function FirmwareJobDetail() {
         <button type="button" onClick={() => void runSimulate()}>
           Run simulation
         </button>
+        {!job.simulationMode && job.approvedAtUtc ? (
+          <button type="button" onClick={() => void runLive()}>
+            Execute live (dual-gated)
+          </button>
+        ) : null}
         <div>
           <label style={{ display: 'block', fontSize: 13 }}>Rollback / backup notes (approval)</label>
           <textarea

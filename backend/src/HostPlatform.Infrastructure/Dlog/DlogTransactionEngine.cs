@@ -4,11 +4,16 @@ using HostPlatform.Infrastructure;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Dlog;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace HostPlatform.Infrastructure.Dlog;
 
 public sealed class DlogTransactionEngine(HostPlatformDbContext db)
 {
+    public Task<DlogTransaction> IngestCashboxAsync(byte[] record, Guid terminalId, Guid nccSessionId,
+        string correlationId, CancellationToken ct) => IngestAsync(record, DlogDirection.TerminalToHost, terminalId,
+        nccSessionId, correlationId, record[0], true, null, null, correlationId, ct, deduplicateCashbox: true);
+
     public async Task<DlogTransaction> IngestAsync(
         byte[] rawPayloadExact,
         DlogDirection direction,
@@ -20,16 +25,13 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
         string? clientIdempotencyExtra,
         DateTime? capturedAtUtc,
         string? httpCorrelationId,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool deduplicateCashbox = false)
     {
         var cap = capturedAtUtc ?? DateTime.UtcNow;
-        var idem = DlogIdempotency.ComputeKey(
-            rawPayloadExact,
-            direction,
-            terminalId,
-            nccSessionId,
-            sessionCorrelationId,
-            clientIdempotencyExtra);
+        var idem = deduplicateCashbox
+            ? DlogIdempotency.ComputeKey(DlogCashboxWire.IdentityBytes(rawPayloadExact), direction, terminalId, null, null, "cashbox")
+            : DlogIdempotency.ComputeKey(rawPayloadExact, direction, terminalId, nccSessionId, sessionCorrelationId, clientIdempotencyExtra);
 
         var existing = await db.DlogTransactions
             .AsNoTracking()
@@ -74,7 +76,16 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
             });
         }
 
-        await db.SaveChangesAsync(ct);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException ex) when (deduplicateCashbox && ex.InnerException is PostgresException
+            { SqlState: PostgresErrorCodes.UniqueViolation, ConstraintName: "IX_DlogTransactions_IdempotencyKey" })
+        {
+            foreach (var entry in db.ChangeTracker.Entries<DlogParseDiagnostic>()
+                .Where(entry => entry.Entity.DlogTransactionId == tx.Id).ToList())
+                entry.State = EntityState.Detached;
+            db.Entry(tx).State = EntityState.Detached;
+            return await db.DlogTransactions.AsNoTracking().FirstAsync(row => row.IdempotencyKey == idem, ct);
+        }
         await TryCorrelateAsync(tx.Id, httpCorrelationId, ct);
         return await db.DlogTransactions
             .Include(t => t.ParseDiagnostics)

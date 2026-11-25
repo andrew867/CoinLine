@@ -1,4 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { signIn } from './auth'
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page)
+})
 
 /**
  * Full operator-console happy path (requires API on :5006 proxied via Vite).
@@ -42,11 +47,11 @@ test('tranche 9 operator happy path', async ({ page }) => {
 
   await page.goto('/downloads')
   await page.getByLabel(/Terminal/i).selectOption(terminalId)
-  await page.getByRole('button', { name: /Start download|Queue/i }).click()
+  await page.getByRole('button', { name: 'Create batch' }).click()
   await expect(page.getByRole('heading', { name: 'Download batches' })).toBeVisible()
 
   await page.goto(`/dlog?terminal=${terminalId}`)
-  await expect(page.getByRole('heading', { name: 'DLOG transactions' })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByRole('heading', { name: 'Message log' })).toBeVisible({ timeout: 20_000 })
   await expect(page.getByRole('link', { name: 'Detail' }).first()).toBeVisible({ timeout: 25_000 })
   await page.getByRole('link', { name: 'Detail' }).first().click()
   await expect(page.getByTestId('hex-viewer')).toBeVisible({ timeout: 20_000 })

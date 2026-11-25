@@ -6,9 +6,9 @@ namespace HostPlatform.Tests.Unit;
 public sealed class SlicePlaceholderTests
 {
     [Fact]
-    public void Card_ledger_defaults_to_simulation()
+    public void Card_ledger_posts_on_the_host()
     {
-        Assert.True(CardLedgerCapabilities.DefaultSimulationMode);
+        Assert.False(CardLedgerCapabilities.DefaultSimulationMode);
         Assert.Contains(
             "HARDWARE_VALIDATION_REQUIRED",
             CardLedgerCapabilities.LiveSettlementNotice,

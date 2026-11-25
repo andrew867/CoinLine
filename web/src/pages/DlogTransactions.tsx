@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Row = {
   id: string
@@ -54,7 +54,7 @@ export function DlogTransactions() {
     setLoading(true)
     try {
       const url = query ? `/api/dlog/transactions?${query}` : '/api/dlog/transactions'
-      const r = await fetch(url, { headers })
+      const r = await apiFetch(url)
       if (!r.ok) throw new Error(`List ${r.status}`)
       setRows((await r.json()) as Row[])
     } catch (e) {
@@ -71,10 +71,9 @@ export function DlogTransactions() {
 
   return (
     <div>
-      <h1>DLOG transactions</h1>
-      <p style={{ color: '#555', maxWidth: 720 }}>
-        Raw bytes are preserved exactly as ingested. Unknown message types are retained and flagged — decoding does not drop
-        octets.
+      <h1>Message log</h1>
+      <p className="page-intro">
+        Messages stored from phones. The raw bytes are kept.
       </p>
       <p>
         <Link to="/dlog/replay-debug">Replay / debug</Link>
@@ -128,7 +127,7 @@ export function DlogTransactions() {
       {loading && <p>Loading…</p>}
       {err && <p style={{ color: 'crimson' }}>{err}</p>}
       {!loading && !err && rows && rows.length === 0 && (
-        <p style={{ color: '#666' }}>No DLOG transactions match the current filters.</p>
+        <p>No messages match these filters.</p>
       )}
       {!loading && !err && rows && rows.length > 0 && (
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 14 }}>

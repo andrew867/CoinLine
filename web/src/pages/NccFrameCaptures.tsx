@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
+import { apiFetch } from '../api/client'
 
 type ListRow = { id: string; originalFileName: string; byteLength: number; createdAtUtc: string }
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 export function NccFrameCaptures() {
   const [list, setList] = useState<ListRow[] | null>(null)
@@ -21,7 +21,7 @@ export function NccFrameCaptures() {
     setListErr(null)
     setLoading(true)
     try {
-      const r = await fetch('/api/ncc/frame-captures', { headers })
+      const r = await apiFetch('/api/ncc/frame-captures')
       if (!r.ok) throw new Error(`List ${r.status}`)
       setList((await r.json()) as ListRow[])
     } catch (e) {
@@ -44,7 +44,7 @@ export function NccFrameCaptures() {
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const r = await fetch('/api/ncc/frame-captures', { method: 'POST', headers, body: fd })
+      const r = await apiFetch('/api/ncc/frame-captures', { method: 'POST', body: fd })
       if (!r.ok) throw new Error(`Upload ${r.status}`)
       const j = await r.json()
       setUploadOk(`Uploaded ${file.name} (${(j as { byteLength?: number }).byteLength ?? '?'} bytes).`)
@@ -62,7 +62,7 @@ export function NccFrameCaptures() {
     setDetailErr(null)
     setDetailLoading(true)
     try {
-      const r = await fetch(`/api/ncc/frame-captures/${id}`, { headers })
+      const r = await apiFetch(`/api/ncc/frame-captures/${id}`)
       if (!r.ok) throw new Error(`Detail ${r.status}`)
       setDetail((await r.json()) as Record<string, unknown>)
     } catch (e) {
@@ -76,9 +76,8 @@ export function NccFrameCaptures() {
     if (!window.confirm('Delete this capture permanently? This cannot be undone.')) return
     setDeleteErr(null)
     try {
-      const r = await fetch(`/api/ncc/frame-captures/${id}?confirm=true`, {
+      const r = await apiFetch(`/api/ncc/frame-captures/${id}?confirm=true`, {
         method: 'DELETE',
-        headers,
       })
       if (!r.ok && r.status !== 204) throw new Error(`Delete ${r.status}`)
       if (selectedId === id) {

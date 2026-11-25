@@ -32,6 +32,7 @@
     <ProjectReference Include="..\..\src\HostPlatform.Domain\HostPlatform.Domain.csproj" />
     <ProjectReference Include="..\..\src\HostPlatform.Infrastructure\HostPlatform.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\HostPlatform.Firmware\HostPlatform.Firmware.csproj" />
+    <ProjectReference Include="..\..\src\HostPlatform.Transport\HostPlatform.Transport.csproj" />
     <ProjectReference Include="..\..\src\HostPlatform.Protocols.Tables\HostPlatform.Protocols.Tables.csproj" />
     <ProjectReference Include="..\..\src\HostPlatform.Rating\HostPlatform.Rating.csproj" />
     <ProjectReference Include="..\..\src\HostPlatform.Worker\HostPlatform.Worker.csproj" />

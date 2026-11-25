@@ -1,4 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { signIn } from './auth'
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page)
+})
 
 test('craft sessions page loads and can open new session flow', async ({ page }) => {
   await page.goto('/craft')

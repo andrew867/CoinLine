@@ -24,7 +24,7 @@ public sealed class ApiKeyGateMiddleware(RequestDelegate next, IOptions<Security
             ctx.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
             return ctx.Response.WriteAsJsonAsync(new
             {
-                error = "ApiKey mode misconfigured — no keys loaded (set Security:ApiKeys or HOSTPLATFORM_API_KEYS)."
+                error = "ApiKey mode misconfigured — no keys loaded (set Security:ApiKeys, HOSTPLATFORM_API_KEYS, or COINLINE_API_KEYS)."
             });
         }
 

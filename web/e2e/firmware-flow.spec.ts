@@ -1,4 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { signIn } from './auth'
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page)
+})
 
 test('firmware packages page and live-flash banner', async ({ page }) => {
   await page.goto('/firmware/packages')

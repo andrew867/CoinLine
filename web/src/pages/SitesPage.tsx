@@ -1,8 +1,8 @@
 import type { FormEvent } from 'react'
 import { useEffect, useState } from 'react'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
+import { apiFetch } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type SiteRow = { id: string; customerId: string; name: string; code: string }
 type Cust = { id: string; name: string; code: string }
@@ -17,14 +17,14 @@ export function SitesPage() {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    void fetch('/api/customers', { headers })
+    void apiFetch('/api/customers')
       .then((r) => r.json() as Promise<Cust[]>)
       .then((c) => {
         setCustomers(c)
         setCustomerId((prev) => prev || (c[0]?.id ?? ''))
       })
       .catch(() => {})
-    void fetch('/api/sites', { headers })
+    void apiFetch('/api/sites')
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<SiteRow[]>
@@ -39,15 +39,15 @@ export function SitesPage() {
     setSaving(true)
     setErr(null)
     try {
-      const r = await fetch('/api/sites', {
+      const r = await apiFetch('/api/sites', {
         method: 'POST',
-        headers: { ...headers, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ customerId, name: name.trim(), code: code.trim() }),
       })
       if (!r.ok) throw new Error(`${r.status}`)
       setName('')
       setCode('')
-      const list = await fetch('/api/sites', { headers }).then((x) => x.json() as Promise<SiteRow[]>)
+      const list = await apiFetch('/api/sites').then((x) => x.json() as Promise<SiteRow[]>)
       setSites(list)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'create failed')
@@ -69,6 +69,7 @@ export function SitesPage() {
           Customer
           <select
             data-testid="site-customer"
+            data-field-kind="mandatory"
             value={customerId}
             onChange={(e) => setCustomerId(e.target.value)}
             style={{ display: 'block', minWidth: 220 }}
@@ -94,6 +95,7 @@ export function SitesPage() {
           Code
           <input
             data-testid="site-code"
+            data-field-kind="key"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             required

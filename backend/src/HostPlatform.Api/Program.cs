@@ -2,11 +2,13 @@ using System.Reflection;
 using System.Threading.RateLimiting;
 using HostPlatform.Api.Authorization;
 using Microsoft.AspNetCore.Authorization;
+using HostPlatform.Api.Craft;
 using HostPlatform.Api.Firmware;
 using HostPlatform.Api.Health;
 using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Middleware;
 using HostPlatform.Api.Options;
+using HostPlatform.Api.Security;
 using HostPlatform.Api.Services;
 using HostPlatform.Api.Swagger;
 using HostPlatform.Firmware;
@@ -15,6 +17,7 @@ using HostPlatform.Infrastructure.Craft;
 using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
@@ -29,17 +32,16 @@ builder.Services.Configure<ObservabilityOptions>(builder.Configuration.GetSectio
 builder.Services.Configure<JobOrchestrationOptions>(builder.Configuration.GetSection(JobOrchestrationOptions.SectionName));
 builder.Services.Configure<CardPaymentOptions>(builder.Configuration.GetSection(CardPaymentOptions.SectionName));
 builder.Services.Configure<FirmwareOptions>(builder.Configuration.GetSection(FirmwareOptions.SectionName));
+builder.Services.Configure<CraftOptions>(builder.Configuration.GetSection(CraftOptions.SectionName));
 builder.Services.Configure<DlTransportEnvironmentOptions>(builder.Configuration.GetSection(DlTransportEnvironmentOptions.SectionName));
 builder.Services.PostConfigure<DlTransportEnvironmentOptions>(BindDlTransportFromEnvironment);
 
 builder.Services.PostConfigure<SecurityOptions>(o =>
 {
-    var keys = builder.Configuration["HOSTPLATFORM_API_KEYS"];
-    if (string.IsNullOrWhiteSpace(keys))
-        return;
-    var split = keys.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-    if (split.Length > 0)
-        o.ApiKeys = split;
+    ApiKeyLists.Apply(
+        o,
+        builder.Configuration["HOSTPLATFORM_API_KEYS"],
+        builder.Configuration["COINLINE_API_KEYS"]);
 });
 
 if (!builder.Environment.IsEnvironment("Testing"))
@@ -51,6 +53,9 @@ if (!builder.Environment.IsEnvironment("Testing"))
     });
 }
 
+builder.Services.AddSingleton<OperatorTokenSigningKey>();
+builder.Services.AddAuthentication(OperatorAuthenticationHandler.SchemeName)
+    .AddScheme<AuthenticationSchemeOptions, OperatorAuthenticationHandler>(OperatorAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddSingleton<IAuthorizationHandler, MinimumRoleAuthorizationHandler>();
 builder.Services.AddAuthorization(o =>
 {
@@ -118,7 +123,7 @@ builder.Services.AddScoped<IFirmwareExecutionPolicy, FirmwareExecutionPolicy>();
 builder.Services.AddScoped<FirmwareJobOrchestrator>();
 builder.Services.AddScoped<CapturedSessionReplayService>();
 
-builder.Services.AddControllers();
+builder.Services.AddControllers(options => options.Filters.Add<OperatorPermissionFilter>());
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(o =>
 {
@@ -129,13 +134,33 @@ builder.Services.AddSwaggerGen(o =>
 });
 builder.Services.AddScoped<DlogTransactionEngine>();
 builder.Services.AddScoped<TableDistributionService>();
+builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<ICraftSimulationTransport, CraftSimulationTransport>();
+builder.Services.AddSingleton<ICraftExecutionPolicy, CraftExecutionPolicy>();
+builder.Services.AddSingleton<INccSessionOutbound, NccSessionOutboundHub>();
+builder.Services.AddSingleton<CraftLiveSocketWriter>();
 builder.Services.AddScoped<ICardAccountLedger, CardAccountLedger>();
+builder.Services.AddHostedService<HostPlatform.Api.Hosting.NccModemListenService>();
+builder.Services.AddHostedService<HostPlatform.Api.Hosting.ScheduledDownloadPreparationService>();
+builder.Services.Configure<HostPlatform.SipModem.SipModemOptions>(
+    builder.Configuration.GetSection(HostPlatform.SipModem.SipModemOptions.SectionName));
+builder.Services.AddSingleton<HostPlatform.SipModem.SipModemHostedService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HostPlatform.SipModem.SipModemHostedService>());
+builder.Services.Configure<HostPlatform.Api.Hosting.SerialModemOptions>(
+    builder.Configuration.GetSection(HostPlatform.Api.Hosting.SerialModemOptions.SectionName));
+builder.Services.AddSingleton<HostPlatform.Api.Hosting.SerialAtModemService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HostPlatform.Api.Hosting.SerialAtModemService>());
 
+var nccListenOnly = string.Equals(Environment.GetEnvironmentVariable("COINLINE_NCC_LISTEN_ONLY"), "1", StringComparison.Ordinal);
 var cs = builder.Configuration.GetConnectionString("Default") ??
          "Host=localhost;Port=5432;Database=coinline;Username=coinline;Password=coinline";
-if (builder.Environment.IsEnvironment("Testing"))
-    builder.Services.AddDbContext<HostPlatformDbContext>(o => o.UseInMemoryDatabase("test-db"));
+if (nccListenOnly)
+    builder.Services.AddDbContext<HostPlatformDbContext>(o => o.UseInMemoryDatabase("ncc-listen"));
+else if (builder.Environment.IsEnvironment("Testing"))
+{
+    var testDatabaseName = $"test-db-{Guid.NewGuid():N}";
+    builder.Services.AddDbContext<HostPlatformDbContext>(o => o.UseInMemoryDatabase(testDatabaseName));
+}
 else
     builder.Services.AddDbContext<HostPlatformDbContext>(o => o.UseNpgsql(cs));
 
@@ -147,7 +172,8 @@ app.UseCors();
 app.UseRateLimiter();
 app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseMiddleware<ApiKeyGateMiddleware>();
-app.UseMiddleware<DevOperatorMiddleware>();
+app.UseAuthentication();
+app.UseMiddleware<OperatorContextMiddleware>();
 app.UseAuthorization();
 
 var swaggerEnabled = app.Configuration.GetValue("Swagger:Enabled", true);

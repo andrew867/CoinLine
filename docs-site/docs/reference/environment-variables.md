@@ -8,8 +8,19 @@
 |----------------|---------|---------|
 | `DOTNET_ENVIRONMENT` | runtime | `Production`, `Development`, `Testing` — affects auth bypass and DB provider |
 | `ConnectionStrings__Default` | ConnectionStrings | PostgreSQL connection string |
-| `COINLINE_API_KEYS` | Security | **Preferred** — comma-separated API keys (merged into `Security:ApiKeys` in `Program.cs`) |
-| `HOSTPLATFORM_API_KEYS` | Security | Legacy alias — same behavior as `COINLINE_API_KEYS` |
+| `COINLINE_API_KEYS` | Security | Comma-separated API keys used when the legacy variable is empty |
+| `HOSTPLATFORM_API_KEYS` | Security | Legacy name. A nonempty value takes precedence over `COINLINE_API_KEYS`. |
+
+## NCC and modem inlets
+
+| Variable / key | Purpose |
+|----------------|---------|
+| `Ncc__Port` | Listener port. Takes precedence over `COINLINE_NCC_PORT`; defaults to `4000` when neither supplies a valid port. |
+| `COINLINE_NCC_LISTEN` | A value of `0` disables the listener. |
+| `SipModem__Enabled` | Enables the SIP audio inlet. The base lab Compose stack sets this to `true`. |
+| `SipModem__NccHost`, `SipModem__NccPort` | NCC destination for decoded modem bytes. |
+| `SipModem__Registrar`, `SipModem__Username`, `SipModem__Password`, `SipModem__AssignedNumber` | Optional SIP registration settings. Store lab values in the ignored `docker/sip.env`. |
+| `SerialModem__Enabled`, `SerialModem__PortName` | Enable the serial ATA inlet and identify its serial device. |
 
 ## Security (`Security`)
 

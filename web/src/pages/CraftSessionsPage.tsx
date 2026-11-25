@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { apiGet, apiPost } from '../api/client'
+import { apiGet, apiPost, apiPostRaw } from '../api/client'
 
 type SessionRow = {
   id: string
   terminalId: string
+  terminalName: string | null
   technicianId: string
   operatorId: string
   fieldNotes: string
   startedAtUtc: string
   endedAtUtc: string | null
+  liveLink?: { nccSessionId: string; terminalIdHex: string } | null
 }
 
 type TermOpt = { id: string; displayName: string }
@@ -24,6 +26,7 @@ export function CraftSessionsPage() {
   const [fieldNotes, setFieldNotes] = useState('')
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     setErr(null)
@@ -63,11 +66,26 @@ export function CraftSessionsPage() {
     }
   }
 
+  async function endSession(id: string) {
+    setBusyId(id)
+    setErr(null)
+    try {
+      const r = await apiPostRaw(`/api/craft/sessions/${id}/end`)
+      if (!r.ok) throw new Error(`end ${r.status}`)
+      await refresh()
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'error')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div>
       <h1>Craft sessions</h1>
       <p style={{ color: '#555', maxWidth: 720 }}>
-        Technician craft workflows — commands run through host simulation unless certified for live NCC/DLOG.
+        Technician craft workflows — commands run through host simulation unless both live craft gates are on and a
+        management call is bound.
       </p>
 
       <h2>Start session</h2>
@@ -119,7 +137,10 @@ export function CraftSessionsPage() {
               <th align="left">Started</th>
               <th align="left">Technician</th>
               <th align="left">Terminal</th>
+              <th align="left">NCC</th>
+              <th align="left">Ended</th>
               <th align="left">Notes</th>
+              <th align="left">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -130,9 +151,18 @@ export function CraftSessionsPage() {
                 </td>
                 <td>{r.technicianId}</td>
                 <td>
-                  <Link to={`/terminals/${r.terminalId}`}>{r.terminalId.slice(0, 8)}…</Link>
+                  <Link to={`/terminals/${r.terminalId}`}>{r.terminalName ?? `${r.terminalId.slice(0, 8)}…`}</Link>
                 </td>
+                <td>{r.liveLink ? `bound ${r.liveLink.terminalIdHex}` : '—'}</td>
+                <td>{r.endedAtUtc ? new Date(r.endedAtUtc).toLocaleString() : 'Open'}</td>
                 <td>{r.fieldNotes || '—'}</td>
+                <td>
+                  {!r.endedAtUtc && (
+                    <button type="button" disabled={busyId === r.id} onClick={() => void endSession(r.id)}>
+                      End
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

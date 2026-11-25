@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { apiFetch } from '../api/client'
 
 export function JsonPanel(props: { title: string; url: string }) {
   const [data, setData] = useState<unknown>(null)
@@ -10,7 +11,7 @@ export function JsonPanel(props: { title: string; url: string }) {
     ;(async () => {
       try {
         setLoading(true)
-        const r = await fetch(props.url, { headers: { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' } })
+        const r = await apiFetch(props.url)
         if (!r.ok) throw new Error(String(r.status))
         const j = await r.json()
         if (!cancelled) {

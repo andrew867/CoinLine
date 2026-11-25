@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { apiGet, apiPostBareOk } from '../api/client'
+import { apiDownload, apiGet, apiPostBareOk } from '../api/client'
 
 type NccSessionRow = {
   id: string
@@ -10,6 +10,7 @@ type NccSessionRow = {
   startedAtUtc: string
   endedAtUtc: string | null
   lastFrameSampleHex: string | null
+  socketBound?: boolean
 }
 
 function formatUtc(iso: string) {
@@ -46,6 +47,7 @@ export function NccSessionsPage() {
   const [err, setErr] = useState<string | null>(null)
   const [includeArchived, setIncludeArchived] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [captureError, setCaptureError] = useState('')
 
   const refresh = useCallback(async () => {
     setErr(null)
@@ -93,13 +95,24 @@ export function NccSessionsPage() {
     }
   }
 
+  async function downloadCapture(id: string) {
+    setBusyId(id)
+    setCaptureError('')
+    try {
+      await apiDownload(`/api/ncc/sessions/${id}/capture`, 'coinline-ncc-redacted.pcapng')
+    } catch (e) {
+      setCaptureError(e instanceof Error ? e.message : 'Capture download failed.')
+    } finally {
+      setBusyId(null)
+    }
+  }
+
   return (
     <div>
       <h1>NCC sessions</h1>
       <p style={{ color: '#555', maxWidth: 720 }}>
-        Modem / NCC session records for DLOG correlation and captures. Status follows host persistence:{' '}
-        <strong>Active</strong> sessions count toward the operator dashboard; <strong>Closed</strong> ended normally;{' '}
-        <strong>Archived</strong> rows stay in history but are hidden from this list unless included below.
+        Modem / NCC session records for DLOG correlation and captures. <strong>Active</strong> is a stored row;
+        <strong> Socket bound</strong> means the management call is still open on this host right now.
       </p>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
@@ -118,6 +131,7 @@ export function NccSessionsPage() {
           {err}
         </p>
       )}
+      {captureError && <p role="alert" style={{ color: 'crimson' }}>{captureError}</p>}
       {!loading && !err && (
         <p style={{ fontSize: 14 }} data-testid="ncc-sessions-summary">
           {`${rows.length} session(s), ${openCount} active`}
@@ -131,6 +145,7 @@ export function NccSessionsPage() {
           <thead>
             <tr style={{ borderBottom: '1px solid #ccc' }}>
               <th align="left">Status</th>
+              <th align="left">Socket</th>
               <th align="left">Started (UTC)</th>
               <th align="left">Ended (UTC)</th>
               <th align="left">Correlation</th>
@@ -143,6 +158,7 @@ export function NccSessionsPage() {
             {rows.map((r) => (
               <tr key={r.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td>{statusLabel(r.status)}</td>
+                <td>{r.socketBound ? 'Bound' : '—'}</td>
                 <td>{formatUtc(r.startedAtUtc)}</td>
                 <td>{r.endedAtUtc ? formatUtc(r.endedAtUtc) : <em>—</em>}</td>
                 <td>
@@ -163,6 +179,9 @@ export function NccSessionsPage() {
                   </code>
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
+                  <button type="button" disabled={busyId === r.id} onClick={() => void downloadCapture(r.id)}>
+                    Download redacted capture
+                  </button>{' '}
                   {r.status === 0 && (
                     <button
                       type="button"

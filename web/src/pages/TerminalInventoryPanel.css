@@ -1,0 +1,55 @@
+.phone-inventory-facts,
+.phone-inventory-values,
+.phone-inventory-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 175px), 1fr));
+  gap: 12px;
+}
+
+.phone-inventory-facts {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.phone-inventory dt {
+  color: var(--muted);
+  font-size: .85rem;
+}
+
+.phone-inventory dd {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.phone-inventory dd small {
+  display: block;
+  color: var(--muted);
+}
+
+.phone-inventory fieldset {
+  margin: 16px 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.phone-inventory legend {
+  padding: 0 5px;
+  font-weight: 650;
+}
+
+.phone-inventory-fields label {
+  display: grid;
+  gap: 4px;
+}
+
+.phone-inventory-fields .phone-inventory-check,
+.phone-inventory-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phone-inventory-actions {
+  flex-wrap: wrap;
+}

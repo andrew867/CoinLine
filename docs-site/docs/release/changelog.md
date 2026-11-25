@@ -4,28 +4,11 @@ All notable changes to this repository are documented here. Format follows [Keep
 
 ---
 
-## [0.2.0] — 2026-05-13 {: #release-020 }
+## [Unreleased]
 
-**Public sync release (v0.2.0).** Brings the public **CoinLine** repository up to the same engineering snapshot as the **[CoinLine Terminal Emulator](https://github.com/andrew867/CoinLine-emu)** companion project, and aligns README, badges, and project-status framing across both.
-
-### Added
-
-- README hero with badges (license, .NET, Node, PostgreSQL, MkDocs, OpenAPI, release, status), architecture diagram, **Project status — honest version** section, and **How to help** contribution entry points.
-- Cross-link to the **CoinLine Terminal Emulator** companion repository.
-- Filled-out controllers, services, and console pages for **destination prefixes**, **tariffs**, **time bands**, **NCC protocol**, **NCC sessions**, **card ledger capabilities**, and **rate-plan detail** flows (parity with the latest internal engineering snapshot).
-- Expanded fixtures, web tests, and Playwright smoke coverage to track the broader API surface.
-
-### Changed
-
-- README rewritten around the host-platform architecture and OEM positioning; `v0.2.0` set as the current release.
-- Honest-scope language in the rating UI and fixtures normalized to reference-firmware framing rather than vendor-specific identifiers.
-- Documentation-site release checklist aligned to **v0.2.0**.
-
-### Notes
-
-- Same overall scope and honesty boundaries as v0.1.0 — see the **v0.1.0** package notes below for the full simulation / gated / field-validation matrix; nothing in v0.2.0 changes those guardrails.
-
----
+- Added the NCC listener for terminal binding, persisted frames, clock sync and retries, warm and cold table downloads, maintenance acknowledgements, and real-time rating with stored wire replies.
+- Added the Compose console and PostgreSQL data mounts, optional SIP and serial modem inlets, operator sign-in, terminal groups, and field events.
+- Updated the lab runbook and public protocol and API references. Local firmware tests verified ten-record downloads, paid and unavailable quotes, maintenance, and toll-free screening.
 
 ## [0.1.0] — 2026-05-03 {: #release-010 }
 

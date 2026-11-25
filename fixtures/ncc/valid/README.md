@@ -2,7 +2,7 @@
 
 ## `clr_sample.*`
 
-Reference 6-octet **CLR** control frame (STX, control, count, CRC LE, ETX). CRC matches the first three bytes per `NccCrc16`.
+MTR212-style **CLR** control frame (6 octets: STX, control, count, CRC LE, ETX). CRC matches the first three bytes per `NccCrc16`.
 
 - **`clr_sample.hex`**: uppercase hex string without spaces (same octets as `.bin`).
 - **`clr_sample.expected.json`**: smoke expectations for automated comparison (`byteLength`, `frameCount`).

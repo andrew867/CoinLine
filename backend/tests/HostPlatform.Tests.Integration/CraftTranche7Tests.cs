@@ -12,6 +12,14 @@ public sealed class CraftTranche7Tests(ApiFixture factory)
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     [Fact]
+    public async Task Execution_policy_defaults_live_craft_off()
+    {
+        var pol = await _client.GetFromJsonAsync<JsonElement>("/api/craft/execution-policy", JsonOpts);
+        Assert.False(pol!.GetProperty("allowLiveCraft").GetBoolean());
+        Assert.False(pol.GetProperty("liveEnabled").GetBoolean());
+    }
+
+    [Fact]
     public async Task Craft_session_command_defer_simulate_cancel_and_audit()
     {
         Assert.Equal(HttpStatusCode.OK, (await _client.GetAsync("/api/craft/command-types")).StatusCode);

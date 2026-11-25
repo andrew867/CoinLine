@@ -5,15 +5,17 @@ services:
       POSTGRES_USER: coinline
       POSTGRES_PASSWORD: coinline
       POSTGRES_DB: coinline
-    # Postgres is reachable as hostname `postgres:5432` from other services.
+    # Reachable as hostname `postgres:5432` from other services. Not published on the host.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U coinline -d coinline"]
+      # TCP, not the local socket: the entrypoint's bootstrap server is socket-only and
+      # restarts once before it listens on 5432. A socket check goes healthy in that window.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U coinline -d coinline"]
       interval: 5s
       timeout: 5s
       retries: 10
       start_period: 10s
     volumes:
-      - coinline_pg:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
 
   api:
     build:
@@ -23,21 +25,47 @@ services:
       postgres:
         condition: service_healthy
     environment:
+      # Lab default so the console operator headers work. The prod overlay sets Production.
+      ASPNETCORE_ENVIRONMENT: Development
       ASPNETCORE_URLS: http://0.0.0.0:5006
+      # NCC TCP listener. Leave it enabled; do not set COINLINE_NCC_LISTEN=0.
+      COINLINE_NCC_PORT: "4000"
       ConnectionStrings__Default: Host=postgres;Port=5432;Database=coinline;Username=coinline;Password=coinline
+      Platform__PayloadStorage__RootPath: /var/coinline/payloads
+      CardPayments__SimulationMode: "false"
+      CardPayments__PhysicalCardWritesDisabled: "true"
+      # SIP registrar credentials come from sip.env (gitignored). See sip.env.example.
+      SipModem__Enabled: "true"
+      SipModem__LoopbackHost: "host.docker.internal"
+      SipModem__NccHost: "127.0.0.1"
+      SipModem__NccPort: "4000"
+    env_file:
+      - path: sip.env
+        required: false
     ports:
       - "5006:5006"
+      - "4000:4000"
+      - "5060:5060/udp"
+      - "40000-40007:40000-40007/udp"
+    volumes:
+      - ./data/payloads:/var/coinline/payloads
 
+  web:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+    depends_on:
+      - api
+    ports:
+      - "8080:80"
+
+  # Heartbeat row only. Session handling stays on the API listener.
   worker:
     build:
       context: ..
       dockerfile: docker/Dockerfile.worker
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       ConnectionStrings__Default: Host=postgres;Port=5432;Database=coinline;Username=coinline;Password=coinline
-    profiles:
-      - worker
-
-volumes:
-  coinline_pg:

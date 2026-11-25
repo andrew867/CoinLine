@@ -1,14 +1,25 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { apiPostBareOk, apiPut } from '../api/client'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { apiFetch, apiPost, apiPostBareOk, apiPut } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { TableSetAssignment } from './TableSetAssignment'
+import type { FirmwareSchedule } from './TableSetAssignment'
+import { TableSetConfiguration } from './TableSetConfiguration'
+import { TableRecordCopy } from './TableRecordCopy'
+import { TableDownloadScheduleList } from './TableDownloadScheduleList'
+import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
+import { TerminalFamilyReview } from './TerminalFamilyReview'
+import './TableSetConfiguration.css'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Ver = {
   id: string
   tableDefinitionId: string
   definitionName: string
+  tableNumber: number
+  dependsOnTableDefinitionId: string | null
   tableRevision: number
+  configurationId: string | null
   payloadSha256Hex: string
   payloadLengthBytes: number
   sortOrder: number
@@ -25,19 +36,46 @@ type Detail = {
   status: number
   publishedAtUtc: string | null
   publishGeneration: number
+  revision: number
+  optionalRecordRemovals: { tableNumber: number; name: string }[]
+  targetFirmwareVersionId: string | null
+  targetFirmware: string | null
+  tableProfile: string | null
+  tableProfileEvidence?: { recordCount: number; terminalAcknowledgedCount: number; completeCatalogue: boolean } | null
+  firmwareFindings: { tableNumber: number; blocking: boolean; message: string }[]
+  firmwareSchedule?: FirmwareSchedule | null
   versions: Ver[]
+  provisioning?: {
+    operatingType: string | null
+    acceptedCoinSlots: number | null
+    configuredCardRanges: number | null
+    onHookAdvertising: boolean | null
+    findings: { tableNumber: number; message: string }[]
+  }
 }
 
 export function TableSetDetail() {
   const { id } = useParams()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const initialRecord = Number(searchParams.get('record') ?? 29)
+  const initialFamily = searchParams.get('family') ?? ''
   const [d, setD] = useState<Detail | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
+  const [copying, setCopying] = useState(false)
+  const [targetEdit, setTargetEdit] = useState<string | null>(null)
+  const [savingTarget, setSavingTarget] = useState(false)
+  const [recordDirty, setRecordDirty] = useState(false)
+  const canRead = canPerform('table-sets', op.read)
+  const canUpdate = canPerform('table-sets', op.update)
+  const canAdd = canPerform('table-sets', op.add)
+  const canReadRecords = canPerform('table-records', op.read)
 
   const load = () => {
-    if (!id) return
+    if (!id || !canRead) return
     setErr(null)
-    fetch(`/api/tables/sets/${id}`, { headers })
+    apiFetch(`/api/tables/sets/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Detail>
@@ -50,12 +88,29 @@ export function TableSetDetail() {
   }
 
   useEffect(() => {
+    setTargetEdit(null)
+    setRecordDirty(false)
     load()
-  }, [id])
+  }, [id, canRead])
+
+  async function saveTarget(e: React.FormEvent) {
+    e.preventDefault()
+    if (!canUpdate || !d || targetEdit == null || recordDirty) return
+    setSavingTarget(true)
+    setErr(null)
+    try {
+      await apiPut(`/api/tables/sets/${d.id}/firmware-target`, { firmwareVersionId: targetEdit || null })
+      load()
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not save target firmware.')
+    } finally {
+      setSavingTarget(false)
+    }
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault()
-    if (!id) return
+    if (!id || !canUpdate) return
     setErr(null)
     try {
       await apiPut(`/api/tables/sets/${id}`, {
@@ -70,7 +125,7 @@ export function TableSetDetail() {
   }
 
   async function publish() {
-    if (!id) return
+    if (!id || !canUpdate) return
     if (
       !window.confirm(
         'Publish this table set? Published sets affect which payloads terminals may download (validate on bench — HARDWARE_VALIDATION_REQUIRED).'
@@ -86,11 +141,33 @@ export function TableSetDetail() {
     }
   }
 
+  async function clone(event: React.FormEvent) {
+    event.preventDefault()
+    if (!id || !canAdd) return
+    setCopying(true)
+    setErr(null)
+    try {
+      const copy = await apiPost<{ id: string }>(`/api/tables/sets/${id}/clone`, { name })
+      setD(null)
+      void navigate(`/table-sets/${copy.id}${initialRecord === 29 ? '' : `?record=${initialRecord}`}`)
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : 'Could not make a draft copy.')
+    } finally {
+      setCopying(false)
+    }
+  }
+
   if (!id) return <p>Missing id.</p>
+  if (!canRead) return <p role="alert">You do not have permission to view table sets.</p>
   if (!d) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
 
   const draft = d.status !== 1
+  const codeOnly = d.versions.length === 1 && d.versions[0].tableNumber === 94
+  const canPreviewScope = canPerform('table-assignments', op.read) || canPerform('table-assignments', op.update) ||
+    canPerform('downloads', op.add) || (!codeOnly && (canReadRecords || canPerform('table-records', op.update)))
   const noVersions = d.versions.length === 0
+  const targetSelection = targetEdit ?? d.targetFirmwareVersionId ?? ''
+  const targetChanged = targetSelection !== (d.targetFirmwareVersionId ?? '')
 
   return (
     <div>
@@ -108,63 +185,163 @@ export function TableSetDetail() {
           </>
         )}
       </p>
-      {draft && (
+      {draft && canUpdate && (
         <form onSubmit={save} style={{ marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
           <label>
             Name{' '}
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </label>
           <button type="submit">Save</button>
-          <button type="button" onClick={() => void publish()}>
+          <button type="button" onClick={() => void publish()}
+            disabled={recordDirty || targetChanged || d.firmwareFindings?.some((finding) => finding.blocking)}>
             Publish set
           </button>
         </form>
       )}
-      <p>
+      {!draft && canAdd && (
+        <form className="table-config-selectors" onSubmit={(event) => void clone(event)}>
+          <label>Draft copy name<input value={name} maxLength={120} onChange={(event) => setName(event.target.value)} /></label>
+          <button type="submit" disabled={copying || !name.trim()}>Make draft copy</button>
+        </form>
+      )}
+      <section className="table-config-panel" aria-labelledby="firmware-target-heading">
+        <h2 id="firmware-target-heading">Firmware compatibility</h2>
+        {draft && canUpdate ? (
+          <form className="table-config-selectors" onSubmit={(event) => void saveTarget(event)}>
+            <FirmwareVersionSelect label="Target firmware" value={targetSelection} onChange={setTargetEdit}
+              emptyLabel="No firmware target" disabled={savingTarget} optionsPath="/api/tables/firmware-options" />
+            <button type="submit" disabled={!targetChanged || savingTarget || recordDirty}>Save target</button>
+          </form>
+        ) : <p>Target firmware <strong>{d.targetFirmware ?? 'Any'}</strong></p>}
+        {draft && recordDirty && targetChanged && <p>Save the record edits before changing the target.</p>}
+        {d.targetFirmware && <p>Table layout <strong>{d.tableProfile ?? 'Unverified'}</strong></p>}
+        {d.tableProfileEvidence && <p className="page-intro">{d.tableProfileEvidence.recordCount} known record lengths.
+          {' '}{d.tableProfileEvidence.terminalAcknowledgedCount} with OEM-emulator acknowledgements.
+          {d.tableProfileEvidence.completeCatalogue && ' Records outside the compiled catalogue cannot be published for this target.'}</p>}
+        {!!d.firmwareFindings?.length && <ul>{d.firmwareFindings.map((finding) => (
+          <li key={`${finding.tableNumber}:${finding.message}`}><strong>MT{finding.tableNumber} {finding.blocking ? 'needs correction' : 'needs verification'}.</strong> {finding.message}
+            {canReadRecords && !recordDirty && d.versions.some(version => version.tableNumber === finding.tableNumber) &&
+              <> <Link to={`/table-sets/${id}?record=${finding.tableNumber}#config-heading`}>Review MT{finding.tableNumber}</Link></>}
+          </li>
+        ))}</ul>}
+      </section>
+      <TerminalFamilyReview key={`${id}:${initialFamily}`} setId={id} initialFamily={initialFamily}
+        dataKey={`${d.revision}:${d.targetFirmwareVersionId}:${d.versions.map(version => `${version.tableNumber}:${version.payloadSha256Hex}`).join(',')}`}
+        recordDirty={recordDirty} />
+      {d.provisioning && (d.provisioning.operatingType || d.provisioning.acceptedCoinSlots !== null ||
+        d.provisioning.configuredCardRanges !== null || d.provisioning.findings.length > 0) && (
+        <section className="table-config-panel" aria-labelledby="provisioning-heading">
+          <h2 id="provisioning-heading">Provisioning review</h2>
+          <dl className="native-table-summary">
+            {d.provisioning.operatingType && <div><dt>Operating type</dt><dd>{d.provisioning.operatingType}</dd></div>}
+            {d.provisioning.acceptedCoinSlots !== null && <div><dt>Accepted coin slots</dt><dd>{d.provisioning.acceptedCoinSlots}</dd></div>}
+            {d.provisioning.configuredCardRanges !== null && <div><dt>Configured card ranges</dt><dd>{d.provisioning.configuredCardRanges}</dd></div>}
+            {d.provisioning.onHookAdvertising !== null && <div><dt>On-hook advertising</dt><dd>{d.provisioning.onHookAdvertising ? 'Enabled' : 'Disabled'}</dd></div>}
+          </dl>
+          {d.provisioning.findings.length > 0 && <ul>{d.provisioning.findings.map((finding) => (
+            <li key={`${finding.tableNumber}:${finding.message}`}>MT{finding.tableNumber} · {finding.message}
+              {canReadRecords && !recordDirty && d.versions.some(version => version.tableNumber === finding.tableNumber) &&
+                <> <Link to={`/table-sets/${id}?record=${finding.tableNumber}#config-heading`}>Review MT{finding.tableNumber}</Link></>}
+            </li>
+          ))}</ul>}
+        </section>
+      )}
+      {draft && canUpdate && <TableRecordCopy key={d.id} setId={d.id} revision={d.revision} customerId={d.customerId}
+        disabled={recordDirty || targetChanged} onSaved={load} />}
+      {canReadRecords && <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
+        versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />}
+      {!draft && canPreviewScope && <TableSetAssignment key={id} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
+        codeOnly={codeOnly} firmwareSchedule={d.firmwareSchedule} />}
+      {!draft && !canPreviewScope && canPerform('downloads', op.read) && <TableDownloadScheduleList setId={id} />}
+      {canReadRecords && <p>
         <Link to={`/table-versions?set=${encodeURIComponent(id)}`}>View versions list</Link>
-      </p>
+      </p>}
       <h2>Versions in this set</h2>
       {noVersions && (
-        <p style={{ color: '#666' }}>No versions yet — POST a table version via API or add seed data.</p>
+        <p style={{ color: '#666' }}>
+          No versions in this set yet. Add table versions from the versions list, then publish this set.
+        </p>
       )}
-      <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 14 }}>
-        <thead>
-          <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
-            <th>Table</th>
-            <th>Rev</th>
-            <th>SHA-256 (payload)</th>
-            <th>Bytes</th>
-            <th>Valid</th>
-            <th>Warnings</th>
-          </tr>
-        </thead>
-        <tbody>
-          {d.versions.map((v) => (
-            <tr key={v.id} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
-              <td>{v.definitionName}</td>
-              <td>{v.tableRevision}</td>
-              <td>
-                <code style={{ fontSize: 11 }} title="SHA-256 of opaque table payload bytes">
-                  {v.payloadSha256Hex}
-                </code>
-              </td>
-              <td>{v.payloadLengthBytes}</td>
-              <td>{v.validationPassed ? 'yes' : 'no'}</td>
-              <td>
-                {v.warnings?.length ? (
-                  <ul style={{ margin: 0, paddingLeft: 18, color: '#a50' }}>
-                    {v.warnings.map((w) => (
-                      <li key={w}>{w}</li>
-                    ))}
-                  </ul>
-                ) : (
-                  ''
-                )}
-              </td>
+      <div className="table-set-versions" tabIndex={0} role="region" aria-label="Versions in this set">
+        <table cellPadding={8} style={{ borderCollapse: 'collapse', fontSize: 14 }}>
+          <thead>
+            <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
+              <th>Table</th>
+              <th>Configuration ID</th>
+              <th>Rev</th>
+              <th>SHA-256 (payload)</th>
+              <th>Bytes</th>
+              <th>Valid</th>
+              <th>Warnings</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {d.versions.map((v) => (
+              <tr key={v.id} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
+                <td>{v.definitionName}</td>
+                <td>{draft && canUpdate && v.tableNumber !== 94
+                  ? <ConfigurationIdField key={v.tableRevision} setId={d.id} record={v} disabled={recordDirty || targetChanged} onSaved={load} />
+                  : v.configurationId ?? 'None'}</td>
+                <td>{v.tableRevision}</td>
+                <td>
+                  <code style={{ fontSize: 11 }} title="SHA-256 of opaque table payload bytes">
+                    {v.payloadSha256Hex}
+                  </code>
+                </td>
+                <td>{v.payloadLengthBytes}</td>
+                <td>{v.validationPassed ? 'yes' : 'no'}</td>
+                <td>
+                  {v.warnings?.length ? (
+                    <ul style={{ margin: 0, paddingLeft: 18, color: '#a50' }}>
+                      {v.warnings.map((w) => (
+                        <li key={w}>{w}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    ''
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
+}
+
+function ConfigurationIdField({ setId, record, disabled, onSaved }: {
+  setId: string; record: Ver; disabled: boolean; onSaved: () => void
+}) {
+  const original = record.configurationId ?? ''
+  const [value, setValue] = useState(original)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const label = `Configuration ID for ${record.definitionName}`
+
+  async function save(event: React.FormEvent) {
+    event.preventDefault()
+    setSaving(true)
+    setError('')
+    try {
+      const response = await apiFetch(`/api/tables/sets/${setId}/records/${record.tableNumber}/configuration-id`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recordRevision: record.tableRevision, configurationId: value || null }),
+      })
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not save the Configuration ID.')
+      setValue(value.trimEnd().toUpperCase())
+      onSaved()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not save the Configuration ID.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return <form onSubmit={event => void save(event)} className="row-actions">
+    <input data-field-kind="key" aria-label={label} autoComplete="off" value={value} maxLength={6} size={6} disabled={disabled || saving}
+      onChange={event => setValue(event.target.value)} />
+    <button type="submit" disabled={disabled || saving || value === original}>Save ID</button>
+    {error && <p role="alert">{error}</p>}
+  </form>
 }

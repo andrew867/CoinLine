@@ -24,6 +24,8 @@ Assignments for **table sets** can apply at customer, site, or terminal scope de
 3. Register **terminals** with identifiers and transport settings appropriate to your deployment.
 4. Assign **table sets** and schedule **downloads** per [Table distribution](table-distribution.md).
 
+Custom operator profiles may permit membership management separately from group administration. A membership-only operator selects a group from the membership lookup. Operators with Add can stage new memberships, and operators with Delete can stage removals. Read-only operators can inspect the list but cannot save changes.
+
 ## API
 
 REST endpoints under `/api/customers`, `/api/sites`, `/api/terminals` — see [API overview](../api/overview.md) and OpenAPI.

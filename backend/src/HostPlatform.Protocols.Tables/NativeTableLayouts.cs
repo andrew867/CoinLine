@@ -1,0 +1,568 @@
+using static HostPlatform.Protocols.Tables.TableFieldEncoding;
+
+namespace HostPlatform.Protocols.Tables;
+
+/// <summary>Editable portions of identified packed terminal profiles. Unlisted bytes survive every edit.</summary>
+public static partial class NativeTableLayouts
+{
+    public const string MultiPay = "MTR 1.9 packed";
+    public const byte CallInRecord = 35;
+    public const byte AnswerSupervisionRecord = 49;
+    public const byte MessagingRecord = MessagingServiceWire.MessageType;
+    internal const byte TimeDiscountRecord = 152;
+    private const int LaterAnswerSupervisionLength = 263;
+    public const string Later = "Later packed profile";
+    private static readonly (int, string)[] PaymentKinds =
+        [(2, "No payment"), (3, "Coin"), (4, "Credit card"), (5, "Calling card"), (6, "Stored-value card"), (7, "Debit card")];
+    private static readonly (int, string)[] CallKinds =
+        [(0, "Incoming"), (1, "Unanswered"), (2, "Abandoned"), (3, "Local"), (4, "Intra-area toll"),
+         (5, "Inter-area toll"), (6, "International"), (7, "Operator"), (8, "Operator-assisted 0+"),
+         (9, "Toll-free"), (10, "Directory assistance"), (11, "Denied"), (15, "No classification")];
+    private static readonly (int, string)[] KeypadDigits =
+        [.. Enumerable.Range(1, 9).Select(digit => (digit, digit.ToString())), (10, "0"), (11, "*"), (12, "#")];
+    private static readonly (int, string)[] MessagingTones = [.. KeypadDigits, (13, "A"), (14, "B"), (15, "C"), (0, "D")];
+    private static readonly (int, string)[] NumberingDigits =
+        [.. KeypadDigits, (16, "0 or 1"), (17, "Any decimal digit"), (18, "2 through 9"), (19, "0 or 2 through 9"), (20, "Any keypad digit")];
+    private static readonly (string Key, string Label)[] DiscountZones =
+        [("local", "Local"), ("intra", "Intra-area"), ("inter", "Inter-area"), ("international", "International")];
+    private static readonly IReadOnlyDictionary<(byte, int), NativeTableLayout[]> Layouts = Build()
+        .GroupBy(layout => (layout.Number, layout.Length)).ToDictionary(group => group.Key, group => group.ToArray());
+
+    public static IReadOnlyList<NativeTableLayout> Candidates(int number, ReadOnlySpan<byte> record) =>
+        number is >= 0 and <= 255 && !record.IsEmpty && record[0] == number
+            ? Layouts.GetValueOrDefault(((byte)number, record.Length)) ?? [] : [];
+
+    public static NativeTableLayout? Find(int number, ReadOnlySpan<byte> record, string? profile = null)
+    {
+        var candidates = Candidates(number, record);
+        // Existing sets without a registered target already use the older editing profile for these records.
+        var selection = profile ?? (candidates.Count > 1 && number is 26 or 31 or 33 or QuickAccessKeyWire.MessageType or ServiceRestrictionWire.MessageType or 73 ? MultiPay : null);
+        var layout = selection == null ? candidates.Count == 1 ? candidates[0] : null
+            : candidates.SingleOrDefault(layout => layout.Profile == selection);
+        if (layout == null)
+            return null;
+        return number switch
+        {
+            22 or 134 => layout with { Sections = CardSections(record) },
+            62 => ExpandNumberingPlan(layout, record),
+            93 when layout.Profile == Later => layout with { Sections = StoredValueSections(record, later: true) },
+            >= 131 and <= 133 => layout with { Sections = GraphicalSections(record) },
+            _ => layout
+        };
+    }
+
+    public static IReadOnlyList<NativeTableLayout> DraftTemplates(int number)
+    {
+        if (number == AnswerSupervisionRecord)
+            return Layouts[(AnswerSupervisionRecord, LaterAnswerSupervisionLength)];
+        return IsLocalDialingRecord(number) || CallScreeningWire.IsRecord(number)
+            || number is 22 or 23 or CallInRecord or QuickAccessKeyWire.MessageType or 58 or MessagingRecord
+            or SpareTableWire.MessageType or 73 or 93 or CodeDownloadWire.MessageType or 95 or >= 131 and <= 135 or >= 150 and <= 152
+            ? Layouts.Values.SelectMany(layouts => layouts).Where(layout => layout.Number == number).ToArray()
+            : [];
+    }
+
+    public static bool IsLocalDialingRecord(int number) =>
+        number is >= 74 and <= 81 or 90 or 91 or >= 101 and <= 115 or >= 136 and <= 149 or 154 or 155;
+
+    public static byte[] CreateDraftTemplate(NativeTableLayout template)
+    {
+        var bytes = new byte[template.Length];
+        bytes[0] = template.Number;
+        if (IsGraphicalRecord(template.Number))
+            InitializeGraphicalRecord(bytes);
+        if (template.Number is 22 or 23 or 134 or 135)
+            InitializePaymentRecord(bytes);
+        if (template.Number == 93 && template.Profile == Later)
+            InitializeStoredValueRecord(bytes);
+        if (template.Number == CodeDownloadWire.MessageType)
+            InitializeCodeDownloadRecord(bytes);
+        if (template.Number == CallInRecord)
+        {
+            bytes[4] = 2;
+            bytes[7] = 1;
+            bytes[10] = 5;
+            bytes[12] = 30;
+        }
+        if (template.Number == AnswerSupervisionRecord)
+        {
+            bytes[3] = 50;
+            bytes[5] = 200;
+        }
+        if (template.Number == 73)
+            InitializeTerminalTariffs(bytes);
+        if (CallScreeningWire.IsRecord(template.Number))
+            CallScreeningWire.Initialize(bytes, template);
+        return bytes;
+    }
+
+    internal static void ValidateMessagingChanges(ReadOnlySpan<byte> original, ReadOnlySpan<byte> updated)
+    {
+        if (updated[19] == 0 || (original[..20].SequenceEqual(updated[..20]) && original[42] == updated[42]))
+            return;
+        if (MessagingServiceWire.ConfigurationIssue(updated) is { } issue)
+            throw new InvalidOperationException(issue);
+    }
+
+    private static IEnumerable<NativeTableLayout> Build()
+    {
+        foreach (var terminalLayout in TerminalConfigurationLayouts())
+            yield return terminalLayout;
+
+        yield return Layout(32, 33, [Section("collection", "Performance reporting",
+            Field("threshold", "Upload threshold", 21), Hour("startHour", "Start hour", 22),
+            Minute("startMinute", "Start minute", 23), Field("days", "Window duration (days)", 24)),
+            .. ReportTimes(25), .. new[] { (0, "Access to dial complete"), (1, "Dial complete to carrier"), (3, "Carrier to first packet"), (4, "User waiting time") }
+                .Select(item => Section($"interval-{item.Item1}", item.Item2,
+                    Field($"interval-{item.Item1}.start", "Start (10 ms ticks)", 1 + item.Item1 * 4, SignedWord, min: 0),
+                    Field($"interval-{item.Item1}.duration", "Interval (10 ms ticks)", 3 + item.Item1 * 4, SignedWord, min: 0)))]);
+
+        yield return Layout(33, 36, ModemSections(later: false));
+        yield return new NativeTableLayout(33, 36, Later, ModemSections(later: true));
+
+        yield return Layout(34, 19, [Section("summary", "Summary collection",
+            Hour("startHour", "Start hour", 1), Minute("startMinute", "Start minute", 2),
+            Field("days", "Window duration (days)", 3), Field("threshold", "Upload threshold", 4)),
+            Section("detail", "Detailed collection",
+                Select("enabled", "Detailed collection", 13, (0, "Disabled"), (1, "Enabled")),
+                Field("detailThreshold", "Detailed upload threshold", 14), Hour("detailHour", "Start hour", 15),
+                Minute("detailMinute", "Start minute", 16), Field("detailDays", "Duration days", 17),
+                Hour("detailHours", "Duration hours", 18)), .. ReportTimes(5)]);
+
+        yield return Layout(CallInRecord, 21,
+            Section("callIn", "Scheduled call-in",
+                [new NativeTableField("startTime", "Routine call-in time (terminal clock)", 4, TerminalTime,
+                    Help: "The phone uses this time of day with the repeat interval."),
+                .. DateTimeFields("start", 1),
+                Field("intervalDays", "Repeat interval days", 7, help: "An all-zero repeat interval means once a day."),
+                Hour("intervalHours", "Repeat interval hours", 8),
+                Minute("intervalMinutes", "Repeat interval minutes", 9), Field("retryMinutes", "Retry delay minutes", 10),
+                Minute("retrySeconds", "Retry delay seconds", 11), Field("recordThreshold", "Call-record upload threshold", 12)]),
+            Section("clock", "Clock adjustment",
+                [new NativeTableField("adjustAt", "Apply clock adjustment at (terminal clock)", 13, TerminalCalendar,
+                    Help: "Clear the date and time to disable the scheduled adjustment."),
+                Field("adjust.year", "Calendar year offset from 1900", 13), .. DateTimeFields("adjust", 13).Skip(1),
+                Field("adjustment", "Time adjustment (signed seconds)", 19, SignedWord)]));
+
+        yield return Layout(50, 105, [Section("cash", "Cash box and escrow",
+            Field("cashBoxVolume", "Cash box capacity", 81, Word), Field("escrowVolume", "Escrow capacity", 83, Word),
+            Field("cashBoxThreshold", "Cash box volume threshold", 85, Word),
+            Field("cashBoxValue", "Cash box value threshold (cents)", 87, SignedLong, min: 0),
+            Field("escrowVolumeThreshold", "Escrow volume threshold", 91, Word),
+            Field("escrowValue", "Escrow value threshold (cents)", 93, SignedLong, min: 0)),
+            .. Rows("coin", 16, i => $"Coin slot {i + 1}", (i, key) =>
+                [Field($"{key}.value", "Coin value (cents)", 1 + i * 2, SignedWord, min: 0),
+                 Field($"{key}.volume", "Coin volume", 33 + i * 2, Word),
+                 Toggle($"{key}.window", "Enable validator window", 65 + i, 1),
+                 Toggle($"{key}.accepted", "Accept coin", 65 + i, 2)])]);
+
+        yield return QuickAccessLayout(later: false);
+        yield return QuickAccessLayout(later: true);
+
+        yield return ServiceRestrictionLayout(later: false);
+        yield return ServiceRestrictionLayout(later: true);
+
+        yield return Layout(62, NumberingPlanWire.RecordLength, Section("numbering", "Digit collection and routing",
+            Toggle("terminateWhileCollecting", "Accept the terminating key while collecting extra digits", 1, 1),
+            Toggle("terminateBeforeTimeout", "Accept the terminating key before the digit timeout", 1, 2),
+            Select("inputTerminator", "Terminating key", 2, [(0, "None"), .. KeypadDigits]),
+            Select("outputTerminator", "Terminating key to dial", 3, [(0, "None"), .. KeypadDigits]),
+            Field("screenTimeout", "Screening digit timeout (10 ms ticks)", 4, Word),
+            Field("planTimeout", "Numbering-plan digit timeout (10 ms ticks)", 6, Word),
+            Select("coinZeroPlus", "Convert coin calls with a leading zero", 14, (0, "No"), (1, "Yes")),
+            Select("spillUnlistedCarrier", "Send the calling-card number to an unlisted carrier on 0+ calls", 15, (0, "No"), (1, "Yes")),
+            Select("internationalZone", "Default international carrier zone", 16, (0, "Intra-area"), (1, "Inter-area")),
+            Select("multipleCoinCarriers", "Multiple coin carriers", 17, (0, "Disabled"), (1, "Enabled")),
+            Select("routeNonInter", "Request host routes for non-interarea calls", 18, (0, "Disabled"), (1, "Enabled")),
+            Field("storedValueDiscount", "Initial domestic stored-value discount (demo firmware)", 19, Word),
+            new NativeTableField("keyCardNumber", "Desk terminal key card number", 21, CredentialBcd, 5, Maximum: 10,
+                Help: "Enter a ten-digit replacement. Leave blank to keep the stored number."),
+            Field("answerSupervision", "Answer supervision timer", 26),
+            Field("internationalStoredValueDiscount", "Initial international stored-value discount (demo firmware)", 27, Word),
+            Field("managerTimeout", "Manager no-answer timeout", 30, Word),
+            Toggle("unrestrictedLocalSearch", "Allow a local dialing search without a protected prefix", 32, 1)),
+            Section("number-display", "Number display and currency",
+                new NativeTableField("currencySymbol", "Currency symbol", 345, TerminatedDisplayText, 4),
+                Select("currencyVoice", "Spoken currency", 349, (0, "Generic"), (1, "Balboas"), (2, "Bolívares"),
+                    (3, "Bolivianos"), (4, "Colones"), (5, "Córdobas"), (6, "Dollars"), (7, "Guaraníes"), (8, "Lempiras"),
+                    (9, "Nuevos soles"), (10, "Pesos"), (11, "Quetzales"), (12, "Soles"), (13, "Sucres"), (14, "Tokens")),
+                Field("currencyWidth", "Minimum display width", 350, max: 10),
+                Field("currencyPrecision", "Decimal places", 351, max: 10),
+                Toggle("formatCurrency", "Use custom currency format", 352, 1),
+                Toggle("currencySuffix", "Show the symbol after the amount", 352, 2),
+                Toggle("currencyAlignLeft", "Align the amount to the left", 352, 4)),
+            Section("rate-mapping", "Rate-response call classification", [..
+                new[] { "Other rate responses", "Local rate (1 or 2)", "Intra-area rate (5)", "Inter-area rate (6)", "Rate response 7", "Rate response 8" }
+                    .SelectMany((label, index) => new[] {
+                        Bits($"response-{index}.call", $"{label} call type", 8 + index, 15, CallKinds),
+                        Bits($"response-{index}.payment", $"{label} payment type", 8 + index, 112, PaymentKinds) })]));
+
+        yield return Layout(MessagingRecord, MessagingServiceWire.RecordLength,
+            Section("service", "Access and reporting",
+                Select("enabled", "Messaging service", 19, (0, "Disabled"), (1, "Enabled")),
+                DialField("serviceNumber", "Messaging service number", 9, 10),
+                new NativeTableField("serviceKey", "Messaging service key", 1, MessagingKey, 8,
+                    Help: "Enter an eight-digit replacement key. Leave blank to keep the stored key."),
+                Field("protocolVersion", "Protocol version", 42, max: 9),
+                Select("cdrs", "Send service call records", 20, (0, "Disabled"), (1, "Enabled")),
+                Bits("statistics", "Collect service statistics", 21, 1, (0, "Disabled"), (1, "Enabled"))),
+            Section("permissions", "Call and payment permissions",
+                Toggle("allowLocal", "Local calls", 34, 1),
+                Toggle("allowIntraArea", "Intra-area toll calls", 34, 2),
+                Toggle("allowInterArea", "Inter-area toll calls", 34, 4),
+                Toggle("allowInternational", "International calls", 34, 8),
+                Toggle("allowCoin", "Coins", 35, 1),
+                Toggle("allowStoredValue", "Stored-value cards", 35, 2),
+                Toggle("allowCredit", "Credit cards", 35, 4),
+                Toggle("allowCallingCard", "Calling cards", 35, 8),
+                Select("returnFunds", "Return escrowed coins before the surcharge", 43, (0, "No"), (1, "Yes"))),
+            Section("surcharges", "Surcharges in cents",
+                Field("localSurcharge", "Local surcharge", 22, Word), Field("tollSurcharge", "Intra-area surcharge", 24, Word),
+                Field("interSurcharge", "Inter-area surcharge", 26, Word), Field("internationalSurcharge", "International surcharge", 28, Word),
+                Field("spareOneSurcharge", "Spare surcharge 1", 30, Word), Field("spareTwoSurcharge", "Spare surcharge 2", 32, Word)),
+            Section("signaling", "Signaling and timing",
+                Field("ringCycles", "Unanswered ringing cycles", 36), Field("busyCycles", "Busy cycles", 37),
+                Bits("syncTone", "Synchronization tone", 38, 0xF0, MessagingTones),
+                Bits("goTone", "Go tone", 39, 0xF0, MessagingTones),
+                Bits("noGoTone", "No-go tone", 40, 0xF0, MessagingTones),
+                Bits("paidTone", "Payment accepted tone", 41, 0xF0, MessagingTones),
+                Field("syncTimeout", "Synchronization timeout (10 ms ticks)", 44, Word),
+                Field("digitPause", "DTMF digit duration and interdigit pause (10 ms ticks)", 46, Word),
+                Field("goNoGoTimeout", "Go or no-go timeout (10 ms ticks)", 48, Word),
+                Field("answerTimeout", "Answer supervision timeout (10 ms ticks)", 50, Word),
+                Field("identityDelay", "Version and terminal ID dial delay (10 ms ticks)", 52, Word),
+                Field("sessionTimeout", "Session timeout after go signal (10 ms ticks)", 54, Word),
+                Field("lineReleaseDelay", "Line release delay (10 ms ticks)", 56, Word,
+                    help: "The legacy manager labels this timing word Voice Prompt Play Delay. The documented terminal implementation uses it to wait for line release.")),
+            Section("spare", "Reserved fields", [
+                Field("spare4", "Spare 4 (word)", 58, Word), Field("spare5", "Spare 5 (word)", 60, Word),
+                .. Enumerable.Range(0, 10).Select(i => Field($"spare{i + 6}", $"Spare {i + 6} (byte)", 62 + i)),
+                .. Enumerable.Range(1, 7).Select(bit => Toggle($"statisticsSpare{bit}", $"Reserved statistics flag {bit}", 21, 1 << bit)),
+                .. Enumerable.Range(4, 4).Select(bit => Toggle($"callSpare{bit}", $"Reserved call type flag {bit}", 34, 1 << bit)),
+                .. Enumerable.Range(4, 4).Select(bit => Toggle($"paymentSpare{bit}", $"Reserved payment type flag {bit}", 35, 1 << bit))]));
+
+        yield return new NativeTableLayout(SpareTableWire.MessageType, SpareTableWire.RecordLength, Later, SpareTableSections());
+
+        yield return Layout(22, 661, []);
+        yield return Layout(23, 678, CarrierRules(21, 32, 4, 20));
+        yield return new NativeTableLayout(134, 1153, Later, []);
+        yield return new NativeTableLayout(135, 1109, Later, CarrierRules(33, 33, 10, 32));
+        yield return Layout(73, 1192, TerminalTariffs(later: false));
+        yield return new NativeTableLayout(73, 1192, Later, TerminalTariffs(later: true));
+
+        yield return new NativeTableLayout(24, 721, CallScreeningWire.CompactProfile, CompactCallScreenRules(60));
+        yield return new NativeTableLayout(59, 1021, CallScreeningWire.CompactProfile, CompactCallScreenRules(85));
+        yield return new NativeTableLayout(59, 1021, CallScreeningWire.ExpandedProfile, CallScreenRules(60));
+        yield return Layout(92, 1021, CallScreenRules(60));
+        yield return Layout(92, 3401, CallScreenRules(200));
+        yield return new NativeTableLayout(92, 3061, Later, CallScreenRules(180, later: true));
+        yield return Layout(93, 225, StoredValueSections([], later: false));
+        yield return new NativeTableLayout(93, 225, Later, []);
+
+        foreach (var type in new byte[] { 27, 28 })
+            yield return Layout(type, 2801, VisualPromptCatalog.Build(expanded: false));
+        foreach (var type in new byte[] { 85, 86, 98, 99 })
+            yield return new NativeTableLayout(type, 8001, Later, VisualPromptCatalog.Build(expanded: true));
+
+        foreach (var type in new byte[] { 131, 132, 133 })
+            yield return new NativeTableLayout(type, GraphicalRecordLength, Later, []);
+
+        for (byte type = 101; type <= 115; type++)
+            yield return Layout(type, 403, [AreaCode(), .. PairedRates(3, "Exchange")]);
+
+        foreach (var type in Enumerable.Range(136, 14).Concat([154, 155]))
+            yield return new NativeTableLayout((byte)type, 203, Later, [AreaCode(),
+                .. Rows("exchange", 200, i => $"Exchanges {200 + i * 4} through {203 + i * 4}", (i, key) =>
+                    [Bits($"{key}.0", $"Rate index for {200 + i * 4}", 3 + i, 192), Bits($"{key}.1", $"Rate index for {201 + i * 4}", 3 + i, 48),
+                     Bits($"{key}.2", $"Rate index for {202 + i * 4}", 3 + i, 12), Bits($"{key}.3", $"Rate index for {203 + i * 4}", 3 + i, 3)])]);
+
+        foreach (var type in Enumerable.Range(74, 8).Concat([90, 91]))
+            yield return Layout((byte)type, 819, [AreaCode(), .. Rows("exchange", 800, i => $"Exchange {200 + i}", (i, key) =>
+                [Field($"{key}.rate", "Rate index", 19 + i, max: 127)])]);
+
+        yield return new NativeTableLayout(AnswerSupervisionRecord, 199, Later, [Section("supervision", "Answer supervision timing",
+            Field("delay", "Delay before answer supervision (10 ms ticks)", 3, SignedWord, min: 0),
+            Field("wink", "Maximum wink duration (10 ms ticks)", 5, SignedWord, min: 0)),
+            .. Rows("pattern", 16, i => $"Dial pattern {i + 1}", (i, key) =>
+                [DialField($"{key}.digits", "Number pattern", 7 + i * 10, 6),
+                 Field($"{key}.plan", "Numbering plan reference", 13 + i * 10),
+                 Bits($"{key}.mode", "Supervision method code", 14 + i * 10, 7)])]);
+        yield return new NativeTableLayout(AnswerSupervisionRecord, LaterAnswerSupervisionLength, Later,
+            [Section("supervision", "Answer supervision timing",
+                Field("delay", "Delay before answer supervision (10 ms ticks)", 3, SignedWord, min: 0,
+                    help: "Delay for lines using polarity reversal to signal answer."),
+                Field("wink", "Maximum wink duration (10 ms ticks)", 5, SignedWord, min: 0,
+                    help: "Maximum duration of the brief polarity reversal on a wink-signaling line.")),
+             Section("control", "Line control",
+                Field("features", "Supervision feature flags", 1), Field("circuitControl", "Telephony circuit control code", 2)),
+             .. Rows("pattern", 16, i => $"Dial pattern {i + 1}", (i, key) =>
+             {
+                 var offset = 7 + i * 14;
+                 return [new NativeTableField($"{key}.digits", "Number pattern", offset, KeypadDial, 10),
+                     Field($"{key}.plan", "Numbering plan reference", offset + 10),
+                     Field($"{key}.definition", "Supervision definition code", offset + 11)];
+             })]);
+
+        yield return new NativeTableLayout(CodeDownloadWire.MessageType, CodeDownloadWire.RecordLength, Later, CodeDownloadSections());
+
+        yield return new NativeTableLayout(95, 153, Later, [Section("display", "Promotion messages",
+            TextField("prompt1", "First prompt", 91, 20), TextField("prompt2", "Second prompt", 111, 20), TextField("prompt3", "Third prompt", 131, 20)),
+            .. Rows("promotion", 10, i => $"Promotion range {i + 1}", (i, key) =>
+            {
+                var offset = 1 + i * 9;
+                return [Field($"{key}.application", "Application ID", offset), Toggle($"{key}.enable", "Enable promotion", offset + 1, 64),
+                    Bits($"{key}.faceValue", "Smart-card value index", offset + 1, 15),
+                    Digits($"{key}.start", "First card serial", offset + 2, 3, 6), Digits($"{key}.end", "Last card serial", offset + 5, 3, 6)];
+            })]);
+
+        yield return new NativeTableLayout(150, 401, Later, PairedRates(1, "Area code", AreaRatingOffset));
+
+        yield return new NativeTableLayout(151, 604, Later, InternationalRating());
+
+        yield return new NativeTableLayout(TimeDiscountRecord, 95, Later, TimeDiscountSections());
+    }
+
+    private static NativeTableSection[] CallScreenRules(int count, bool later = false) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
+    {
+        var offset = 1 + i * CallScreeningWire.ExpandedSlotLength;
+        return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, ScreeningPattern, 8,
+                Help: "Use ? to match one digit at that position."),
+            Select($"{key}.wildcards", "Trailing wildcard digits", offset + 3,
+                [.. Enumerable.Range(0, 15).Select(digits => (digits, digits.ToString())), (15, "Unlimited")]),
+            Bits($"{key}.classification", "Call classification", offset + 1, 15, CallKinds),
+            Bits($"{key}.payment", "Payment classification", offset + 1, 240, PaymentKinds),
+            Field($"{key}.rate", "Rate index", offset + 2, help: later
+                ? "Use 255 to keep toll-free data-port calls unrated as well as free voice calls."
+                : "Use 255 for an unrated free call."),
+            Toggle($"{key}.free", "Free call", offset, 1),
+            Toggle($"{key}.answer", "Require answer supervision", offset, 2),
+            Toggle($"{key}.carrier", "Apply carrier selection", offset, 4),
+            Toggle($"{key}.fallback", "Use only in fallback service", offset, 8),
+            Toggle($"{key}.mute", "Mute until answer supervision", offset, 16),
+            Toggle($"{key}.preDialDelay", "Wait before dialing", offset, 32),
+            new NativeTableField($"{key}.coinException", "Restrict route to coin payment", offset, Flag, Mask: 64,
+                Help: "Leave this off for a Multi-pay route that should accept cards. The phone can reject card payment before requesting authorization."),
+            Toggle($"{key}.featureGroupB", "Use Feature Group B", offset, 128),
+            Toggle($"{key}.denyModemData", "Deny modem data service", offset + 13, 1),
+            Toggle($"{key}.denyDataPort", "Deny data-port calls", offset + 13, 2),
+            .. later ? new[] {
+                Toggle($"{key}.restrictedAccess", "Allow in configurable restricted service", offset + 13, 4),
+                Toggle($"{key}.targetCdr", "Collect target call detail", offset + 13, 8),
+                Toggle($"{key}.translated", "Translate screened number", offset + 13, 0x40)
+            } : []];
+    });
+
+    private static NativeTableSection[] CompactCallScreenRules(int count) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
+    {
+        var offset = 1 + i * CallScreeningWire.CompactSlotLength;
+        var options = offset + 3;
+        return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, CompactScreeningPattern, 8,
+                Help: "Use ? to match one digit. B is the compact screening link marker."),
+            Bits($"{key}.classification", "Call classification", offset + 1, 15, [.. CallKinds, (14, "Electronic purse")]),
+            Field($"{key}.reference", "Rate or carrier reference", offset + 2, help: "Use 255 for no reference."),
+            Toggle($"{key}.free", "Free call", offset, 1),
+            Toggle($"{key}.answer", "Require answer supervision", offset, 2),
+            Toggle($"{key}.keypad", "Enable keypad", offset, 4),
+            Toggle($"{key}.fallback", "Use only in fallback service", offset, 8),
+            Toggle($"{key}.mute", "Mute transmitter", offset, 16),
+            Toggle($"{key}.preDialDelay", "Wait before dialing", offset, 32),
+            Toggle($"{key}.coinException", "Deny card payment", offset, 64),
+            Toggle($"{key}.featureGroupB", "Use Feature Group B", offset, 128),
+            Toggle($"{key}.denyModemData", "Deny message delivery service", options, 1),
+            Toggle($"{key}.denyDataPort", "Deny data-port calls", options, 2),
+            Toggle($"{key}.restrictedAccess", "Allow in restricted service", options, 4),
+            Toggle($"{key}.targetCdr", "Collect target call detail", options, 8),
+            Toggle($"{key}.prefix", "Enable prefix", options, 16),
+            Toggle($"{key}.emergency", "Enable emergency number handling", options, 32),
+            Toggle($"{key}.translated", "Translate screened number", options, 64)];
+    });
+
+    private static NativeTableSection[] CarrierRules(int count, int stride, int header, int cardCount) => [Section("selection", "Carrier selection",
+        [CarrierReference("primary", "Primary carrier reference", 1), CarrierReference("coinDefault", "Default coin carrier reference", 2),
+        CarrierReference("cardDefault", "Default credit-card carrier reference", 3),
+        .. (header == 10 ? new[] {
+            CarrierReference("intraPrimary", "Intra-area primary carrier reference", 4),
+            CarrierReference("intraCoin", "Intra-area coin carrier reference", 5),
+            CarrierReference("intraCard", "Intra-area credit-card carrier reference", 6),
+            CarrierReference("localPrimary", "Local primary carrier reference", 7),
+            CarrierReference("localCoin", "Local coin carrier reference", 8),
+            CarrierReference("localCard", "Local credit-card carrier reference", 9)
+        } : [])]),
+        .. Rows("carrier", count, i => $"Carrier {i}", (i, key) =>
+        {
+            var offset = header + i * stride;
+            var prompt = offset + 3 + (cardCount + 7) / 8;
+            var control = prompt + 20;
+            return [Field($"{key}.reference", "Carrier reference", offset, help: "Identifier used by card ranges and route selections. Use a distinct reference for each carrier, or 255 for an unused row."),
+                Digits($"{key}.access", "Carrier number", offset + 1, 2, 4),
+                new NativeTableField($"{key}.name", "Display name", prompt, DisplayText, 20),
+                Toggle($"{key}.promptNumber", "Ask for the destination number", control, 1),
+                Toggle($"{key}.stripLocalPrefix", "Remove the dialed prefix for local calls", control, 2),
+                Toggle($"{key}.stripIntraPrefix", "Remove the dialed prefix for intra-area calls", control, 4),
+                Toggle($"{key}.carrierCard", "Use carrier-card processing", control + 1, 1),
+                Toggle($"{key}.carrierPrompt", "Show the carrier's display name", control + 1, 2),
+                Toggle($"{key}.acceptCash", "Accept coins and stored-value cards", control + 1, 4),
+                Toggle($"{key}.alternateBongTimeout", "Use the alternate bong-tone timeout", control + 1, 8),
+                Toggle($"{key}.alternateBongDelay", "Use the alternate delay after the bong tone", control + 1, 16),
+                Toggle($"{key}.intraToLocalCarrier", "Send intra-area calls to the local carrier", control + 1, 32),
+                Toggle($"{key}.featureGroupBSpillOrder", "Use the alternate Feature Group B spill order", control + 1, 64),
+                Toggle($"{key}.featureGroupB", "Use Feature Group B", control + 1, 128),
+                Field($"{key}.featureGroupBTimeout", "Feature Group B timeout (10 ms ticks)", control + 2, Word),
+                Field($"{key}.screeningEntry", "Call-screening entry", control + 5, max: header == 10 ? 180 : 200,
+                    help: "Feature Group B requires a one-based rule number from the call-screening list."),
+                .. (cardCount == 32 ? new[] {
+                    Toggle($"{key}.localCardRate", "Use terminal rates for local credit-card calls", control + 4, 1),
+                    Toggle($"{key}.localCashRate", "Use terminal rates for local coin or stored-value calls", control + 4, 2),
+                    Toggle($"{key}.intraCardRate", "Use terminal rates for intra-area credit-card calls", control + 4, 4),
+                    Toggle($"{key}.intraCashRate", "Use terminal rates for intra-area coin or stored-value calls", control + 4, 8),
+                    Toggle($"{key}.interCardRate", "Use terminal rates for inter-area credit-card calls", control + 4, 16),
+                    Toggle($"{key}.interCashRate", "Use terminal rates for inter-area coin or stored-value calls", control + 4, 32)
+                } : []),
+                .. Enumerable.Range(0, cardCount).Select(card => Toggle($"{key}.card-{card}", $"Accept card range {card + 1}",
+                    offset + 3 + card / 8, 1 << card % 8))];
+        })];
+
+    internal static void ValidateCarrierChanges(ReadOnlySpan<byte> original, ReadOnlySpan<byte> record)
+    {
+        var later = record[0] == 135;
+        var start = later ? 10 : 4;
+        var stride = later ? 33 : 32;
+        var count = later ? 33 : 21;
+        var slotCount = later ? 180 : 200;
+        for (var index = 0; index < count; index++)
+        {
+            const int featureGroupB = 128;
+            var startOfRow = start + index * stride;
+            var control = startOfRow + stride - 5;
+            var screening = startOfRow + stride - 1;
+            if (record[startOfRow] != byte.MaxValue && (record[control] & featureGroupB) != 0 &&
+                (record[screening] == 0 || record[screening] > slotCount) &&
+                (original[startOfRow] == byte.MaxValue || (original[control] & featureGroupB) == 0 || original[screening] != record[screening]))
+                throw new InvalidOperationException($"Choose a call-screening entry from 1 to {slotCount} for Feature Group B on carrier {index}.");
+        }
+    }
+
+    private static NativeTableLayout ExpandNumberingPlan(NativeTableLayout layout, ReadOnlySpan<byte> record)
+    {
+        const int start = 33;
+        const int length = 180;
+        const int header = 6;
+        var plan = record.Slice(start, length);
+        var rules = new SortedDictionary<int, int>();
+        var pending = new Queue<int>();
+        pending.Enqueue(0);
+        while (pending.TryDequeue(out var position))
+        {
+            if (rules.ContainsKey(position))
+                continue;
+            if (position > length - header)
+                return layout;
+
+            var count = plan[position + 5];
+            var optionalBytes = (plan[position + 2] & 0x12) == 0 ? 0 : 1;
+            if (count == 0 || position + header + count + optionalBytes > length)
+                return layout;
+            rules.Add(position, count + optionalBytes);
+            if (plan[position] != 0)
+                pending.Enqueue(plan[position]);
+            if (plan[position + 1] != 0)
+                pending.Enqueue(plan[position + 1]);
+        }
+
+        var sections = new List<NativeTableSection>(layout.Sections);
+        var end = 0;
+        foreach (var (position, bodyLength) in rules)
+        {
+            if (position < end)
+                return layout;
+            end = position + header + bodyLength;
+            var offset = start + position;
+            var count = plan[position + 5];
+            var key = $"dial-{position}";
+            sections.Add(Section(key, $"Dial rule {sections.Count}",
+                [Bits($"{key}.classification", "Call classification", offset + 4, 15, CallKinds),
+                Toggle($"{key}.timeout", "Wait for the digit timeout", offset + 2, 4),
+                Toggle($"{key}.removeTerminator", "Remove the terminating key", offset + 2, 8),
+                Toggle($"{key}.networkBilling", "Use network billing", offset + 2, 32),
+                Toggle($"{key}.addTerminator", "Dial the configured terminating key", offset + 2, 64),
+                Toggle($"{key}.mute", "Mute until answer supervision", offset + 2, 128),
+                .. Enumerable.Range(0, count).Select(digit => Bits($"{key}.digit-{digit}", $"Match digit {digit + 1}",
+                    offset + header + digit, 31, NumberingDigits))]));
+        }
+
+        return layout with { Sections = sections };
+    }
+
+    private static NativeTableLayout QuickAccessLayout(bool later) => new(
+        QuickAccessKeyWire.MessageType, QuickAccessKeyWire.RecordLength, later ? Later : MultiPay,
+        Rows("key", QuickAccessKeyWire.SlotCount, i => $"Quick-access key {i + 1}", (i, key) =>
+        {
+            var offset = 1 + i * QuickAccessKeyWire.SlotLength;
+            NativeTableField[] variant = later
+                ? [Toggle($"{key}.restrictedAccess", "Allow in configurable restricted service", offset + 55, 1),
+                   Toggle($"{key}.targetCdr", "Collect target call detail", offset + 55, 2),
+                   Toggle($"{key}.pds", "Enable PDS dialing", offset + 55, 4),
+                   Toggle($"{key}.dataJack", "Data-jack or change-card key", offset + 55, 8)]
+                : [Toggle($"{key}.changeCard", "Change-card key", offset + 55, 8)];
+            return [new NativeTableField($"{key}.number", "Number to dial", offset + 3, KeypadDial, 8),
+                Field($"{key}.customerReference", "Customer reference", offset + 51, UnsignedLong),
+                TextField($"{key}.upper", "Upper display line", offset + 11, 20),
+                TextField($"{key}.lower", "Lower display line", offset + 31, 20),
+                Toggle($"{key}.free", "Free call", offset, QuickAccessKeyWire.FreeCall),
+                Toggle($"{key}.answer", "Require answer supervision", offset, QuickAccessKeyWire.AnswerSupervision),
+                Toggle($"{key}.carrierPrefix", "Use the stored number as a carrier access prefix", offset, QuickAccessKeyWire.CarrierPrefix),
+                Toggle($"{key}.keypad", "Enable keypad after answer", offset, QuickAccessKeyWire.EnableKeypad),
+                Toggle($"{key}.information", "Display information", offset, QuickAccessKeyWire.Information),
+                Toggle($"{key}.featureGroupB", "Feature Group B access", offset, QuickAccessKeyWire.FeatureGroupB),
+                Toggle($"{key}.advertising", "Show advertising for this key", offset + 56, QuickAccessKeyWire.Advertising),
+                Bits($"{key}.type", "Call classification", offset + 1, 15, CallKinds),
+                Bits($"{key}.payment", "Payment classification", offset + 1, 240, PaymentKinds),
+                Field($"{key}.rate", "Rate index", offset + 2,
+                    help: "Paid calls use a tariff index. Free Feature Group B calls use a carrier reference."),
+                .. variant];
+        }));
+
+    private static NativeTableSection AreaCode() => Section("region", "Local dialing region",
+        new NativeTableField("areaCode", "Area code", 1, LocalDialingArea,
+            Help: "Enter a three-digit area code. Leave it blank to disable lookups in this segment."));
+
+    private static NativeTableSection[] PairedRates(int offset, string label, int? tariffOffset = null) => Rows("pair", 400,
+        i => $"{label} {200 + i * 2} and {201 + i * 2}", (i, key) =>
+            [new NativeTableField($"{key}.even", $"Rate index for {200 + i * 2}", offset + i, TableFieldEncoding.Bits,
+                Mask: 240, TariffIndexOffset: tariffOffset),
+             new NativeTableField($"{key}.odd", $"Rate index for {201 + i * 2}", offset + i, TableFieldEncoding.Bits,
+                Mask: 15, TariffIndexOffset: tariffOffset)]);
+
+    private static NativeTableSection[] ReportTimes(int offset) => Rows("timestamp", 4, i => $"Report timestamp {i + 1}", (i, key) =>
+        [Hour($"{key}.hour", "Hour", offset + i * 2), Minute($"{key}.minute", "Minute", offset + i * 2 + 1)]);
+
+    private static NativeTableField[] DateTimeFields(string key, int offset) =>
+        [Field($"{key}.year", "Year (two digits)", offset, max: 99), Field($"{key}.month", "Month", offset + 1, max: 12),
+         Field($"{key}.day", "Day", offset + 2, max: 31), Hour($"{key}.hour", "Hour", offset + 3),
+         Minute($"{key}.minute", "Minute", offset + 4), Minute($"{key}.second", "Second", offset + 5)];
+
+    private static NativeTableSection[] Rows(string prefix, int count, Func<int, string> label,
+        Func<int, string, NativeTableField[]> fields) => Enumerable.Range(0, count).Select(i =>
+        {
+            var key = $"{prefix}-{i}";
+            return Section(key, label(i), fields(i, key));
+        }).ToArray();
+
+    private static NativeTableLayout Layout(byte number, int length, params NativeTableSection[] sections) =>
+        new(number, length, MultiPay, sections);
+    private static NativeTableSection Section(string key, string label, params NativeTableField[] fields) => new(key, label, fields);
+    private static NativeTableField Field(string key, string label, int offset, TableFieldEncoding encoding = UInt8,
+        int? min = null, int? max = null, string? help = null) => new(key, label, offset, encoding, Minimum: min, Maximum: max, Help: help);
+    private static NativeTableField Toggle(string key, string label, int offset, int mask) => new(key, label, offset, Flag, Mask: mask);
+    private static NativeTableField Select(string key, string label, int offset, params (int, string)[] values) =>
+        new(key, label, offset, Choices: values.Select(choice => new TableFieldChoice(choice.Item1, choice.Item2)).ToArray());
+    private static NativeTableField Bits(string key, string label, int offset, int mask, params (int, string)[] values) =>
+        new(key, label, offset, TableFieldEncoding.Bits, Mask: mask,
+            Choices: values.Length == 0 ? null : values.Select(choice => new TableFieldChoice(choice.Item1, choice.Item2)).ToArray());
+    private static NativeTableField Digits(string key, string label, int offset, int bytes, int digits) =>
+        new(key, label, offset, Bcd, bytes, Maximum: digits);
+    private static NativeTableField DialField(string key, string label, int offset, int bytes) => new(key, label, offset, Dial, bytes);
+    private static NativeTableField TextField(string key, string label, int offset, int width) => new(key, label, offset, Text, width);
+    private static NativeTableField Hour(string key, string label, int offset) => Field(key, label, offset, max: 23);
+    private static NativeTableField Minute(string key, string label, int offset) => Field(key, label, offset, max: 59);
+}

@@ -1,4 +1,9 @@
 import { test, expect } from '@playwright/test'
+import { signIn } from './auth'
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page)
+})
 
 /**
  * Tranche 11: NCC sessions list is a first-class operator page (not raw JSON).

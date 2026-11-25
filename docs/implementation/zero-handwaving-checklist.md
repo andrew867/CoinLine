@@ -30,3 +30,4 @@ Use this before merging protocol, API, or operator-facing features.
 - `dotnet test backend/HostPlatform.sln`
 - `cd web && npm ci && npm run build && npm run test`
 - `mkdocs build` for `docs-site` when documentation changed
+- `bash tools/public-docs-sanitize-check.sh` when public docs changed

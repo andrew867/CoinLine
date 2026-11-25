@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiPostBareCreated, apiPostBareOk } from '../api/client'
+import { apiFetch, apiPostBareCreated, apiPostBareOk } from '../api/client'
 
-const headers = { 'X-Operator-Id': 'ui@local', 'X-Operator-Role': 'Admin' }
 
 type Step = {
   id: string
@@ -21,6 +20,8 @@ type Step = {
 type Detail = {
   id: string
   terminalId: string
+  nccSessionId: string | null
+  scheduleId: string | null
   tableSetId: string
   tableSetName: string | null
   status: number
@@ -42,7 +43,7 @@ export function DownloadDetail() {
   const load = () => {
     if (!id) return
     setErr(null)
-    fetch(`/api/downloads/${id}`, { headers })
+    apiFetch(`/api/downloads/${id}`)
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Detail>
@@ -104,8 +105,8 @@ export function DownloadDetail() {
       } as Record<number, string>
     )[n] ?? String(n)
 
-  const canCancel = d.status === 1 || d.status === 5
-  const canRetry = d.status === 3 || d.status === 4
+  const canCancel = !d.scheduleId && (d.status === 0 || (d.status === 1 && !d.nccSessionId) || d.status === 5)
+  const canRetry = !d.scheduleId && (d.status === 3 || d.status === 4)
 
   return (
     <div>
@@ -117,9 +118,12 @@ export function DownloadDetail() {
       <p>
         <strong>{statusLabel(d.status)}</strong> · Terminal <code>{d.terminalId}</code>
       </p>
+      {d.nccSessionId && <p>NCC session <code>{d.nccSessionId}</code></p>}
+      {d.scheduleId && <p><Link to={`/table-sets/${d.tableSetId}`}>Manage scheduled download</Link></p>}
       <p>
         Set: {d.tableSetName ?? d.tableSetId} · Scope: {d.scope === 1 ? 'Partial' : 'Full'} · Retries: {d.retryCount}
       </p>
+      {d.lastError && <p role="alert">{d.lastError}</p>}
       {d.diagnosticsJson && (
         <pre style={{ background: '#f6f8fa', padding: 12, fontSize: 12 }}>{d.diagnosticsJson}</pre>
       )}
@@ -150,6 +154,7 @@ export function DownloadDetail() {
               Host phase: {s.hostDownloadPhaseName} ({s.hostDownloadPhase}) · ACK: {s.lastAckStatus} · Item status:{' '}
               {s.itemStatus}
             </div>
+            {s.errorDetail && <div>{s.errorDetail}</div>}
             <div style={{ fontSize: 12 }}>
               Payload SHA-256: <code>{s.payloadSha256Hex}</code>
             </div>

@@ -5,6 +5,7 @@ using HostPlatform.Api.Options;
 using HostPlatform.Api.Services;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -24,12 +25,14 @@ public sealed class FirmwareController(
 {
     /// <summary>UI / operators — surface whether live modem flashing is enabled (default false).</summary>
     [HttpGet("execution-policy")]
-    public ActionResult<object> ExecutionPolicy() =>
+    public ActionResult<object> ExecutionPolicy(
+        [FromServices] Microsoft.Extensions.Options.IOptions<HostPlatform.Firmware.DlTransportEnvironmentOptions> dlOpt) =>
         Ok(new
         {
             allowLiveFlashing = executionPolicy.AllowLiveFlashing,
+            liveDlaEnabled = dlOpt.Value.LiveDlaEnabled,
             hardwareValidationNotice =
-                "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only."
+                "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only. Live execute needs Firmware:AllowLiveFlashing and COINLINE_FIRMWARE_LIVE_DLA_ENABLED."
         });
 
     [AllowAnonymous]
@@ -40,23 +43,35 @@ public sealed class FirmwareController(
             .ToListAsync(ct));
 
     [AllowAnonymous]
+    [HttpGet("table-profiles")]
+    public ActionResult<object> TableProfiles() => Ok(FirmwareTableProfiles.Catalog.Select(profile =>
+        new { profile.Id, profile.Label, profile.VerifiedLengths, profile.CompleteCatalogue,
+            terminalAcknowledgedRecords = profile.TerminalAcknowledgedRecords.Order().ToArray() }));
+
+    [AllowAnonymous]
     [HttpGet("versions")]
     public async Task<ActionResult<IEnumerable<object>>> FirmwareVersions(CancellationToken ct) =>
         Ok(await db.FirmwareVersions.AsNoTracking()
             .OrderBy(v => v.Label)
-            .Select(v => new { v.Id, v.Label, v.BuildId })
+            .Select(v => new { v.Id, v.Label, v.BuildId, v.TableProfileId })
             .ToListAsync(ct));
 
-    public sealed record FirmwareVersionCreateDto(string Label, string? BuildId, string? Notes);
+    public sealed record FirmwareVersionCreateDto(string Label, string? BuildId, string? Notes, string? TableProfileId = null);
 
     [HttpPost("versions")]
     public async Task<ActionResult<object>> CreateFirmwareVersion([FromBody] FirmwareVersionCreateDto body, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(body.Label))
+            return BadRequest(new { error = "Enter a label for the firmware version." });
+        if (body.TableProfileId != null && FirmwareTableProfiles.Find(body.TableProfileId) == null)
+            return BadRequest(new { error = "Choose a known table layout profile." });
+
         var v = new FirmwareVersion
         {
             Label = body.Label.Trim(),
             BuildId = body.BuildId,
-            Notes = body.Notes
+            Notes = body.Notes,
+            TableProfileId = body.TableProfileId
         };
         db.FirmwareVersions.Add(v);
         ApiAudit.Write(db, HttpContext, "firmware.version", "create", $"FirmwareVersion:{v.Id}", new { v.Label }, null);
@@ -301,6 +316,26 @@ public sealed class FirmwareController(
         try
         {
             await orchestrator.SimulateJobAsync(id, ct);
+            var j = await db.FirmwareUpdateJobs.AsNoTracking().Include(x => x.Steps).FirstAsync(x => x.Id == id, ct);
+            return Ok(new { j.Id, j.Status, steps = j.Steps.Count });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { error = ex.Message });
+        }
+    }
+
+    /// <summary>
+    /// Dual-gated live DLA/XMODEM execute. Rejected unless Firmware:AllowLiveFlashing and
+    /// COINLINE_FIRMWARE_LIVE_DLA_ENABLED are both on. Default Compose leaves both off.
+    /// </summary>
+    [Authorize(Policy = Policies.RequireAdmin)]
+    [HttpPost("jobs/{id:guid}/execute-live")]
+    public async Task<ActionResult<object>> ExecuteLiveJob(Guid id, CancellationToken ct)
+    {
+        try
+        {
+            await orchestrator.ExecuteLiveJobAsync(id, observation: null, ct);
             var j = await db.FirmwareUpdateJobs.AsNoTracking().Include(x => x.Steps).FirstAsync(x => x.Id == id, ct);
             return Ok(new { j.Id, j.Status, steps = j.Steps.Count });
         }

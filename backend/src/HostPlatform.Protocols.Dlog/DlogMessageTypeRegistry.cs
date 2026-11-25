@@ -36,8 +36,13 @@ public static class DlogMessageTypeRegistry
         Add(19, "DLOG_MT_CALL_BACK_REQ", "DLOG_MA_CALL_BACK_REQ", false);
         Add(20, "DLOG_MT_TIME_SYNC", "DLOG_MA_TIME_SYNC", false);
         Add(21, "DLOG_MT_NCC_TERM_PARMS", "DLOG_MA_TAB_UPD_POTS", false);
+        Add(22, "DLOG_MT_CARD_TABLE", "DLOG_MA_TAB_UPD_NOCD", false, "Earlier firmware wire type.");
+        Add(23, "DLOG_MT_CARRIER_TABLE", "DLOG_MA_TAB_UPD", false, "Earlier firmware wire type.");
+        Add(24, "DLOG_MT_CALLSCRN_UNIVERSAL", "DLOG_MA_TAB_UPD", false, "Compact call-screening record.");
 
         Add(26, "DLOG_MT_FCONFIG_OPTS", "DLOG_MA_TAB_UPD_POTS", false);
+        Add(27, "DLOG_MT_VIS_PROMPTS_L1", "DLOG_MA_TAB_UPD", false, "Earlier firmware wire type.");
+        Add(28, "DLOG_MT_VIS_PROMPTS_L2", "DLOG_MA_TAB_UPD", false, "Earlier firmware wire type.");
         Add(29, "DLOG_MT_ADVERT_PROMPTS", "DLOG_MA_TAB_UPD", false);
         Add(30, "DLOG_MT_USER_IF_PARMS", "DLOG_MA_TAB_UPD", false);
         Add(31, "DLOG_MT_INSTALL_PARMS", "DLOG_MA_TAB_UPD_POTS", false);
@@ -59,13 +64,17 @@ public static class DlogMessageTypeRegistry
         Add(53, "DLOG_MT_CALL_DETAILS", "DLOG_MA_MULT_OUT", false, "Second DLOG_MT_CALL_DETAILS define in OEM compatibility catalogue (value 53).");
         Add(55, "DLOG_MT_REP_DIAL_LIST", "DLOG_MA_TAB_UPD", false);
         Add(56, "DLOG_MT_CALL_STATS", "DLOG_MA_MULT_OUT", false);
+        Add(57, "DLOG_MT_CARRIER_STATS", "DLOG_MA_MULT_OUT", false, "Earlier firmware wire type.");
         Add(58, "DLOG_MT_LIMSERV_DATA", "DLOG_MA_TAB_UPD", false);
+        Add(59, "DLOG_MT_CALL_SCREEN_LIST", "DLOG_MA_TAB_UPD", false, "Earlier firmware wire type.");
         Add(60, "DLOG_MT_SW_VERSION", "DLOG_MA_SW_VERSION", false);
         Add(61, "DLOG_MT_CN_CALL_DETAILS", "DLOG_MA_MULT_OUT", false);
         Add(62, "DLOG_MT_NUM_PLAN_TABLE", "DLOG_MA_TAB_UPD_POTS", false);
         Add(63, "DLOG_MT_RATE_REQUEST", "DLOG_MA_OUT_IMMED_CLR", true);
         Add(64, "DLOG_MT_RATE_RESPONSE", "DLOG_MA_INPUT", false);
         Add(65, "DLOG_MT_AUTH_RESP_CODE", "DLOG_MA_INPUT", false);
+        Add(68, "DLOG_MT_MDS_FCONFIG", "DLOG_MA_TAB_UPD", false, "Optional earlier service profile.");
+        Add(69, "DLOG_MT_MDS_STATS", "DLOG_MA_MULT_OUT", false, "Optional messaging service profile.");
         Add(70, "DLOG_MT_MDX_DEPOSIT_REC", "DLOG_MA_MULT_OUT", false,
             "OPEN QUESTION: Mondex docs cite immediate-clear scheduling; XSETROM catalogue lists DLOG_MA_MULT_OUT — reconcile with captures.");
         Add(71, "DLOG_MT_CARRIER_STATS", "DLOG_MA_MULT_OUT", false);

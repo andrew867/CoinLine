@@ -1,8 +1,13 @@
 import { test, expect } from '@playwright/test'
+import { signIn } from './auth'
+
+test.beforeEach(async ({ page }) => {
+  await signIn(page)
+})
 
 test('dashboard loads', async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Dashboard' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Home' })).toBeVisible()
 })
 
 test('customers page renders (JSON requires API on :5006)', async ({ page }) => {
@@ -31,7 +36,7 @@ test('ncc frame captures page loads', async ({ page }) => {
 
 test('dlog transactions page loads', async ({ page }) => {
   await page.goto('/dlog')
-  await expect(page.getByRole('heading', { name: 'DLOG transactions' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Message log' })).toBeVisible()
 })
 
 test('dlog replay debug page loads', async ({ page }) => {

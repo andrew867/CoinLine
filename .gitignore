@@ -6,6 +6,7 @@
 
 # .NET / tooling
 backend/.tools/
+backend/.test-out/
 **/TestResults/
 *.user
 *.suo
@@ -25,4 +26,10 @@ docs-site/site/
 
 # Secrets — never commit
 .env
+docker/sip.env
+**/sip.env
 *.pfx
+
+# Compose lab partition (see docker/data/README.md). Keep the README; ignore database and payload files.
+docker/data/postgres/
+docker/data/payloads/

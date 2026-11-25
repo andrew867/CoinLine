@@ -27,6 +27,7 @@ public sealed class FirmwareTranche8Tests(ApiFixture factory)
     {
         var pol = await _client.GetFromJsonAsync<JsonElement>("/api/firmware/execution-policy", JsonOpts);
         Assert.False(pol.GetProperty("allowLiveFlashing").GetBoolean());
+        Assert.False(pol.GetProperty("liveDlaEnabled").GetBoolean());
         Assert.Contains("HARDWARE_VALIDATION", pol.GetProperty("hardwareValidationNotice").GetString(), StringComparison.OrdinalIgnoreCase);
     }
 
@@ -224,5 +225,35 @@ public sealed class FirmwareTranche8Tests(ApiFixture factory)
             simulationMode = false
         });
         Assert.Equal(HttpStatusCode.BadRequest, job.StatusCode);
+    }
+
+    [Fact]
+    public async Task Execute_live_is_rejected_when_dual_gate_is_off()
+    {
+        var term = (await _client.GetFromJsonAsync<JsonElement>("/api/terminals"))![0];
+        var termId = term.GetProperty("id").GetGuid();
+        var pkgCreate = await _client.PostAsJsonAsync("/api/firmware/packages", new
+        {
+            name = "live gate pkg",
+            versionLabel = "1.0",
+            checksumHex = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            artifactSizeBytes = 1L,
+            metadataJson = "{}"
+        });
+        var pkgId = JsonSerializer.Deserialize<JsonElement>(await pkgCreate.Content.ReadAsStringAsync(), JsonOpts).GetProperty("id").GetGuid();
+        var jobCreate = await _client.PostAsJsonAsync($"/api/terminals/{termId}/firmware-jobs", new
+        {
+            firmwarePackageId = pkgId,
+            simulationMode = true
+        });
+        var jobId = JsonSerializer.Deserialize<JsonElement>(await jobCreate.Content.ReadAsStringAsync(), JsonOpts).GetProperty("id").GetGuid();
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsync($"/api/firmware/jobs/{jobId}/simulate", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await _client.PostAsJsonAsync($"/api/firmware/jobs/{jobId}/approve",
+            new { rollbackNotes = "Lab approve notes for gate rejection test." })).StatusCode);
+
+        var live = await _client.PostAsync($"/api/firmware/jobs/{jobId}/execute-live", null);
+        Assert.Equal(HttpStatusCode.Conflict, live.StatusCode);
+        var body = await live.Content.ReadAsStringAsync();
+        Assert.Contains("Live", body, StringComparison.OrdinalIgnoreCase);
     }
 }
