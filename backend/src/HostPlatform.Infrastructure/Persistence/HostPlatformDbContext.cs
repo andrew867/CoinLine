@@ -15,6 +15,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<InmateFeatureConfiguration> InmateFeatureConfigurations => Set<InmateFeatureConfiguration>();
     public DbSet<CarrierLibraryEntry> CarrierLibraryEntries => Set<CarrierLibraryEntry>();
     public DbSet<CardMasterDefinition> CardMasterDefinitions => Set<CardMasterDefinition>();
+    public DbSet<QuickAccessCustomer> QuickAccessCustomers => Set<QuickAccessCustomer>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
@@ -163,6 +164,22 @@ public class HostPlatformDbContext : DbContext
             b.Property(c => c.RowPayload).HasColumnType("bytea");
             b.Property(c => c.Version).IsConcurrencyToken();
             b.HasIndex(c => new { c.TableNumber, c.CodeKey }).IsUnique();
+        });
+        modelBuilder.Entity<QuickAccessCustomer>(b =>
+        {
+            b.Property(c => c.Reference).HasMaxLength(6);
+            b.Property(c => c.Name).HasMaxLength(160);
+            b.Property(c => c.BillingComments).HasMaxLength(2000);
+            b.Property(c => c.ContactName).HasMaxLength(40);
+            b.Property(c => c.Phone).HasMaxLength(64);
+            b.Property(c => c.Street).HasMaxLength(256);
+            b.Property(c => c.City).HasMaxLength(128);
+            b.Property(c => c.Province).HasMaxLength(128);
+            b.Property(c => c.PostalCode).HasMaxLength(32);
+            b.Property(c => c.Notes).HasMaxLength(2000);
+            b.Property(c => c.Version).IsConcurrencyToken();
+            b.HasIndex(c => c.Reference).IsUnique();
+            b.ToTable(t => t.HasCheckConstraint("CK_QuickAccessCustomers_Reference", "\"Reference\" ~ '^[0-9]{6}$' AND \"Reference\" <> '000000'"));
         });
         modelBuilder.Entity<TableSet>(b =>
         {
