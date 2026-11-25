@@ -42,4 +42,27 @@ public sealed class FirmwareTableProfileTests
         Assert.Contains(92, earlier.TerminalAcknowledgedRecords);
         Assert.DoesNotContain(33, earlier.TerminalAcknowledgedRecords);
     }
+
+    [Fact]
+    public void Graphical_profile_has_the_compiled_later_catalogue_plus_three_display_records()
+    {
+        var standard = FirmwareTableProfiles.Find(FirmwareTableProfiles.LaterMultiPay180)!;
+        var graphical = FirmwareTableProfiles.Find(FirmwareTableProfiles.GraphicalMultiPay180)!;
+        Assert.Equal(45, graphical.VerifiedLengths.Count);
+        Assert.True(graphical.CompleteCatalogue);
+        Assert.Equal(18, graphical.TerminalAcknowledgedRecords.Count);
+        Assert.All(new[] { 131, 132, 133 }, number => Assert.Contains(number, graphical.TerminalAcknowledgedRecords));
+        foreach (var (number, length) in standard.VerifiedLengths)
+        {
+            Assert.Equal(length, graphical.VerifiedLengths[number]);
+            Assert.Equal(standard.LayoutFor(number), graphical.LayoutFor(number));
+        }
+        foreach (var number in new[] { 131, 132, 133 })
+        {
+            Assert.Equal(9224, graphical.VerifiedLengths[number]);
+            Assert.DoesNotContain(number, standard.VerifiedLengths.Keys);
+            Assert.Equal(NativeTableLayouts.Later, graphical.LayoutFor(number));
+        }
+        Assert.DoesNotContain(153, graphical.VerifiedLengths.Keys);
+    }
 }

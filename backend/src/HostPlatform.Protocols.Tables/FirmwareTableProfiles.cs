@@ -12,6 +12,7 @@ public static class FirmwareTableProfiles
 {
     public const string MultiPay200 = "mtr19-multipay-200";
     public const string LaterMultiPay180 = "mtr2x-multipay-180-double-compressed";
+    public const string GraphicalMultiPay180 = "mtr2x-multipay-graphical-180-double-compressed";
 
     public static IReadOnlyList<FirmwareTableProfile> Catalog { get; } =
     [
@@ -27,12 +28,16 @@ public static class FirmwareTableProfiles
             false, new HashSet<int>()),
         new(LaterMultiPay180, "MTR 2.x Multi-pay, 180-entry, double-compressed LCD",
             NativeTableLayouts.Later, LaterCatalogue(), new HashSet<int>(), true,
+            new HashSet<int> { 30, 32, 35, 50, 62 }),
+        new(GraphicalMultiPay180, "MTR 2.12-based graphical Multi-pay (type 40), 180-entry, double-compressed LCD",
+            NativeTableLayouts.Later, LaterCatalogue(graphical: true),
+            new HashSet<int> { 21, 26, 30, 31, 33, 49, 50, 62, 72, 73, 92, 93, 131, 132, 133, 134, 135, 136 }, true,
             new HashSet<int> { 30, 32, 35, 50, 62 })
     ];
 
     public static FirmwareTableProfile? Find(string? id) => Catalog.SingleOrDefault(profile => profile.Id == id);
 
-    private static IReadOnlyDictionary<int, int> LaterCatalogue()
+    private static IReadOnlyDictionary<int, int> LaterCatalogue(bool graphical = false)
     {
         var records = new Dictionary<int, int>
         {
@@ -44,6 +49,9 @@ public static class FirmwareTableProfiles
         };
         foreach (var number in Enumerable.Range(136, 14).Concat([154, 155]))
             records.Add(number, 203);
+        if (graphical)
+            foreach (var number in new[] { 131, 132, 133 })
+                records.Add(number, 9224);
         return ReadOnly(records);
     }
 

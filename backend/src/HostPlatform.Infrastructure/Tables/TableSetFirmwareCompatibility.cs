@@ -46,9 +46,10 @@ public static class TableSetFirmwareCompatibility
                 verifiedRecords.Add(number, data);
         }
 
-        if (profile?.Id is FirmwareTableProfiles.MultiPay200 or FirmwareTableProfiles.LaterMultiPay180)
+        if (profile?.Id is FirmwareTableProfiles.MultiPay200 or FirmwareTableProfiles.LaterMultiPay180
+            or FirmwareTableProfiles.GraphicalMultiPay180)
         {
-            var later = profile.Id == FirmwareTableProfiles.LaterMultiPay180;
+            var later = profile.Id != FirmwareTableProfiles.MultiPay200;
             if (verifiedRecords.TryGetValue(NumberingPlanWire.MessageType, out var numbering))
                 foreach (var finding in NumberingPlanWire.Review(numbering))
                     yield return new(NumberingPlanWire.MessageType, finding.Blocking, finding.Message);

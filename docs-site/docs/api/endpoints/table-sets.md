@@ -129,6 +129,8 @@ Graphical records MT131 through MT133 expose fields based on the screen type. A 
 
 Graphical screen and mixed-panel `.dwell` values use 10 ms ticks. The two nibbles in `.flash` and the MT131 `offHookDuration` field use seconds.
 
+`POST /api/tables/sets/{id}/graphical-starter` takes `enableSampleMenu` (boolean, default false). It adds MT131, MT132 and MT133 to a draft using the supplied default artwork, with an optional off-hook menu that navigates locally. The response includes the number of records created and their message types. An existing matching record is retained, making an exact retry idempotent. A conflicting existing record returns HTTP 409 without replacing any records. A known incompatible target profile returns HTTP 400. The endpoint requires Table records Add permission and does not publish or assign the set.
+
 The MT68 `serviceKey` field is write-only in the native field API. Omit it from `changes` to keep the stored key. The field response provides `editor: "password"` and `value: null`. Enabling messaging requires a valid service number and key.
 
 ## Inmate Feature Configurations
