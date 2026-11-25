@@ -29,7 +29,7 @@ export function RestrictedRouteReview({ records }: { records: RestrictedRouteRec
   const candidates = records?.flatMap(record => record.routes).filter(route => route.dialable).length ?? 0
   return <section className="table-config-panel" aria-label="Permitted routes review">
     <h4>Configurable restricted access</h4>
-    <p>Mark routes and keys using <strong>Allow in configurable restricted service</strong> in Call-Screening List and Quick Access Keys.</p>
+    <p>Mark the permitted entries in Call-Screening List and Quick Access Keys using <strong>Allow in configurable restricted service</strong>.</p>
     <p>This review reads the saved companion records. A marked entry is not proof that the terminal will permit, rate or connect a call.</p>
     {records === null ? <p role="status">The saved companion-record review is unavailable. Check the firmware profile and open both records separately.</p> : <>
       <p role="status"><strong>{candidates}</strong> configured dialable {candidates === 1 ? 'candidate' : 'candidates'} in the included records.</p>
