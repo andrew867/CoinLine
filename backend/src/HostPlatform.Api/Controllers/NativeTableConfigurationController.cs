@@ -90,6 +90,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                     field.Choices,
                     field.TariffIndexOffset,
                     field.TariffFallbackCode,
+                    field.IsSpare,
+                    displayGlyphs = field.UsesDisplayGlyphs,
                     field.Help,
                     value = field.Read(raw)
                 })

@@ -19,7 +19,7 @@ public sealed record NativeTableField(
     string Key, string Label, int Offset, TableFieldEncoding Encoding = TableFieldEncoding.UInt8,
     int Size = 1, int Mask = 0, int? Minimum = null, int? Maximum = null,
     IReadOnlyList<TableFieldChoice>? Choices = null, string? Help = null, int? BitmapTypeOffset = null, int? TariffIndexOffset = null,
-    int? TariffFallbackCode = null)
+    int? TariffFallbackCode = null, bool IsSpare = false)
 {
     public string Editor => Encoding switch
     {
@@ -92,6 +92,7 @@ public sealed record NativeTableField(
 
     public bool IsCredential => Encoding is TableFieldEncoding.MessagingKey or TableFieldEncoding.CredentialBcd
         or TableFieldEncoding.PaddedCredentialBcd or TableFieldEncoding.CredentialHex;
+    public bool UsesDisplayGlyphs => Encoding is TableFieldEncoding.DisplayText or TableFieldEncoding.TerminatedDisplayText;
 
     private int Shift => BitOperations.TrailingZeroCount((uint)Mask);
 

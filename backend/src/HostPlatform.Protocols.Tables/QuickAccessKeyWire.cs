@@ -13,6 +13,9 @@ public static class QuickAccessKeyWire
     internal const byte Information = 0x40;
     internal const byte FeatureGroupB = 0x80;
     internal const byte Advertising = 0x01;
+    internal const byte MessageKey = 0x40;
+    internal static byte VariantSpareFlags(bool later) => later ? (byte)0xF0 : (byte)0xF7;
+    internal static byte FinalSpareFlags(bool later) => later ? (byte)0xFE : (byte)0xBE;
 
     public static void Clear(Span<byte> record, NativeTableLayout layout, IReadOnlyList<int> keys,
         IReadOnlyDictionary<string, string> changes)
@@ -34,8 +37,9 @@ public static class QuickAccessKeyWire
             slot[0] &= unchecked((byte)~(FreeCall | AnswerSupervision | CarrierPrefix | EnableKeypad | Information | FeatureGroupB));
             // Blank classification, reference, destination, two display lines, and customer reference.
             slot[1..55].Clear();
-            slot[55] &= layout.Profile == NativeTableLayouts.MultiPay ? (byte)0xF7 : (byte)0xF0;
-            slot[56] &= unchecked((byte)~Advertising);
+            var later = layout.Profile != NativeTableLayouts.MultiPay;
+            slot[55] &= VariantSpareFlags(later);
+            slot[56] &= FinalSpareFlags(later);
         }
     }
 }

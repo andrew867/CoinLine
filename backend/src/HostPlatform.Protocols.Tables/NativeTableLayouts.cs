@@ -249,8 +249,8 @@ public static partial class NativeTableLayouts
         yield return new NativeTableLayout(59, 1021, CallScreeningWire.CompactProfile, CompactCallScreenRules(85));
         yield return new NativeTableLayout(59, 1021, CallScreeningWire.ExpandedProfile, CallScreenRules(60));
         yield return Layout(92, 1021, CallScreenRules(60));
-        yield return Layout(92, 3401, CallScreenRules(200));
-        yield return new NativeTableLayout(92, 3061, Later, CallScreenRules(180, later: true));
+        yield return Layout(92, 3401, CallScreenRules(200, includeSpares: true));
+        yield return new NativeTableLayout(92, 3061, Later, CallScreenRules(180, later: true, includeSpares: true));
         yield return Layout(93, 225, StoredValueSections([], later: false));
         yield return new NativeTableLayout(93, 225, Later, []);
 
@@ -317,7 +317,7 @@ public static partial class NativeTableLayouts
         yield return new NativeTableLayout(TimeDiscountRecord, 95, Later, TimeDiscountSections());
     }
 
-    private static NativeTableSection[] CallScreenRules(int count, bool later = false) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
+    private static NativeTableSection[] CallScreenRules(int count, bool later = false, bool includeSpares = false) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
     {
         var offset = 1 + i * CallScreeningWire.ExpandedSlotLength;
         return [new NativeTableField($"{key}.pattern", "Number pattern", offset + 4, ScreeningPattern, 8,
@@ -343,8 +343,13 @@ public static partial class NativeTableLayouts
             .. later ? new[] {
                 Toggle($"{key}.restrictedAccess", "Allow in configurable restricted service", offset + 13, 4),
                 Toggle($"{key}.targetCdr", "Collect target call detail", offset + 13, 8),
+                Toggle($"{key}.pds", "Enable PDS dialing", offset + 13, CallScreeningWire.Pds),
                 Toggle($"{key}.translated", "Translate screened number", offset + 13, 0x40)
-            } : []];
+            } : [],
+            .. includeSpares ? new[] { SpareByte($"{key}.spare.identifierHigh", "Secondary identifier high byte", offset + 12) } : [],
+            .. includeSpares ? SpareFlags($"{key}.spare.identifier", "Secondary identifier low byte", offset + 13,
+                later ? CallScreeningWire.LaterSpareFlags : CallScreeningWire.OlderSpareFlags) : [],
+            .. includeSpares ? SpareBytes($"{key}.spare", offset + 14, 3) : []];
     });
 
     private static NativeTableSection[] CompactCallScreenRules(int count) => Rows("rule", count, i => $"Screening rule {i + 1}", (i, key) =>
@@ -498,11 +503,14 @@ public static partial class NativeTableLayouts
                    Toggle($"{key}.targetCdr", "Collect target call detail", offset + 55, 2),
                    Toggle($"{key}.pds", "Enable PDS dialing", offset + 55, 4),
                    Toggle($"{key}.dataJack", "Data-jack or change-card key", offset + 55, 8)]
-                : [Toggle($"{key}.changeCard", "Change-card key", offset + 55, 8)];
+                : [Toggle($"{key}.changeCard", "Change-card key", offset + 55, 8),
+                   new NativeTableField($"{key}.messageKey", "Audio-Gram message key", offset + 56, Flag,
+                       Mask: QuickAccessKeyWire.MessageKey,
+                       Help: "Used only by terminals with the optional messaging service enabled.")];
             return [new NativeTableField($"{key}.number", "Number to dial", offset + 3, KeypadDial, 8),
                 Field($"{key}.customerReference", "Customer reference", offset + 51, UnsignedLong),
-                TextField($"{key}.upper", "Upper display line", offset + 11, 20),
-                TextField($"{key}.lower", "Lower display line", offset + 31, 20),
+                new NativeTableField($"{key}.upper", "Upper display line", offset + 11, DisplayText, 20),
+                new NativeTableField($"{key}.lower", "Lower display line", offset + 31, DisplayText, 20),
                 Toggle($"{key}.free", "Free call", offset, QuickAccessKeyWire.FreeCall),
                 Toggle($"{key}.answer", "Require answer supervision", offset, QuickAccessKeyWire.AnswerSupervision),
                 Toggle($"{key}.carrierPrefix", "Use the stored number as a carrier access prefix", offset, QuickAccessKeyWire.CarrierPrefix),
@@ -514,7 +522,10 @@ public static partial class NativeTableLayouts
                 Bits($"{key}.payment", "Payment classification", offset + 1, 240, PaymentKinds),
                 Field($"{key}.rate", "Rate index", offset + 2,
                     help: "Paid calls use a tariff index. Free Feature Group B calls use a carrier reference."),
-                .. variant];
+                .. variant,
+                .. SpareFlags($"{key}.spare.variant", "Additional key identifier", offset + 55,
+                    QuickAccessKeyWire.VariantSpareFlags(later)),
+                .. SpareFlags($"{key}.spare.flags", "Key flags", offset + 56, QuickAccessKeyWire.FinalSpareFlags(later))];
         }));
 
     private static NativeTableSection AreaCode() => Section("region", "Local dialing region",
@@ -549,6 +560,13 @@ public static partial class NativeTableLayouts
     private static NativeTableField Field(string key, string label, int offset, TableFieldEncoding encoding = UInt8,
         int? min = null, int? max = null, string? help = null) => new(key, label, offset, encoding, Minimum: min, Maximum: max, Help: help);
     private static NativeTableField Toggle(string key, string label, int offset, int mask) => new(key, label, offset, Flag, Mask: mask);
+    private static NativeTableField SpareByte(string key, string label, int offset) => new(key, label, offset, IsSpare: true);
+    private static NativeTableField[] SpareBytes(string prefix, int offset, int count) => Enumerable.Range(0, count)
+        .Select(index => SpareByte($"{prefix}.byte{index + 1}", $"Spare byte {index + 1}", offset + index)).ToArray();
+    private static NativeTableField[] SpareFlags(string prefix, string label, int offset, int mask) =>
+        Enumerable.Range(0, 8).Where(bit => (mask & (1 << bit)) != 0)
+            .Select(bit => new NativeTableField($"{prefix}.bit{bit}", $"{label} spare bit {bit} (0x{1 << bit:X2})",
+                offset, Flag, Mask: 1 << bit, IsSpare: true)).ToArray();
     private static NativeTableField Select(string key, string label, int offset, params (int, string)[] values) =>
         new(key, label, offset, Choices: values.Select(choice => new TableFieldChoice(choice.Item1, choice.Item2)).ToArray());
     private static NativeTableField Bits(string key, string label, int offset, int mask, params (int, string)[] values) =>

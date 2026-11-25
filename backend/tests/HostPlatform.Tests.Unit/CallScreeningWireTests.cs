@@ -91,7 +91,7 @@ public sealed class CallScreeningWireTests
         Assert.Equal(new byte[] { 0, 0, 255 }, deleted[offset..(offset + 3)]);
         Assert.All(deleted[(offset + 3)..(offset + 12)], value => Assert.Equal(0, value));
         Assert.Equal(0xD2, deleted[offset + 12]);
-        Assert.Equal(count == 180 ? 0xB0 : 0xFC, deleted[offset + 13]);
+        Assert.Equal(count == 180 ? 0xA0 : 0xFC, deleted[offset + 13]);
         Assert.Equal(0x96, deleted[offset + 15]);
         foreach (var modified in new[] { blanked, deleted })
         {

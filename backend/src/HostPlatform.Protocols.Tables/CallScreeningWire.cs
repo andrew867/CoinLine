@@ -9,6 +9,9 @@ public static class CallScreeningWire
     public const string CompactProfile = "Compact screening, 12 bytes per entry";
     public const string ExpandedProfile = "Expanded screening, 17 bytes per entry";
     private const byte Translate = 0x40;
+    internal const byte Pds = 0x10;
+    internal const byte OlderSpareFlags = 0xFC;
+    internal const byte LaterSpareFlags = 0xA0;
 
     public static bool IsRecord(int number) => number is 24 or 59 or 92;
     public static bool NeedsLayoutChoice(int number) => number == 59;
@@ -72,7 +75,7 @@ public static class CallScreeningWire
             {
                 row[..12].Clear();
                 row[2] = byte.MaxValue;
-                row[13] &= SupportsSpeedDial(layout) ? (byte)0xB0 : (byte)0xFC;
+                row[13] &= SupportsSpeedDial(layout) ? LaterSpareFlags : OlderSpareFlags;
             }
         }
     }
