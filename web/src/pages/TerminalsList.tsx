@@ -4,6 +4,7 @@ import { terminalStatusLabel } from '../components/StatusBadge'
 import { apiFetch } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
+import { canReviewTerminalIdCutover } from './TerminalIdCutoverPage'
 
 
 type Row = {
@@ -80,6 +81,7 @@ export function TerminalsList() {
           Add a phone
         </Link>
       </p>}
+      {canReviewTerminalIdCutover() && <p><Link to="/terminals/identity-cutover">Review terminal ID cutover</Link></p>}
       {!canRead && <p>Read permission for Phones is required to view existing phone records.</p>}
       {canRead && <>
       <form className="table-config-selectors" aria-label="Find phones" onSubmit={applySearch}>

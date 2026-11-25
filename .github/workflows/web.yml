@@ -76,6 +76,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify terminal ID cutover review workflow
+        run: npm run e2e -- e2e/terminal-id-cutover.spec.ts --output test-results/terminal-id-cutover
+        env:
+          CI: "true"
+
       - name: Verify firmware profile revision workflow
         run: npm run e2e -- e2e/firmware-profile-revision.spec.ts --output test-results/firmware-profile-revision
         env:
