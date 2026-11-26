@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiPostBareOk } from '../api/client'
 import { carrierReportLabel } from './collectionPolicy'
 import { PerformanceReferenceSummary, performanceReportRanges, type PerformanceReference } from './PerformanceReportReference'
+import { CollectionReportReference, type CollectionReference } from './CollectionReportReference'
 import './UploadDetail.css'
 
 
@@ -60,6 +61,8 @@ type Detail = {
   createdAtUtc: string
   updatedAtUtc: string
   performanceReference?: PerformanceReference | null
+  collectionReference?: CollectionReference | null
+  callInReference?: CollectionReference | null
   records: RecordRow[]
 }
 
@@ -193,13 +196,16 @@ export function UploadDetail() {
       {d.isTerminalStatistics ? (
         <section aria-label="Received statistics" data-testid="upload-records">
           {d.records.map(({ id: recordId, terminalStatistics }) => terminalStatistics &&
-            <StatisticsReport key={recordId} report={terminalStatistics} performanceReference={d.performanceReference} />)}
+            <StatisticsReport key={recordId} report={terminalStatistics} performanceReference={d.performanceReference}
+              collectionReference={d.collectionReference} />)}
           <p>Received <time dateTime={d.createdAtUtc}>{new Date(d.createdAtUtc).toLocaleString()}</time></p>
         </section>
       ) : d.isTerminalCallDetail ? (
         <section aria-labelledby="terminal-call-details-heading">
           <h2 id="terminal-call-details-heading" data-testid="upload-records">Received call record</h2>
           {d.records.map(({ id: recordId, terminalCall }) => terminalCall && <TerminalCallDetails key={recordId} call={terminalCall} />)}
+          <CollectionReportReference number={34} reference={d.collectionReference} />
+          <CollectionReportReference number={35} reference={d.callInReference} />
           <p>Received <time dateTime={d.createdAtUtc}>{new Date(d.createdAtUtc).toLocaleString()}</time></p>
         </section>
       ) : (
@@ -237,7 +243,8 @@ export function UploadDetail() {
   )
 }
 
-function StatisticsReport({ report, performanceReference }: { report: TerminalStatistics; performanceReference?: PerformanceReference | null }) {
+function StatisticsReport({ report, performanceReference, collectionReference }: { report: TerminalStatistics;
+  performanceReference?: PerformanceReference | null; collectionReference?: CollectionReference | null }) {
   const period = (value: string | null) => value?.replace('T', ' ') ?? 'Unavailable'
 
   return <article className="upload-statistics">
@@ -251,6 +258,7 @@ function StatisticsReport({ report, performanceReference }: { report: TerminalSt
       </dl>
     </header>
     {report.messageType === 37 && <PerformanceReferenceSummary reference={performanceReference} />}
+    {[56, 57, 71].includes(report.messageType) && <CollectionReportReference number={34} reference={collectionReference} />}
     {report.groups.length > 0 && <CounterGroups groups={report.groups}
       performanceReference={report.messageType === 37 ? performanceReference : null} />}
     {report.carriers.map(({ reference, groups }, index) => <details key={`${reference}-${index}`} open={index === 0}>

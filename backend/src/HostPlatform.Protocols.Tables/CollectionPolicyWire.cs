@@ -5,12 +5,31 @@ namespace HostPlatform.Protocols.Tables;
 
 public sealed record CollectionPolicyFinding(bool Blocking, string Message);
 public sealed record PerformanceTimingPair(int MeasurementIndex, short StartTicks, short IntervalTicks);
+public sealed record CollectionTimestamp(byte Hour, byte Minute);
+public sealed record CallCarrierCollectionSettings(byte StartHour, byte StartMinute, byte Days, byte Threshold,
+    IReadOnlyList<CollectionTimestamp> Timestamps, byte PolicyFlags, byte DetailThreshold,
+    byte DetailHour, byte DetailMinute, byte DetailDays, byte DetailHours);
 
 public static class CollectionPolicyWire
 {
     public const byte CommunicationsType = 32;
     public const byte CallCarrierType = 34;
     public const int OptionalCdrMask = 0x1D;
+
+    // Keep the stored flags, including the profile-dependent combined mode bit.
+    // A record length alone does not establish the historical feature profile.
+    public static CallCarrierCollectionSettings? ReadCallCarrierSettings(ReadOnlySpan<byte> record)
+    {
+        if (record.Length != 19 || record[0] != CallCarrierType) return null;
+        var timestamps = new CollectionTimestamp[4];
+        for (var index = 0; index < timestamps.Length; index++)
+            timestamps[index] = new(record[5 + index * 2], record[6 + index * 2]);
+        return new(record[1], record[2], record[3], record[4], timestamps, record[13], record[14],
+            record[15], record[16], record[17], record[18]);
+    }
+
+    public static int? ReadCallInRecordThreshold(ReadOnlySpan<byte> record) =>
+        record.Length == 21 && record[0] == NativeTableLayouts.CallInRecord ? record[12] : null;
 
     /// <summary>Only the four active MT32 timing pairs are used by the shared MT37 report.</summary>
     public static IReadOnlyList<PerformanceTimingPair>? ReadPerformanceTiming(ReadOnlySpan<byte> record)

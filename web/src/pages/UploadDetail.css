@@ -45,6 +45,9 @@
 
 .performance-report-reference { border: 1px solid var(--line); border-radius: 12px; padding: 12px 16px; }
 .performance-report-reference h3 { margin-top: 0; }
+.collection-reference-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 20px; margin: 14px 0; }
+.collection-reference-fields dt { color: var(--muted); font-size: .82rem; }
+.collection-reference-fields dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .performance-report-range { display: block; font-size: .84rem; color: var(--muted); margin-top: 3px; }
 
 .graphical-usage-scroll { overflow-x: auto; }
