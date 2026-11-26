@@ -1,0 +1,9 @@
+# Set up a phone or a configuration
+
+1. In **Phones**, register the terminal with its actual line identity, installation site, firmware release and family. The registration is not a download.
+2. In **Table sets**, choose **Start guided configuration setup**. Choose a published starting configuration with the matching registered native firmware profile and the intended terminal family. Give the new draft a name.
+3. Choose card-only, coin-only, Multi-pay or unchanged payment mode. Choose an offline local tariff structure, the existing pricing, or a separately managed host real-time plan. For offline pricing, select the exact MT73 rate row already referenced by the local route. Choose whether to rotate idle advertisements.
+4. Review the intended record changes, the family checklist, payment availability and provisioning findings. Create the new draft only after reviewing the result. The source remains untouched and the new set is not assigned, published or queued automatically.
+5. Open the resulting draft and complete the terminal-specific management access, local route, coin acceptance, card/carrier configuration, advertising and required tables. Correct any validation findings. Publish and use the normal assignment/preparation workflow, then check the terminal acknowledgement and actual operation.
+
+The wizard deliberately does not invent a card range, coin calibration, rate-plan route, access identity or missing proprietary table. It copies a known configuration, modifies only the selected typed fields in MT26 and MT73, and retains every unrelated record and byte. A length-only or unregistered profile must be reviewed using the ordinary configuration tools first. Selecting host rating does not silently turn a terminal route into a host-rated one; review the route and published host rate plan separately.

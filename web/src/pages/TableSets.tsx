@@ -1,8 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
+import { ConfigurationSetupWizard } from './ConfigurationSetupWizard'
 
 
 type Row = {
@@ -14,6 +15,7 @@ type Row = {
   publishedAtUtc: string | null
   publishGeneration: number
   targetFirmware: string | null
+  targetFirmwareVersionId?: string | null
 }
 
 export function TableSets() {
@@ -24,6 +26,9 @@ export function TableSets() {
   const [message, setMessage] = useState('')
   const canRead = canPerform('table-sets', op.read)
   const canAdd = canPerform('table-sets', op.add)
+  const [query] = useSearchParams()
+  const [showSetup, setShowSetup] = useState(query.get('setup') === '1')
+  const canSetup = canRead && canAdd && canPerform('table-records', op.read) && canPerform('table-records', op.update)
 
   function load() {
     if (!canRead) return
@@ -64,6 +69,10 @@ export function TableSets() {
   return (
     <div>
       <h1>Table sets</h1>
+      {canSetup && <>
+        <button type="button" className="quiet" aria-expanded={showSetup} onClick={() => setShowSetup(value => !value)}>{showSetup ? 'Hide guided setup' : 'Start guided configuration setup'}</button>
+        {showSetup && rows && <ConfigurationSetupWizard sources={rows} onCreated={load} />}
+      </>}
       {(canPerform('card-master', op.read) || canPerform('card-master', op.add)) && <p><Link to="/card-master">Card Master List</Link></p>}
       {canPerform('inmate-features', op.read) && <p><Link to="/inmate-features">Inmate Feature Configurations</Link></p>}
       {canAdd && <form onSubmit={(e) => void createSet(e)} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>

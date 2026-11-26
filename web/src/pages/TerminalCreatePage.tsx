@@ -99,6 +99,9 @@ export function TerminalCreatePage() {
         <Link to="/terminals">← Phones</Link>
       </p>
       <h1>Create terminal</h1>
+      <p>First register the phone with its actual line identity, site, terminal family and installed firmware. After registration, review the configuration assignment and initial download separately.</p>
+      {canPerform('table-sets', op.read) && canPerform('table-sets', op.add) && canPerform('table-records', op.read) && canPerform('table-records', op.update) &&
+        <p>Need a matching set? <Link to="/table-sets?setup=1">Use guided configuration setup</Link> to choose payment, pricing and advertising before assignment.</p>}
       {!options && !err && <p>Loading phone registration choices…</p>}
       {options && options.sites.length === 0 && (
         <EmptyHint>No sites — create a customer, site, then return here.</EmptyHint>
