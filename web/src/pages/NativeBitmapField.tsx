@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  bitmapBit, bitmapByteIndex, bitmapHeight as height, bitmapPixelIsLit, bitmapWidth as width,
-  emptyBitmap, encodeBitmap, exportBitmap, invertBitmap,
+  bitmapHeight as height, bitmapPixelIsLit, bitmapWidth as width,
+  emptyBitmap, exportBitmap, invertBitmap, packBitmapPixels,
 } from './graphicalBitmap'
 
 export function NativeBitmapPreview({ name, value }: { name: string; value: string }) {
@@ -49,15 +49,10 @@ export function NativeBitmapField({ name, value, savedValue, onChange }: {
         context.fillRect(0, 0, width, height)
         context.drawImage(image, 0, 0)
         const pixels = context.getImageData(0, 0, width, height).data
-        const bitmap = new Uint8Array(width * height / 8)
-        for (let y = 0; y < height; y++) {
-          for (let x = 0; x < width; x++) {
-            const index = (y * width + x) * 4
-            const darkness = pixels[index] * .299 + pixels[index + 1] * .587 + pixels[index + 2] * .114
-            if (darkness < 128) bitmap[bitmapByteIndex(x, y)] |= bitmapBit(y)
-          }
-        }
-        onChange(encodeBitmap(bitmap))
+        onChange(packBitmapPixels((x, y) => {
+          const index = (y * width + x) * 4
+          return pixels[index] * .299 + pixels[index + 1] * .587 + pixels[index + 2] * .114 < 128
+        }))
       } finally {
         image.close()
       }

@@ -2,7 +2,9 @@ export const bitmapWidth = 112
 export const bitmapHeight = 72
 const bitmapBytes = bitmapWidth * bitmapHeight / 8
 
-export const bitmapByteIndex = (x: number, y: number) => Math.floor(y / 8) * bitmapWidth + x
+// The packed graphic stores the bottom display band first. Within each 8-dot
+// band, bit 0 is the top pixel and bit 7 is the bottom pixel.
+export const bitmapByteIndex = (x: number, y: number) => Math.floor((bitmapHeight - 1 - y) / 8) * bitmapWidth + x
 export const bitmapBit = (y: number) => 1 << (y % 8)
 
 export const bitmapPixelIsLit = (bitmap: string, x: number, y: number) =>
@@ -10,6 +12,16 @@ export const bitmapPixelIsLit = (bitmap: string, x: number, y: number) =>
 
 export const encodeBitmap = (bitmap: Uint8Array) => btoa(String.fromCharCode(...bitmap))
 export const emptyBitmap = encodeBitmap(new Uint8Array(bitmapBytes))
+
+export function packBitmapPixels(isLit: (x: number, y: number) => boolean): string {
+  const bitmap = new Uint8Array(bitmapBytes)
+  for (let y = 0; y < bitmapHeight; y++) {
+    for (let x = 0; x < bitmapWidth; x++) {
+      if (isLit(x, y)) bitmap[bitmapByteIndex(x, y)] |= bitmapBit(y)
+    }
+  }
+  return encodeBitmap(bitmap)
+}
 
 export function invertBitmap(value: string): string {
   return encodeBitmap(Uint8Array.from(atob(value), byte => byte.charCodeAt(0) ^ 255))

@@ -12,6 +12,8 @@ test('finds a saved graphical link issue and saves the exact corrected mixed-pan
   let saved: Record<string, string> | null = null
   const field = (key: string, label: string, value: string, editor: string) =>
     ({ key, label, value, editor, isSpare: false, min: 0, max: 255, maxLength: null, choices: null, help: null })
+  const bitmap = Buffer.alloc(1008)
+  bitmap[896] = 1; bitmap[785] = 2; bitmap[111] = 128
   const links = () => ({
     records: [{ number: 131, availability: 'included' }, { number: 132, availability: 'missing' },
       { number: 133, availability: 'included' }],
@@ -35,6 +37,10 @@ test('finds a saved graphical link issue and saves the exact corrected mixed-pan
         { ...field('screen-0.kind', 'Screen type', '84', 'screen-kind'), choices: [{ value: 84, label: 'Text' }] },
         field('screen-0.text', 'Screen text', 'Welcome', 'screen-text'),
         field('screen-0.next', 'Next screen', next, 'screen-link'),
+      ] },
+      { key: 'screen-1', label: 'Screen 2', graphicalScreenIndex: 1, fields: [
+        { ...field('screen-1.kind', 'Screen type', '66', 'screen-kind'), choices: [{ value: 66, label: 'Bitmap' }] },
+        field('screen-1.bitmap', 'Artwork', bitmap.toString('base64'), 'bitmap'),
       ] },
       { key: 'button-0', label: 'Screen 1, key 1', graphicalScreenIndex: 0, fields: [field('button-0.next', 'Next screen', '8', 'screen-link')] },
     ] })
@@ -92,4 +98,11 @@ test('finds a saved graphical link issue and saves the exact corrected mixed-pan
   await expect(corrected).toContainText('Resolved')
   await review.getByLabel('Review scope').selectOption('all')
   await expect(review.getByText('1 advisory finding in 3 saved references.')).toBeVisible()
+  await page.getByLabel('Section or entry').selectOption('screen-1')
+  const canvas = page.getByRole('img', { name: 'Artwork preview' })
+  await expect(canvas).toBeVisible()
+  await expect.poll(() => canvas.evaluate(element => {
+    const ctx = (element as HTMLCanvasElement).getContext('2d')!
+    return [[0, 0], [1, 9], [111, 71], [0, 64], [111, 7]].map(([x, y]) => Array.from(ctx.getImageData(x, y, 1, 1).data))
+  })).toEqual([[152, 247, 216, 255], [152, 247, 216, 255], [152, 247, 216, 255], [22, 49, 42, 255], [22, 49, 42, 255]])
 })
