@@ -103,9 +103,11 @@ public sealed class NccListenerSecurityTests
         first.Dispose();
         await WaitSessionsAsync(factory, 1, 0);
 
-        using var replacement = await ConnectAsync(baseFactory.Port);
+        // Persisting Closed precedes disposing the handler scope and releasing
+        // its semaphore slot. Wait for observable admission, not just the
+        // database timestamp, and retry only a socket closed before any ACK.
+        using var replacement = await ConnectAfterSlotReleaseAsync(baseFactory.Port);
         await WaitSessionsAsync(factory, 2, 1);
-        await SendAndReadAckAsync(replacement);
     }
 
     [Fact]
@@ -212,6 +214,38 @@ public sealed class NccListenerSecurityTests
             return client;
         }
         catch { client.Dispose(); throw; }
+    }
+
+    private static async Task<TcpClient> ConnectAfterSlotReleaseAsync(int port)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(7));
+        while (true)
+        {
+            var client = new TcpClient();
+            var admitted = false;
+            try
+            {
+                await client.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+                var stream = client.GetStream();
+                await stream.WriteAsync(Message(), timeout.Token);
+                var ack = new byte[6];
+                if (await stream.ReadAsync(ack.AsMemory(0, 1), timeout.Token) != 0)
+                {
+                    admitted = true;
+                    await stream.ReadExactlyAsync(ack.AsMemory(1), timeout.Token);
+                    var parse = NccFrameCodec.TryDecode(ack, NccParseMode.Strict);
+                    Assert.True(parse.Success);
+                    Assert.NotEqual(0, parse.Packet!.Control & NccControl.Ack);
+                    return client;
+                }
+            }
+            catch (IOException ex) when (!admitted && ex.InnerException is SocketException
+                { SocketErrorCode: SocketError.ConnectionReset or SocketError.ConnectionAborted or SocketError.Shutdown })
+            { /* A capacity-declined loopback socket can close with FIN or reset. */ }
+            catch { client.Dispose(); throw; }
+            client.Dispose();
+            await Task.Delay(20, timeout.Token);
+        }
     }
 
     private static Task AssertClosedAsync(TcpClient client) => AssertClosedAsync(client.GetStream());
