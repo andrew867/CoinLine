@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test'
 import { signIn } from './auth'
 
-test('edits coin, international and time-of-day settings without changing unrelated packed values', async ({ page, baseURL }) => {
+test('edits coin, international and time-of-day settings and reviews the routes affected by a local tariff', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
   if (!baseURL) throw new Error('The console fixture requires a local base URL.')
   const origin = new URL(baseURL).origin
   const setId = '00000000-0000-4000-8000-000000000601'
@@ -43,6 +44,15 @@ test('edits coin, international and time-of-day settings without changing unrela
         ],
       })),
     ] },
+    { number: 73, profile: 'Later packed profile', length: 1192, name: 'Terminal tariffs', revision: 1, sections: [1, 2].map(index => ({
+      key: `rate-${index}`, label: `Rate ${index}`, fields: [
+        { ...field(`rate-${index}.classification`, 'Rate classification', '3', 'select'), choices: [
+          { value: 1, label: 'Local measured service' }, { value: 2, label: 'Fixed local charge' }, { value: 3, label: 'Rate unavailable' }] },
+        { ...field(`rate-${index}.initialPeriod`, 'Initial period', '0', 'rate-period'), max: 32767 },
+        { ...field(`rate-${index}.initialCharge`, 'Initial charge', '0'), max: 65535 },
+        { ...field(`rate-${index}.additionalPeriod`, 'Additional period', '0', 'rate-period'), max: 32767 },
+        { ...field(`rate-${index}.additionalCharge`, 'Additional charge', '0'), max: 65535 },
+      ] })) },
   ]
   const saved = new Map<number, Record<string, string>>()
   const set = () => ({ id: setId, name: 'Workshop configuration', status: 0, revision: 1, customerId: null, isDefault: false,
@@ -63,6 +73,11 @@ test('edits coin, international and time-of-day settings without changing unrela
     }
     if (request.headers().authorization !== `Bearer ${fixtureToken}`) return route.fulfill({ status: 401 })
     if (url.pathname === `/api/tables/sets/${setId}`) return route.fulfill({ json: set() })
+    if (url.pathname === `/api/tables/sets/${setId}/tariffs/2/references`) return route.fulfill({ json: {
+      rateIndex: 2, setRevision: 1, profile: 'Fixture later profile', review: { supported: true, reason: null,
+        groups: [{ recordNumber: 92, kind: 'Screening rules', use: 'configured', count: 1, entries: ['Screening rule 1: 3335550120'] },
+          { recordNumber: 136, kind: 'Local exchanges in 205', use: 'configured', count: 3, entries: ['200 to 202'] }],
+        reviewedRecords: [92, 136], missingRecords: [55], unreviewedRecords: [], warnings: [] } } })
     const record = records.find(record => url.pathname === `/api/tables/sets/${setId}/records/${record.number}/fields`)
     if (record) {
       if (request.method() === 'PUT') {
@@ -134,4 +149,22 @@ test('edits coin, international and time-of-day settings without changing unrela
   await expect(preview).toContainText('MT73 rate 127')
   await preview.getByLabel('Test international destination prefix').fill('55')
   await expect(preview).toContainText('External rating | No destination matched')
+
+  await page.goto(`/table-sets/${setId}?record=73`)
+  await page.getByLabel('Section or entry').selectOption('rate-2')
+  const references = page.getByRole('region', { name: 'Terminal tariff references' })
+  await references.getByRole('button', { name: 'Review references' }).click()
+  await references.getByText('MT92 · Screening rules (1 reference)', { exact: true }).click()
+  await references.getByText('MT136 · Local exchanges in 205 (3 references)', { exact: true }).click()
+  await expect(references).toContainText('Screening rule 1: 3335550120')
+  await expect(references).toContainText('200 to 202')
+  await expect(references).toContainText('Not present here: MT55')
+  await page.getByLabel('Pricing structure').selectOption('flat')
+  await page.getByLabel('Whole call charge (cents)').fill('25')
+  await page.getByRole('button', { name: 'Apply pricing to this row' }).click()
+  await page.getByRole('button', { name: 'Save record' }).click()
+  await expect(page.getByText('Changes saved to this draft.')).toBeVisible()
+  expect(saved.get(73)).toEqual({ 'rate-2.classification': '2', 'rate-2.initialPeriod': '-1', 'rate-2.initialCharge': '25' })
+  await page.getByLabel('Section or entry').selectOption('rate-1')
+  await expect(page.getByLabel('Initial charge', { exact: true })).toHaveValue('0')
 })
