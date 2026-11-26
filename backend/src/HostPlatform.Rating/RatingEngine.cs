@@ -33,7 +33,8 @@ public static class RatingEngine
         IReadOnlyList<Diagnostic> Diagnostics,
         string DeterminismFingerprint,
         string DeterminismInputJson,
-        RatingAirtimeSource AirtimeSource);
+        RatingAirtimeSource AirtimeSource,
+        CallPricing? Pricing = null);
 
     public sealed record Diagnostic(string Code, string Severity, string Message);
 
@@ -100,14 +101,17 @@ public static class RatingEngine
                 default:
                 {
                     var minutes = Math.Max(0.01m, req.AssumedDurationMinutes);
-                    var amount = Math.Round(rule.RatePerMinuteUsd * minutes, 4, MidpointRounding.AwayFromZero);
+                    var pricing = new CallPricing(rule.PricingMode, rule.InitialChargeUsd, rule.RatePerMinuteUsd);
+                    var amount = pricing.Estimate(minutes);
                     diagnostics.Add(new Diagnostic(
                         "RATE_RULE",
                         "Info",
-                        $"Rule matched (rated): {rule.Pattern} @ {rule.RatePerMinuteUsd}/min × {minutes} min."));
+                        pricing.Mode == CallPricingMode.LegacyProrated
+                            ? $"Rule matched (rated): {rule.Pattern} @ {rule.RatePerMinuteUsd}/min × {minutes} min."
+                            : $"Rule matched (rated): {rule.Pattern}, {pricing.Mode}, first {pricing.FirstChargeUsd}, following {pricing.FollowingChargeUsd}, {minutes} min."));
                     AppendModeDiagnostics(req.Mode, diagnostics);
                     return Finish(RatingDecisionKind.Allowed, true, false, false, false, amount, req, diagnostics,
-                        RatingAirtimeSource.RateRule);
+                        RatingAirtimeSource.RateRule, pricing);
                 }
             }
         }
@@ -173,13 +177,16 @@ public static class RatingEngine
         if (rateTariff == null)
             return null;
 
-        var amount = Math.Round(rateTariff.RatePerMinuteUsd * minutes, 4, MidpointRounding.AwayFromZero);
+        var pricing = new CallPricing(rateTariff.PricingMode, rateTariff.InitialChargeUsd, rateTariff.RatePerMinuteUsd);
+        var amount = pricing.Estimate(minutes);
         diagnostics.Add(new Diagnostic(
             "TARIFF_RATE",
             "Info",
-            $"Catalog airtime @ {rateTariff.RatePerMinuteUsd}/min × {minutes} min."));
+            pricing.Mode == CallPricingMode.LegacyProrated
+                ? $"Catalog airtime @ {rateTariff.RatePerMinuteUsd}/min × {minutes} min."
+                : $"Catalog airtime: {pricing.Mode}, first {pricing.FirstChargeUsd}, following {pricing.FollowingChargeUsd}, {minutes} min."));
         AppendModeDiagnostics(req.Mode, diagnostics);
-        return Finish(RatingDecisionKind.Allowed, true, false, false, false, amount, req, diagnostics, src);
+        return Finish(RatingDecisionKind.Allowed, true, false, false, false, amount, req, diagnostics, src, pricing);
     }
 
     private static void AppendModeDiagnostics(RatingMode mode, List<Diagnostic> diagnostics)
@@ -281,7 +288,8 @@ public static class RatingEngine
         decimal amount,
         QuoteRequest req,
         List<Diagnostic> diagnostics,
-        RatingAirtimeSource airtimeSource = RatingAirtimeSource.None)
+        RatingAirtimeSource airtimeSource = RatingAirtimeSource.None,
+        CallPricing? pricing = null)
     {
         var inputObj = new
         {
@@ -297,7 +305,7 @@ public static class RatingEngine
         var inputJson = JsonSerializer.Serialize(inputObj, JsonOpts);
         var fp = Fingerprint(inputJson, diagnostics);
         return new QuoteResult(amount, kind, allowed, blocked, freeCall, emergencyCall, diagnostics, fp, inputJson,
-            airtimeSource);
+            airtimeSource, pricing);
     }
 
     private static string Fingerprint(string inputJson, IReadOnlyList<Diagnostic> diagnostics)

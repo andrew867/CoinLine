@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import { RatePlanPricing, describeRatePricing, type RatePricing } from './RatePlanPricing'
 
 type VerSummary = { id: string; versionNumber: number; status: number; publishedAtUtc: string | null }
 type Detail = {
@@ -13,7 +14,7 @@ type Detail = {
   versions: VerSummary[]
 }
 
-type RuleRow = {
+type RuleRow = RatePricing & {
   id: string
   priority: number
   matchKind: number
@@ -23,7 +24,7 @@ type RuleRow = {
   expression: string
 }
 
-type TariffRow = { id: string; name: string; ratePerMinuteUsd: number; notes: string }
+type TariffRow = RatePricing & { id: string; name: string; notes: string }
 type PrefixRow = { id: string; prefixDigits: string; tariffId: string | null; notes: string }
 type BandRow = {
   id: string
@@ -62,10 +63,10 @@ export function RatePlanDetail() {
   const [np, setNp] = useState(100)
   const [pat, setPat] = useState('888')
   const [out, setOut] = useState(0)
-  const [rpm, setRpm] = useState(0.05)
+  const [rulePricing, setRulePricing] = useState<RatePricing>({ pricingMode: 2, initialChargeUsd: 0, ratePerMinuteUsd: 0.05 })
 
   const [tarName, setTarName] = useState('Peak')
-  const [tarRpm, setTarRpm] = useState(0.12)
+  const [tarPricing, setTarPricing] = useState<RatePricing>({ pricingMode: 2, initialChargeUsd: 0, ratePerMinuteUsd: 0.12 })
   const [tarNotes, setTarNotes] = useState('')
 
   const [pfxDigits, setPfxDigits] = useState('1')
@@ -155,9 +156,19 @@ export function RatePlanDetail() {
         matchKind: 0,
         pattern: pat,
         outcome: out,
-        ratePerMinuteUsd: rpm,
+        ...(out === 0 ? rulePricing : { pricingMode: 0, initialChargeUsd: 0, ratePerMinuteUsd: 0 }),
         expression: '{}',
       })
+      await refreshVersion()
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : 'error')
+    }
+  }
+
+  async function saveRule(r: RuleRow) {
+    setErr(null)
+    try {
+      await apiPut(`/api/rate-rules/${r.id}`, r)
       await refreshVersion()
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'error')
@@ -171,7 +182,7 @@ export function RatePlanDetail() {
     try {
       await apiPost(`/api/rate-plans/${id}/versions/${selVer}/tariffs`, {
         name: tarName,
-        ratePerMinuteUsd: tarRpm,
+        ...tarPricing,
         notes: tarNotes || undefined,
       })
       await refreshVersion()
@@ -187,6 +198,8 @@ export function RatePlanDetail() {
       await apiPut(`/api/tariffs/${t.id}`, {
         name: t.name,
         ratePerMinuteUsd: t.ratePerMinuteUsd,
+        pricingMode: t.pricingMode ?? 0,
+        initialChargeUsd: t.initialChargeUsd ?? 0,
         notes: t.notes || undefined,
       })
       await refreshVersion()
@@ -306,8 +319,8 @@ export function RatePlanDetail() {
         <>
           <h1>{d.name}</h1>
           <p style={{ color: '#a60', maxWidth: 720 }}>
-            Editing rules and catalog rows is allowed only on <strong>draft</strong> versions. Publish to apply quotes.
-            This UI does not claim firmware parity.
+            Edit host pricing rules and tariffs on a <strong>draft</strong> version, then publish to enable real-time quotes.
+            For rates stored on the phone itself, edit MT73 in its terminal configuration set instead.
           </p>
           <p>
             Mode: {d.mode} · Published: {d.publishedVersionId ?? '—'}
@@ -350,7 +363,7 @@ export function RatePlanDetail() {
                 <th align="left">Pri</th>
                 <th align="left">Pattern</th>
                 <th align="left">Outcome</th>
-                <th align="left">$/min</th>
+                <th align="left">Pricing</th>
               </tr>
             </thead>
             <tbody>
@@ -366,7 +379,11 @@ export function RatePlanDetail() {
                     <td>{r.priority}</td>
                     <td>{r.pattern}</td>
                     <td>{r.outcome}</td>
-                    <td>{r.ratePerMinuteUsd}</td>
+                    <td>{r.outcome === 0 ? draft ? <>
+                      <RatePlanPricing value={r} onChange={pricing => setVerDetail(vd => vd ? { ...vd,
+                        rules: vd.rules.map(row => row.id === r.id ? { ...row, ...pricing } : row) } : vd)} />
+                      <button type="button" onClick={() => saveRule(r)}>Save rule pricing</button>
+                    </> : describeRatePricing(r) : 'Not rated'}</td>
                   </tr>
                 ))
               )}
@@ -386,10 +403,7 @@ export function RatePlanDetail() {
                 Outcome (0=rated,1=block,2=free,3=emergency){' '}
                 <input type="number" value={out} onChange={(e) => setOut(+e.target.value)} />
               </label>{' '}
-              <label>
-                $/min{' '}
-                <input type="number" step="0.01" value={rpm} onChange={(e) => setRpm(+e.target.value)} />
-              </label>{' '}
+              {out === 0 && <RatePlanPricing value={rulePricing} onChange={setRulePricing} />}
               <button type="submit">Add rule</button>
             </form>
           )}
@@ -400,7 +414,7 @@ export function RatePlanDetail() {
             <thead>
               <tr>
                 <th align="left">Name</th>
-                <th align="left">$/min</th>
+                <th align="left">Pricing</th>
                 <th align="left">Notes</th>
                 {draft && <th align="left">Actions</th>}
               </tr>
@@ -434,24 +448,8 @@ export function RatePlanDetail() {
                           />
                         </td>
                         <td>
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={t.ratePerMinuteUsd}
-                            onChange={(e) => {
-                              const ratePerMinuteUsd = +e.target.value
-                              setVerDetail((vd) =>
-                                vd
-                                  ? {
-                                      ...vd,
-                                      tariffs: vd.tariffs.map((x) =>
-                                        x.id === t.id ? { ...x, ratePerMinuteUsd } : x
-                                      ),
-                                    }
-                                  : vd
-                              )
-                            }}
-                          />
+                          <RatePlanPricing value={t} onChange={pricing => setVerDetail(vd => vd ? { ...vd,
+                            tariffs: vd.tariffs.map(row => row.id === t.id ? { ...row, ...pricing } : row) } : vd)} />
                         </td>
                         <td>
                           <input
@@ -481,7 +479,7 @@ export function RatePlanDetail() {
                     ) : (
                       <>
                         <td>{t.name}</td>
-                        <td>{t.ratePerMinuteUsd}</td>
+                        <td>{describeRatePricing(t)}</td>
                         <td>{t.notes}</td>
                       </>
                     )}
@@ -495,10 +493,7 @@ export function RatePlanDetail() {
               <label>
                 Name <input value={tarName} onChange={(e) => setTarName(e.target.value)} />
               </label>{' '}
-              <label>
-                $/min{' '}
-                <input type="number" step="0.01" value={tarRpm} onChange={(e) => setTarRpm(+e.target.value)} />
-              </label>{' '}
+              <RatePlanPricing value={tarPricing} onChange={setTarPricing} />
               <label>
                 Notes <input value={tarNotes} onChange={(e) => setTarNotes(e.target.value)} />
               </label>{' '}

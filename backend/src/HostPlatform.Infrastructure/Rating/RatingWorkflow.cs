@@ -86,6 +86,7 @@ public static class RatingWorkflow
                 quote.Allowed,
                 quote.DeterminismFingerprint,
                 airtimeSource = quote.AirtimeSource.ToString(),
+                pricing = quote.Pricing,
                 hostPlanQuote = true
             }, JsonOpts)
         };

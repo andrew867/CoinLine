@@ -7,7 +7,7 @@ namespace HostPlatform.Protocols.Dlog;
 /// The dialed number is 10 BCD bytes, high nibble first. A nibble above 9 ends the number.
 /// Sixteen-bit periods and charges are little-endian and packed on byte boundaries.
 /// Charges are cents. A type 64 payload is 26 bytes: message type, a 19-byte quote, and 6 spare bytes.
-/// The quote flag is 1 for a local rate, 3 when a rate is unavailable, 4 when the number is blocked,
+/// The quote flag is 1 for a local rate, 2 for a fixed local charge, 3 when a rate is unavailable, 4 when the number is blocked,
 /// and 5 or 6 for an intra-area or inter-area toll rate.
 /// </summary>
 public static class DlogRateWire
@@ -19,6 +19,7 @@ public static class DlogRateWire
     public const int ResponseLength = 26;
 
     public const byte RateFound = 1;
+    public const byte FixedLocalRateFound = 2;
     public const byte RateNotFound = 3;
     public const byte RateBlocked = 4;
     private const byte RateFoundIntraToll = 5;
@@ -121,6 +122,31 @@ public static class DlogRateWire
         };
         var info = allowed ? foundRateInfo : blocked ? RateBlocked : RateNotFound;
         return new RateQuote(info, period, charge, period, period, charge, period);
+    }
+
+    /// <summary>Build the actual offered rate ladder, not an estimated call total.</summary>
+    public static RateQuote QuoteFromPricing(decimal initialUsd, decimal additionalUsd, bool unlimitedInitial, byte callType)
+    {
+        var info = (callType & 0x0F) switch
+        {
+            4 => RateFoundIntraToll,
+            5 => RateFoundInterToll,
+            _ => unlimitedInitial ? FixedLocalRateFound : RateFound
+        };
+        var first = ExactCents(initialUsd);
+        var additional = ExactCents(additionalUsd);
+        if (unlimitedInitial && additional != 0)
+            throw new ArgumentException("An unlimited initial period cannot be followed by a recurring charge.", nameof(additionalUsd));
+        return unlimitedInitial
+            ? new RateQuote(info, ushort.MaxValue, first, ushort.MaxValue, 0, 0, 0)
+            : new RateQuote(info, 60, first, 60, 60, additional, 60);
+    }
+
+    private static ushort ExactCents(decimal price)
+    {
+        if (price < 0 || price > 655.35m || price * 100m != decimal.Truncate(price * 100m))
+            throw new ArgumentOutOfRangeException(nameof(price), "The rate must be an exact nonnegative number of cents fitting the wire field.");
+        return (ushort)(price * 100m);
     }
 
     private static void EncodeBcd(string digits, Span<byte> dest)

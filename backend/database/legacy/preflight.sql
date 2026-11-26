@@ -53,7 +53,7 @@ BEGIN
         RAISE EXCEPTION 'No CoinLine migration history in the selected schema. Use the normal baseline for a new database.';
     END IF;
     SELECT array_agg("MigrationId"::text ORDER BY "MigrationId") INTO observed FROM "__EFMigrationsHistory";
-    IF observed = known || ARRAY[baseline] THEN
+    IF observed = known || ARRAY[baseline] OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures'] THEN
         RETURN;
     END IF;
     IF observed IS NULL OR cardinality(observed) > cardinality(known)

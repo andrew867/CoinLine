@@ -2857,6 +2857,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("InitialChargeUsd")
+                        .HasColumnType("numeric");
+
                     b.Property<int>("MatchKind")
                         .HasColumnType("integer");
 
@@ -2866,6 +2869,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("Pattern")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("PricingMode")
+                        .HasColumnType("integer");
 
                     b.Property<int>("Priority")
                         .HasColumnType("integer");
@@ -3617,6 +3623,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<decimal>("InitialChargeUsd")
+                        .HasColumnType("numeric");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
@@ -3624,6 +3633,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("Notes")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("PricingMode")
+                        .HasColumnType("integer");
 
                     b.Property<decimal>("RatePerMinuteUsd")
                         .HasColumnType("numeric");

@@ -155,15 +155,16 @@ public sealed class PostgresCardEventPrivacyTests
         command.Parameters.AddWithValue("schema", schema);
         Assert.Equal(0L, (long)(await command.ExecuteScalarAsync())!);
         Assert.Contains(DatabaseBaseline.MigrationId, await db.Database.GetAppliedMigrationsAsync());
-        Assert.Equal(44, (await db.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(45, (await db.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
 
         // Compare the active schema created by the single baseline with the upgraded schema.
         var (freshConnection, _) = await IsolatedSchemaAsync(connection);
         await using var fresh = new HostPlatformDbContext(new DbContextOptionsBuilder<HostPlatformDbContext>().UseNpgsql(freshConnection).Options);
-        Assert.Equal(new[] { DatabaseBaseline.MigrationId }, fresh.Database.GetMigrations());
+        var activeMigrations = new[] { DatabaseBaseline.MigrationId, "20261126132338_AddCallPricingStructures" };
+        Assert.Equal(activeMigrations, fresh.Database.GetMigrations());
         await DatabaseBaseline.MigrateAsync(fresh);
-        Assert.Equal(new[] { DatabaseBaseline.MigrationId }, await fresh.Database.GetAppliedMigrationsAsync());
+        Assert.Equal(activeMigrations, await fresh.Database.GetAppliedMigrationsAsync());
         Assert.Empty(await fresh.Database.GetPendingMigrationsAsync());
         Assert.False(fresh.Database.HasPendingModelChanges());
         Assert.Equal(await ReadSchemaAsync(freshConnection), await ReadSchemaAsync(scoped));
@@ -204,7 +205,7 @@ public sealed class PostgresCardEventPrivacyTests
         await ApplyLegacySqlAsync(scoped, "stamp-baseline.sql");
         await DatabaseBaseline.MigrateAsync(db);
         db.ChangeTracker.Clear();
-        Assert.Equal(44, (await db.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Equal(45, (await db.Database.GetAppliedMigrationsAsync()).Count());
         Assert.Empty(await db.Database.GetPendingMigrationsAsync());
         Assert.Equal(set.Id, (await db.TerminalTableAssignments.SingleAsync(row => row.TerminalId == phone.Id)).TableSetId);
         var retained = await db.TableVersions.SingleAsync(row => row.Id == version.Id);

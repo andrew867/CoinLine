@@ -18,11 +18,20 @@ public enum RateRuleMatchKind
 /// <summary>What happens when a rule matches.</summary>
 public enum RateRuleOutcome
 {
-    /// <summary>Per-minute airtime from the matching rule (× quoted duration).</summary>
+    /// <summary>Charge according to the matching rule's pricing structure.</summary>
     Rated = 0,
     Block = 1,
     Free = 2,
     Emergency = 3
+}
+
+/// <summary>Call pricing structure. Zero retains existing prorated host estimates.</summary>
+public enum CallPricingMode
+{
+    LegacyProrated = 0,
+    FlatCall = 1,
+    PerStartedMinute = 2,
+    FirstAndFollowingMinutes = 3
 }
 
 /// <summary>High-level quote/authorize outcome (persisted on results and logs).</summary>
