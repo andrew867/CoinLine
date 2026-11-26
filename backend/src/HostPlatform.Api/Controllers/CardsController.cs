@@ -174,8 +174,7 @@ public sealed class CardsController(
                     t.Amount,
                     reconciliation = t.Reconciliation,
                     reportedCardType = t.ReportedCardType,
-                    t.DetailJson,
-                    rawPayloadJson = t.RawPayloadJson
+                    t.DetailJson
                 }
             })
             .ToListAsync(ct);
@@ -189,7 +188,7 @@ public sealed class CardsController(
                 kind = "cardRead",
                 atUtc = e.CreatedAtUtc,
                 title = "Card read event",
-                detail = new { e.Id, reportedCardType = e.ReportedCardType, e.RawPayloadJson, e.TerminalId }
+                detail = new { e.Id, reportedCardType = e.ReportedCardType, panLast4Display = CardIdentifierRedaction.MaskPanLast4(e.PanLast4), e.Result, e.TerminalId }
             })
             .ToListAsync(ct);
 
@@ -202,7 +201,7 @@ public sealed class CardsController(
                 kind = "cardWrite",
                 atUtc = e.CreatedAtUtc,
                 title = "Card write event",
-                detail = new { e.Id, e.RawPayloadJson }
+                detail = new { e.Id, reportedCardType = e.ReportedCardType, panLast4Display = CardIdentifierRedaction.MaskPanLast4(e.PanLast4), e.Disposition }
             })
             .ToListAsync(ct);
 
@@ -240,6 +239,8 @@ public sealed class CardsController(
         if (product == null)
             return BadRequest(new { error = "Unknown CardProductId" });
 
+        if (!string.IsNullOrEmpty(body.PanLast4) && !CardIdentifierRedaction.IsLast4(body.PanLast4))
+            return BadRequest(new { error = "Supply only the last four ASCII digits, or leave the field blank." });
         var resolved = body.ResolvedCardType ?? product.DefaultCardType;
         var a = new CardAccount
         {
@@ -328,17 +329,23 @@ public sealed class CardsController(
     [HttpPost("read-events")]
     public async Task<ActionResult<object>> ReadEvent([FromBody] CardReadEventDto body, CancellationToken ct)
     {
-        var raw = string.IsNullOrWhiteSpace(body.RawPayloadJson) ? "{}" : body.RawPayloadJson!;
+        if (!ValidObservation(body.PanLast4, body.ReportedCardType) ||
+            (body.Result is { } result && !Enum.IsDefined(result)))
+            return BadRequest(new { error = "Supply a valid card type, read result and optional last four ASCII digits." });
+        var account = await FindCardObservationAccountAsync(body.CardAccountId, ct);
+        if (body.CardAccountId != null && account == null)
+            return BadRequest(new { error = "Unknown CardAccountId" });
         var ev = new CardReadEvent
         {
             CardAccountId = body.CardAccountId,
             TerminalId = body.TerminalId,
-            ReportedCardType = body.ReportedCardType ?? CardType.Unknown,
-            RawPayloadJson = raw
+            ReportedCardType = body.ReportedCardType ?? account?.ResolvedCardType ?? CardType.Unknown,
+            PanLast4 = ObservationLast4(body.PanLast4, account),
+            Result = body.Result ?? CardReadResult.Unknown
         };
         db.CardReadEvents.Add(ev);
         ApiAudit.Write(db, HttpContext, "cards", "card_read_event", $"CardReadEvent:{ev.Id}",
-            new { body.CardAccountId, reportedCardType = ev.ReportedCardType, payloadLength = raw.Length });
+            new { body.CardAccountId, reportedCardType = ev.ReportedCardType, ev.Result });
         await db.SaveChangesAsync(ct);
         return Created($"/api/cards/read-events", new { ev.Id });
     }
@@ -360,7 +367,6 @@ public sealed class CardsController(
             account.CardBalance = cb;
         }
 
-        var raw = string.IsNullOrWhiteSpace(body.RawPayloadJson) ? "{}" : body.RawPayloadJson!;
         try
         {
             ledger.ApplyPaymentAmount(account, product, body.Amount);
@@ -375,9 +381,9 @@ public sealed class CardsController(
             CardAccountId = body.CardAccountId,
             Amount = body.Amount,
             Reconciliation = body.Reconciliation ?? ReconciliationStatus.Pending,
-            DetailJson = body.DetailJson ?? "{}",
+            DetailJson = "{}",
             ReportedCardType = body.ReportedCardType ?? account.ResolvedCardType,
-            RawPayloadJson = raw
+            RawPayloadJson = "{}"
         };
         db.PaymentTransactions.Add(tx);
 
@@ -642,17 +648,22 @@ public sealed class CardsController(
         if (!body.SimulationMode)
             return Conflict(new { error = "Non-simulation writes not implemented (HARDWARE_VALIDATION_REQUIRED)." });
 
+        if (!ValidObservation(body.PanLast4, body.ReportedCardType))
+            return BadRequest(new { error = "Supply a valid card type and optional last four ASCII digits." });
+        var account = await FindCardObservationAccountAsync(body.CardAccountId, ct);
+        if (body.CardAccountId != null && account == null)
+            return BadRequest(new { error = "Unknown CardAccountId" });
         var ev = new CardWriteEvent
         {
             CardAccountId = body.CardAccountId,
-            IntendedOperation = body.IntendedOperation ?? "unspecified",
-            RawPayloadJson = string.IsNullOrWhiteSpace(body.RawPayloadJson) ? "{}" : body.RawPayloadJson!,
+            PanLast4 = ObservationLast4(body.PanLast4, account),
+            ReportedCardType = body.ReportedCardType ?? account?.ResolvedCardType ?? CardType.Unknown,
             Disposition = CardWriteDisposition.Simulated,
             SimulationMode = true
         };
         db.CardWriteEvents.Add(ev);
         ApiAudit.Write(db, HttpContext, "cards", "card_write_simulated", $"CardWriteEvent:{ev.Id}",
-            new { disposition = ev.Disposition, intendedOperation = ev.IntendedOperation });
+            new { disposition = ev.Disposition, reportedCardType = ev.ReportedCardType });
         await db.SaveChangesAsync(ct);
         return Created($"/api/cards/write-events", new { ev.Id, ev.Disposition });
     }
@@ -677,15 +688,15 @@ public sealed class CardsController(
 
     public sealed record AdjustDto(decimal Delta, string? Reason, bool SimulationMode);
 
-    public sealed record CardReadEventDto(Guid? CardAccountId, Guid? TerminalId, CardType? ReportedCardType, string? RawPayloadJson);
+    // Unknown fields from older clients, such as raw payloads, are ignored by JSON binding.
+    public sealed record CardReadEventDto(Guid? CardAccountId, Guid? TerminalId, CardType? ReportedCardType,
+        string? PanLast4 = null, CardReadResult? Result = null);
 
     public sealed record PaymentTransactionDto(
         Guid CardAccountId,
         decimal Amount,
         ReconciliationStatus? Reconciliation,
-        string? DetailJson,
-        CardType? ReportedCardType,
-        string? RawPayloadJson);
+        CardType? ReportedCardType);
 
     public sealed record ReconciliationBatchCreateDto(string? DetailJson);
 
@@ -693,7 +704,18 @@ public sealed class CardsController(
 
     public sealed record ReconciliationExceptionDto(bool Confirm, string? Note);
 
-    public sealed record CardWriteEventDto(Guid? CardAccountId, string? IntendedOperation, string? RawPayloadJson, bool SimulationMode);
+    public sealed record CardWriteEventDto(Guid? CardAccountId, bool SimulationMode,
+        string? PanLast4 = null, CardType? ReportedCardType = null);
+
+    private static bool ValidObservation(string? last4, CardType? cardType) =>
+        (string.IsNullOrEmpty(last4) || CardIdentifierRedaction.IsLast4(last4)) &&
+        (cardType == null || Enum.IsDefined(cardType.Value));
+
+    private Task<CardAccount?> FindCardObservationAccountAsync(Guid? id, CancellationToken ct) =>
+        id == null ? Task.FromResult<CardAccount?>(null) : db.CardAccounts.AsNoTracking().SingleOrDefaultAsync(a => a.Id == id, ct);
+
+    private static string? ObservationLast4(string? last4, CardAccount? account) =>
+        CardIdentifierRedaction.IsLast4(last4) ? last4 : CardIdentifierRedaction.IsLast4(account?.PanLast4) ? account!.PanLast4 : null;
 
     private static BatchSummary ReadBatchSummary(string? detailJson)
     {

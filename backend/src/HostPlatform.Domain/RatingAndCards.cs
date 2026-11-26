@@ -210,7 +210,7 @@ public class PaymentTransaction : AuditableEntity
     public ReconciliationStatus Reconciliation { get; set; }
     public string DetailJson { get; set; } = "{}";
     public CardType ReportedCardType { get; set; } = CardType.Unknown;
-    /// <summary>Firmware/host opaque payload preserved for unknown card rails.</summary>
+    /// <summary>Legacy compatibility field, always empty for new transactions.</summary>
     public string RawPayloadJson { get; set; } = "{}";
 }
 

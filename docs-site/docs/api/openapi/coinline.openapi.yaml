@@ -3433,10 +3433,19 @@ components:
           nullable: true
         reportedCardType:
           $ref: '#/components/schemas/CardType'
-        rawPayloadJson:
+        panLast4:
           type: string
           nullable: true
+        result:
+          $ref: '#/components/schemas/CardReadResult'
       additionalProperties: false
+    CardReadResult:
+      enum:
+        - 0
+        - 1
+        - 2
+      type: integer
+      format: int32
     CardType:
       enum:
         - 0
@@ -3455,14 +3464,13 @@ components:
           type: string
           format: uuid
           nullable: true
-        intendedOperation:
-          type: string
-          nullable: true
-        rawPayloadJson:
-          type: string
-          nullable: true
         simulationMode:
           type: boolean
+        panLast4:
+          type: string
+          nullable: true
+        reportedCardType:
+          $ref: '#/components/schemas/CardType'
       additionalProperties: false
     CommandDto:
       type: object
@@ -3832,14 +3840,8 @@ components:
           format: double
         reconciliation:
           $ref: '#/components/schemas/ReconciliationStatus'
-        detailJson:
-          type: string
-          nullable: true
         reportedCardType:
           $ref: '#/components/schemas/CardType'
-        rawPayloadJson:
-          type: string
-          nullable: true
       additionalProperties: false
     ProblemDetails:
       type: object

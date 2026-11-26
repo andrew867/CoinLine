@@ -602,11 +602,14 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("RawPayloadJson")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<string>("PanLast4")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
 
                     b.Property<int>("ReportedCardType")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Result")
                         .HasColumnType("integer");
 
                     b.Property<Guid?>("TerminalId")
@@ -628,7 +631,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("CardReadEvents");
+                    b.ToTable("CardReadEvents", t =>
+                        {
+                            t.HasCheckConstraint("CK_CardReadEvents_PanLast4", "\"PanLast4\" IS NULL OR \"PanLast4\" ~ '^[0-9]{4}$'");
+                        });
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.CardReconciliationBatch", b =>
@@ -691,13 +697,12 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Disposition")
                         .HasColumnType("integer");
 
-                    b.Property<string>("IntendedOperation")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<string>("PanLast4")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
 
-                    b.Property<string>("RawPayloadJson")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("ReportedCardType")
+                        .HasColumnType("integer");
 
                     b.Property<bool>("SimulationMode")
                         .HasColumnType("boolean");
@@ -716,7 +721,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CardAccountId");
 
-                    b.ToTable("CardWriteEvents");
+                    b.ToTable("CardWriteEvents", t =>
+                        {
+                            t.HasCheckConstraint("CK_CardWriteEvents_PanLast4", "\"PanLast4\" IS NULL OR \"PanLast4\" ~ '^[0-9]{4}$'");
+                        });
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.CarrierLibraryEntry", b =>

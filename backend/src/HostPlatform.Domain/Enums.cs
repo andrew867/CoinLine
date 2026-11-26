@@ -138,6 +138,13 @@ public enum CardCredentialKind
     VaultReference = 2
 }
 
+public enum CardReadResult
+{
+    Unknown = 0,
+    Succeeded = 1,
+    Failed = 2
+}
+
 public enum CardWriteDisposition
 {
     Simulated = 0,
