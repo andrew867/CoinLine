@@ -8,6 +8,7 @@ using HostPlatform.Infrastructure;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -18,6 +19,63 @@ namespace HostPlatform.Tests.Integration;
 [Collection("PostgreSQL integration")]
 public sealed class PostgresCurrentPhoneStatusTests
 {
+    [PostgresIntegrationFact]
+    public async Task Registered_status_profile_is_used_for_matched_current_and_retained_reports_without_rewriting_original_decode()
+    {
+        await using var ncc = new NccFactory();
+        var key = Guid.NewGuid().ToString("N");
+        await using var host = ncc.WithWebHostBuilder(web => web.UseEnvironment("Production")
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("Ncc:LoopbackOnly", "true").UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(host);
+        client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var customer = new Customer { Name = "Profile status fixture", Code = Guid.NewGuid().ToString("N")[..8] };
+        var site = new Site { Customer = customer, Name = "Fixture site", Code = Guid.NewGuid().ToString("N")[..8] };
+        var profiles = new[] { FirmwareTableProfiles.GraphicalMultiPay180, FirmwareTableProfiles.MultiPay200, FirmwareTableProfiles.Mtr211MultiPay };
+        var phones = profiles.Select(profile => new Terminal { Site = site, DisplayName = "Synthetic status phone",
+            TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant(),
+            FirmwareVersion = new FirmwareVersion { Label = "Fixture " + profile, TableProfileId = profile } }).ToArray();
+        var now = DateTime.UtcNow;
+        var reports = phones.Select(phone => new DlogTransaction { Terminal = phone,
+            NccSession = new NccSession { Terminal = phone, Status = NccSessionStatus.Closed, StartedAtUtc = now, EndedAtUtc = now.AddSeconds(1), CorrelationId = Guid.NewGuid().ToString("N") },
+            MessageType = 10, MessageTypeName = "Synthetic status", RawPayload = [10,0,0,0,0,0,4,0,0,0,0],
+            Direction = (int)DlogDirection.TerminalToHost, CapturedAtUtc = now, IdempotencyKey = Guid.NewGuid().ToString("N"), DecodedJson = "{\"retained\":true}" }).ToArray();
+        var imported = new DlogTransaction { Terminal = phones[0], MessageType = 10, MessageTypeName = "Imported status",
+            RawPayload = [10,0,0,0,0,0,4,0,0,0,0], Direction = (int)DlogDirection.TerminalToHost,
+            CapturedAtUtc = now.AddSeconds(2), IdempotencyKey = Guid.NewGuid().ToString("N") };
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.AddRange(reports); db.Add(imported); await db.SaveChangesAsync();
+        }
+        var current = await client.GetFromJsonAsync<JsonElement>($"/api/field-events/phones/{phones[0].Id}/current-status");
+        Assert.Equal(reports[0].Id, current.GetProperty("statusReportId").GetGuid());
+        Assert.Equal("Later", current.GetProperty("statusProfile").GetString());
+        Assert.Equal("0400000000", current.GetProperty("rawStatusHex").GetString());
+        Assert.Equal(0, current.GetProperty("unmappedSetBitCount").GetInt32());
+        Assert.Equal("EPM/SAM not responding", Assert.Single(current.GetProperty("groups").EnumerateArray().SelectMany(g => g.GetProperty("flags").EnumerateArray()), f => f.GetProperty("asserted").GetBoolean()).GetProperty("name").GetString());
+        for (var i = 1; i < phones.Length; i++)
+        {
+            var other = await client.GetFromJsonAsync<JsonElement>($"/api/field-events/phones/{phones[i].Id}/current-status");
+            Assert.Equal(i == 1 ? "Earlier" : "Unknown", other.GetProperty("statusProfile").GetString());
+            Assert.Equal(1, other.GetProperty("unmappedSetBitCount").GetInt32());
+            Assert.Equal(2, other.GetProperty("groups")[0].GetProperty("unresolvedFlags")[0].GetProperty("statusIndex").GetInt32());
+        }
+        var list = await client.GetFromJsonAsync<JsonElement>($"/api/field-events?terminalId={phones[0].Id}");
+        var rows = list.GetProperty("items").EnumerateArray().ToArray();
+        Assert.Equal("EPM/SAM not responding", rows.Single(r => r.GetProperty("id").GetGuid() == reports[0].Id).GetProperty("summary").GetString());
+        Assert.Equal("Unknown", rows.Single(r => r.GetProperty("id").GetGuid() == imported.Id).GetProperty("statusProfile").GetString());
+        var detail = await client.GetFromJsonAsync<JsonElement>($"/api/dlog/transactions/{reports[0].Id}");
+        Assert.Equal("EPM/SAM not responding", detail.GetProperty("fieldEvent").GetProperty("summary").GetString());
+        Assert.Equal("Later", detail.GetProperty("terminalStatus").GetProperty("profile").GetString());
+        Assert.Equal("{\"retained\":true}", detail.GetProperty("decodedJson").GetString());
+        var importedDetail = await client.GetFromJsonAsync<JsonElement>($"/api/dlog/transactions/{imported.Id}");
+        Assert.Equal("Unknown", importedDetail.GetProperty("terminalStatus").GetProperty("profile").GetString());
+        Assert.Equal(1, importedDetail.GetProperty("terminalStatus").GetProperty("unmappedSetBitCount").GetInt32());
+    }
+
     [PostgresIntegrationFact]
     public async Task Current_status_uses_the_latest_valid_matched_report_and_restricted_status_access_without_inventory_access()
     {

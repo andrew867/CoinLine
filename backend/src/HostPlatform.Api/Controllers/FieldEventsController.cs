@@ -38,7 +38,8 @@ public sealed class FieldEventsController(HostPlatformDbContext db, INccSessionO
     public async Task<IActionResult> CurrentStatus(Guid terminalId, CancellationToken ct)
     {
         var phone = await db.Terminals.AsNoTracking().Where(row => row.Id == terminalId)
-            .Select(row => new { row.Id, row.DisplayName, row.TerminalIdHex, row.DeactivatedAtUtc }).SingleOrDefaultAsync(ct);
+            .Select(row => new { row.Id, row.DisplayName, row.TerminalIdHex, row.DeactivatedAtUtc,
+                tableProfileId = row.FirmwareVersion == null ? null : row.FirmwareVersion.TableProfileId }).SingleOrDefaultAsync(ct);
         if (phone == null) return NotFound();
         var reports = db.DlogTransactions.AsNoTracking().Where(row => row.TerminalId == terminalId && row.NccSessionId != null
             && row.NccSession!.TerminalId == terminalId && row.Direction == (int)DlogDirection.TerminalToHost
@@ -50,14 +51,16 @@ public sealed class FieldEventsController(HostPlatformDbContext db, INccSessionO
                     ? row.RawPayload[0] == TerminalStatusWire.MessageType : false)
                 .OrderByDescending(row => row.CapturedAtUtc).ThenByDescending(row => row.Id)
                 .Select(row => new { row.Id, row.CapturedAtUtc, row.RawPayload }).FirstOrDefaultAsync(ct);
-        var decoded = valid == null ? null : TerminalStatusWire.Read(valid.RawPayload);
+        var profile = TerminalStatusProfileResolver.FromRegisteredProfile(phone.tableProfileId);
+        var decoded = valid == null ? null : TerminalStatusWire.Read(valid.RawPayload, profile);
         return Ok(new
         {
             phone.Id, phone.DisplayName, phone.TerminalIdHex, phone.DeactivatedAtUtc,
             latestReportAtUtc = newest?.CapturedAtUtc, statusReportId = valid?.Id, statusReportedAtUtc = valid?.CapturedAtUtc,
             newerUnreadableReport = newest != null && newest.Id != valid?.Id,
             serialNumber = decoded?.SerialNumber, groups = decoded?.Groups,
-            hasStatusBits = decoded?.HasStatusBits, unmappedSetBitCount = decoded?.UnmappedSetBitCount
+            hasStatusBits = decoded?.HasStatusBits, unmappedSetBitCount = decoded?.UnmappedSetBitCount,
+            statusProfile = decoded?.Profile, rawStatusHex = decoded?.RawStatusHex
         });
     }
 
@@ -146,7 +149,9 @@ public sealed class FieldEventsController(HostPlatformDbContext db, INccSessionO
                 t.MessageType,
                 t.CapturedAtUtc,
                 t.SessionCorrelationId,
-                t.RawPayload
+                t.RawPayload,
+                tableProfileId = t.MessageType == TerminalStatusWire.MessageType && t.Direction == (int)DlogDirection.TerminalToHost && t.Terminal != null && t.Terminal.FirmwareVersion != null &&
+                    t.NccSession != null && t.NccSession.TerminalId == t.TerminalId ? t.Terminal.FirmwareVersion.TableProfileId : null
             })
             .ToListAsync(ct);
 
@@ -157,6 +162,7 @@ public sealed class FieldEventsController(HostPlatformDbContext db, INccSessionO
             FieldEventCatalog.TryDescribe(r.MessageType, out var title);
             var code = FieldEventSummary.ReadCode(r.MessageType, r.RawPayload);
             var setting = code is { } key ? settings.GetValueOrDefault(key) : null;
+            var statusProfile = TerminalStatusProfileResolver.FromRegisteredProfile(r.tableProfileId);
             return new
             {
                 r.Id,
@@ -165,7 +171,8 @@ public sealed class FieldEventsController(HostPlatformDbContext db, INccSessionO
                 r.MessageType,
                 category = FieldEventCatalog.Category(r.MessageType),
                 title = string.IsNullOrEmpty(title) ? "Field event" : title,
-                summary = FieldEventSummary.TryBuild(r.MessageType, r.RawPayload),
+                summary = FieldEventSummary.TryBuild(r.MessageType, r.RawPayload, statusProfile),
+                statusProfile = r.MessageType == TerminalStatusWire.MessageType ? statusProfile.ToString() : null,
                 operatorDescription = setting?.Description,
                 severity = setting?.Severity,
                 r.CapturedAtUtc,

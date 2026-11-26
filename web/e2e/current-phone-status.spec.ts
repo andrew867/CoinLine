@@ -27,8 +27,12 @@ test('queries the current reported phone state independently of historic alarms'
       latestReportAtUtc: cleared ? '2026-10-01T12:06:00Z' : '2026-10-01T12:05:03Z',
       statusReportId: cleared ? 'report-clear' : 'report-prior', statusReportedAtUtc: cleared ? '2026-10-01T12:06:00Z' : '2026-10-01T12:00:00Z',
       newerUnreadableReport: !cleared, serialNumber: '0123456789', hasStatusBits: !cleared, unmappedSetBitCount: cleared ? 0 : 2,
-      groups: [{ label: 'Memory and stored records', flags: [{ name: 'Memory lost', asserted: !cleared }, { name: 'EEPROM fault', asserted: false }] },
-        { label: 'Enclosure and cash box', flags: [{ name: 'Cash box full', asserted: !cleared }] }]
+      statusProfile: 'Later', rawStatusHex: cleared ? '0000000000' : '0400404090',
+      groups: [{ label: 'Handset and telephony', rawMask: cleared ? 0 : 4, flags: [{ name: 'EPM/SAM not responding', asserted: !cleared, statusIndex: 2 }], unresolvedFlags: [] },
+        { label: 'Memory and stored records', rawMask: cleared ? 0 : 64, flags: [{ name: 'Memory lost', asserted: !cleared }, { name: 'EEPROM fault', asserted: false }] },
+        { label: 'Enclosure and cash box', rawMask: cleared ? 0 : 64, flags: [{ name: 'Cash box full', asserted: !cleared }] },
+        { label: 'Coin equipment and line', rawMask: cleared ? 0 : 144, flags: [], unresolvedFlags: cleared ? [] : [
+          { statusIndex: 36, mask: 16, description: 'Reserved or unverified status bit' }, { statusIndex: 39, mask: 128, description: 'Reserved or unverified status bit' } ] }]
     } })
     if (url.pathname === '/api/field-events') return route.fulfill({ json: { items: [{ id: 'old-alarm', terminalId: phone.id,
       terminalName: phone.displayName, title: 'Alarm', summary: 'Memory lost (alarm 22)', category: 'alarm', capturedAtUtc: '2026-10-01T12:00:00Z' }] } })
@@ -43,6 +47,10 @@ test('queries the current reported phone state independently of historic alarms'
   await expect(page.getByText('2026-10-01 12:00:00 UTC')).toBeVisible()
   await expect(page.getByRole('note')).toContainText('A more recent MT10 could not be interpreted.')
   await expect(page.getByText('2 unmapped status bits set.', { exact: false })).toBeVisible()
+  await expect(page.getByText('Registered later profile.')).toBeVisible()
+  await expect(page.getByText('04 00 40 40 90')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Handset and telephony' }).getByRole('listitem').filter({ hasText: 'EPM/SAM not responding' }).getByText('Reported', { exact: true })).toBeVisible()
+  await expect(page.getByText('Status bit 39 (0x80)')).toBeVisible()
   const memory = page.getByRole('region', { name: 'Memory and stored records' })
   await expect(memory.getByRole('listitem').filter({ hasText: 'Memory lost' }).getByText('Reported', { exact: true })).toBeVisible()
   await expect(memory.getByRole('listitem').filter({ hasText: 'EEPROM fault' }).getByText('Not indicated', { exact: true })).toBeVisible()

@@ -6,6 +6,7 @@ import { PhoneStatusPanel } from './PhoneStatusPanel'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { alarmSeverityLabel } from './fieldEventLabels'
 import { CashboxQueryLink } from './CashboxQueryPage'
+import { statusProfileLabel } from './ReportedStatusGroups'
 import './FieldEventsPage.css'
 
 const categories = {
@@ -26,6 +27,7 @@ type FieldEvent = {
   operatorDescription?: string | null
   severity?: number | null
   category: Category
+  statusProfile?: string | null
   capturedAtUtc: string
 }
 
@@ -189,6 +191,7 @@ export function FieldEventsPage() {
                   <span className="terminal-status-event-type">{event.title}</span>
                   {canReadMessages ? <Link to={`/dlog/${event.id}`}>{event.summary ?? 'Report details unavailable'}</Link>
                     : <strong>{event.summary ?? 'Report details unavailable'}</strong>}
+                  {event.statusProfile && <small>{statusProfileLabel(event.statusProfile)} (current interpretation)</small>}
                   {event.operatorDescription && <span>Operator description: {event.operatorDescription}</span>}
                   {event.severity != null && <span className="terminal-status-event-type">Current severity: {alarmSeverityLabel(event.severity)}</span>}
                   {!terminalId && (event.terminalId

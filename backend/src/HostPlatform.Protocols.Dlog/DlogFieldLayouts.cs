@@ -42,7 +42,8 @@ internal static class DlogFieldLayouts
             || (tail.Length == DlogCashboxWire.StatusLength + 1 && tail is [38, .., 13]);
     }
 
-    public static bool TryDecodeFields(int messageType, ReadOnlySpan<byte> raw, out JsonObject fields, out string note)
+    public static bool TryDecodeFields(int messageType, ReadOnlySpan<byte> raw, out JsonObject fields, out string note,
+        TerminalStatusProfile statusProfile = TerminalStatusProfile.Unknown)
     {
         fields = new JsonObject();
         note = "";
@@ -50,7 +51,7 @@ internal static class DlogFieldLayouts
         {
             6 or 15 => TryDecodeMaintenance(raw, fields, out note),
             7 => TryDecodeAlarm(raw, fields, out note),
-            10 => TryDecodeTerminalStatus(raw, fields, out note),
+            10 => TryDecodeTerminalStatus(raw, fields, out note, statusProfile),
             16 => TryDecodeAlarmAck(raw, fields, out note),
             38 => TryDecodeCashBoxStatus(raw, fields, out note),
             39 => TryDecodeAttentionCallback(raw, fields, out note),
@@ -74,13 +75,13 @@ internal static class DlogFieldLayouts
         return true;
     }
 
-    private static bool TryDecodeTerminalStatus(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
+    private static bool TryDecodeTerminalStatus(ReadOnlySpan<byte> raw, JsonObject fields, out string note, TerminalStatusProfile profile)
     {
         note = "Phone status requires an eleven-byte report.";
         if (raw.Length < TerminalStatusLength)
             return false;
 
-        var status = TerminalStatusWire.Read(raw[..TerminalStatusLength]);
+        var status = TerminalStatusWire.Read(raw[..TerminalStatusLength], profile);
         if (status == null) return false;
         fields["serialNumber"] = status.SerialNumber;
         var flags = new JsonArray();
@@ -89,7 +90,13 @@ internal static class DlogFieldLayouts
         fields["statusFlags"] = flags;
         fields["hasStatusBits"] = status.HasStatusBits;
         fields["unmappedStatusBits"] = status.UnmappedSetBitCount;
-        note = "Named status bits shared by the inspected terminal profiles.";
+        fields["statusProfile"] = status.Profile;
+        fields["statusMaskHex"] = status.RawStatusHex;
+        var unresolved = new JsonArray();
+        foreach (var bit in status.Groups.SelectMany(group => group.UnresolvedFlags))
+            unresolved.Add(new JsonObject { ["statusIndex"] = bit.StatusIndex, ["mask"] = bit.Mask, ["description"] = bit.Description });
+        fields["unresolvedStatusBits"] = unresolved;
+        note = "Shared and profile-qualified status bits; unresolved masks remain visible.";
         return true;
     }
 
