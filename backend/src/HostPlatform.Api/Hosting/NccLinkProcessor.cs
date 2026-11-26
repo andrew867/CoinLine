@@ -1002,13 +1002,13 @@ internal sealed class NccLinkProcessor(
             TerminalId = message.TerminalId,
             Data = message.Data
         });
-        return WriteCapturedFrameAsync(stream, retry, stoppingToken);
+        return WriteCapturedFrameAsync(stream, retry, stoppingToken, DlogTimeSyncWire.DecodeResponse(message.Data));
     }
 
     private async Task<NccWirePacket> WriteMessageAsync(NetworkStream stream, byte[] terminalId, byte[] data)
     {
         var message = new NccWirePacket { Control = _nextMessagePacketId, TerminalId = terminalId, Data = data };
-        await WriteCapturedFrameAsync(stream, NccFrameCodec.Encode(message), stoppingToken);
+        await WriteCapturedFrameAsync(stream, NccFrameCodec.Encode(message), stoppingToken, DlogTimeSyncWire.DecodeResponse(data));
         _nextMessagePacketId = NccControl.PacketId((byte)(_nextMessagePacketId + 1));
         return message;
     }
@@ -1033,7 +1033,8 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task WriteCapturedFrameAsync(NetworkStream stream, ReadOnlyMemory<byte> bytes, CancellationToken ct)
+    private async Task WriteCapturedFrameAsync(NetworkStream stream, ReadOnlyMemory<byte> bytes, CancellationToken ct,
+        DateTime? offeredClockUtc = null)
     {
         using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct, stoppingToken);
         writeCts.CancelAfter(settings.ReadTimeout);
@@ -1055,6 +1056,17 @@ internal sealed class NccLinkProcessor(
             await using var scope = scopes.CreateAsyncScope();
             var traceDb = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             traceDb.NccSessionFrames.Add(frame);
+            if (offeredClockUtc is { } clock)
+            {
+                traceDb.AuditEvents.Add(new AuditEvent
+                {
+                    Category = "ncc", Action = "clock_sync_offered", Actor = Actor,
+                    Resource = _session.Id.ToString(), TerminalId = _session.TerminalId,
+                    CorrelationId = _session.CorrelationId, TerminalSessionId = _session.Id.ToString(),
+                    DetailJson = ClockOfferObservation.Encode(frame.Sequence, clock,
+                        (frame.LinkControl.GetValueOrDefault() & NccControl.ReTrans) != 0)
+                });
+            }
             await traceDb.SaveChangesAsync(CancellationToken.None);
         }
         catch (Exception ex)

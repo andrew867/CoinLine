@@ -51,11 +51,19 @@ public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionO
     }
 
     [HttpGet("{id:guid}")]
-    public async Task<ActionResult<object>> Get(Guid id, CancellationToken ct)
+    public async Task<ActionResult<object>> Get(Guid id, CancellationToken ct, [FromQuery] bool clockOnly = false)
     {
         var s = await db.NccSessions.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
         if (s == null)
             return NotFound();
+        var sessionKey = id.ToString();
+        var clockAudit = await db.AuditEvents.AsNoTracking()
+            .Where(e => e.Category == "ncc" && e.Action == "clock_sync_offered" && e.TerminalSessionId == sessionKey)
+            .Select(e => e.DetailJson).ToListAsync(ct);
+        var clockOffers = clockAudit.Select(ClockOfferObservation.Read).OfType<ClockOfferObservation>()
+            .OrderBy(offer => offer.Sequence).ToArray();
+        if (clockOnly)
+            return Ok(new { clockOffers });
         var frames = await db.NccSessionFrames.AsNoTracking()
             .Where(f => f.NccSessionId == id && !f.SentByHost)
             .OrderBy(f => f.Sequence)
@@ -70,6 +78,7 @@ public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionO
             s.StartedAtUtc,
             s.EndedAtUtc,
             socketBound = bound,
+            clockOffers,
             liveLink = bound
                 ? new { link.TerminalId, link.NccSessionId, link.TerminalIdHex }
                 : null,

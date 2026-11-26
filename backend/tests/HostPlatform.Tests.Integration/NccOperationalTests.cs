@@ -347,6 +347,22 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal(6, detail.GetProperty("frames").GetArrayLength());
         Assert.All(detail.GetProperty("frames").EnumerateArray().Skip(1),
             frame => Assert.Equal(string.Empty, frame.GetProperty("terminalIdHex").GetString()));
+        var offers = detail.GetProperty("clockOffers").EnumerateArray().ToArray();
+        Assert.Equal(2, offers.Length);
+        Assert.All(offers, offer => Assert.Equal(syncTime, offer.GetProperty("offeredClockUtc").GetDateTime()));
+        Assert.False(offers[0].GetProperty("retransmission").GetBoolean());
+        Assert.True(offers[1].GetProperty("retransmission").GetBoolean());
+        Assert.True(offers[0].GetProperty("sequence").GetInt32() < offers[1].GetProperty("sequence").GetInt32());
+        var clockOnly = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{session.GetProperty("id").GetGuid()}?clockOnly=true", Json);
+        Assert.Equal(detail.GetProperty("clockOffers").GetRawText(), clockOnly.GetProperty("clockOffers").GetRawText());
+        Assert.Single(clockOnly.EnumerateObject());
+        await using var scope = fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        var sessionId = session.GetProperty("id").GetGuid();
+        var sentFrames = await db.NccSessionFrames.Where(frame => frame.NccSessionId == sessionId && frame.SentByHost).ToListAsync();
+        Assert.NotEmpty(sentFrames);
+        Assert.All(sentFrames, frame => Assert.Empty(frame.RawBytes));
+        Assert.All(offers, offer => Assert.Single(sentFrames, frame => frame.Sequence == offer.GetProperty("sequence").GetInt32()));
     }
 
     [Fact]
