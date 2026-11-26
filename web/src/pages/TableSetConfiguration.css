@@ -7,6 +7,8 @@
 }
 
 .table-config-panel h2 { margin-top: 0; font-size: 1.17rem; }
+.discount-companion-reference { padding: 12px; margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.discount-companion-reference h4 { margin: 6px 0; }
 .table-config-selectors { display: flex; align-items: end; flex-wrap: wrap; gap: 10px; margin: 10px 0; }
 .table-config-selectors :is(label, input, select) { max-width: 100%; }
 .table-config-selectors label, .table-config-ads label { display: grid; gap: 4px; }

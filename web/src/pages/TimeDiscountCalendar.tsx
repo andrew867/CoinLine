@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { discountZones, formatDiscountWindow, previewTimeDiscount, type DiscountPayment, type DiscountValue, type DiscountZone } from './timeDiscountPreview'
+import { DiscountCompanionReference } from './DiscountCompanionReference'
 
 const zoneLabels: Record<DiscountZone, string> = { local: 'Local', intra: 'Intra-area', inter: 'Inter-area', international: 'International' }
 const paymentLabels = ['Disabled', 'Coins', 'Cards', 'Coins and cards']
@@ -9,7 +10,7 @@ function localDate() {
   return `${String(today.getFullYear()).padStart(4, '0')}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
 }
 
-export function TimeDiscountCalendar({ value }: { value: DiscountValue }) {
+export function TimeDiscountCalendar({ value, setId, revision }: { value: DiscountValue; setId: string; revision: number }) {
   const [date, setDate] = useState(localDate)
   const [time, setTime] = useState('12:00')
   const [zone, setZone] = useState<DiscountZone>('local')
@@ -46,6 +47,8 @@ export function TimeDiscountCalendar({ value }: { value: DiscountValue }) {
           <p>{preview.selection.eligible === true ? 'The selected MT152 period enables this payment and references a discount row.'
             : preview.selection.eligible === false ? 'The selected period does not enable this payment. Period 2 is not a fallback.'
               : 'The selected payment or discount reference cannot be interpreted from the current fields.'}</p>
+          {preview.selection.eligible === true && preview.selection.discountIndex !== null && preview.selection.discountIndex <= 9 &&
+            <DiscountCompanionReference setId={setId} revision={revision} index={preview.selection.discountIndex} zone={zone} />}
         </>}
       </>}
     </div>
