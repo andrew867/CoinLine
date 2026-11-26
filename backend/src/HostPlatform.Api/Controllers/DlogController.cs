@@ -1,4 +1,5 @@
 using System.Text.Json;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Middleware;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure;
@@ -99,12 +100,17 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (x == null) return NotFound();
         string? terminalName = null;
+        var statusProfile = TerminalStatusProfile.Unknown;
         if (x.TerminalId is { } terminalId)
         {
-            terminalName = await db.Terminals.AsNoTracking()
+            var phone = await db.Terminals.AsNoTracking()
                 .Where(t => t.Id == terminalId)
-                .Select(t => t.DisplayName)
+                .Select(t => new { t.DisplayName, tableProfileId = t.FirmwareVersion == null ? null : t.FirmwareVersion.TableProfileId })
                 .FirstOrDefaultAsync(ct);
+            terminalName = phone?.DisplayName;
+            if (x.MessageType == TerminalStatusWire.MessageType && x.Direction == (int)DlogDirection.TerminalToHost && x.NccSessionId is { } sessionId &&
+                await db.NccSessions.AsNoTracking().AnyAsync(s => s.Id == sessionId && s.TerminalId == terminalId, ct))
+                statusProfile = TerminalStatusProfileResolver.FromRegisteredProfile(phone?.tableProfileId);
         }
         var links = await db.DlogCorrelationLinks.AsNoTracking()
             .Where(l => l.RequestTransactionId == id || l.ResponseTransactionId == id)
@@ -121,7 +127,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             {
                 title,
                 category = FieldEventCatalog.Category(x.MessageType),
-                summary = x.MessageType is 7 or 16 ? alarm?.Summary : FieldEventSummary.TryBuild(x.MessageType, x.RawPayload),
+                summary = x.MessageType is 7 or 16 ? alarm?.Summary : FieldEventSummary.TryBuild(x.MessageType, x.RawPayload, statusProfile),
                 alarmNumber = alarm?.Number,
                 operatorDescription = eventSetting?.Description,
                 severity = eventSetting?.Severity,
@@ -140,6 +146,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             x.CorrelationKey,
             RawPayloadHex = Convert.ToHexString(x.RawPayload),
             x.DecodedJson,
+            terminalStatus = x.MessageType == TerminalStatusWire.MessageType ? TerminalStatusWire.Read(x.RawPayload, statusProfile) : null,
             fieldEvent,
             x.IsUnknownMessageType,
             x.ImmediateClear,

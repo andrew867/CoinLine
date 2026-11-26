@@ -4,6 +4,7 @@ import { HexViewer } from '../components/HexViewer'
 import { JsonPanel } from '../components/JsonPanel'
 import { apiDownload, apiFetch } from '../api/client'
 import { alarmSeverityLabel } from './fieldEventLabels'
+import { ReportedStatusGroups, type StatusGroup } from './ReportedStatusGroups'
 
 
 type Detail = {
@@ -19,6 +20,7 @@ type Detail = {
   immediateClear: boolean
   rawPayloadHex: string
   decodedJson: string
+  terminalStatus?: { groups: StatusGroup[]; unmappedSetBitCount: number; profile: string; rawStatusHex: string; serialNumber: string | null } | null
   fieldEvent: { title: string; category: string; summary: string | null; phoneTime: string | null; operatorDescription?: string | null; severity?: number | null } | null
   idempotencyKey: string
   capturedAtUtc: string
@@ -65,6 +67,7 @@ export function DlogTransactionDetail() {
 
   const fieldEvent = detail.fieldEvent
   const isAlarm = fieldEvent?.category === 'alarm'
+  const reportedStatus = detail.terminalStatus
   const fields = decodedFields(detail.decodedJson)
 
   async function download(messageId: string) {
@@ -102,7 +105,12 @@ export function DlogTransactionDetail() {
       <h1>{fieldEvent?.title ?? 'Stored message'}</h1>
       {isAlarm && <h2>Decoded alarm</h2>}
       {!isAlarm && fieldEvent?.summary && <p className="page-intro">{fieldEvent.summary}</p>}
-      {!isAlarm && jsonFields && <><h2>Decoded fields</h2>{jsonFields}</>}
+      {reportedStatus && <section className="current-phone-status" aria-label="Decoded terminal status">
+        <h2>Decoded terminal status</h2>
+        <p>Reported serial number: {reportedStatus.serialNumber ?? 'Not available'}. Unresolved asserted bits: {reportedStatus.unmappedSetBitCount}.</p>
+        <ReportedStatusGroups groups={reportedStatus.groups} profile={reportedStatus.profile} rawStatusHex={reportedStatus.rawStatusHex} />
+      </section>}
+      {!isAlarm && !reportedStatus && jsonFields && <><h2>Decoded fields</h2>{jsonFields}</>}
       {detail.isUnknownMessageType && (
         <p role="status">This message type is not in the catalog. The raw bytes are still stored.</p>
       )}
@@ -141,12 +149,12 @@ export function DlogTransactionDetail() {
         <dd>{detail.sessionCorrelationId ?? '—'}</dd>
       </dl>
 
-      {!isAlarm && rawBytes}
+      {!isAlarm && !reportedStatus && rawBytes}
 
       <details>
         <summary>Technical record</summary>
-        {isAlarm && rawBytes}
-        {isAlarm && jsonFields && <><h2>Decoded JSON</h2>{jsonFields}</>}
+        {(isAlarm || reportedStatus) && rawBytes}
+        {(isAlarm || reportedStatus) && jsonFields && <><h2>{reportedStatus ? 'Original decoded JSON' : 'Decoded JSON'}</h2>{jsonFields}</>}
         <dl style={{ display: 'grid', gridTemplateColumns: '160px 1fr', gap: 8, maxWidth: 720 }}>
           <dt>Record id</dt>
           <dd>{detail.id}</dd>

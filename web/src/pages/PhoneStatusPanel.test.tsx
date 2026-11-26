@@ -42,6 +42,22 @@ it('distinguishes a valid all-clear snapshot from a phone that has never reporte
   expect(screen.queryByRole('link', { name: 'Open source status report' })).toBeNull()
 })
 
+it('shows profile-qualified conditions and exact unresolved masks without counting them as named conditions', async () => {
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ ...state, newerUnreadableReport: false, statusProfile: 'Later', rawStatusHex: '0400000080',
+    unmappedSetBitCount: 1, groups: [
+      { label: 'Handset and telephony', rawMask: 4, flags: [{ name: 'EPM/SAM not responding', asserted: true, statusIndex: 2 }], unresolvedFlags: [] },
+      { label: 'Coin equipment and line', rawMask: 128, flags: [], unresolvedFlags: [{ statusIndex: 39, mask: 128, description: 'Reserved or unverified status bit' }] },
+    ] }))
+  render(<MemoryRouter><PhoneStatusPanel terminalId={first.id} refresh={0} showReportLink /></MemoryRouter>)
+  expect(await screen.findByText('EPM/SAM not responding')).toBeVisible()
+  expect(screen.getByText('1 named condition reported')).toBeVisible()
+  expect(screen.getByText('Registered later profile.')).toBeVisible()
+  expect(screen.getByText('04 00 00 00 80')).toBeVisible()
+  expect(screen.getByText('Status bit 39 (0x80)')).toBeVisible()
+  expect(screen.getByText('Reserved or unverified status bit')).toBeVisible()
+  expect(screen.getByText('Unresolved')).toBeVisible()
+})
+
 it('allows a status-only operator to select a phone without fetching or linking denied registry and message screens', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'phone-status': 1 })
   vi.mocked(apiFetch).mockImplementation(async url => {

@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client'
+import { ReportedStatusGroups, type StatusGroup } from './ReportedStatusGroups'
 
-type Flag = { name: string; asserted: boolean }
 type CurrentStatus = {
   id: string; displayName: string; terminalIdHex: string; deactivatedAtUtc: string | null
   latestReportAtUtc: string | null; statusReportId: string | null; statusReportedAtUtc: string | null
-  newerUnreadableReport: boolean; serialNumber: string | null; groups: { label: string; flags: Flag[] }[] | null
+  newerUnreadableReport: boolean; serialNumber: string | null; groups: StatusGroup[] | null
   hasStatusBits: boolean | null; unmappedSetBitCount: number | null
+  statusProfile?: string | null; rawStatusHex?: string | null
 }
 const utc = (value: string) => new Date(value).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')
 
@@ -59,14 +60,7 @@ export function PhoneStatusPanel({ terminalId, refresh, showReportLink }: { term
           {!!status.unmappedSetBitCount && <span className="current-phone-warning">{status.unmappedSetBitCount} unmapped status {status.unmappedSetBitCount === 1 ? 'bit' : 'bits'} set. Their meaning is not verified.</span>}
           {showReportLink && status.statusReportId && <Link to={`/dlog/${status.statusReportId}`}>Open source status report</Link>}
         </div>
-        <div className="current-phone-status-groups">
-          {status.groups.map(group => <section key={group.label} aria-label={group.label}>
-            <h4>{group.label}</h4>
-            <ul>{group.flags.map(flag => <li key={flag.name} data-asserted={flag.asserted}>
-              <span>{flag.name}</span><span>{flag.asserted ? 'Reported' : 'Not indicated'}</span>
-            </li>)}</ul>
-          </section>)}
-        </div>
+        <ReportedStatusGroups groups={status.groups} profile={status.statusProfile} rawStatusHex={status.rawStatusHex} />
       </>}
     </>}
   </section>

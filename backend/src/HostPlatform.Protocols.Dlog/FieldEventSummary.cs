@@ -5,12 +5,12 @@ namespace HostPlatform.Protocols.Dlog;
 /// <summary>Short operator-facing line from documented decoded fields (raw bytes stay authoritative).</summary>
 public static class FieldEventSummary
 {
-    public static string? TryBuild(int messageType, ReadOnlySpan<byte> raw)
+    public static string? TryBuild(int messageType, ReadOnlySpan<byte> raw, TerminalStatusProfile statusProfile = TerminalStatusProfile.Unknown)
     {
         if (messageType is 7 or 16)
             return ReadAlarm(messageType, raw)?.Summary;
 
-        if (!DlogFieldLayouts.TryDecodeFields(messageType, raw, out var fields, out _))
+        if (!DlogFieldLayouts.TryDecodeFields(messageType, raw, out var fields, out _, statusProfile))
             return null;
 
         return messageType switch
@@ -45,10 +45,18 @@ public static class FieldEventSummary
     {
         [0] = "Handset fault",
         [1] = "Telephony not responding",
+        [2] = "EPM/SAM not responding",
+        [3] = "EPM locked out or serious module error",
+        [4] = "EPM expired",
+        [5] = "EPM/SAM approaching or reaching transaction limit",
+        [6] = "Primary collection system unreachable",
         [8] = "Power interruption",
         [9] = "Display not responding",
         [10] = "Voice prompts unavailable",
+        [11] = "Alternate collection system unreachable",
         [12] = "Card reader blocked",
+        [13] = "Required configuration table missing",
+        [14] = "Data-jack port blocked",
         [16] = "Call record checksum fault",
         [17] = "Statistics checksum fault",
         [18] = "Table checksum fault",
@@ -69,6 +77,8 @@ public static class FieldEventSummary
         [33] = "Coin validator fault",
         [34] = "Line check failed",
         [35] = "Data call failed",
+        [37] = "Collection upload dialogue failure",
+        [38] = "Code-download server connection failure",
         [99] = "Fault cleared",
     };
 
