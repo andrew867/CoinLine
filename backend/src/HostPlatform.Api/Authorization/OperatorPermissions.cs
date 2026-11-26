@@ -86,6 +86,7 @@ public static class OperatorPermissions
             ("Terminals", R, "GetTableAssignment TableAssignmentOptions RoutineCallIn"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
         Screen("downloads", "Downloads",
             ("Downloads", R, "List Get"), ("Downloads", U, "Cancel Retry"),
+            ("DownloadPreparation", A, "Options Preview Prepare"),
             ("Tables", R, "ListSchedules"), ("Tables", A, "ScheduleForScope PreviewAssignments ScopeOptions"), ("Tables", U, "CancelSchedule"),
             ("Terminals", A, "StartDownload RequestTableReload"));
         Screen("callbacks", "Callbacks", ("TerminalCallbacks", R, "Get"), ("TerminalCallbacks", U, "Save Cancel"));

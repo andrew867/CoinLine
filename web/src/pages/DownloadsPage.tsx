@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch, apiGet, apiPostRaw } from '../api/client'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
+import { DownloadPreparationPanel } from './DownloadPreparationPanel'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 
 type Batch = {
@@ -35,8 +37,14 @@ export function DownloadsPage() {
   const [saving, setSaving] = useState(false)
   const [recordsError, setRecordsError] = useState('')
   const [err, setErr] = useState<string | null>(null)
+  const [preparationOpen, setPreparationOpen] = useState(false)
+  const [scheduleRefresh, setScheduleRefresh] = useState(0)
+  const canPrepare = canPerform('downloads', op.add)
+  const canRead = canPerform('downloads', op.read)
+  const canCreateSingle = canPrepare && canPerform('phones', op.read) && canPerform('table-sets', op.read)
 
   const load = () => {
+    if (!canRead) return
     setErr(null)
     apiFetch('/api/downloads')
       .then((r) => {
@@ -52,6 +60,7 @@ export function DownloadsPage() {
   }, [])
 
   useEffect(() => {
+    if (!canCreateSingle) return
     let c = false
     async function safeJson<T>(path: string): Promise<T | null> {
       try {
@@ -77,20 +86,20 @@ export function DownloadsPage() {
     return () => {
       c = true
     }
-  }, [])
+  }, [canCreateSingle])
 
   useEffect(() => {
     if (preTerm) setTerminalId(preTerm)
   }, [preTerm])
 
   useEffect(() => {
-    if (!tableSetId) return
+    if (!canCreateSingle || !tableSetId) return
     let current = true
     void apiGet<{ versions: RecordChoice[] }>(`/api/tables/sets/${tableSetId}`)
       .then(set => { if (current) setRecords(set.versions) })
       .catch(() => { if (current) setRecordsError('Could not load the records in this set.') })
     return () => { current = false }
-  }, [tableSetId])
+  }, [tableSetId, canCreateSingle])
 
   const visibleRows = (rows ?? []).filter((b) => (failedOnly ? b.status === 3 : true))
 
@@ -139,7 +148,12 @@ export function DownloadsPage() {
         set under <Link to="/table-sets">Table sets</Link>.
       </p>
       {err && <p role="alert" style={{ color: 'crimson' }}>{err}</p>}
-      <TableDownloadScheduleList terminalId={preTerm || undefined} />
+      {canPrepare && <div className="row-actions"><button type="button" aria-expanded={preparationOpen} onClick={() => setPreparationOpen(current => !current)}>
+        {preparationOpen ? 'Close phone-list preparation' : 'Prepare downloads for multiple phones'}
+      </button></div>}
+      {canPrepare && preparationOpen && <DownloadPreparationPanel showBatchLinks={canRead} onPrepared={() => { load(); setScheduleRefresh(current => current + 1) }} />}
+      {canRead && <TableDownloadScheduleList terminalId={preTerm || undefined} refresh={scheduleRefresh} />}
+      {canCreateSingle && <>
       {terms && terms.length === 0 && (
         <p style={{ color: '#666' }}>
           No terminals yet — create one under <Link to="/terminals">Terminals</Link>.
@@ -224,6 +238,9 @@ export function DownloadsPage() {
       </form>
       {queuedId && <p role="status"><Link to={`/downloads/${queuedId}`}>View queued batch</Link>. The phone picks it up on its next eligible call.</p>}
 
+      </>}
+      {canPrepare && !canCreateSingle && <p>Preparing a different published set for one phone requires phone and table set read access. You can prepare the existing assignments with the phone-list workflow above.</p>}
+      {canRead && <>
       <h2>Recent batches</h2>
       <p className="page-intro">
         {failedOnly ? (
@@ -271,6 +288,7 @@ export function DownloadsPage() {
           </tbody>
         </table>
       )}
+      </>}
     </div>
   )
 }

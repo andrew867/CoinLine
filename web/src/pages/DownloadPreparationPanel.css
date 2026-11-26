@@ -1,0 +1,14 @@
+.download-preparation { border: 1px solid var(--border, #d5ded9); border-radius: 10px; padding: 18px; margin: 14px 0 24px; }
+.preparation-panes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); gap: 14px; }
+.preparation-pane { border: 1px solid var(--border, #d5ded9); border-radius: 8px; padding: 12px; min-width: 0; }
+.preparation-pane h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin-top: 0; }
+.preparation-count { font-size: .8em; opacity: .78; font-weight: 500; }
+.preparation-phone-list { margin: 12px 0; padding: 0; list-style: none; max-height: 300px; overflow: auto; }
+.preparation-phone-list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 4px; align-items: center; border-top: 1px solid var(--border, #d5ded9); }
+.preparation-phone-list small, .preparation-table small { display: block; opacity: .75; font-variant-numeric: tabular-nums; }
+.preparation-time { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin: 16px 0 8px; }
+.preparation-time label { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.preparation-review { margin-top: 16px; border-top: 1px solid var(--border, #d5ded9); padding-top: 12px; }
+.preparation-table { overflow-x: auto; margin-bottom: 12px; }
+.preparation-table table { width: 100%; border-collapse: collapse; text-align: left; }
+.preparation-table :is(th, td) { padding: 8px; vertical-align: top; border-bottom: 1px solid var(--border, #d5ded9); }
