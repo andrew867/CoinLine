@@ -89,6 +89,9 @@ public sealed class DlogFieldLayoutTests
         Assert.Equal(9, alarm.Number);
         Assert.Null(alarm.PhoneTime);
         Assert.Equal("Call record store full, Unlisted reason bits (1)", FieldEventSummary.TryBuild(42, [42, 0x05]));
+        Assert.Equal("Technician requested upload, Cash box status requested", FieldEventSummary.TryBuild(42, [42, 0x82]));
+        Assert.Equal("Scheduled upload, Cash box status requested", FieldEventSummary.TryBuild(42, [42, 0x88]));
+        Assert.Equal("Terminal requested upload", FieldEventSummary.TryBuild(42, [42, 0x40]));
         Assert.Equal("Technician requested download, Cash box follow-up", FieldEventSummary.TryBuild(44, [44, 0x81]));
         Assert.Equal("Installation, Memory lost, Cash box follow-up", FieldEventSummary.TryBuild(44, [44, 0x86]));
         Assert.True(FieldEventCatalog.TryDescribe(39, out var title));

@@ -167,7 +167,8 @@ public static class FieldEventSummary
         var labels = new List<string>();
         (int Flag, string Label)[] known = messageType switch
         {
-            42 => [(2, "Technician requested upload"), (4, "Call record store full"), (8, "Scheduled upload")],
+            42 => [(2, "Technician requested upload"), (4, "Call record store full"), (8, "Scheduled upload"),
+                (0x40, "Terminal requested upload"), (DlogCashboxWire.StatusRequestFlag, "Cash box status requested")],
             DlogTableRequestWire.MessageType => [(DlogTableRequestWire.CraftUpdate, "Technician requested download"),
                 (DlogTableRequestWire.Install, "Installation"), (DlogTableRequestWire.MemoryLost, "Memory lost"),
                 (8, "Interrupted transfer"), (DlogCashboxWire.StatusRequestFlag, "Cash box follow-up")],

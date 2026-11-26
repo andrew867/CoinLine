@@ -126,6 +126,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify CDR upload observation workflow
+        run: npm run e2e -- e2e/cdr-upload-observation.spec.ts --output test-results/cdr-upload-observation
+        env:
+          CI: "true"
+
       - name: Verify firmware local dialing transition workflow
         run: npm run e2e -- e2e/firmware-local-dialing-transition.spec.ts --output test-results/firmware-local-dialing-transition
         env:

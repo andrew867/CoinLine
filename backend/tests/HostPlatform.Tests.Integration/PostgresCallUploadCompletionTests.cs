@@ -22,6 +22,94 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresCallUploadCompletionTests
 {
     [PostgresIntegrationFact]
+    public async Task Combined_cashbox_and_call_upload_attention_restores_only_known_current_status_before_transmit_request()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
+        var key = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
+            .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()).UseSetting("Ncc:LoopbackOnly", "true"));
+        using var api = TestOperatorAuthentication.CreateAuthenticatedClient(factory); api.DefaultRequestHeaders.Add("X-API-Key", key);
+        var (known, setId) = await Seed(factory.Services); var (unknown, _) = await Seed(factory.Services);
+        var queued = await AccessRolloutFixture.Post(api, $"/api/terminals/{known.Id}/downloads", new { tableSetId = setId });
+        var box = new byte[DlogCashboxWire.StatusLength]; box[0] = 38;
+        new byte[] { 128, 2, 29, 10, 11, 12 }.CopyTo(box, 1); box[7] = 1;
+        new byte[] { 0, 0, 0, 0xA1 }.CopyTo(box, 8); box[12] = 5;
+        BinaryPrimitives.WriteInt32LittleEndian(box.AsSpan(13), 25); BinaryPrimitives.WriteUInt16LittleEndian(box.AsSpan(17), 1);
+        // Establish the baseline through the same genuine matched terminal report path.
+        using (var socket = await Connect())
+        {
+            var stream = socket.GetStream(); await Send(stream, known, 0, box); AssertAck(await Read(stream));
+            await Send(stream, known, NccControl.Clr);
+        }
+        var status = new byte[11]; status[0] = 10; var version = new byte[28]; version[0] = 60;
+        byte[] attention = [42, 0x82, .. status, .. version];
+        var call = Call(0x0249);
+        for (var pass = 0; pass < 2; pass++)
+        {
+            using var socket = await Connect(); var stream = socket.GetStream();
+            await Send(stream, known, 0, attention); AssertAck(await Read(stream));
+            var response = await Read(stream); Assert.Equal([.. box, 17], response.Data);
+            if (pass == 0)
+            {
+                // Both a full and header-only retransmission must replay the
+                // original combined payload, not retrieve or fabricate a new status.
+                await Send(stream, known, NccControl.ReTrans, attention); AssertAck(await Read(stream));
+                var fullRetry = await Read(stream); Assert.Equal(response.Data, fullRetry.Data);
+                Assert.Equal((byte)(response.Control | NccControl.ReTrans), fullRetry.Control);
+                await stream.WriteAsync(HeaderOnly(known)); AssertAck(await Read(stream));
+                var headerRetry = await Read(stream); Assert.Equal(response.Data, headerRetry.Data);
+                Assert.Equal(fullRetry.Control, headerRetry.Control);
+            }
+            await Send(stream, known, (byte)(NccControl.Ack | NccControl.PacketId(response.Control)));
+            await Send(stream, known, 1, [.. call, .. status, .. version, 13]); AssertAck(await Read(stream));
+            var done = await Read(stream); Assert.Equal(new byte[] { 5, 0x49, 0x02, 13 }, done.Data);
+            await Send(stream, known, (byte)(NccControl.Ack | NccControl.Clr | done.Control));
+        }
+        using (var socket = await Connect())
+        {
+            var stream = socket.GetStream(); await Send(stream, unknown, 0, attention); AssertAck(await Read(stream));
+            var response = await Read(stream); Assert.Equal(new byte[] { 17 }, response.Data);
+            await Send(stream, unknown, (byte)(NccControl.Ack | response.Control));
+            await Send(stream, unknown, 1, [.. status, .. version, 13]); AssertAck(await Read(stream));
+            var done = await Read(stream); Assert.Equal(new byte[] { 13 }, done.Data);
+            await Send(stream, unknown, (byte)(NccControl.Ack | NccControl.Clr | done.Control));
+        }
+        await using var scope = factory.Services.CreateAsyncScope(); var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        Assert.Single(await db.UploadBatches.Where(row => row.TerminalId == known.Id && row.IdempotencyKey.StartsWith(TerminalUploads.CallDetailPrefix)).ToListAsync());
+        Assert.False(await db.UploadBatches.AnyAsync(row => row.TerminalId == unknown.Id));
+        var reports = await db.DlogTransactions.Where(row => row.TerminalId == known.Id && row.MessageType == 38).ToListAsync();
+        Assert.Equal(box, Assert.Single(reports).RawPayload);
+        Assert.False(await db.DlogTransactions.AnyAsync(row => row.TerminalId == unknown.Id && row.MessageType == 38));
+        var observations = await db.AuditEvents.Where(row => row.Action == "call_upload_cashbox_restore" && (row.TerminalId == known.Id || row.TerminalId == unknown.Id)).ToListAsync();
+        Assert.Equal(3, observations.Count);
+        foreach (var row in observations)
+        {
+            var data = JsonSerializer.Deserialize<JsonElement>(row.DetailJson);
+            Assert.Equal(row.TerminalId == known.Id, data.GetProperty("available").GetBoolean());
+            Assert.True(data.GetProperty("sent").GetBoolean()); Assert.Equal(row.TerminalId == known.Id ? 58 : 1, data.GetProperty("responseBytes").GetInt32());
+            var detail = await api.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{row.TerminalSessionId}/upload-observations");
+            var restore = Assert.Single(detail.GetProperty("cashboxRestores").EnumerateArray());
+            Assert.Equal(new[] { "available", "observedAtUtc", "responseBytes", "sent" }, restore.EnumerateObject().Select(field => field.Name).Order());
+            Assert.Equal(row.TerminalId == known.Id, restore.GetProperty("available").GetBoolean());
+        }
+        var batch = Assert.Single(await db.DownloadBatches.Where(row => row.TerminalId == known.Id).ToListAsync());
+        Assert.Equal(queued.GetProperty("id").GetGuid(), batch.Id); Assert.Equal(DownloadBatchStatus.Pending, batch.Status);
+
+        async Task<TcpClient> Connect() { var socket = new TcpClient(); await socket.ConnectAsync(IPAddress.Loopback, port); return socket; }
+        static Task Send(NetworkStream stream, Terminal phone, byte control, byte[]? data = null) => stream.WriteAsync(NccFrameCodec.Encode(
+            new NccWirePacket { Control = control, TerminalId = Convert.FromHexString(phone.TerminalIdHex), Data = data ?? [] })).AsTask();
+        static byte[] HeaderOnly(Terminal phone)
+        {
+            byte[] frame = [NccConstants.FrameStart, NccControl.ReTrans, 10, .. Convert.FromHexString(phone.TerminalIdHex), 0, 0, NccConstants.FrameEnd];
+            var crc = NccCrc16.Compute(frame.AsSpan(0, frame.Length - 3)); frame[^3] = (byte)crc; frame[^2] = (byte)(crc >> 8); return frame;
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Immediate_card_and_rate_bundles_acknowledge_only_durable_call_records_across_reconnects()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();

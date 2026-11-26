@@ -49,3 +49,21 @@ internal sealed record CallUploadObservation(int Sequence, bool Parsed, bool? En
         Math.Max(DlogCallDetailWire.RecordLength(type), Math.Max(DlogTerminalStatisticsWire.RecordLength(type),
             Math.Max(DlogCashboxWire.RecordLength(type), DlogTerminalStatisticsWire.StatusRecordLength(type))));
 }
+
+internal sealed record CallUploadCashboxRestoreObservation(DateTime ObservedAtUtc, bool Available, bool Sent, int ResponseBytes)
+{
+    internal static CallUploadCashboxRestoreObservation? Read(DateTime time, string detail)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(detail);
+            var root = document.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("available", out var available) || available.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                !root.TryGetProperty("sent", out var sent) || sent.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
+                !root.TryGetProperty("responseBytes", out var count) || count.ValueKind != JsonValueKind.Number || !count.TryGetInt32(out var bytes) ||
+                bytes != (available.GetBoolean() ? DlogCashboxWire.StatusLength + 1 : 1)) return null;
+            return new(time, available.GetBoolean(), sent.GetBoolean(), bytes);
+        }
+        catch (JsonException) { return null; }
+    }
+}

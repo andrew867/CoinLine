@@ -20,6 +20,7 @@ type UploadFrame = {
   endsDialogue: boolean | null
   records: { messageType: number; byteCount: number }[] | null
 }
+type CashboxRestore = { observedAtUtc: string; available: boolean; sent: boolean; responseBytes: number }
 
 const recordNames: Record<number, string> = {
   4: 'Card call detail', 10: 'Terminal status', 13: 'End of data', 37: 'Communications statistics',
@@ -30,11 +31,12 @@ const recordNames: Record<number, string> = {
 
 function UploadRecordObservation({ id }: { id: string }) {
   const [frames, setFrames] = useState<UploadFrame[] | null>(null)
+  const [restores, setRestores] = useState<CashboxRestore[]>([])
   const [error, setError] = useState('')
   useEffect(() => {
     let current = true
-    void apiGet<{ callUploadFrames?: UploadFrame[] }>(`/api/ncc/sessions/${id}/upload-observations`)
-      .then(detail => { if (current) setFrames(detail.callUploadFrames ?? []) })
+    void apiGet<{ callUploadFrames?: UploadFrame[]; cashboxRestores?: CashboxRestore[] }>(`/api/ncc/sessions/${id}/upload-observations`)
+      .then(detail => { if (current) { setFrames(detail.callUploadFrames ?? []); setRestores(detail.cashboxRestores ?? []) } })
       .catch(() => { if (current) setError('Could not load call-upload observations.') })
     return () => { current = false }
   }, [id])
@@ -44,6 +46,13 @@ function UploadRecordObservation({ id }: { id: string }) {
     {error && <p role="alert">{error}</p>}
     {!frames && !error && <p role="status">Loading call-upload observations…</p>}
     {frames?.length === 0 && <p>No explicit call-upload frame metadata was retained for this session. This does not establish that the phone sent no call or cashbox records.</p>}
+    {restores.length > 0 && <><h3>Requested cashbox status</h3><ul>{restores.map((restore, index) => <li key={index}>
+      {formatUtc(restore.observedAtUtc)}: {restore.sent ? restore.available
+        ? 'Last known cashbox status sent before the upload request. Terminal application is not confirmed.'
+        : 'No current cashbox status was known; call upload requested without a fabricated status.'
+        : 'The combined upload response was not sent.'}</li>)}</ul></>}
+    {!!frames?.length && frames.every(frame => frame.parsed && frame.records != null) && frames.some(frame => frame.endsDialogue === true) &&
+      <p><strong>{frames.flatMap(frame => frame.records ?? []).filter(record => [4, 53, 61].includes(record.messageType)).length} call-detail records observed</strong> in the retained parsed upload frames. This is not a statement about records remaining in terminal storage.</p>}
     {!!frames?.length && <table>
       <caption>Received upload frames</caption>
       <thead><tr><th>Frame</th><th>Recognized records in wire order</th><th>End marker</th></tr></thead>
@@ -167,7 +176,7 @@ export function NccSessionsPage() {
       </p>
 
       {sessionId && <p>Showing the selected retained session, including archived records. <Link to="/ncc-sessions">Show all sessions</Link></p>}
-      {sessionId && !loading && !err && rows.some(row => row.id === sessionId) && <NccClockObservations key={sessionId} sessionId={sessionId} />}
+      {sessionId && !loading && !err && rows.some(row => row.id === sessionId) && <NccClockObservations key={`clock-${sessionId}`} sessionId={sessionId} />}
       {!sessionId && <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <input
           type="checkbox"
@@ -267,7 +276,7 @@ export function NccSessionsPage() {
         </table>
       )}
       {inspectedSession && rows.some(row => row.id === inspectedSession) && !loading && !err &&
-        <UploadRecordObservation key={inspectedSession} id={inspectedSession} />}
+        <UploadRecordObservation key={`upload-${inspectedSession}`} id={inspectedSession} />}
     </div>
   )
 }

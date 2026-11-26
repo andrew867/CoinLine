@@ -491,6 +491,7 @@ internal sealed class NccLinkProcessor(
                 && (reply.Data[0] is DlogCallDetailWire.Acknowledgement or DlogCallDetailWire.RequestUpload ||
                     _lastCallUploadEndRequest != null && ReferenceEquals(_lastDialogueRequest, _lastCallUploadEndRequest) ||
                     _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]
+                        or [DlogCallDetailWire.UploadAttention, _, ..]
                     || DlogMaintenanceWire.HasRequestRecord(_lastDialogueRequest.Data)
                     || (_lastDialogueRequest.Data.Length > 0 && (DlogCardAuthorizationWire.IsRequest(_lastDialogueRequest.Data[0])
                         || _lastDialogueRequest.Data[0] == DlogRateWire.MessageTypeRequest))))
@@ -578,7 +579,24 @@ internal sealed class NccLinkProcessor(
             {
                 _callUploadPhoneId = terminal.Id;
                 _lastCallUploadEndRequest = null;
-                await SendDialogueReplyAsync(stream, packet, [DlogCallDetailWire.RequestUpload], "call upload request");
+                if (TryImmediateReplyRetry(packet, out var previousReply))
+                {
+                    await SendDialogueReplyAsync(stream, packet, previousReply.Data, "call upload request retry");
+                    return;
+                }
+
+                var statusRequested = (packet.Data[1] & DlogCashboxWire.StatusRequestFlag) != 0;
+                var status = statusRequested ? await TerminalCashboxAccounting.ReadCurrentStatusBytesAsync(db, terminal.Id, stoppingToken) : null;
+                // MT38 is a complete status record. MT17 starts the terminal's
+                // upload, so neither a table-update marker nor EOD belongs here.
+                // An unknown current box must never receive a fabricated status.
+                byte[] response = status == null ? [DlogCallDetailWire.RequestUpload] : [..status, DlogCallDetailWire.RequestUpload];
+                var sent = await SendDialogueReplyAsync(stream, packet, response, "call upload request");
+                if (statusRequested)
+                {
+                    Audit("call_upload_cashbox_restore", new { available = status != null, sent, responseBytes = response.Length }, terminal.Id);
+                    await db.SaveChangesAsync(stoppingToken);
+                }
             }
         }
 
