@@ -17,6 +17,8 @@ public sealed class SeedOptions
 {
     /// <summary>When false, catalog/protocol seeds still load; demo transit customer + lab terminal are skipped.</summary>
     public bool EnableDemoData { get; set; } = true;
+    /// <summary>Optional local directory of validated profile-specific demo starter records. No automatic publication or assignment.</summary>
+    public string? DemoConfigurationBundlePath { get; set; }
 }
 
 public sealed class PayloadStorageOptions

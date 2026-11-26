@@ -219,6 +219,8 @@ using (var scope = app.Services.CreateScope())
         await db.Database.EnsureCreatedAsync();
     await OperatorAccountBootstrap.EnsureAsync(db, app.Configuration, app.Environment, platformOpts.Value.Seed.EnableDemoData);
     await SeedData.EnsureSeedAsync(db, platformOpts.Value.Seed.EnableDemoData);
+    if (platformOpts.Value.Seed.EnableDemoData && !string.IsNullOrWhiteSpace(platformOpts.Value.Seed.DemoConfigurationBundlePath))
+        await DemoConfigurationSeed.EnsureAsync(db, platformOpts.Value.Seed.DemoConfigurationBundlePath);
 }
 
 app.Run();
