@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { apiFetch, apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
@@ -71,30 +71,41 @@ export function TableSetDetail() {
   const [targetEdit, setTargetEdit] = useState<string | null>(null)
   const [savingTarget, setSavingTarget] = useState(false)
   const [recordDirty, setRecordDirty] = useState(false)
+  const currentId = useRef(id)
+  const requestRef = useRef<AbortController | null>(null)
+  currentId.current = id
   const canRead = canPerform('table-sets', op.read)
   const canUpdate = canPerform('table-sets', op.update)
   const canAdd = canPerform('table-sets', op.add)
   const canReadRecords = canPerform('table-records', op.read)
 
   const load = () => {
-    if (!id || !canRead) return
+    if (!id || id !== currentId.current || !canRead) return
+    requestRef.current?.abort()
+    const request = new AbortController()
+    requestRef.current = request
     setErr(null)
-    apiFetch(`/api/tables/sets/${id}`)
+    apiFetch(`/api/tables/sets/${id}`, { signal: request.signal })
       .then((r) => {
         if (!r.ok) throw new Error(String(r.status))
         return r.json() as Promise<Detail>
       })
       .then((j) => {
+        if (request.signal.aborted || currentId.current !== id) return
         setD(j)
         setName(j.name)
       })
-      .catch((e) => setErr(e instanceof Error ? e.message : 'error'))
+      .catch((e) => {
+        if (!request.signal.aborted && currentId.current === id)
+          setErr(e instanceof Error ? e.message : 'error')
+      })
   }
 
   useEffect(() => {
     setTargetEdit(null)
     setRecordDirty(false)
     load()
+    return () => requestRef.current?.abort()
   }, [id, canRead])
 
   async function saveTarget(e: React.FormEvent) {
@@ -163,7 +174,7 @@ export function TableSetDetail() {
 
   if (!id) return <p>Missing id.</p>
   if (!canRead) return <p role="alert">You do not have permission to view table sets.</p>
-  if (!d) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
+  if (!d || d.id !== id) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
 
   const draft = d.status !== 1
   const codeOnly = d.versions.length === 1 && d.versions[0].tableNumber === 94
