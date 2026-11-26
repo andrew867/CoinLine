@@ -18,6 +18,7 @@ import { RestrictedRouteReview, type RestrictedRouteRecord } from './RestrictedR
 import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { InterfaceTimingPanel, interfaceTimingKeys } from './InterfaceTimingPanel'
+import { ModemDebounceReview } from './ModemDebounceReview'
 import { TimeDiscountCalendar } from './TimeDiscountCalendar'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
@@ -421,6 +422,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
           if (field) edit(field, value)
         }} />}
+      {number === 33 && layout.length === 36 && <ModemDebounceReview later={layout.profile === 'Later packed profile'} value={key => {
+        const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
+        return field && effectiveValue(field)
+      }} onOpen={key => { setSearch(''); setSectionKey(key) }} />}
       {layout.profiles && layout.profiles.length > 1 && (
         <div className="table-config-selectors">
           <label>Firmware profile

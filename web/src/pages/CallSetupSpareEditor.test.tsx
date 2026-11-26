@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
@@ -99,6 +99,34 @@ it('stages an answer-supervision row spare and tail spare without replacing line
   expect(screen.getByLabelText('Number pattern')).toHaveValue('1234')
   fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
   expect((await saved()).changes).toEqual({ 'spare.byte32': '129', 'pattern-15.spare.byte1': '99' })
+})
+
+it('reviews modem release and assertion separately and stages only the selected count', async () => {
+  editor(33, layout(36, [
+    { key: 'modem', label: 'Modem line timing', fields: [
+      field('answerToneDetection', 'Enable answer tone detection', 'true', 'checkbox'),
+      field('answerToneOptional', 'Allow connection without answer tone', 'false', 'checkbox'),
+      field('skipAnswerToneRemoval', 'Skip waiting for answer tone removal', 'false', 'checkbox'),
+    ] },
+    { key: 'debounce-2', label: 'Answer tone', fields: [
+      field('debounce-2.interval', 'Interval', '1'), field('debounce-2.off', 'Off count', '5'), field('debounce-2.on', 'On count', '10'),
+    ] },
+    { key: 'debounce-3', label: 'Carrier/mark', fields: [
+      field('debounce-3.interval', 'Interval', '1'), field('debounce-3.off', 'Off count', '10'), field('debounce-3.on', 'On count', '10'),
+    ] },
+  ]))
+  const panel = await screen.findByRole('region', { name: 'Modem detector timing review' })
+  const answer = within(panel).getByRole('row', { name: /Answer tone/ })
+  expect(within(answer).getByText('50 ms')).toBeVisible()
+  expect(within(answer).getByText('100 ms')).toBeVisible()
+  expect(within(panel).getByText(/answer required/)).toBeVisible()
+  fireEvent.click(within(answer).getByRole('button', { name: 'Review Answer tone fields' }))
+  fireEvent.change(screen.getByLabelText('Off count'), { target: { value: '25' } })
+  expect(within(answer).getByText('250 ms')).toBeVisible()
+  expect(within(answer).getByText('100 ms')).toBeVisible()
+  expect(within(panel).getByText(/answer required/)).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  expect((await saved()).changes).toEqual({ 'debounce-2.off': '25' })
 })
 
 it('previews Western promotion prompts and exposes the minimum usage threshold separately from spares', async () => {
