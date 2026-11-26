@@ -6,6 +6,16 @@
 
 **UI:** `/terminals`, `/terminals/new`
 
+## Individual configuration assignments
+
+From a phone's **Table assignment** section, expand **Individual configuration assignments**. The worksheet lists its current Manager configuration IDs and revisions by family and record type. Use the family filter or search to find a row, including an unassigned record available for the registered firmware. The legacy mandatory-family review is advisory; a listed family is not proof of an accepted INSTALL.
+
+Choose **Look up MT…** to find published records by Configuration ID or set name. The lookup includes shared configurations and those owned by the phone's customer, with firmware or record incompatibilities shown alongside the options. Operators with read-only assignment access can browse; full record inspection requires the independent table set and record read permissions.
+
+An assignment operator can select records from different published sets, one choice per message type, and explicitly clear an optional record when removal is confirmed for the installed profile. The default for every other record is **Leave unchanged**. Select a source MT21 and explicitly enable the registered-wire-ID option if its identity must be personalized. Preview the resulting set; required dependencies are included and conflicting source requirements are rejected. Review missing legacy families before applying, especially when assembling an initial assignment.
+
+Apply creates one new published host assignment while retaining the prior set for rollback. No other phone, source configuration or pending download is changed. A phone with queued or running configuration delivery must complete or cancel that work first. Clearing an optional assignment does not erase a record already in terminal memory. Use the separate download workflow to review and deliver the new configuration to the device.
+
 Operators with an Add-only Phones profile can register new phones. The registration form offers existing sites, installed firmware and terminal families without opening the full catalogues. The optional group is available only with Membership Add and follows the selected site's customer. Registering a phone does not require permission to read existing phone records.
 
 ## Latest reported phone status

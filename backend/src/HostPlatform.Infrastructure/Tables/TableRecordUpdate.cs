@@ -5,6 +5,7 @@ namespace HostPlatform.Infrastructure.Tables;
 
 public sealed record TableRecordUpdateChange(int TableNumber, string Action, bool Required = false, bool Personalized = false);
 public sealed record TableRecordUpdatePlan(TableSet Set, IReadOnlyList<TableRecordUpdateChange> Changes);
+public sealed record TableRecordSourceSelection(TableSet Source, int[] Numbers);
 
 public static class TableRecordUpdate
 {
@@ -17,12 +18,24 @@ public static class TableRecordUpdate
     };
 
     public static TableRecordUpdatePlan Prepare(TableSet source, TableSet basis, FirmwareVersion? firmware,
-        int[] copyNumbers, int[] removeNumbers, string? registeredAccessWireId = null)
+        int[] copyNumbers, int[] removeNumbers, string? registeredAccessWireId = null) =>
+        PrepareSelections(basis, firmware, copyNumbers.Length == 0 ? [] : [new(source, copyNumbers)], removeNumbers, registeredAccessWireId);
+
+    // Build one resulting assignment from independently selected published records.
+    // Validate the complete result, not transient intermediate combinations.
+    public static TableRecordUpdatePlan PrepareSelections(TableSet basis, FirmwareVersion? firmware,
+        IReadOnlyList<TableRecordSourceSelection> selections, int[] removeNumbers, string? registeredAccessWireId = null)
     {
+        var copyNumbers = selections.SelectMany(selection => selection.Numbers).ToArray();
+        var requested = copyNumbers.Concat(removeNumbers).ToArray();
+        if (requested.Distinct().Count() != requested.Length || selections.Any(selection => selection.Numbers.Length == 0) ||
+            requested.Any(number => number is < 1 or > 255 or CodeDownloadWire.MessageType))
+            throw new InvalidOperationException("Choose one action per data record. Firmware schedules are handled separately.");
         if (registeredAccessWireId != null)
         {
             if (!copyNumbers.Contains(21))
                 throw new InvalidOperationException("Select MT21 for copying before personalizing its terminal identity.");
+            var source = selections.Single(selection => selection.Numbers.Contains(21)).Source;
             var access = source.Versions.Where(version => version.TableDefinition!.TableNumber == 21).Take(2).ToArray();
             if (access.Length != 1)
                 throw new InvalidOperationException("Choose exactly one source access record.");
@@ -31,29 +44,45 @@ public static class TableRecordUpdate
                 && TableDistributionService.GetEffectivePayload(access[0]).Length != expected)
                 throw new InvalidOperationException("The source MT21 length does not match the phone's registered firmware profile.");
         }
-        var copy = copyNumbers.Length != 0;
         var name = $"Update · {basis.Name}";
-        var target = basis.TargetFirmwareVersion ?? (copy ? source.TargetFirmwareVersion : null);
+        var target = basis.TargetFirmwareVersion ?? selections.Select(selection => selection.Source.TargetFirmwareVersion).FirstOrDefault(row => row != null);
+        var targetIds = new[] { basis.TargetFirmwareVersionId ?? basis.TargetFirmwareVersion?.Id }
+            .Concat(selections.Select(selection => selection.Source.TargetFirmwareVersionId ?? selection.Source.TargetFirmwareVersion?.Id))
+            .OfType<Guid>().Distinct().ToArray();
+        var owners = new[] { basis.CustomerId }.Concat(selections.Select(selection => selection.Source.CustomerId)).OfType<Guid>().Distinct().ToArray();
+        if (targetIds.Length > 1) throw new InvalidOperationException("The selected configurations target different firmware versions.");
+        if (owners.Length > 1) throw new InvalidOperationException("The selected configurations belong to different customers.");
         var result = new TableSet
         {
             Name = name[..Math.Min(name.Length, 120)],
-            CustomerId = basis.CustomerId ?? (copy ? source.CustomerId : null),
-            TargetFirmwareVersionId = target?.Id, TargetFirmwareVersion = target
+            CustomerId = owners.Length == 1 ? owners[0] : null,
+            TargetFirmwareVersionId = targetIds.Length == 1 ? targetIds[0] : null, TargetFirmwareVersion = target
         };
         foreach (var version in basis.Versions)
             result.Versions.Add(CopyForReview(version));
 
         var operations = new List<TableRecordUpdateChange>();
+        var byNumber = new Dictionary<int, int>();
         var lastSortOrder = result.Versions.Select(version => version.SortOrder).DefaultIfEmpty(-1).Max();
-        if (copy)
+        foreach (var selection in selections)
         {
-            var plan = TableRecordCopy.Prepare(source, result, copyNumbers, registeredAccessWireId);
+            var personalized = registeredAccessWireId != null && selection.Numbers.Contains(21);
+            var plan = TableRecordCopy.Prepare(selection.Source, result, selection.Numbers, personalized ? registeredAccessWireId : null);
             foreach (var entry in plan)
             {
                 var number = entry.Source.TableDefinition!.TableNumber;
                 if (removeNumbers.Contains(number))
                     throw new InvalidOperationException($"MT{number} is required by a selected source record and cannot be removed in the same update.");
-                operations.Add(new(number, entry.Action, entry.Required, registeredAccessWireId != null && number == 21 && copyNumbers.Contains(21)));
+                if (byNumber.TryGetValue(number, out var index))
+                {
+                    if (entry.Action != "keep")
+                        throw new InvalidOperationException($"Selected configurations require different MT{number} records. Choose matching source dependencies.");
+                    operations[index] = operations[index] with { Required = operations[index].Required && entry.Required,
+                        Personalized = operations[index].Personalized || (personalized && number == 21) };
+                    continue;
+                }
+                byNumber.Add(number, operations.Count);
+                operations.Add(new(number, entry.Action, entry.Required, personalized && number == 21));
                 if (entry.Action == "keep")
                     continue;
 
