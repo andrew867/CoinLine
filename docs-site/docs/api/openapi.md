@@ -42,4 +42,4 @@ Open **http://localhost:5006/swagger**
 
 ## Customer integration
 
-- Use **HTTPS** and **API keys** in production; see [Authentication](authentication.md) and [Security overview](../security/security-overview.md).
+- Use **HTTPS** and **operator tokens** in production, plus the deployment API key when enabled; see [Authentication](authentication.md) and [Security overview](../security/security-overview.md).

@@ -17,7 +17,7 @@ public sealed class PostgresInstallPriorityTests
     public async Task Only_older_due_exact_partial_work_is_superseded_after_a_completed_full_installation()
     {
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", Guid.NewGuid().ToString("N"))
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")

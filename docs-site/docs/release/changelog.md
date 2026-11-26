@@ -51,7 +51,7 @@ Prior alpha notes remain applicable; treat **v0.1.0** as the first tagged **MIT-
 #### Security warnings
 
 - **API keys** are shared-secret HTTP headers — protect at rest, rotate, and terminate TLS at the edge; **never** expose the API anonymously to the internet.
-- **Development auth modes** must not ship to production; production requires explicit **`Security:Mode`** and key configuration (see configuration docs).
+- Earlier releases supported a Development authentication bypass; current releases require named operator tokens in every environment and a configured signing key outside Development.
 - **Raw payloads** (DLOG, tables, cards) may contain sensitive traffic or account metadata — classify, restrict access, and review **audit** and **export** paths (including DLOG replay export).
 - **Payment-adjacent APIs** are **not** a substitute for a PCI-scoped payment application; token references and masking discipline are **necessary but not sufficient**.
 

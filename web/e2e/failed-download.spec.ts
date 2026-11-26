@@ -54,7 +54,7 @@ test('find the table missing an acknowledgement on a phone’s failed download',
     const headers = request.headers()
     if (url.pathname === '/api/auth/login' && request.method() === 'POST') {
       const body = request.postDataJSON() as { username: string; password: string }
-      if (body.username === 'operator' && body.password === 'lab-operator' && !headers.authorization) {
+      if (body.username === 'operator' && body.password === 'fixture-passphrase' && !headers.authorization) {
         return route.fulfill({ json: { token, displayName: 'Workshop operator', role: 'Operator' } })
       }
     }

@@ -23,12 +23,12 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresAuthAccountTests
 {
     [PostgresIntegrationFact]
-    public async Task Named_profiles_restrict_actions_without_altering_role_or_machine_access()
+    public async Task Named_profiles_restrict_actions_without_altering_role_and_require_tokens_for_machine_access()
     {
         var key = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)
@@ -194,8 +194,8 @@ public sealed class PostgresAuthAccountTests
         await SignIn(userClient, user);
         using (var allowed = await userClient.GetAsync(phones))
             Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
-        using (var allowed = await machine.GetAsync(phones))
-            Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+        using (var denied = await machine.GetAsync(phones))
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         using (var clean = await adminClient.DeleteAsync($"{groups}/{groupId}"))
             Assert.Equal(HttpStatusCode.NoContent, clean.StatusCode);
 
@@ -216,7 +216,7 @@ public sealed class PostgresAuthAccountTests
         var key = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)
@@ -274,14 +274,14 @@ public sealed class PostgresAuthAccountTests
     }
 
     [PostgresIntegrationFact]
-    public async Task Named_sessions_are_revoked_by_account_changes_without_changing_key_only_access()
+    public async Task Named_sessions_are_revoked_by_account_changes_and_key_only_access_is_denied()
     {
         var key = Guid.NewGuid().ToString("N");
         var signingKey = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         var newPassword = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)
@@ -360,7 +360,7 @@ public sealed class PostgresAuthAccountTests
         using (var forbidden = await administrator.GetAsync(accounts))
             Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
         using (var machineRead = await machine.GetAsync(phones))
-            Assert.Equal(HttpStatusCode.OK, machineRead.StatusCode);
+            Assert.Equal(HttpStatusCode.Unauthorized, machineRead.StatusCode);
         using (var machineAdmin = await machine.GetAsync(accounts))
             Assert.Equal(HttpStatusCode.Unauthorized, machineAdmin.StatusCode);
 

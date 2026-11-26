@@ -1,15 +1,15 @@
 namespace HostPlatform.Api.Options;
 
-/// <summary>Production gate for API keys and auth mode — replaces implicit dev trust.</summary>
+/// <summary>Optional additional API-key gate; operator tokens are always required.</summary>
 public sealed class SecurityOptions
 {
     public const string SectionName = "Security";
 
     /// <summary>
-    /// <see cref="HostAuthMode.Development"/> — header-based operator identity only (default local).
-    /// <see cref="HostAuthMode.ApiKey"/> — requires <c>X-API-Key</c> except exempt paths.
+    /// <see cref="HostAuthMode.Token"/> requires a validated operator token.
+    /// <see cref="HostAuthMode.ApiKey"/> additionally requires a configured <c>X-API-Key</c>.
     /// </summary>
-    public HostAuthMode Mode { get; set; } = HostAuthMode.Development;
+    public HostAuthMode Mode { get; set; } = HostAuthMode.Token;
 
     /// <summary>
     /// Shared secrets for field gateways / automation.
@@ -23,6 +23,8 @@ public sealed class SecurityOptions
 
 public enum HostAuthMode
 {
-    Development = 0,
+    Token = 0,
+    // Compatibility with old configuration names; this never bypasses token authentication.
+    Development = Token,
     ApiKey = 1
 }

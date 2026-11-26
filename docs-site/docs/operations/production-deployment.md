@@ -5,4 +5,4 @@
 3. Static UI or CDN for React `dist/`.
 4. Worker optional — heartbeat gate readiness.
 
-Validate **`ValidateProductionSecurity`** throws if ApiKey mode missing keys.
+Set a unique signing secret (`COINLINE_OPERATOR_TOKEN_KEY`) before starting and provision a named administrator. `ValidateStartupSecurity` rejects a missing or invalid signing key and ApiKey mode without deployment keys. See [Authentication](../api/authentication.md).

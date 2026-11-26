@@ -28,9 +28,7 @@ public sealed class NccListenFixture : IAsyncLifetime
     {
         Factory = new NccFactory();
         Port = Factory.Port;
-        Client = Factory.CreateClient();
-        Client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "ui@local");
-        Client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        Client = TestOperatorAuthentication.CreateAuthenticatedClient(Factory, "ui@local", "Admin");
         var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
@@ -71,7 +69,7 @@ public sealed class NccFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment("Testing").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey);
         builder.UseSetting("Ncc:Listen", "1");
         builder.UseSetting("Ncc:Port", Port.ToString());
         builder.ConfigureServices(services => services.AddSingleton<TimeProvider>(Clock));
@@ -480,9 +478,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         await using var factory = new NccFactory();
         await using var host = factory.WithWebHostBuilder(builder =>
             builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider)));
-        using var client = host.CreateClient();
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "fixture");
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(host, "fixture", "Admin");
         var state = await client.GetFromJsonAsync<JsonElement>("/api/cards/simulation-state");
         Assert.True(state.GetProperty("runtimeAuthorizationProviderRegistered").GetBoolean());
         Assert.Equal(0, provider.Calls);

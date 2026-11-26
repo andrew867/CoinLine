@@ -26,10 +26,10 @@ public sealed class PostgresQuickAccessCustomerTests
         var key = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production").UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey).UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
-        using var client = factory.CreateClient();
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         using var anonymous = factory.CreateClient();
         using (var denied = await anonymous.PostAsJsonAsync(Path + "/lookup", new { })) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         client.DefaultRequestHeaders.Add("X-API-Key", key);
@@ -103,7 +103,7 @@ public sealed class PostgresQuickAccessCustomerTests
         }
         using (var denied = await client.DeleteAsync(url + "?revision=1&confirm=true")) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
 
-        client.DefaultRequestHeaders.Authorization = null;
+        TestOperatorAuthentication.Authenticate(client, factory);
         var unchangedInput = new { input.reference, input.name, input.billingComments, input.contactName, input.phone,
             input.street, input.city, input.province, input.postalCode, input.notes, revision = 1 };
         using (var unchanged = await client.PutAsJsonAsync(url, unchangedInput))
@@ -152,7 +152,7 @@ public sealed class PostgresQuickAccessCustomerTests
                 changes = new Dictionary<string, string> { ["key-5.customerReference"] = uint.Parse(selectedRef).ToString() } }))
                 saved.EnsureSuccessStatusCode();
             savedRecords[version.Id] = expected;
-            client.DefaultRequestHeaders.Authorization = null;
+            TestOperatorAuthentication.Authenticate(client, factory);
         }
         using (var denied = await client.DeleteAsync(url + "?revision=2")) Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
         using (var archived = await client.DeleteAsync(url + "?revision=2&confirm=true")) Assert.Equal(HttpStatusCode.NoContent, archived.StatusCode);

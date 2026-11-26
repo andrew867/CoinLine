@@ -303,6 +303,7 @@ public sealed partial class ManualCardLabTests
         protected override void ConfigureWebHost(IWebHostBuilder web)
         {
             web.UseEnvironment("Production")
+                .UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
                 .UseSetting("ConnectionStrings:Default", connection)
                 .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", Guid.NewGuid().ToString("N"))
                 .UseSetting("Platform:Seed:EnableDemoData", "false")

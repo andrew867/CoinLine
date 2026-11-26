@@ -4,8 +4,9 @@
 
 ## Authentication
 
-- **API keys** (HTTP headers) for automation and Management Console traffic — protect like passwords; rotate on schedule.
-- **Development** auth bypass must be **disabled** in production (`Security:Mode`).
+- Every protected API route requires a validated operator token, including in Development and Testing.
+- API keys are an optional additional deployment gate, not a substitute for an operator account.
+- Set a unique signing secret outside Development. No default production administrator is created. The API binds to loopback by default.
 
 Use **`COINLINE_API_KEYS`** (comma-separated) or configuration equivalents — see [Environment variables](../reference/environment-variables.md).
 

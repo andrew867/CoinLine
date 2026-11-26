@@ -1385,9 +1385,7 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
 
     private static HttpClient CreateClient(ApiFixture f)
     {
-        var c = f.CreateClient();
-        c.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "itest@local");
-        c.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        var c = TestOperatorAuthentication.CreateAuthenticatedClient(f, "itest@local", "Admin");
         return c;
     }
 }

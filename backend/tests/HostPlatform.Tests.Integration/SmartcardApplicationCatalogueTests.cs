@@ -7,7 +7,7 @@ namespace HostPlatform.Tests.Integration;
 [Collection("IntegrationApi")]
 public sealed class SmartcardApplicationCatalogueTests(ApiFixture factory)
 {
-    private readonly HttpClient _client = factory.CreateClient();
+    private readonly HttpClient _client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
 
     [Fact]
     public async Task Compatibility_matrix_exposes_distinct_application_subtypes_without_claiming_payments()

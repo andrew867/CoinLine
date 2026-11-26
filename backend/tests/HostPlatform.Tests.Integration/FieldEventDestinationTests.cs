@@ -16,9 +16,7 @@ public sealed class FieldEventDestinationTests(ApiFixture factory)
     [Fact]
     public async Task Combined_scope_and_code_rules_route_new_reports_without_rewriting_previous_decisions()
     {
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "fixture");
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         var customer = new Customer { Name = "Routing fixture", Code = "ROUTE" };
         var site = new Site { Customer = customer, Name = "Fixture site", Code = "ROUTE" };
         var group = new TerminalGroup { Name = "Fixture additional group" };

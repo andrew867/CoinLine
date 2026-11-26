@@ -8,6 +8,7 @@
     <NoWarn>$(NoWarn);1591</NoWarn>
     <Product>CoinLine Payphone Management Platform</Product>
     <AssemblyTitle>CoinLine Server</AssemblyTitle>
+    <UserSecretsId>CoinLine.Server.LocalDevelopment</UserSecretsId>
   </PropertyGroup>
 
   <ItemGroup>

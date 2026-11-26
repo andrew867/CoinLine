@@ -7,7 +7,7 @@ namespace HostPlatform.Tests.Integration;
 [Collection("IntegrationApi")]
 public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
 {
-    private readonly HttpClient _client = factory.CreateClient();
+    private readonly HttpClient _client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
 
     [Fact]
     public async Task Reference_separates_native_layouts_firmware_evidence_and_operational_messages()

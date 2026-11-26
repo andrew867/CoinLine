@@ -23,7 +23,7 @@ public sealed class PostgresPerformanceReportReferenceTests
         var key = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)

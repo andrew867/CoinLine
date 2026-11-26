@@ -22,13 +22,13 @@ public sealed class PostgresGraphicalStarterTests
     {
         var key = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false")
             .UseSetting("Platform:Seed:EnableDemoData", "false"));
-        using var client = factory.CreateClient();
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         client.DefaultRequestHeaders.Add("X-API-Key", key);
 
         var firmware = await Firmware(FirmwareTableProfiles.GraphicalMultiPay180);
@@ -104,7 +104,7 @@ public sealed class PostgresGraphicalStarterTests
         await SignIn(author);
         using (var allowed = await client.PostAsJsonAsync($"/api/tables/sets/{permissionSet}/graphical-starter", new { }))
             allowed.EnsureSuccessStatusCode();
-        client.DefaultRequestHeaders.Authorization = null;
+        TestOperatorAuthentication.Authenticate(client, factory);
         Assert.Equal(3, (await Versions(permissionSet)).Length);
 
         OperatorAccount Account(int operations) => new()
