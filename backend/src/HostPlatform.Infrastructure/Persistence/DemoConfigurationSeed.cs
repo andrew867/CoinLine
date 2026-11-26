@@ -109,7 +109,7 @@ public static class DemoConfigurationSeed
     {
         var bundle = ReadBundleDetails(directory);
         var starters = bundle.Starters;
-        var names = starters.Select(row => row.Name).Concat(bundle.Superseded.SelectMany(row => new[] { row.Name + " (initial export)", row.Name + " (complete)" })).ToArray();
+        var names = starters.Select(row => row.Name).Concat(bundle.Superseded.SelectMany(row => new[] { PreviousName(row), ReplacementName(row) })).ToArray();
         var existing = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
             .Include(row => row.Versions).ThenInclude(row => row.TablePayload).Where(row => names.Contains(row.Name)).ToListAsync(ct);
         var definitions = await db.TableDefinitions.ToListAsync(ct);
@@ -121,16 +121,17 @@ public static class DemoConfigurationSeed
             if (collisions.Length > 0)
             {
                 var old = bundle.Superseded.SingleOrDefault(row => row.Name == name);
-                // Never overwrite operator edits. Only an exact, unpublished initial
-                // export is retired as a non-default reference when expanded data arrives.
+                // Never overwrite operator edits. Only an exact, unpublished prior
+                // default is retired as a non-default reference.
                 if (old == null || collisions.Length != 1 || !HasShape(collisions[0], old)) continue;
                 var prior = collisions[0];
+                if (HasExactRecords(prior, starter)) continue;
                 if (prior.Status == TableSetStatus.Draft && prior.IsDefault && HasExactRecords(prior, old)
-                    && !existing.Any(row => row.Name == name + " (initial export)"))
+                    && !existing.Any(row => row.Name == PreviousName(old)))
                 {
-                    prior.Name += " (initial export)"; prior.IsDefault = false; prior.Version++;
+                    prior.Name = PreviousName(old); prior.IsDefault = false; prior.Version++;
                 }
-                else name += " (complete)";
+                else name = ReplacementName(old);
                 if (existing.Any(row => row.Name == name)) continue;
             }
             var targetIds = starter.ProfileId == null ? [] : await db.FirmwareVersions.AsNoTracking().Where(row => row.TableProfileId == starter.ProfileId)
@@ -155,6 +156,12 @@ public static class DemoConfigurationSeed
         }
         await db.SaveChangesAsync(ct);
     }
+
+    private static string PreviousName(Starter starter) => starter.Name + (starter.Name == GraphicalName
+        ? " (text-enabled reference)" : " (initial export)");
+
+    private static string ReplacementName(Starter starter) => starter.Name + (starter.Name == GraphicalName
+        ? " (graphical idle default)" : " (complete)");
 
     private static bool HasShape(TableSet set, Starter starter) => set.Versions.Count == starter.Records.Count &&
         set.Versions.Select(row => row.TableDefinition?.TableNumber ?? 0).ToHashSet().SetEquals(starter.Records.Keys);

@@ -16,6 +16,8 @@ These datasets contain examples of earlier and later tariffs, coin validation, d
 
 An expanded manifest retains 70 validated record files, including identical alias payloads, and explicitly selects the populated standard text advertisements and original ordinary screening defaults. The importer checks that both selected text rotations contain visible idle messages, that the graphical set contains twenty bitmap and four mixed screens, and that the standard free screening rules use the correct unrated tariff reference. A structurally valid but blank default advertising record is refused.
 
+Graphical starters retain the original populated MT29 as reference content, but disable its idle rotation in MT26 and keep MT131 graphical idle rotation enabled. The two-line starters preserve their original MT26 setting. A 43-record graphical installation previously showed text instead of the unchanged graphics. A selected MT26 update received its one application acknowledgement, and the subsequent normal restart restored graphical rotation. The default importer changes only that preference bit, preserves both advertising records and retires only an exact prior unassigned default; operator-customized configurations are not overwritten.
+
 | Default starter | Records | Target profile |
 | --- | ---: | --- |
 | Demo starter, MTR 1.9 | 13 | Earlier 200-entry Multi-pay |

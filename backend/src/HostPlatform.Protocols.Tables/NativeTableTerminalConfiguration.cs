@@ -107,7 +107,7 @@ public static partial class NativeTableLayouts
             Field("maxDistinctSmartCards", "Maximum different smart cards", 52)),
         Section("display", "Display and advertising", [
             Select("displayPresent", "Display fitted", 2, (0, "No display"), (1, "Display fitted")),
-            Toggle("onHookAds", "Rotate advertisements on hook", 22, 1),
+            Toggle("onHookAds", "Rotate two-line text advertisements on hook", 22, 1),
             Toggle("quickAccessAds", "Display quick-access advertisements", 22, 2),
             Toggle("establishedAds", "Display advertisements during connected calls", 22, 4),
             Toggle("showClock", "Display date and time on hook", 22, 8),

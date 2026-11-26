@@ -16,7 +16,8 @@ namespace HostPlatform.Api.Controllers;
 public sealed class ConfigurationSetupController(HostPlatformDbContext db, TableDistributionService tables) : ControllerBase
 {
     public sealed record SetupRequest(string? Name, string? FamilyId, int PaymentMode, string? Pricing,
-        int? TariffIndex, int? FirstChargeCents, int? FollowingChargeCents, bool? OnHookAdvertising, string? PreviewToken = null);
+        int? TariffIndex, int? FirstChargeCents, int? FollowingChargeCents, bool? OnHookAdvertising, string? PreviewToken = null,
+        string? IdleAdvertisingMode = null);
 
     private sealed record Prepared(string Name, Dictionary<int, byte[]> Changed,
         TerminalFamilyTableReview Family, TableProvisioningReview Provisioning, TableFirmwareFinding[] Findings, string Token);
@@ -69,7 +70,7 @@ public sealed class ConfigurationSetupController(HostPlatformDbContext db, Table
         ApiAudit.Write(db, HttpContext, "tables.set", "guided_setup_draft", draft.Id.ToString(), new
         {
             sourceId, request.FamilyId, source.TargetFirmwareVersionId, request.PaymentMode, request.Pricing,
-            request.TariffIndex, request.OnHookAdvertising, changedNumbers = prepared.Changed.Keys.Order().ToArray()
+            request.TariffIndex, request.OnHookAdvertising, request.IdleAdvertisingMode, changedNumbers = prepared.Changed.Keys.Order().ToArray()
         });
         try { await db.SaveChangesAsync(ct); }
         catch (DbUpdateException) { return Conflict(new { error = "The draft could not be created. Review the source and retry." }); }
@@ -84,6 +85,9 @@ public sealed class ConfigurationSetupController(HostPlatformDbContext db, Table
         if (family == null) throw new ArgumentException("Choose the intended terminal family.");
         if (request.PaymentMode is < 0 or > 3) throw new ArgumentException("Choose a supported operating mode.");
         if (request.Pricing is not ("keep" or "host" or "flat" or "minute" or "split")) throw new ArgumentException("Choose a pricing structure.");
+        if (request.IdleAdvertisingMode is not (null or "keep" or "text" or "graphical" or "none") ||
+            (request.IdleAdvertisingMode != null && request.OnHookAdvertising != null))
+            throw new ArgumentException("Choose one idle advertising mode, not both the new mode and the legacy text flag.");
         if (source.Status != TableSetStatus.Published && !(source.Status == TableSetStatus.Draft && source.IsDefault))
             throw new InvalidOperationException("Choose a published base configuration or a designated default starter draft.");
         var profile = FirmwareTableProfiles.Find(source.TargetFirmwareVersion?.TableProfileId);
@@ -96,6 +100,18 @@ public sealed class ConfigurationSetupController(HostPlatformDbContext db, Table
         var features = new Dictionary<string, string>();
         if (request.PaymentMode != 0) features["terminalType"] = request.PaymentMode.ToString();
         if (request.OnHookAdvertising is { } ads) features["onHookAds"] = ads ? "true" : "false";
+        if (request.IdleAdvertisingMode is "text" or "graphical" or "none")
+        {
+            var graphicalTarget = profile.VerifiedLengths.ContainsKey(131);
+            if (request.IdleAdvertisingMode == "graphical" && (!graphicalTarget || !family.Id.EndsWith("-graphical", StringComparison.Ordinal)))
+                throw new ArgumentException("Graphical idle advertising requires a graphical terminal family and a compatible registered profile.");
+            if (request.IdleAdvertisingMode == "graphical" && new[] { 131, 132, 133 }.Any(number =>
+                !records.TryGetValue(number, out var raw) || raw.Length != profile.VerifiedLengths.GetValueOrDefault(number) || raw[0] != number))
+                throw new InvalidOperationException("Prepare all three graphical records before selecting graphical idle advertising.");
+            features["onHookAds"] = request.IdleAdvertisingMode == "text" ? "true" : "false";
+            if (graphicalTarget && records.ContainsKey(131))
+                Stage(131, new() { ["onHook"] = request.IdleAdvertisingMode == "graphical" ? "true" : "false" });
+        }
         if (features.Count != 0) Stage(26, features);
         if (request.Pricing is "flat" or "minute" or "split")
         {

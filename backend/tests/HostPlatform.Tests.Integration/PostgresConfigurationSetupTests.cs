@@ -17,6 +17,67 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresConfigurationSetupTests
 {
     [PostgresIntegrationFact]
+    public async Task Graphical_idle_preference_preserves_text_and_graphics_and_edits_only_selected_enable_flags()
+    {
+        var key = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
+        client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var firmware = new FirmwareVersion { Label = "Graphical fixture target", TableProfileId = FirmwareTableProfiles.GraphicalMultiPay180 };
+        var features = new byte[72]; features[0] = 26; features[1] = 2; features[22] = 0xA9;
+        var ads = Enumerable.Repeat(new AdvertisingSlot("", 0, 0, false, true), AdvertisingTableWire.SlotCount).ToArray();
+        ads[0] = new("Fixture text", 50, 0, false, false);
+        var records = GraphicalStarterWire.Create().ToDictionary(row => row.Key, row => row.Value);
+        records.Add(26, features); records.Add(29, AdvertisingTableWire.Encode(ads));
+        var source = new TableSet { Name = "Graphical fixture starter", TargetFirmwareVersion = firmware, IsDefault = true };
+        foreach (var (number, bytes) in records)
+            source.Versions.Add(CarrierSchedulerSpareFixture.Version(new TableDefinition { TableNumber = number, Name = $"Fixture MT{number}" }, bytes, number));
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>(); db.Add(source); await db.SaveChangesAsync();
+        }
+        var endpoint = $"/api/tables/sets/{source.Id}/setup";
+        object Request(string mode, string? token = null, string family = "mtr20-multipay-graphical") => new
+        { name = "Graphical fixture result", familyId = family, paymentMode = 0, pricing = "keep", idleAdvertisingMode = mode, previewToken = token };
+        var keep = await Preview("keep");
+        Assert.Contains(keep.GetProperty("provisioning").GetProperty("findings").EnumerateArray(), f => f.GetProperty("message").GetString()!.Contains("Both idle rotations"));
+        var graph = await Preview("graphical");
+        Assert.Equal(new[] { 26 }, graph.GetProperty("changedNumbers").EnumerateArray().Select(n => n.GetInt32()));
+        Assert.False(graph.GetProperty("provisioning").GetProperty("onHookAdvertising").GetBoolean());
+        Assert.True(graph.GetProperty("provisioning").GetProperty("graphicalOnHookAdvertising").GetBoolean());
+        Assert.DoesNotContain(graph.GetProperty("provisioning").GetProperty("findings").EnumerateArray(), f => f.GetProperty("message").GetString()!.Contains("Both idle rotations"));
+        Assert.Equal(new[] { 131 }, (await Preview("text")).GetProperty("changedNumbers").EnumerateArray().Select(n => n.GetInt32()));
+        Assert.Equal(new[] { 26, 131 }, (await Preview("none")).GetProperty("changedNumbers").EnumerateArray().Select(n => n.GetInt32()));
+        using (var incompatible = await client.PostAsJsonAsync(endpoint + "/preview", Request("graphical", family: "mtr19-multipay")))
+            Assert.Equal(HttpStatusCode.BadRequest, incompatible.StatusCode);
+        using var created = await client.PostAsJsonAsync(endpoint, Request("graphical", graph.GetProperty("previewToken").GetString()));
+        Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+        var draftId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var draft = await db.TableSets.Include(s => s.Versions).ThenInclude(r => r.TableDefinition).Include(s => s.Versions).ThenInclude(r => r.TablePayload).SingleAsync(s => s.Id == draftId);
+            Assert.Equal(TableSetStatus.Draft, draft.Status);
+            foreach (var (n, original) in records)
+            {
+                var expected = original.ToArray(); if (n == 26) expected[22] &= 0xFE;
+                Assert.Equal(expected, TableDistributionService.GetEffectivePayload(draft.Versions.Single(r => r.TableDefinition!.TableNumber == n)));
+            }
+            Assert.False(await db.TerminalTableAssignments.AnyAsync(a => a.TableSetId == draftId));
+            Assert.False(await db.DownloadBatches.AnyAsync(b => b.TableSetId == draftId));
+        }
+        async Task<JsonElement> Preview(string mode)
+        {
+            using var response = await client.PostAsJsonAsync(endpoint + "/preview", Request(mode));
+            response.EnsureSuccessStatusCode(); return await response.Content.ReadFromJsonAsync<JsonElement>();
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Default_starter_draft_is_a_copy_only_setup_base_and_changes_require_a_new_preview()
     {
         var key = Guid.NewGuid().ToString("N");

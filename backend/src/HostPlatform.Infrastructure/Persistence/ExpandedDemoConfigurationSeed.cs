@@ -73,6 +73,11 @@ internal static class ExpandedDemoConfigurationSeed
         standard.Add(92, received[LaterRouting][92]);
         var graphical = new Dictionary<int, byte[]>(standard);
         foreach (var type in Graphics) graphical.Add(type, received["archived-demo"][type]);
+        var previousGraphical = new Dictionary<int, byte[]>(graphical);
+        // The graphical terminal uses the MT131 loop independently. Retain the
+        // imported text messages, but do not let their MT26 rotation take priority.
+        graphical[26] = NativeTableLayouts.Find(26, standard[26], NativeTableLayouts.Later)!
+            .Apply(standard[26], new Dictionary<string, string> { ["onHookAds"] = "false" });
 
         if (!VisibleIdle(older) || !VisibleIdle(standard))
             throw new InvalidOperationException("A selected default text advertisement has no visible on-hook message.");
@@ -98,7 +103,8 @@ internal static class ExpandedDemoConfigurationSeed
         if (received.Values.SelectMany(group => group.Values).Any(data => !digests.Contains(TablePayloadHasher.Sha256Hex(data))))
             throw new InvalidOperationException("The expanded import omitted a validated demo payload.");
         return new(starters.ToArray(), [new(DemoConfigurationSeed.EarlierName, oldProfile.Id, originalOlder),
-            new(DemoConfigurationSeed.LaterName, laterProfile.Id, originalLater)]);
+            new(DemoConfigurationSeed.LaterName, laterProfile.Id, originalLater),
+            new(DemoConfigurationSeed.GraphicalName, graphProfile.Id, previousGraphical)]);
 
         static Dictionary<int, int> Lengths(FirmwareTableProfile profile, IEnumerable<int> numbers) =>
             numbers.ToDictionary(number => number, number => profile.VerifiedLengths[number]);

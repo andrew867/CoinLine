@@ -51,6 +51,7 @@ type Detail = {
     acceptedCoinSlots: number | null
     configuredCardRanges: number | null
     onHookAdvertising: boolean | null
+    graphicalOnHookAdvertising?: boolean | null
     visibleOnHookTextMessages?: number | null
     findings: { tableNumber: number; message: string }[]
   }
@@ -255,7 +256,8 @@ export function TableSetDetail() {
             {d.provisioning.operatingType && <div><dt>Operating type</dt><dd>{d.provisioning.operatingType}</dd></div>}
             {d.provisioning.acceptedCoinSlots !== null && <div><dt>Accepted coin slots</dt><dd>{d.provisioning.acceptedCoinSlots}</dd></div>}
             {d.provisioning.configuredCardRanges !== null && <div><dt>Configured card ranges</dt><dd>{d.provisioning.configuredCardRanges}</dd></div>}
-            {d.provisioning.onHookAdvertising !== null && <div><dt>On-hook advertising</dt><dd>{d.provisioning.onHookAdvertising ? 'Enabled' : 'Disabled'}</dd></div>}
+            {d.provisioning.onHookAdvertising !== null && <div><dt>On-hook text advertising (MT26)</dt><dd>{d.provisioning.onHookAdvertising ? 'Enabled' : 'Disabled'}</dd></div>}
+            {d.provisioning.graphicalOnHookAdvertising != null && <div><dt>On-hook graphical advertising (MT131)</dt><dd>{d.provisioning.graphicalOnHookAdvertising ? 'Enabled' : 'Disabled'}</dd></div>}
             {d.provisioning.visibleOnHookTextMessages != null && <div><dt>Visible idle text messages (MT29)</dt><dd>{d.provisioning.visibleOnHookTextMessages}</dd></div>}
           </dl>
           {d.provisioning.findings.length > 0 && <ul>{d.provisioning.findings.map((finding) => (

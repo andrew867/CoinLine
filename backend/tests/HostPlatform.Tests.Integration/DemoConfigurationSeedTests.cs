@@ -41,6 +41,12 @@ public sealed class DemoConfigurationSeedTests
         Assert.DoesNotContain(standard.Records.Keys, number => number is 98 or 99 or 131 or 132 or 133);
         var graph = Assert.Single(rows, row => row.Name == DemoConfigurationSeed.GraphicalName);
         foreach (var number in new[] { 131, 132, 133 }) Assert.Equal(expected[$"archived-demo/mt{number:D3}.bin"], graph.Records[number]);
+        Assert.Equal(expected["archived-demo/mt029.bin"], graph.Records[29]);
+        Assert.Equal(expected["archived-demo/mt026.bin"], standard.Records[26]);
+        var graphicalFeatures = standard.Records[26].ToArray(); graphicalFeatures[22] &= 0xFE;
+        Assert.Equal(graphicalFeatures, graph.Records[26]);
+        Assert.False(NativeTableSetReview.Build(graph.Records).OnHookAdvertising);
+        Assert.True(NativeTableSetReview.Build(graph.Records).GraphicalOnHookAdvertising);
         Assert.All(rows.Where(row => !row.IsDefault), row => Assert.Null(row.ProfileId));
         var imported = rows.SelectMany(row => row.Records.Values).Select(raw => TablePayloadHasher.Sha256Hex(raw)).ToHashSet();
         Assert.Equal(70, expected.Count);
@@ -180,7 +186,7 @@ public sealed class DemoConfigurationSeedTests
     [PostgresIntegrationFact]
     public async Task Expanded_startup_retires_exact_initial_export_and_preserves_an_edited_initial_draft()
     {
-        var (directory, legacy, _) = ExpandedFixture();
+        var (directory, legacy, expected) = ExpandedFixture();
         var connection = Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable)!;
         var schema = "coinline_expanded_demo_" + Guid.NewGuid().ToString("N");
         await using (var server = new NpgsqlConnection(connection))
@@ -232,6 +238,34 @@ public sealed class DemoConfigurationSeedTests
         {
             await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(21, await db.TableSets.CountAsync());
         }
+        Guid oldGraphId;
+        await using (var db = new HostPlatformDbContext(options))
+        {
+            var graph = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                .Include(row => row.Versions).ThenInclude(row => row.TablePayload).SingleAsync(row => row.Name == DemoConfigurationSeed.GraphicalName);
+            oldGraphId = graph.Id;
+            // Simulate an exact previously imported text-enabled graphical default.
+            var feature = Assert.Single(graph.Versions, row => row.TableDefinition!.TableNumber == 26);
+            new TableDistributionService(db).StageDraftPayloadReplacement(graph, feature, expected["archived-demo/mt026.bin"]);
+            await db.SaveChangesAsync();
+        }
+        await using (var db = new HostPlatformDbContext(options)) { await DemoConfigurationSeed.EnsureAsync(db, directory); }
+        await using (var db = new HostPlatformDbContext(options))
+        {
+            var graphs = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                .Include(row => row.Versions).ThenInclude(row => row.TablePayload)
+                .Where(row => row.Name.StartsWith(DemoConfigurationSeed.GraphicalName)).ToArrayAsync();
+            var old = Assert.Single(graphs, row => row.Id == oldGraphId); Assert.False(old.IsDefault);
+            Assert.Equal(DemoConfigurationSeed.GraphicalName + " (text-enabled reference)", old.Name);
+            var corrected = Assert.Single(graphs, row => row.Id != oldGraphId); Assert.True(corrected.IsDefault);
+            var before = old.Versions.ToDictionary(row => row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload);
+            var after = corrected.Versions.ToDictionary(row => row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload);
+            Assert.Equal(new[] { 26 }, before.Keys.Where(number => !before[number].AsSpan().SequenceEqual(after[number])));
+            Assert.False(NativeTableSetReview.Build(after).OnHookAdvertising); Assert.True(NativeTableSetReview.Build(after).GraphicalOnHookAdvertising);
+            Assert.Equal(22, await db.TableSets.CountAsync());
+            Assert.Empty(await db.TerminalTableAssignments.ToArrayAsync());
+        }
+        await using (var db = new HostPlatformDbContext(options)) { await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(22, await db.TableSets.CountAsync()); }
     }
 
     private static (string Directory, Dictionary<(string Profile, int Number), byte[]> Expected) Fixture()
