@@ -308,7 +308,18 @@ internal sealed class NccLinkProcessor(
             matched = terminal != null,
             unknown = !control && terminal == null,
             redactedMessageType = recordedBytes.Length == 0 ? messageType : null,
-            callUploadEnd = uploadFrame?.EndsDialogue
+            callUploadEnd = uploadFrame?.EndsDialogue,
+            callUpload = explicitUpload ? new
+            {
+                sequence = frame.Sequence,
+                parsed = uploadFrame != null,
+                endsDialogue = uploadFrame?.EndsDialogue,
+                records = uploadFrame?.Records.Select(record => new
+                {
+                    messageType = record.MessageType,
+                    byteCount = record.ByteCount
+                }).ToArray()
+            } : null
         }, _session.TerminalId);
 
         try

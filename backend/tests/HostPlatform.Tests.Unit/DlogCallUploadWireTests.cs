@@ -17,6 +17,8 @@ public sealed class DlogCallUploadWireTests
         Assert.Equal(new[] { 108..189 }, parsed.Statistics);
         Assert.Equal(new[] { 189..200, 200..228 }, parsed.Status);
         Assert.Empty(parsed.Cashbox);
+        Assert.Equal(new[] { (53, 54), (53, 54), (56, 81), (10, 11), (60, 28) },
+            parsed.Records.Select(record => ((int)record.MessageType, record.ByteCount)));
         Assert.True(DlogCallUploadWire.TryParse([.. Record(37, 99), 13], out parsed));
         Assert.True(parsed!.EndsDialogue);
         Assert.Equal(new[] { 0..99 }, parsed.Statistics);
@@ -33,6 +35,8 @@ public sealed class DlogCallUploadWireTests
         Assert.True(mixed!.EndsDialogue);
         Assert.Equal(new[] { 0..35 }, mixed.CallDetails);
         Assert.Equal(new[] { 35..92 }, mixed.Cashbox);
+        Assert.Equal(new[] { (61, 35), (38, 57), (13, 1) },
+            mixed.Records.Select(record => ((int)record.MessageType, record.ByteCount)));
         Assert.True(DlogCallUploadWire.TryParse([13], out var end));
         Assert.True(end!.EndsDialogue);
     }

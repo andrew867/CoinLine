@@ -83,6 +83,21 @@ public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionO
         });
     }
 
+    [HttpGet("{id:guid}/upload-observations")]
+    [ResponseCache(NoStore = true)]
+    public async Task<ActionResult<object>> UploadObservations(Guid id, CancellationToken ct)
+    {
+        if (!await db.NccSessions.AnyAsync(session => session.Id == id, ct))
+            return NotFound();
+        var sessionKey = id.ToString();
+        var uploadAudit = await db.AuditEvents.AsNoTracking()
+            .Where(e => e.Category == "ncc" && e.Action == "frame_stored" && e.TerminalSessionId == sessionKey)
+            .Select(e => e.DetailJson).ToListAsync(ct);
+        var uploadFrames = uploadAudit.Select(CallUploadObservation.Read).OfType<CallUploadObservation>()
+            .OrderBy(observation => observation.Sequence).ToArray();
+        return Ok(new { callUploadFrames = uploadFrames });
+    }
+
     [HttpGet("{id:guid}/capture")]
     [ResponseCache(NoStore = true)]
     public async Task<IActionResult> Capture(Guid id, CancellationToken ct)

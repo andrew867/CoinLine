@@ -13,6 +13,50 @@ type NccSessionRow = {
   socketBound?: boolean
 }
 
+type UploadFrame = {
+  sequence: number
+  parsed: boolean
+  endsDialogue: boolean | null
+  records: { messageType: number; byteCount: number }[] | null
+}
+
+const recordNames: Record<number, string> = {
+  4: 'Card call detail', 10: 'Terminal status', 13: 'End of data', 37: 'Communications statistics',
+  38: 'Cashbox status', 51: 'Cashbox collection', 53: 'Combined call detail', 56: 'Call statistics',
+  57: 'Carrier statistics', 60: 'Software versions', 61: 'Coin call detail', 69: 'Messaging statistics',
+  71: 'Extended carrier statistics', 153: 'Graphical usage statistics',
+}
+
+function UploadRecordObservation({ id }: { id: string }) {
+  const [frames, setFrames] = useState<UploadFrame[] | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let current = true
+    void apiGet<{ callUploadFrames?: UploadFrame[] }>(`/api/ncc/sessions/${id}/upload-observations`)
+      .then(detail => { if (current) setFrames(detail.callUploadFrames ?? []) })
+      .catch(() => { if (current) setError('Could not load call-upload observations.') })
+    return () => { current = false }
+  }, [id])
+  return <section aria-label="Call-upload observations">
+    <h2>Call-upload observations</h2>
+    <p>Recognized record types and lengths from explicit call uploads. These show parsing evidence, not proof of accounting or terminal completion.</p>
+    {error && <p role="alert">{error}</p>}
+    {!frames && !error && <p role="status">Loading call-upload observations…</p>}
+    {frames?.length === 0 && <p>No explicit call-upload frame metadata was retained for this session. This does not establish that the phone sent no call or cashbox records.</p>}
+    {!!frames?.length && <table>
+      <caption>Received upload frames</caption>
+      <thead><tr><th>Frame</th><th>Recognized records in wire order</th><th>End marker</th></tr></thead>
+      <tbody>{frames.map(frame => <tr key={frame.sequence}>
+        <td>{frame.sequence}</td>
+        <td>{frame.parsed && frame.records ? <ul>{frame.records.map((record, index) => <li key={index}>
+          {recordNames[record.messageType] ?? 'Record'} (MT{record.messageType}), {record.byteCount} {record.byteCount === 1 ? 'byte' : 'bytes'}
+        </li>)}</ul> : 'Unrecognized or incomplete upload frame; record contents unknown.'}</td>
+        <td>{frame.endsDialogue == null ? 'Unknown' : frame.endsDialogue ? 'Present' : 'Not present'}</td>
+      </tr>)}</tbody>
+    </table>}
+  </section>
+}
+
 function formatUtc(iso: string) {
   try {
     const d = new Date(iso)
@@ -50,6 +94,7 @@ export function NccSessionsPage() {
   const [includeArchived, setIncludeArchived] = useState(false)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [captureError, setCaptureError] = useState('')
+  const [inspectedSession, setInspectedSession] = useState('')
 
   const refresh = useCallback(async () => {
     setErr(null)
@@ -185,6 +230,10 @@ export function NccSessionsPage() {
                   </code>
                 </td>
                 <td style={{ whiteSpace: 'nowrap' }}>
+                  <button type="button" aria-expanded={inspectedSession === r.id}
+                    onClick={() => setInspectedSession(current => current === r.id ? '' : r.id)}>
+                    Inspect upload records
+                  </button>{' '}
                   <button type="button" disabled={busyId === r.id} onClick={() => void downloadCapture(r.id)}>
                     Download redacted capture
                   </button>{' '}
@@ -214,6 +263,8 @@ export function NccSessionsPage() {
           </tbody>
         </table>
       )}
+      {inspectedSession && rows.some(row => row.id === inspectedSession) && !loading && !err &&
+        <UploadRecordObservation key={inspectedSession} id={inspectedSession} />}
     </div>
   )
 }
