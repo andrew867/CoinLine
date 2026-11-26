@@ -65,6 +65,7 @@ public static class OperatorPermissions
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
+            ("Tables", D, "RemoveDraftRecord"),
             ("ConfigurationLibrary", R, "List Options"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
             ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),

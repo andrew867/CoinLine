@@ -181,6 +181,7 @@ export function TableSetDetail() {
   const canPreviewScope = canPerform('table-assignments', op.read) || canPerform('table-assignments', op.update) ||
     canPerform('downloads', op.add) || (!codeOnly && (canReadRecords || canPerform('table-records', op.update)))
   const noVersions = d.versions.length === 0
+  const canRemoveRecords = draft && canPerform('table-records', op.delete)
   const targetSelection = targetEdit ?? d.targetFirmwareVersionId ?? ''
   const targetChanged = targetSelection !== (d.targetFirmwareVersionId ?? '')
 
@@ -290,6 +291,7 @@ export function TableSetDetail() {
               <th>Bytes</th>
               <th>Valid</th>
               <th>Warnings</th>
+              {canRemoveRecords && <th>Draft actions</th>}
             </tr>
           </thead>
           <tbody>
@@ -318,6 +320,8 @@ export function TableSetDetail() {
                     ''
                   )}
                 </td>
+                {canRemoveRecords && <td><DraftRecordRemoval key={`${d.revision}:${v.id}:${v.tableRevision}`}
+                  setId={d.id} setRevision={d.revision} record={v} disabled={recordDirty || targetChanged || name !== d.name} onSaved={load} /></td>}
               </tr>
             ))}
           </tbody>
@@ -325,6 +329,42 @@ export function TableSetDetail() {
       </div>
     </div>
   )
+}
+
+function DraftRecordRemoval({ setId, setRevision, record, disabled, onSaved }: {
+  setId: string; setRevision: number; record: Ver; disabled: boolean; onSaved: () => void
+}) {
+  const [review, setReview] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+
+  async function remove() {
+    if (!review || disabled || busy || !canPerform('table-records', op.delete)) return
+    setBusy(true)
+    setError('')
+    try {
+      const response = await apiFetch(`/api/tables/sets/${setId}/records/${record.id}/remove?confirm=true`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ setRevision, recordRevision: record.tableRevision, payloadSha256Hex: record.payloadSha256Hex }),
+      })
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not remove the draft record.')
+      setReview(false)
+      onSaved()
+    } catch (failure) {
+      setError(failure instanceof Error ? failure.message : 'Could not remove the draft record.')
+    } finally { setBusy(false) }
+  }
+
+  return <div>
+    {!review ? <button type="button" className="quiet" disabled={disabled}
+      onClick={() => { setError(''); setReview(true) }}>Remove MT{record.tableNumber} from draft</button> :
+      <section aria-label={`Remove MT${record.tableNumber} from draft review`}>
+        <p>Remove {record.definitionName}, revision {record.tableRevision}, from this draft only? This does not change another set, a phone assignment or an installed record.</p>
+        <button type="button" disabled={disabled || busy} onClick={() => void remove()}>Confirm removal</button>{' '}
+        <button type="button" disabled={busy} onClick={() => { setReview(false); setError('') }}>Cancel</button>
+      </section>}
+    {error && <p role="alert">{error}</p>}
+  </div>
 }
 
 function ConfigurationIdField({ setId, record, disabled, onSaved }: {

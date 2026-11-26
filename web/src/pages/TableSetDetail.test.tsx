@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch, apiGet } from '../api/client'
@@ -97,4 +97,67 @@ it('ignores a late response from the previous set after navigating', async () =>
   await act(async () => { finishOld(details('old-set', 'Old configuration')) })
   expect(screen.getByRole('heading', { name: 'Table set: Replacement configuration' })).toBeVisible()
   expect(screen.queryByRole('heading', { name: 'Table set: Old configuration' })).toBeNull()
+})
+
+it('reviews and removes exactly one draft record with optimistic revisions', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 1, 'table-records': 9 })
+  vi.mocked(apiGet).mockResolvedValue([])
+  let removed = false
+  const record = { id: 'record-29', tableNumber: 29, tableRevision: 3, definitionName: 'Text advertising',
+    payloadLengthBytes: 481, payloadSha256Hex: 'fixture-hash', validationPassed: true, configurationId: null, warnings: [] }
+  const companion = { ...record, id: 'record-26', tableNumber: 26, definitionName: 'Features' }
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+    if (path === '/api/tables/sets/set-fixture/records/record-29/remove?confirm=true' && init?.method === 'POST') {
+      removed = true
+      return new Response(null, { status: 204 })
+    }
+    return Response.json({ id: 'set-fixture', name: 'Fixture set', status: 0, revision: removed ? 8 : 7,
+      optionalRecordRemovals: [], firmwareFindings: [], versions: removed ? [companion] : [record, companion] })
+  })
+  render(<MemoryRouter initialEntries={['/table-sets/set-fixture']}>
+    <Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes>
+  </MemoryRouter>)
+  fireEvent.click(await screen.findByRole('button', { name: 'Remove MT29 from draft' }))
+  const review = screen.getByRole('region', { name: 'Remove MT29 from draft review' })
+  expect(within(review).getByText(/from this draft only/)).toBeVisible()
+  fireEvent.click(within(review).getByRole('button', { name: 'Cancel' }))
+  expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'POST')).toBe(false)
+  fireEvent.click(screen.getByRole('button', { name: 'Remove MT29 from draft' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Remove MT29 from draft' })).not.toBeInTheDocument())
+  expect(screen.getByRole('button', { name: 'Remove MT26 from draft' })).toBeVisible()
+  const request = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'POST')
+  expect(request?.[0]).toBe('/api/tables/sets/set-fixture/records/record-29/remove?confirm=true')
+  expect(JSON.parse(request![1]!.body as string)).toEqual({ setRevision: 7, recordRevision: 3, payloadSha256Hex: 'fixture-hash' })
+  expect(screen.queryByRole('button', { name: 'Remove MT29 from draft' })).not.toBeInTheDocument()
+})
+
+it.each([{ status: 0, permissions: 3 }, { status: 1, permissions: 9 }])('does not offer removal on status $status with record rights $permissions', async ({ status, permissions }) => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 1, 'table-records': permissions })
+  vi.mocked(apiGet).mockResolvedValue([])
+  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ id: 'set-fixture', name: 'Fixture set', status, revision: 7,
+    optionalRecordRemovals: [], firmwareFindings: [], versions: [{ id: 'record-29', tableNumber: 29, tableRevision: 1,
+      definitionName: 'Text advertising', payloadLengthBytes: 481, payloadSha256Hex: 'fixture-hash', configurationId: null, warnings: [] }] }))
+  render(<MemoryRouter initialEntries={['/table-sets/set-fixture']}><Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes></MemoryRouter>)
+  expect(await screen.findByRole('heading', { name: 'Table set: Fixture set' })).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Remove MT29 from draft' })).not.toBeInTheDocument()
+})
+
+it('keeps the draft record visible when removal is refused and protects unsaved set metadata', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 3, 'table-records': 9 })
+  vi.mocked(apiGet).mockResolvedValue([])
+  vi.mocked(apiFetch).mockImplementation(async (_path, init) => init?.method === 'POST'
+    ? Response.json({ error: 'The set or record changed. Review it again.' }, { status: 409 })
+    : Response.json({ id: 'set-fixture', name: 'Fixture set', status: 0, revision: 7,
+      optionalRecordRemovals: [], firmwareFindings: [], versions: [{ id: 'record-29', tableNumber: 29, tableRevision: 1,
+        definitionName: 'Text advertising', payloadLengthBytes: 481, payloadSha256Hex: 'fixture-hash', configurationId: null, warnings: [] }] }))
+  render(<MemoryRouter initialEntries={['/table-sets/set-fixture']}><Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes></MemoryRouter>)
+  const button = await screen.findByRole('button', { name: 'Remove MT29 from draft' })
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Unsaved name' } })
+  expect(button).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Fixture set' } })
+  fireEvent.click(button)
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm removal' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('The set or record changed. Review it again.')
+  expect(screen.getByText('Text advertising', { selector: 'td' })).toBeVisible()
 })

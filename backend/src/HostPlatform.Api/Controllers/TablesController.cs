@@ -207,6 +207,56 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 s.PublishGeneration
             }).ToListAsync(ct));
 
+    [HttpPost("sets/{id:guid}/records/{recordId:guid}/remove")]
+    public async Task<ActionResult> RemoveDraftRecord(Guid id, Guid recordId, [FromBody] DraftRecordRemovalDto body,
+        [FromQuery] bool confirm = false, CancellationToken ct = default)
+    {
+        if (!confirm)
+            return BadRequest(new { error = DestructiveOperationMessages.RepeatWithConfirmTrue });
+        var set = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+            .FirstOrDefaultAsync(row => row.Id == id, ct);
+        if (set == null)
+            return NotFound();
+        var record = set.Versions.SingleOrDefault(row => row.Id == recordId);
+        if (record == null)
+            return NotFound();
+        if (set.Status != TableSetStatus.Draft)
+            return Conflict(new { error = "Published configurations are immutable. Make a draft copy to remove a record." });
+        if (body.SetRevision != set.Version || body.RecordRevision != record.TableRevision || body.PayloadSha256Hex == null ||
+            !string.Equals(body.PayloadSha256Hex, record.PayloadSha256Hex, StringComparison.OrdinalIgnoreCase))
+            return Conflict(new { error = "The set or record changed. Reopen and review the current version before removing it." });
+        if (set.Versions.Any(row => row.Id != record.Id && row.DependsOnTableDefinitionId == record.TableDefinitionId))
+            return Conflict(new { error = "Another record in this draft depends on this table. Remove or correct that dependency first." });
+        // A draft should not normally have operational references. Guard retained
+        // legacy references as well, rather than cascading away delivery history.
+        if (await db.TerminalTableAssignments.AnyAsync(row => row.TableSetId == id || row.PreviousTableSetId == id, ct) ||
+            await db.ScheduledTableDownloads.AnyAsync(row => row.TableSetId == id || row.SourceTableSetId == id, ct) ||
+            await db.DownloadBatches.AnyAsync(row => row.TableSetId == id, ct) ||
+            await db.TableRecordUpdateRuns.AnyAsync(row => row.SourceSetId == id, ct) ||
+            await db.TerminalIdentityCutoverItems.AnyAsync(row => row.SourceTableSetId == id || row.StagedTableSetId == id, ct) ||
+            await db.DownloadBatchItems.AnyAsync(row => row.TableVersionId == recordId, ct) ||
+            await db.CustomerTableOverrides.AnyAsync(row => row.TableVersionId == recordId, ct) ||
+            await db.SiteTableOverrides.AnyAsync(row => row.TableVersionId == recordId, ct) ||
+            await db.TerminalTableOverrides.AnyAsync(row => row.TableVersionId == recordId, ct))
+            return Conflict(new { error = "This draft or record has retained operational references. It cannot be removed." });
+
+        ApiAudit.Write(db, HttpContext, "tables.set", "remove_draft_record", id.ToString(), new
+        {
+            recordId, record.TableDefinitionId, tableNumber = record.TableDefinition?.TableNumber,
+            record.TableRevision, record.PayloadSha256Hex
+        });
+        set.Version++;
+        db.TableVersions.Remove(record);
+        // Retain the immutable payload blob, even if no other version currently
+        // points to it. This operation only removes the selected draft row.
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { error = "The configuration changed or is now referenced. Refresh the draft and review it again." });
+        }
+        return NoContent();
+    }
+
     [HttpGet("firmware-options")]
     public async Task<ActionResult<object>> FirmwareOptions(CancellationToken ct) =>
         Ok(await db.FirmwareVersions.AsNoTracking().OrderBy(version => version.Label)
@@ -1235,6 +1285,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
 
     public sealed record TableDefDto(string Name, int TableNumber, string? Description);
     public sealed record TableCloneDto(string Name);
+    public sealed record DraftRecordRemovalDto(int SetRevision, int RecordRevision, string? PayloadSha256Hex);
     public sealed record TableRecordCopyRequest(Guid SourceSetId, int SourceRevision, int DestinationRevision, int[] RecordNumbers);
     public sealed record AdvertisingDto(AdvertisingSlot[] Slots, int? Revision = null, string? Sha256 = null);
     public sealed record TableScopeDto(string TargetType, Guid? TargetId, Guid[] TerminalIds, string? RegionCode = null,
