@@ -64,3 +64,26 @@ it('offers a targeted default starter draft, not ordinary drafts or untargeted e
   expect(screen.getByText('Management access: missing')).toBeVisible()
   expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/starter/setup/preview', expect.objectContaining({ pricing: 'keep' }))
 })
+
+it('defaults a graphical family to graphical idle rotation and exposes text and off as distinct choices', async () => {
+  vi.mocked(apiGet).mockResolvedValue([{ id: 'mtr20-multipay-graphical', release: 'MTR 2.0', variant: 'Graphical Multi-pay', maximizerTypeNumbers: [40] }])
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ previewToken: 'graphical', canCreate: true, targetFirmware: 'Graphical', changedNumbers: [26], recordCount: 35,
+    family: { familyLabel: 'Graphical Multi-pay', documented: true, tables: [] },
+    provisioning: { operatingType: 'Multi-pay', acceptedCoinSlots: 2, configuredCardRanges: 1, onHookAdvertising: false, graphicalOnHookAdvertising: true,
+      visibleOnHookTextMessages: 2, findings: [] }, findings: [] }))
+  render(<MemoryRouter><ConfigurationSetupWizard onCreated={vi.fn()} sources={[
+    { id: 'graphical', name: 'Graphical starter', status: 0, isDefault: true, targetFirmwareVersionId: 'version', targetFirmware: 'Graphical' },
+  ]} /></MemoryRouter>)
+  await screen.findByRole('option', { name: 'MTR 2.0 Graphical Multi-pay (40)' })
+  fireEvent.change(screen.getByLabelText('Starting configuration'), { target: { value: 'graphical' } })
+  fireEvent.change(screen.getByLabelText('Terminal family'), { target: { value: 'mtr20-multipay-graphical' } })
+  fireEvent.change(screen.getByLabelText('Draft configuration name'), { target: { value: 'Graphical site' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Next: payment and pricing' }))
+  expect(screen.getByLabelText('Idle advertising mode')).toHaveValue('graphical')
+  expect(screen.getByRole('option', { name: 'Two-line text rotation' })).toBeVisible()
+  expect(screen.getByRole('option', { name: 'No idle advertisements' })).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Review draft' }))
+  expect(await screen.findByText('Idle graphical rotation (MT131)')).toBeVisible()
+  expect(screen.getByText('Idle text rotation (MT26)')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/graphical/setup/preview', expect.objectContaining({ idleAdvertisingMode: 'graphical' }))
+})

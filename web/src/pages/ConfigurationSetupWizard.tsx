@@ -9,7 +9,7 @@ type Choices = { name: string; familyId: string; paymentMode: number; pricing: s
 type Preview = { previewToken: string; canCreate: boolean; sourceIsStarterDraft?: boolean; targetFirmware: string; changedNumbers: number[]; recordCount: number;
   family: { familyLabel: string; documented: boolean; tables: { name: string; required: boolean; status: string }[] };
   provisioning: { operatingType: string | null; acceptedCoinSlots: number | null; configuredCardRanges: number | null;
-    visibleOnHookTextMessages?: number | null;
+    visibleOnHookTextMessages?: number | null; onHookAdvertising?: boolean | null; graphicalOnHookAdvertising?: boolean | null;
     findings: { tableNumber: number; message: string }[] };
   findings: { tableNumber: number; blocking: boolean; message: string }[] }
 
@@ -31,7 +31,8 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
   const valid = !local || validInteger(choices.tariffIndex, 127) && validInteger(choices.firstChargeCents, 65535)
     && (choices.pricing !== 'split' || validInteger(choices.followingChargeCents, 65535))
   function change<K extends keyof Choices>(key: K, value: Choices[K]) {
-    setChoices(previous => ({ ...previous, [key]: value }))
+    setChoices(previous => ({ ...previous, [key]: value, ...(key === 'familyId' && typeof value === 'string'
+      ? { advertising: value.endsWith('-graphical') ? 'graphical' : previous.advertising === 'graphical' ? 'keep' : previous.advertising } : {}) }))
     setReview(null); setError('')
   }
 
@@ -43,7 +44,7 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
         name: choices.name.trim(), familyId: choices.familyId, paymentMode: choices.paymentMode, pricing: choices.pricing,
         tariffIndex: local ? Number(choices.tariffIndex) : null, firstChargeCents: local ? Number(choices.firstChargeCents) : null,
         followingChargeCents: choices.pricing === 'split' ? Number(choices.followingChargeCents) : null,
-        onHookAdvertising: choices.advertising === 'keep' ? null : choices.advertising === 'yes',
+        idleAdvertisingMode: choices.advertising,
         previewToken: create ? review?.previewToken : null,
       })
       const body = await response.json().catch(() => null)
@@ -103,9 +104,12 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
           {choices.pricing === 'split' && <label>Each following minute (cents)<input type="number" min={0} max={65535} step={1}
             value={choices.followingChargeCents} onChange={event => change('followingChargeCents', event.target.value)} /></label>}
         </>}
-        <label>Rotate advertisements when idle?<select value={choices.advertising} onChange={event => change('advertising', event.target.value)}>
-          <option value="keep">Keep the base setting</option><option value="yes">Enable</option><option value="no">Disable</option>
+        <label>Idle advertising mode<select value={choices.advertising} onChange={event => change('advertising', event.target.value)}>
+          <option value="keep">Keep the base setting</option><option value="text">Two-line text rotation</option>
+          {choices.familyId.endsWith('-graphical') && <option value="graphical">Graphical rotation (preferred for large-screen terminals)</option>}
+          <option value="none">No idle advertisements</option>
         </select></label>
+        {choices.familyId.endsWith('-graphical') && <p>Graphical rotation disables the MT26 text rotation and enables the MT131 idle loop. Text messages and graphical screens are retained; a normal terminal restart may be required after download.</p>}
         <p>Payment mode does not automatically enable coin windows, card ranges or a real payment provider. These are checked in the review.</p>
         <button type="button" className="quiet" onClick={() => setStep(0)}>Back</button>{' '}
         <button type="button" disabled={!valid || busy} onClick={() => void submit(false)}>{busy ? 'Reviewing…' : 'Review draft'}</button>
@@ -117,6 +121,8 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
           <dt>Operating mode</dt><dd>{review.provisioning.operatingType ?? 'Not verified'}</dd>
           <dt>Payable coin slots</dt><dd>{review.provisioning.acceptedCoinSlots ?? 'Not verified'}</dd>
           <dt>Card acceptance ranges</dt><dd>{review.provisioning.configuredCardRanges ?? 'Not verified'}</dd>
+          {review.provisioning.onHookAdvertising != null && <><dt>Idle text rotation (MT26)</dt><dd>{review.provisioning.onHookAdvertising ? 'Enabled' : 'Disabled'}</dd></>}
+          {review.provisioning.graphicalOnHookAdvertising != null && <><dt>Idle graphical rotation (MT131)</dt><dd>{review.provisioning.graphicalOnHookAdvertising ? 'Enabled' : 'Disabled'}</dd></>}
           {review.provisioning.visibleOnHookTextMessages != null && <><dt>Visible idle text messages (MT29)</dt><dd>{review.provisioning.visibleOnHookTextMessages}</dd></>}</dl>
         <h3>Remaining setup checks</h3>
         {!review.family.documented && <p>The selected terminal family has no complete documented checklist.</p>}

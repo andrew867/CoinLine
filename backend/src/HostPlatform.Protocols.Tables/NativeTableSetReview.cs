@@ -4,7 +4,8 @@ public sealed record TableReviewFinding(int TableNumber, string Message);
 
 public sealed record TableProvisioningReview(
     string? OperatingType, int? AcceptedCoinSlots, int? ConfiguredCardRanges,
-    bool? OnHookAdvertising, IReadOnlyList<TableReviewFinding> Findings, int? VisibleOnHookTextMessages = null);
+    bool? OnHookAdvertising, IReadOnlyList<TableReviewFinding> Findings, int? VisibleOnHookTextMessages = null,
+    bool? GraphicalOnHookAdvertising = null);
 
 public static class NativeTableSetReview
 {
@@ -14,6 +15,8 @@ public static class NativeTableSetReview
         var features = Get(records, 26, 72);
         var type = features?[1] switch { 1 => "Card only", 2 => "Multi-pay", 3 => "Coin only", _ => null };
         bool? advertising = features == null ? null : (features[22] & 1) != 0;
+        var graphics = Get(records, 131, 9224);
+        bool? graphicalAdvertising = graphics == null ? null : (graphics[3] & 1) != 0;
         int? visibleOnHookTextMessages = null;
         if (Get(records, AdvertisingTableWire.MessageType, AdvertisingTableWire.RecordLength) is { } ads)
         {
@@ -26,6 +29,8 @@ public static class NativeTableSetReview
             if (advertising == true && content.HiddenMessages > 0)
                 findings.Add(new(AdvertisingTableWire.MessageType, $"{content.HiddenMessages} populated text message(s) are after the on-hook end marker. They are not part of the idle rotation."));
         }
+        if (graphicalAdvertising == true && advertising == true && visibleOnHookTextMessages > 0)
+            findings.Add(new(26, "Both idle rotations are enabled. On the verified graphical Multi-pay profile, populated text advertising can take priority over the graphical loop. Disable the MT26 text rotation to prefer MT131 graphics, then restart the terminal normally."));
         var coins = CoinValidationWire.ReadSlots(Get(records, CoinValidationWire.MessageType, CoinValidationWire.RecordLength) ?? []);
         var screenings = Get(records, 92, 3401);
         int? coinSlots = null;
@@ -111,7 +116,7 @@ public static class NativeTableSetReview
             foreach (var finding in MessagingServiceWire.OperatingFindings(messaging))
                 findings.Add(new(MessagingServiceWire.MessageType, finding));
 
-        return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings, visibleOnHookTextMessages);
+        return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings, visibleOnHookTextMessages, graphicalAdvertising);
     }
 
     private static byte[]? Get(IReadOnlyDictionary<int, byte[]> records, int number, int length) =>
