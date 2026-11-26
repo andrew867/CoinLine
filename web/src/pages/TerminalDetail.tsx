@@ -7,6 +7,7 @@ import { TerminalIdentityPanel } from './TerminalIdentityPanel'
 import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 import { InmateAssignmentPanel } from './InmateAssignmentPanel'
 import { TerminalLifecyclePanel } from './TerminalLifecyclePanel'
+import { TerminalConfigurationWorksheet } from './TerminalConfigurationWorksheet'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiGet, apiPost, apiPostBare, apiPostRaw, apiPut } from '../api/client'
@@ -736,6 +737,15 @@ export function TerminalDetail() {
           Rollback to previous set
         </button>
       </form>}
+      {assign !== undefined && <TerminalConfigurationWorksheet key={`worksheet-${id}`} terminalId={id}
+        assignmentKey={`${assign?.tableSetId ?? ''}:${term.firmwareVersionId ?? ''}:${term.terminalFamilyId ?? ''}`}
+        terminalActive={terminalActive} onApplied={result => {
+          rememberDownloadReview({ terminalId: id, tableSetId: result.tableSetId, reason: 'assignment' })
+          void apiFetch(`/api/terminals/${id}/table-assignment`).then(async response => {
+            if (response.ok) setAssign(await response.json() as Assign)
+            else setErr('The assignment was saved, but its phone summary could not be refreshed.')
+          }).catch(() => setErr('The assignment was saved, but its phone summary could not be refreshed.'))
+        }} />}
       </>}
 
       {canReadAssignment && canPerform('table-records', op.read) && assign !== undefined &&

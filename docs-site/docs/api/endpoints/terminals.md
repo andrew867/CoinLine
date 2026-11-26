@@ -11,6 +11,10 @@
 | GET | `/api/terminals/{id}/routine-call-in` | Assigned and acknowledged MT35 settings and latest observed routine contact; source evidence is permission-scoped |
 | GET | `/api/terminals/firmware-options` | Minimal installed-version choices for phone inventory |
 | GET | `/api/terminals/{id}/table-assignment-options` | Minimal table-set choices for phone assignments, excluding firmware-scheduler-only sets |
+| GET | `/api/terminals/{id}/configuration-worksheet` | Current individual configuration records and legacy family review |
+| GET | `/api/terminals/{id}/configuration-worksheet/options` | Paged published configuration choices for one record type |
+| POST | `/api/terminals/{id}/configuration-worksheet/preview` | Review a multi-source assignment, dependencies and explicit clears |
+| POST | `/api/terminals/{id}/configuration-worksheet` | Apply the reviewed host assignment without scheduling a download |
 | GET | `/api/terminals/{id}/lifecycle` | Manager activity, lifecycle dates and current revision |
 | PUT | `/api/terminals/{id}/lifecycle` | Deactivate, amend deletion review date, or reactivate |
 | PUT | `/api/terminals/{id}` | Update |
@@ -66,6 +70,10 @@ For a special callback, supply the current `revision` or null when creating the 
 **Manager lifecycle:** use `active=true` or `active=false` on the terminal list to filter activity independently of reported operational status. To deactivate, PUT `active: false` and the observed `revision`; optionally supply a `deletionReviewDate` (YYYY-MM-DD), otherwise the initial date is 45 days from current UTC date. To reactivate, PUT `active: true` and the observed revision; this clears both dates. An open local NCC link or stale revision returns HTTP 409. An inactive terminal is excluded from new table deliveries and field request creation. The review date does not trigger record deletion.
 
 The firmware and table assignment choices are separately permissioned under Phones Read and Table assignments Read. They do not grant access to firmware registry or table authoring endpoints. The current assignment response includes the set name and target firmware label and ID, so a read-only assignment operator need not retrieve the whole table catalogue.
+
+`GET /api/terminals/{id}/configuration-worksheet` returns the current `baseSetId`, `assignmentRevision`, minimal assigned record metadata, available record rows and legacy family review. `GET .../options?number=29&query=...&page=1` looks up up to 50 published choices by configuration ID or set name for the phone's customer or shared configurations; each row reports a known compatibility issue if present. Both endpoints require Table assignments Read and return no record payload bytes.
+
+`POST .../configuration-worksheet/preview` accepts `baseSetId`, `assignmentRevision` (both null for a new assignment), and `choices`, each with `number` and `action` (`copy` with `sourceSetId` and `sourceVersionId`, or `clear` for a confirmed optional record). Set `personalizeAccessIdentity` only for a selected MT21. The preview returns `changes`, including required dependencies, a resulting family review and a `previewToken`. Submit the same request with that token to `POST .../configuration-worksheet` to apply. Applying requires Table assignments Read and Update, does not require table editor permission, preserves unselected records, and atomically creates a new published assignment. Conflicting sources, cross-customer choices, invalid records or unsupported removal are rejected; a changed assignment or pending configuration download returns HTTP 409. No download is queued by this operation.
 
 The assignment choices also include `compatibilityIssue` (null if there is no known conflict) for the installed profile and all records in each set. Direct assignment and rollback check again before changing the assignment. A known length, complete catalogue or explicitly confirmed layout conflict is returned as HTTP 400 with its message type. The target-firmware ID constraint still applies.
 

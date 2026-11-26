@@ -1,0 +1,14 @@
+.phone-configuration-worksheet { margin: 14px 0; padding: 12px; border: 1px solid #d4dfd8; border-radius: 9px; background: #f8fbf9; }
+.phone-configuration-worksheet > summary { cursor: pointer; font-weight: 650; }
+.worksheet-controls, .worksheet-actions, .worksheet-review-actions { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; margin: 12px 0; }
+.worksheet-controls label { display: grid; gap: 4px; }
+.worksheet-table-scroll { overflow-x: auto; }
+.phone-configuration-worksheet table { width: 100%; }
+.phone-configuration-worksheet table td { vertical-align: top; }
+.phone-configuration-worksheet table td small { display: block; color: #526358; }
+.worksheet-actions { margin: 0; }
+.worksheet-lookup { background: white; padding: 12px; border: 1px solid #d4dfd8; border-radius: 8px; margin: 14px 0; }
+.worksheet-lookup h3 { margin-top: 0; }
+.worksheet-family-review { background: #edf5ee; border-radius: 7px; padding: 10px; margin: 10px 0; }
+.worksheet-family-review p { margin: 5px 0; }
+.worksheet-note, .worksheet-notice { background: #edf5ee; border-radius: 6px; padding: 9px; }
