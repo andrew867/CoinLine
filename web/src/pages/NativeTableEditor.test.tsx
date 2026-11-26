@@ -18,6 +18,36 @@ function renderEditor(number = 55) {
     onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} />)
 }
 
+it.each([
+  ['flat', 'Whole call charge (cents)', '25', null, '2', '-1', '0', '0', '$0.25'],
+  ['minute', 'Charge per minute (cents)', '25', null, '1', '60', '60', '25', '$1.25'],
+  ['split', 'First minute including connection (cents)', '25', '10', '1', '60', '60', '10', '$0.65'],
+])('stages %s local-call pricing without changing any other tariff row', async (pricing, label, first, extra, classification, period, nextPeriod, nextCharge, fiveMinutes) => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+  const layout = { supported: true, editable: true, profile: 'Fixture', length: 1192, revision: 1, sha256: 'fixture-hash',
+    sections: [0, 1].map(index => ({ key: `rate-${index}`, label: `Rate ${index}`, fields: [
+      { key: `rate-${index}.classification`, label: 'Rate classification', editor: 'select', value: '3', min: 0, max: 8,
+        choices: [{ value: 1, label: 'Local measured service' }, { value: 2, label: 'Fixed local charge' }, { value: 3, label: 'Rate unavailable' }], maxLength: null, help: null },
+      ...['initialPeriod', 'initialCharge', 'additionalPeriod', 'additionalCharge'].map(name => ({ key: `rate-${index}.${name}`, label: name,
+        editor: name.endsWith('Period') ? 'rate-period' : 'number', value: '0', min: 0, max: 32767, maxLength: null, choices: null, help: null })),
+    ] })) }
+  vi.mocked(apiFetch).mockImplementation(async (_, options) => options?.method === 'PUT'
+    ? new Response(null, { status: 204 }) : Response.json(layout))
+  renderEditor(73)
+  fireEvent.change(await screen.findByLabelText('Pricing structure'), { target: { value: pricing } })
+  fireEvent.change(screen.getByLabelText(label), { target: { value: first } })
+  if (extra !== null) fireEvent.change(screen.getByLabelText('Each following minute (cents)'), { target: { value: extra } })
+  expect(screen.getByLabelText('Example pricing')).toHaveTextContent(`5 minutes: ${fiveMinutes}`)
+  expect(apiFetch).toHaveBeenCalledTimes(1)
+  fireEvent.click(screen.getByRole('button', { name: 'Apply pricing to this row' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/tables/sets/set-fixture/records/73/fields', expect.objectContaining({ method: 'PUT' })))
+  const request = vi.mocked(apiFetch).mock.calls.find(([, options]) => options?.method === 'PUT')
+  const body = JSON.parse(String(request?.[1]?.body))
+  expect(body.changes).toEqual({ 'rate-0.classification': classification, 'rate-0.initialPeriod': period, 'rate-0.initialCharge': first,
+    ...(nextPeriod !== '0' ? { 'rate-0.additionalPeriod': nextPeriod } : {}), ...(nextCharge !== '0' ? { 'rate-0.additionalCharge': nextCharge } : {}) })
+})
+
 it('moves a card range through the native editor and reopens its actual saved destination', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
   let moved = false
