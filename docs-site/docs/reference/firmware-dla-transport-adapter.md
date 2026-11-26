@@ -1,6 +1,6 @@
 # Firmware DLA transport adapter (`IDlXmodemTransportAdapter`)
 
-The host registers **`IDlXmodemTransportAdapter`** with default implementation **`DlXmodemSimulationTransportAdapter`**.
+The host registers **`IDlXmodemTransportAdapter`** with implementation **`DlXmodemTransportAdapter`**. It implements host-memory simulation and a separately enabled live sender transport.
 
 ## Simulation (default)
 
@@ -8,13 +8,7 @@ The host registers **`IDlXmodemTransportAdapter`** with default implementation *
 
 ## Live path (certification)
 
-Replacing the default implementation with UART-backed code must align with the **firmware_update** dossier, including:
-
-- [Transport (XMODEM) and timers](https://github.com/andrew867/CoinLine/blob/main/docs/protocols/firmware_update/transport_xmodem_and_timers.md)
-- [Wire protocol function codes and headers](https://github.com/andrew867/CoinLine/blob/main/docs/protocols/firmware_update/wire_protocol_function_codes_and_headers.md)
-- [Orchestration tasks and gates](https://github.com/andrew867/CoinLine/blob/main/docs/protocols/firmware_update/orchestration_tasks_and_gates.md)
-
-Live flashing remains blocked unless **`Firmware:AllowLiveFlashing`** and operational sign-off.
+The existing sender supports configured serial, TCP or named-pipe client transport; an injected in-memory transport is available to tests. Live execution requires **`Firmware:AllowLiveFlashing`** and **`COINLINE_FIRMWARE_LIVE_DLA_ENABLED`**, along with a compatible artifact and job approval. Native terminal-initiated code-server handshake and complete upgrade acceptance have not been established by this sender. Do not mistake transport configuration for device qualification. See [firmware update](../protocols/firmware-update.md).
 
 ## Orchestration
 
