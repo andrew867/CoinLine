@@ -167,12 +167,22 @@ public static partial class NativeTableLayouts
             Field("performanceFailures", "Performance report dialogue failure threshold", 41),
             Field("lineCheckFailures", "Line check failures before action", 42), Field("alternateFailures", "Alternate manager failures before action", 43),
             Field("outOfServiceFailures", "Dialogue failures before out of service", 44), Field("alarmFailures", "Dialogue failures before an alarm", 45),
-            Field("onHookAlarmDelay", "On-hook alarm delay", 55, Word), Field("postOnHookAlarmDelay", "Post-on-hook alarm delay", 57, Word),
-            Field("cardAlarmDuration", "Card alarm duration", 59, Word), Field("cardAlarmOn", "Card alarm on interval", 61, Word),
-            Field("cardAlarmOff", "Card alarm off interval", 63, Word), Field("blockedReaderAlarm", "Blocked card reader alarm delay", 65, Word),
             .. (later ? new[] { Toggle("revertPrimary", "Return to the primary modem pool", 8, 16),
                 Toggle("blockUnratedCarrier", "Block unrated carrier calls", 8, 32), Toggle("recordCardCharges", "Record rated credit card charges in call records", 8, 64),
-                Toggle("forceElevenDigitLocal", "Use 11-digit local dialing", 8, 128) } : [])])
+                Toggle("forceElevenDigitLocal", "Use 11-digit local dialing", 8, 128) } : [])]),
+        Section("cardAlert", "Card-present audio alert",
+            Field("onHookAlarmDelay", "On-hook card-present audio alarm delay", 55, Word,
+                help: "Stored timing value. The time unit and effect of zero are not yet verified for each terminal profile. This is separate from the fraud-control alarm option."),
+            Field("postOnHookAlarmDelay", "Post-call card-present audio alarm delay", 57, Word,
+                help: "Stored timing value; retain the installed setting until its behavior is verified."),
+            Field("cardAlarmDuration", "Card-present audio alarm timing", 59, Word,
+                help: "Stored timing value for the card-present alert. The delay or duration behavior is not yet qualified."),
+            Field("cardAlarmOn", "Audio alarm cadence on timer", 61, Word,
+                help: "Stored timing value; the time unit is not yet verified."),
+            Field("cardAlarmOff", "Audio alarm cadence off timer", 63, Word,
+                help: "Stored timing value; the time unit is not yet verified."),
+            Field("blockedReaderAlarm", "Card-reader blocked alarm delay", 65, Word,
+                help: "Stored timing value. Reader blockage is distinct from a card left inserted."))
     ];
 
     private static NativeTableField CarrierReroute(string key, string label, int mask) =>
