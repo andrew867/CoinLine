@@ -21,14 +21,14 @@ public sealed class PostgresTerminalLifecycleTests
         var key = Guid.NewGuid().ToString("N");
         var now = new DateTimeOffset(2028, 2, 1, 12, 0, 0, TimeSpan.Zero);
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false")
             .UseSetting("Platform:Seed:EnableDemoData", "false")
             .ConfigureServices(services => services.AddSingleton<TimeProvider>(new FixedClock(now))));
-        using var client = factory.CreateClient();
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         client.DefaultRequestHeaders.Add("X-API-Key", key);
 
         var customer = new Customer { Name = "Fixture customer", Code = Guid.NewGuid().ToString("N")[..8] };

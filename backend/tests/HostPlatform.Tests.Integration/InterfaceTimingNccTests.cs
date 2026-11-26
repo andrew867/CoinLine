@@ -115,10 +115,10 @@ public sealed class PostgresInterfaceTimingTests
     {
         var key = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production").UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey).UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
-        using var client = factory.CreateClient(); client.DefaultRequestHeaders.Add("X-API-Key", key);
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory); client.DefaultRequestHeaders.Add("X-API-Key", key);
         var input = InterfaceTimingFixture.Record(); var expected = InterfaceTimingFixture.Expected(input);
         var definition = new TableDefinition { Name = "Synthetic prompt timing", TableNumber = 30 };
         var set = new TableSet { Name = "Synthetic interface timing configuration" };

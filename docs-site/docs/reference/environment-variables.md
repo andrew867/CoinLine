@@ -6,7 +6,7 @@
 
 | Variable / key | Section | Purpose |
 |----------------|---------|---------|
-| `DOTNET_ENVIRONMENT` | runtime | `Production`, `Development`, `Testing` — affects auth bypass and DB provider |
+| `DOTNET_ENVIRONMENT` | runtime | `Production`, `Development`, `Testing` — controls DB provider and demo bootstrap, not authentication |
 | `ConnectionStrings__Default` | ConnectionStrings | PostgreSQL connection string |
 | `COINLINE_API_KEYS` | Security | Comma-separated API keys used when the legacy variable is empty |
 | `HOSTPLATFORM_API_KEYS` | Security | Legacy name. A nonempty value takes precedence over `COINLINE_API_KEYS`. |
@@ -26,7 +26,11 @@
 
 | Key | Default (appsettings) |
 |-----|------------------------|
-| `Security__Mode` | `Development` — use **`ApiKey`** in production |
+| `Security__Mode` | `Token`; `ApiKey` adds the deployment key requirement |
+| `COINLINE_OPERATOR_TOKEN_KEY` | Required outside Development, random secret of at least 32 bytes |
+| `COINLINE_DEV_OPERATOR_PASSWORD` | Optional Development demo account password; otherwise generated once |
+| `COINLINE_BOOTSTRAP_ADMIN_USERNAME`, `COINLINE_BOOTSTRAP_ADMIN_PASSWORD` | One-time initial administrator credentials, remove after provisioning |
+| `COINLINE_API_BIND_ADDRESS`, `COINLINE_WEB_BIND_ADDRESS` | Docker host bind addresses, default `127.0.0.1` |
 | `Security__ApiKeys` | `[]` — prefer env |
 | `Security__GlobalRequestsPerMinutePerIp` | `0` = disabled |
 

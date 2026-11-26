@@ -18,7 +18,7 @@ That starts PostgreSQL, the API, the management console, and the worker.
 | postgres | `postgres:5432` on the Compose network | Not published on the host. |
 | worker | no host port | Writes the worker heartbeat row only. It does not handle sessions. |
 
-The base Compose file runs the API in Development so the console's operator headers are accepted and demo seed data loads. Migrations run when the API starts.
+The base Compose file runs the API in Development and loads demo data. A real operator token is still required. The API and console are published on loopback by default; opt in to a different host address with `COINLINE_API_BIND_ADDRESS` or `COINLINE_WEB_BIND_ADDRESS`. Migrations run when the API starts.
 
 ## Durable data
 
@@ -36,7 +36,7 @@ Start the emulator on the host. Compose does not build or run it. Point it at TC
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 ```
 
-Set `HOSTPLATFORM_API_KEYS` or `COINLINE_API_KEYS` (comma-separated) before starting. When both are set, `HOSTPLATFORM_API_KEYS` is used. Production refuses to start in ApiKey mode when that list is empty.
+Set `COINLINE_OPERATOR_TOKEN_KEY` to a random secret of at least 32 bytes and `HOSTPLATFORM_API_KEYS` or `COINLINE_API_KEYS` (comma-separated) before starting. When both API key variables are set, `HOSTPLATFORM_API_KEYS` is used. For a fresh database, set `COINLINE_BOOTSTRAP_ADMIN_USERNAME` and `COINLINE_BOOTSTRAP_ADMIN_PASSWORD` (at least 12 characters) to create the first named administrator, then remove the bootstrap variables. Production refuses to start with a missing or invalid signing key, or with an empty API key list in ApiKey mode. If upgrading a database with the retired demo account, provision a distinct replacement administrator before startup; the old default account is disabled.
 
 ## Checks
 
@@ -49,7 +49,7 @@ curl -sf http://localhost:8080/ready
 
 A TCP connection to `localhost:4000` should be accepted once the API is up. PostgreSQL files appear under `data/postgres` after the database initializes.
 
-Sign in at http://localhost:8080/login as `operator` with password `lab-operator`. That account is created on first start when it does not already exist. Additional people are added under People. Alarms and cash reports from a phone appear under Alarms.
+In Development, the demo account `operator` is created on first start with `COINLINE_DEV_OPERATOR_PASSWORD` (at least 12 characters), or a random password shown once in the API startup output. Sign in at http://localhost:8080/login with the configured or generated credentials. A persistent signing key is recommended for a lab that retains its database. Additional people are added under People. Alarms and cash reports from a phone appear under Alarms.
 
 Postgres is healthy only when `pg_isready` reaches `127.0.0.1`. The image's first server listens on a local socket and then restarts before it accepts TCP, so a socket-only check lets the API start too early.
 

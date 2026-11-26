@@ -19,13 +19,14 @@ namespace HostPlatform.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/firmware")]
-[Authorize(Policy = Policies.RequireOperator)]
+[Authorize]
 public sealed class FirmwareController(
     HostPlatformDbContext db,
     FirmwareJobOrchestrator orchestrator,
     IFirmwareExecutionPolicy executionPolicy) : ControllerBase
 {
     /// <summary>UI / operators — surface whether live modem flashing is enabled (default false).</summary>
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpGet("execution-policy")]
     public ActionResult<object> ExecutionPolicy(
         [FromServices] Microsoft.Extensions.Options.IOptions<HostPlatform.Firmware.DlTransportEnvironmentOptions> dlOpt) =>
@@ -37,20 +38,17 @@ public sealed class FirmwareController(
                 "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only. Live execute needs Firmware:AllowLiveFlashing and COINLINE_FIRMWARE_LIVE_DLA_ENABLED."
         });
 
-    [AllowAnonymous]
     [HttpGet("packages")]
     public async Task<ActionResult<IEnumerable<object>>> Packages(CancellationToken ct) =>
         Ok(await db.FirmwarePackages.AsNoTracking()
             .Select(p => new { p.Id, p.Name, p.VersionLabel, p.ArtifactSizeBytes, p.PrimaryArtifactId })
             .ToListAsync(ct));
 
-    [AllowAnonymous]
     [HttpGet("table-profiles")]
     public ActionResult<object> TableProfiles() => Ok(FirmwareTableProfiles.Catalog.Select(profile =>
         new { profile.Id, profile.Label, profile.VerifiedLengths, profile.CompleteCatalogue, profile.ObservedLengthsOnly, profile.EvidenceNote,
             terminalAcknowledgedRecords = profile.TerminalAcknowledgedRecords.Order().ToArray() }));
 
-    [AllowAnonymous]
     [HttpGet("versions")]
     public async Task<ActionResult<IEnumerable<object>>> FirmwareVersions(CancellationToken ct) =>
         Ok(await db.FirmwareVersions.AsNoTracking()
@@ -60,6 +58,7 @@ public sealed class FirmwareController(
 
     public sealed record FirmwareVersionCreateDto(string Label, string? BuildId, string? Notes, string? TableProfileId = null);
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("versions")]
     public async Task<ActionResult<object>> CreateFirmwareVersion([FromBody] FirmwareVersionCreateDto body, CancellationToken ct)
     {
@@ -84,6 +83,7 @@ public sealed class FirmwareController(
     public sealed record FirmwareTableProfileChoice(string? TableProfileId);
     public sealed record FirmwareTableProfileChange(string? TableProfileId, string? PreviewToken);
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("versions/{id:guid}/table-profile/preview")]
     public async Task<ActionResult<object>> PreviewFirmwareTableProfile(Guid id,
         [FromBody] FirmwareTableProfileChoice body, CancellationToken ct)
@@ -96,6 +96,7 @@ public sealed class FirmwareController(
         return Ok(await FirmwareProfileImpact.ReviewAsync(db, firmware, body.TableProfileId, ct));
     }
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPut("versions/{id:guid}/table-profile")]
     public async Task<ActionResult<object>> SetFirmwareTableProfile(Guid id,
         [FromBody] FirmwareTableProfileChange body, CancellationToken ct)
@@ -139,6 +140,7 @@ public sealed class FirmwareController(
     private static bool IsSerializationConflict(Exception exception) => exception is PostgresException
         { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.DeadlockDetected };
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("packages")]
     public async Task<ActionResult<object>> CreatePackage([FromBody] PackageDto body, CancellationToken ct)
     {
@@ -161,7 +163,6 @@ public sealed class FirmwareController(
         return Created($"/api/firmware/packages/{p.Id}", new { p.Id });
     }
 
-    [AllowAnonymous]
     [HttpGet("packages/{id:guid}")]
     public async Task<ActionResult<object>> PackageDetail(Guid id, CancellationToken ct)
     {
@@ -201,6 +202,7 @@ public sealed class FirmwareController(
 
     public sealed record ArtifactDto(string Kind, string Sha256Hex, long SizeBytes, string? StorageRef, string? MetadataJson);
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("packages/{id:guid}/artifacts")]
     public async Task<ActionResult<object>> AddArtifact(Guid id, [FromBody] ArtifactDto body, CancellationToken ct)
     {
@@ -244,6 +246,7 @@ public sealed class FirmwareController(
 
     public sealed record CompatibilityRuleDto(Guid? RequiredTerminalFirmwareVersionId, string? RequiredTargetSkuContains, string? Notes);
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("packages/{id:guid}/compatibility-rules")]
     public async Task<ActionResult<object>> AddCompatibilityRule(Guid id, [FromBody] CompatibilityRuleDto body, CancellationToken ct)
     {
@@ -268,7 +271,6 @@ public sealed class FirmwareController(
         return Created($"/api/firmware/packages/{id}", new { r.Id });
     }
 
-    [AllowAnonymous]
     [HttpGet("targets")]
     public async Task<ActionResult<IEnumerable<object>>> Targets(CancellationToken ct) =>
         Ok(await db.FirmwareTargets.AsNoTracking()
@@ -278,6 +280,7 @@ public sealed class FirmwareController(
 
     public sealed record TargetDto(Guid FirmwarePackageId, string Sku, string? Notes);
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("targets")]
     public async Task<ActionResult<object>> CreateTarget([FromBody] TargetDto body, CancellationToken ct)
     {
@@ -296,7 +299,6 @@ public sealed class FirmwareController(
         return Created($"/api/firmware/targets", new { t.Id });
     }
 
-    [AllowAnonymous]
     [HttpGet("jobs")]
     public async Task<ActionResult<IEnumerable<object>>> ListJobs(CancellationToken ct) =>
         Ok(await db.FirmwareUpdateJobs.AsNoTracking()
@@ -312,7 +314,6 @@ public sealed class FirmwareController(
                 j.ApprovedAtUtc
             }).ToListAsync(ct));
 
-    [AllowAnonymous]
     [HttpGet("jobs/{id:guid}")]
     public async Task<ActionResult<object>> Job(Guid id, CancellationToken ct)
     {
@@ -370,6 +371,7 @@ public sealed class FirmwareController(
         });
     }
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("jobs/{id:guid}/simulate")]
     public async Task<ActionResult<object>> SimulateJob(Guid id, CancellationToken ct)
     {
@@ -425,6 +427,7 @@ public sealed class FirmwareController(
     /// <summary>Cancelling a job is audited — clients must send <c>confirm: true</c> (destructive / state-changing).</summary>
     public sealed record CancelJobDto(bool Confirm, string? Reason);
 
+    [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("jobs/{id:guid}/cancel")]
     public async Task<ActionResult<object>> CancelJob(Guid id, [FromBody] CancelJobDto body, CancellationToken ct)
     {

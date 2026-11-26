@@ -25,9 +25,14 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      # Lab default so the console operator headers work. The prod overlay sets Production.
+      # The lab still requires a validated operator token. The prod overlay sets Production.
       ASPNETCORE_ENVIRONMENT: Development
+      # Explicit container-network binding for the web reverse proxy; host publication is loopback below.
       ASPNETCORE_URLS: http://0.0.0.0:5006
+      COINLINE_OPERATOR_TOKEN_KEY: ${COINLINE_OPERATOR_TOKEN_KEY:-}
+      COINLINE_DEV_OPERATOR_PASSWORD: ${COINLINE_DEV_OPERATOR_PASSWORD:-}
+      COINLINE_BOOTSTRAP_ADMIN_USERNAME: ${COINLINE_BOOTSTRAP_ADMIN_USERNAME:-}
+      COINLINE_BOOTSTRAP_ADMIN_PASSWORD: ${COINLINE_BOOTSTRAP_ADMIN_PASSWORD:-}
       # NCC TCP listener. Leave it enabled; do not set COINLINE_NCC_LISTEN=0.
       COINLINE_NCC_PORT: "4000"
       ConnectionStrings__Default: Host=postgres;Port=5432;Database=coinline;Username=coinline;Password=coinline
@@ -43,7 +48,7 @@ services:
       - path: sip.env
         required: false
     ports:
-      - "5006:5006"
+      - "${COINLINE_API_BIND_ADDRESS:-127.0.0.1}:5006:5006"
       - "4000:4000"
       - "5060:5060/udp"
       - "40000-40007:40000-40007/udp"
@@ -57,7 +62,7 @@ services:
     depends_on:
       - api
     ports:
-      - "8080:80"
+      - "${COINLINE_WEB_BIND_ADDRESS:-127.0.0.1}:8080:80"
 
   # Heartbeat row only. Session handling stays on the API listener.
   worker:

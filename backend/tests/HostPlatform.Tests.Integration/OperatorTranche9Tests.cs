@@ -55,9 +55,7 @@ public sealed class OperatorTranche9Tests(ApiFixture factory)
 
     private static HttpClient CreateClient(ApiFixture factory)
     {
-        var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Operator-Id", "itest@local");
-        client.DefaultRequestHeaders.Add("X-Operator-Role", "Admin");
+        var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory, "itest@local", "Admin");
         return client;
     }
 }

@@ -13,7 +13,6 @@ public static class SeedData
     {
         await EnsureDlogMessageTypesAsync(db, ct);
         await EnsureCraftCommandTypesSeedAsync(db, ct);
-        await EnsureLabOperatorAsync(db, ct);
         await CloseDemoSessionAsync(db, ct);
 
         if (!enableDemoData)
@@ -703,26 +702,6 @@ public static class SeedData
             });
         }
 
-        await db.SaveChangesAsync(ct);
-    }
-
-    private static async Task EnsureLabOperatorAsync(HostPlatformDbContext db, CancellationToken ct)
-    {
-        if (await db.OperatorAccounts.AnyAsync(a => a.Username == "operator", ct))
-            return;
-        var now = DateTime.UtcNow;
-        db.OperatorAccounts.Add(new OperatorAccount
-        {
-            Username = "operator",
-            DisplayName = "Lab operator",
-            PasswordHash = OperatorPassword.Hash("lab-operator"),
-            Role = OperatorRole.Admin,
-            Enabled = true,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now,
-            CreatedBy = "seed",
-            UpdatedBy = "seed"
-        });
         await db.SaveChangesAsync(ct);
     }
 

@@ -14,12 +14,10 @@ public sealed class OperatorAuthenticationHandler(
     IOptionsMonitor<AuthenticationSchemeOptions> options,
     ILoggerFactory logger,
     UrlEncoder encoder,
-    IWebHostEnvironment environment,
     OperatorTokenSigningKey signingKey,
     HostPlatformDbContext db) : AuthenticationHandler<AuthenticationSchemeOptions>(options, logger, encoder)
 {
     public const string SchemeName = "CoinLineOperator";
-    internal const string NamedAccountClaim = "coinline:named-account";
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
@@ -36,18 +34,7 @@ public sealed class OperatorAuthenticationHandler(
                 return AuthenticateResult.Fail("The operator session is no longer current.");
             if (account.Role != OperatorRole.Admin)
                 OperatorPermissions.SetRequestProfile(Context, account.PermissionProfileJson);
-            return AuthenticateOperator(username, account.Role, namedAccount: true);
-        }
-
-        if (environment.IsDevelopment() || environment.IsEnvironment("Testing"))
-        {
-            var username = Request.Headers["X-Operator-Id"].ToString().Trim();
-            if (username.Length > 0)
-            {
-                var role = Enum.TryParse<OperatorRole>(Request.Headers["X-Operator-Role"].ToString(), true, out var requested)
-                    && Enum.IsDefined(requested) ? requested : OperatorRole.Operator;
-                return AuthenticateOperator(username, role);
-            }
+            return AuthenticateOperator(username, account.Role);
         }
 
         return AuthenticateResult.NoResult();
@@ -59,21 +46,32 @@ public sealed class OperatorAuthenticationHandler(
         return base.HandleChallengeAsync(properties);
     }
 
-    private static AuthenticateResult AuthenticateOperator(string username, OperatorRole role, bool namedAccount = false)
+    private static AuthenticateResult AuthenticateOperator(string username, OperatorRole role)
     {
         var identity = new ClaimsIdentity(
             [new Claim(ClaimTypes.Name, username), new Claim(ClaimTypes.Role, role.ToString())], SchemeName);
-        if (namedAccount)
-            identity.AddClaim(new Claim(NamedAccountClaim, "true"));
         return AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName));
     }
 }
 
-public sealed class OperatorTokenSigningKey(IConfiguration configuration, IWebHostEnvironment environment)
+public sealed class OperatorTokenSigningKey
 {
-    public string Value { get; } = configuration["Security:OperatorTokenKey"] is { } key && !string.IsNullOrWhiteSpace(key)
-        ? key
-        : environment.IsDevelopment() || environment.IsEnvironment("Testing")
-            ? "coinline-lab-token-key"
-            : Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+    public string Value { get; }
+
+    public OperatorTokenSigningKey(IConfiguration configuration, IWebHostEnvironment environment)
+    {
+        var key = configuration["COINLINE_OPERATOR_TOKEN_KEY"];
+        if (string.IsNullOrWhiteSpace(key)) key = configuration["Security:OperatorTokenKey"];
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            if (!environment.IsDevelopment())
+                throw new InvalidOperationException("Configure an operator token signing key before starting outside Development.");
+            Value = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+            return;
+        }
+        // The retired public default is rejected, never used to issue a token.
+        if (key == "coinline-lab-token-key" || System.Text.Encoding.UTF8.GetByteCount(key) < 32)
+            throw new InvalidOperationException("Configure a new operator token signing key of at least 32 bytes.");
+        Value = key;
+    }
 }

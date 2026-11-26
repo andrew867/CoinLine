@@ -23,11 +23,11 @@ public sealed class PostgresCarrierLibraryTests
         var key = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
-        using var client = factory.CreateClient();
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         client.DefaultRequestHeaders.Add("X-API-Key", key);
         var add = Account(4, 0);
         var read = Account(1, 0);
@@ -60,7 +60,7 @@ public sealed class PostgresCarrierLibraryTests
         using (var added = await client.PostAsJsonAsync(path, new { code = "A" + code[1..], tableNumber = 23, changes = new Dictionary<string, string> { ["carrier-0.reference"] = "10" } }))
             Assert.Equal(HttpStatusCode.Created, added.StatusCode);
 
-        client.DefaultRequestHeaders.Authorization = null;
+        TestOperatorAuthentication.Authenticate(client, factory);
         using var created = await client.PostAsJsonAsync(path, payload);
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var details = await created.Content.ReadFromJsonAsync<JsonElement>();
@@ -90,7 +90,7 @@ public sealed class PostgresCarrierLibraryTests
             Assert.Equal(2, stored.TableRevision);
             Assert.Contains(await db.AuditEvents.Where(row => row.Category == "carrier_library").ToListAsync(), row => row.Action == "apply" && row.Resource == id.ToString());
         }
-        client.DefaultRequestHeaders.Authorization = null;
+        TestOperatorAuthentication.Authenticate(client, factory);
         using (var revised = await client.PutAsJsonAsync($"{path}/{id}", new { code, tableNumber = 23, revision, changes = new Dictionary<string, string> { ["carrier-0.name"] = "New brand" } }))
             Assert.Equal(HttpStatusCode.OK, revised.StatusCode);
         using (var stale = await Apply(target.Id, revision, 2, Hash(expected))) Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);

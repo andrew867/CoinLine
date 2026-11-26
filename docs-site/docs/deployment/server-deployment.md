@@ -25,7 +25,7 @@ See [Docker Compose](../operations/docker-compose.md) for variables and profiles
 
 ## Production checklist (abbreviated)
 
-1. Set **`Security:Mode`** to **`ApiKey`** and configure **`COINLINE_API_KEYS`** (comma-separated) or `Security:ApiKeys`.
+1. Configure `COINLINE_OPERATOR_TOKEN_KEY` and a named administrator. All protected API calls need an operator token. For the additional deployment gate, set `Security:Mode=ApiKey` and configure `COINLINE_API_KEYS` or `Security:ApiKeys`. The default host binding is loopback.
 2. Disable demo seed: **`Platform:Seed:EnableDemoData`** = `false`.
 3. Configure **CORS** origins for your Management Console URL.
 4. Terminate **TLS** at nginx/Traefik/ALB; forward `X-Forwarded-*` as appropriate.

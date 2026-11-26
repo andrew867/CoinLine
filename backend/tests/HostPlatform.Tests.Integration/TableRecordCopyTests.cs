@@ -82,9 +82,7 @@ public sealed class TableRecordCopyTests(ApiFixture factory)
 
     private static HttpClient CreateClient(ApiFixture factory)
     {
-        var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Operator-Id", "record-copy-test");
-        client.DefaultRequestHeaders.Add("X-Operator-Role", "Admin");
+        var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory, "record-copy-test", "Admin");
         return client;
     }
 

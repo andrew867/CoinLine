@@ -48,9 +48,7 @@ public sealed class ConfigurationLibraryTests(ApiFixture factory)
             db.AddRange(records);
             await db.SaveChangesAsync();
         }
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "fixture");
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         const string path = "/api/tables/configuration-library";
         var options = await client.GetFromJsonAsync<JsonElement>($"{path}/options");
         Assert.Contains(options.GetProperty("sets").EnumerateArray(), row => row.GetProperty("id").GetGuid() == sets[0].Id);

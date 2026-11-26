@@ -48,7 +48,7 @@ public sealed class PostgresSyntheticAuthorizationTests
         probe.Stop();
 
         await using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production")
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey")
             .UseSetting("Security:ApiKeys:0", key)
@@ -66,7 +66,7 @@ public sealed class PostgresSyntheticAuthorizationTests
             .UseSetting("CardPayments:LabAuthorization:Bindings:1:TerminalId", otherTerminal.Id.ToString())
             .UseSetting("CardPayments:LabAuthorization:Bindings:1:CardAccountId", otherAccount.Id.ToString())
             .UseSetting("CardPayments:LabAuthorization:Bindings:1:Destination", route));
-        using var admin = host.CreateClient();
+        using var admin = TestOperatorAuthentication.CreateAuthenticatedClient(host);
         admin.DefaultRequestHeaders.Add("X-API-Key", key);
         await using (var scope = host.Services.CreateAsyncScope())
         {

@@ -17,7 +17,7 @@ RUN apt-get update \
     && mkdir -p /var/coinline/payloads \
     && chown -R hpapi:hpapi /app /var/coinline/payloads
 USER hpapi
-ENV ASPNETCORE_URLS=http://0.0.0.0:5006
+ENV ASPNETCORE_URLS=http://127.0.0.1:5006
 EXPOSE 5006
 EXPOSE 4000
 EXPOSE 5060/udp

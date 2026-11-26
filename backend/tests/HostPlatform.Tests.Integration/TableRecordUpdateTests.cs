@@ -280,9 +280,7 @@ public sealed class TableRecordUpdateTests(ApiFixture factory)
 
     private static HttpClient CreateClient(ApiFixture factory)
     {
-        var client = factory.CreateClient();
-        client.DefaultRequestHeaders.Add("X-Operator-Id", "record-update-test");
-        client.DefaultRequestHeaders.Add("X-Operator-Role", "Admin");
+        var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory, "record-update-test", "Admin");
         return client;
     }
 

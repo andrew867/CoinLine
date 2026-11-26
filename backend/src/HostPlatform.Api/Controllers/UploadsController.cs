@@ -188,7 +188,7 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
         {
             reviewedAtUtc = DateTime.UtcNow,
             note = body.Note,
-            reviewedBy = HttpContext.Request.Headers.TryGetValue("X-Operator-Id", out var op) ? op.ToString() : "unknown"
+            reviewedBy = User.Identity?.Name ?? "unknown"
         });
 
         batch.DecodedMetadataJson = root.ToJsonString(new JsonSerializerOptions { WriteIndented = false });

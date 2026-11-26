@@ -1,13 +1,16 @@
 # Production-ish compose overlay — use with:
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
 #
-# Requires HOSTPLATFORM_API_KEYS or COINLINE_API_KEYS (comma-separated) for ApiKey auth mode.
+# Requires an operator token signing key and HOSTPLATFORM_API_KEYS or COINLINE_API_KEYS.
 # When both are set, HOSTPLATFORM_API_KEYS is used.
 
 services:
   api:
     environment:
       ASPNETCORE_ENVIRONMENT: Production
+      Security__Mode: ApiKey
+      COINLINE_OPERATOR_TOKEN_KEY: ${COINLINE_OPERATOR_TOKEN_KEY:?Configure a new operator token signing key}
+      COINLINE_DEV_OPERATOR_PASSWORD: ""
       COINLINE_API_KEYS: ${COINLINE_API_KEYS:-}
       HOSTPLATFORM_API_KEYS: ${HOSTPLATFORM_API_KEYS:-}
       Platform__Seed__EnableDemoData: "false"
