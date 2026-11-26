@@ -4,7 +4,7 @@ namespace HostPlatform.Api.Hosting;
 
 /// <summary>Bounded transport settings for the terminal-facing TCP listener.</summary>
 internal sealed record NccListenerSettings(IPAddress BindAddress, int MaxConcurrentConnections,
-    TimeSpan ReadTimeout, TimeSpan IdleTimeout, TimeSpan TerminalClearDrainTimeout)
+    TimeSpan ReadTimeout, TimeSpan IdleTimeout, TimeSpan TerminalClearDrainTimeout, TimeSpan CardAuthorizationTimeout)
 {
     public static NccListenerSettings FromConfiguration(IConfiguration config, bool forceLoopback = false)
     {
@@ -18,8 +18,9 @@ internal sealed record NccListenerSettings(IPAddress BindAddress, int MaxConcurr
         var readTimeout = BoundedInt(config, "Ncc:ReadTimeoutSeconds", 60, 3600);
         var idleTimeout = BoundedInt(config, "Ncc:IdleTimeoutSeconds", 120, 3600);
         var clearDrainTimeout = BoundedInt(config, "Ncc:TerminalClearDrainMilliseconds", 3000, 10000);
+        var cardTimeout = BoundedInt(config, "CardPayments:AuthorizationTimeoutMilliseconds", 5000, 30000);
         return new(bindAddress, maximum, TimeSpan.FromSeconds(readTimeout), TimeSpan.FromSeconds(idleTimeout),
-            TimeSpan.FromMilliseconds(clearDrainTimeout));
+            TimeSpan.FromMilliseconds(clearDrainTimeout), TimeSpan.FromMilliseconds(cardTimeout));
     }
 
     private static int BoundedInt(IConfiguration config, string key, int fallback, int maximum)
