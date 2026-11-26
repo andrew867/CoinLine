@@ -59,6 +59,7 @@ public static class OperatorPermissions
             ("TerminalGroups", U, "Rename UpdateDetails"), ("TerminalGroups", D, "Delete"));
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
+            ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
             ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
             ("Tables", A | U, "FirmwareOptions"));
