@@ -31,6 +31,14 @@ For a source tariff reference, the preview offers only target MT73 rows with the
 
 Review the changed-position count, reference selections and findings, then confirm the new draft. Changing a reference requires a fresh preview. Other candidate records remain byte-for-byte unchanged, so review their pointers to screening positions, numbering rules, time discounts and the tariff effective date before publishing. Use the resulting draft as the next target candidate to continue preparation. This feature neither transfers a record to the phone nor qualifies the upgrade.
 
+### Prepare local dialing areas for the later layout
+
+The earlier single-compressed MT101 to MT115 segments contain 800 exchange codes using four bits per exchange. Later MT136 to MT149, MT154 and MT155 contain the same exchange count using two bits. **Prepare phone-specific local dialing areas** is available when both registered layouts and the source/candidate tariff records are identified.
+
+Review the exact source rate tuples and the four target MT73 local rate positions. If any used source tariff has no equal target tuple, first prepare the target tariffs with the ordinary tariff editor and review the effect on their existing references. The carry-forward does not rewrite any MT73 price. The preview maps each active source area to the existing same-area segment or an included completely blank target segment; it will not overwrite a different active area, retained disabled bytes or an omitted record. It shows changed exchange codes separately from changed rate tuples. Duplicate areas, unrepresentable rates and unavailable capacity block the draft.
+
+Choose alternate exact matches or vacant segments if desired, preview again, and confirm the listed changes to create a separate unassigned draft. All unrelated target areas, tariffs and other records remain unchanged. This is structural preparation, not proof of stock-device call classification or compatibility.
+
 ## Simulation and the native code scheduler
 
 Use the simulation job form to exercise the host's checks without opening a device transport. Inspect the resulting job, safety checks and rollback notes before planning any real upgrade. The execution policy reports whether the existing live transport is enabled.

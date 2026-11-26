@@ -61,6 +61,7 @@ public static class OperatorPermissions
             ("TerminalGroups", U, "Rename UpdateDetails"), ("TerminalGroups", D, "Delete"));
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
+            ("FirmwareLocalDialingStaging", A, "Create"),
             ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
             ("FirmwareTariffStaging", A, "Create"),
             ("Terminals", R, "Families"),
@@ -73,6 +74,7 @@ public static class OperatorPermissions
             ("FirmwareTariffStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
             ("ConfigurationLibrary", R, "List Options"),
+            ("FirmwareLocalDialingStaging", R, "Preview"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
             ("NativeTableConfiguration", R, "PreviewNumberingOverlay"), ("NativeTableConfiguration", U, "ApplyNumberingOverlay"),
             ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
