@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using HostPlatform.SipModem;
@@ -27,6 +28,7 @@ public sealed class SipAudioGatewayTests
             PublicAddress = "127.0.0.1"
         }, NullLogger.Instance);
         gateway.Start();
+        AssertLoopbackUdp(gateway.SipPort);
 
         using var phone = new UdpClient(new IPEndPoint(IPAddress.Loopback, 0));
         var phonePort = ((IPEndPoint)phone.Client.LocalEndPoint!).Port;
@@ -36,6 +38,7 @@ public sealed class SipAudioGatewayTests
         var ok = await ReadSipAsync(phone, "SIP/2.0 200");
         Assert.Contains("SIP/2.0 200", ok, StringComparison.Ordinal);
         var rtpPort = RtpPort(ok);
+        AssertLoopbackUdp(rtpPort);
         var payload = new byte[] { 0x02, 0x11, 0x22 };
         await SendModemAudioAsync(phone, rtpPort, payload);
 
@@ -137,6 +140,21 @@ public sealed class SipAudioGatewayTests
         await phone.SendAsync(Encoding.ASCII.GetBytes(invite), new IPEndPoint(IPAddress.Loopback, gateway.SipPort));
         var response = await ReadSipAsync(phone, "SIP/2.0 488");
         Assert.Contains("SIP/2.0 488", response, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Invalid_bind_address_is_not_silently_replaced_with_a_wildcard()
+    {
+        await using var gateway = new SipAudioGateway(new SipModemOptions { BindAddress = "invalid", SipPort = 0 }, NullLogger.Instance);
+        Assert.Throws<InvalidOperationException>(() => gateway.Start());
+        Assert.False(gateway.Listening);
+    }
+
+    private static void AssertLoopbackUdp(int port)
+    {
+        var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveUdpListeners();
+        Assert.Contains(listeners, ep => ep.Port == port && ep.Address.Equals(IPAddress.Loopback));
+        Assert.DoesNotContain(listeners, ep => ep.Port == port && (ep.Address.Equals(IPAddress.Any) || ep.Address.Equals(IPAddress.IPv6Any)));
     }
 
     private static string Invite(int fromPort, int toPort, string payloadType, string rtpmap) =>
