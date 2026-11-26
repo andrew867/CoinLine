@@ -2522,6 +2522,9 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             Assert.Equal(new byte[] { 13 }, end.Data);
             await WaitNewBatchAsync(before, 1);
             await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | end.Control)));
+            // Final ACK still completes the batch, but the peer must be allowed
+            // to finish its own clear/relay release before host transport EOF.
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ReadFrameAsync(link.Stream, TimeSpan.FromMilliseconds(250)));
             var batch = await WaitNewBatchAsync(before, 2);
             Assert.Equal("Completed", batch.GetProperty("timeline")[0].GetProperty("hostDownloadPhaseName").GetString());
         }

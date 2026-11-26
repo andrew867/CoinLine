@@ -22,6 +22,7 @@
 | `Ncc__MaxConcurrentConnections` | Maximum concurrent client sockets, default `32`. |
 | `Ncc__ReadTimeoutSeconds` | Maximum wait for a read or unfinished frame, default `60`. |
 | `Ncc__IdleTimeoutSeconds` | Maximum interval without a valid received frame, default `120`. INSTALL acknowledgement deadlines remain separate. |
+| `Ncc__TerminalClearDrainMilliseconds` | Maximum time to preserve the TCP transport after a valid terminal-initiated clear, default `3000`, range `1` to `10000`. The host stops accepting application work on that link and waits for peer EOF; unexpected disconnects do not use this drain. |
 | `COINLINE_NCC_BIND_ADDRESS` | Docker host publication, default loopback; internal container listener binds explicitly. |
 | `SipModem__Enabled` | Enables the SIP audio inlet. The base lab Compose stack sets this to `true`. |
 | `SipModem__BindAddress` | Numeric SIP and RTP bind address; default `127.0.0.1`. |

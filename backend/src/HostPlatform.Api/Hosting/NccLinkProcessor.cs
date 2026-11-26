@@ -62,6 +62,7 @@ internal sealed class NccLinkProcessor(
     private bool _installStarted;
     private bool _mandatoryFullInstall;
     private bool _firmwareDialogue;
+    private volatile bool _terminalCleared;
     private readonly Dictionary<int, DownloadBatchItem> _waiting = new();
     private FirmwareTableTransfer? _firmwareTables;
     private CallbackOffer? _callbackOffer;
@@ -192,10 +193,21 @@ internal sealed class NccLinkProcessor(
                         continue;
                     }
 
+                    var terminalClear = (packet.Control & NccControl.Clr) != 0;
+                    if (terminalClear)
+                    {
+                        // The terminal has ended the application dialogue, but its modem may
+                        // still be completing the normal local clear and relay-release sequence.
+                        _terminalCleared = true;
+                        outbound.Unregister(_session.Id);
+                    }
                     await AcceptFrameAsync(stream, packet, parsed.Frame.RawBytes, frame!);
                     lastFrameAt = Stopwatch.GetTimestamp();
-                    if ((packet.Control & NccControl.Clr) != 0)
+                    if (terminalClear)
+                    {
+                        await DrainAfterTerminalClearAsync(stream, buf);
                         return;
+                    }
                 }
             }
         }
@@ -229,6 +241,37 @@ internal sealed class NccLinkProcessor(
     }
 
     private static TimeSpan Min(TimeSpan left, TimeSpan right) => left <= right ? left : right;
+
+    private async Task DrainAfterTerminalClearAsync(NetworkStream stream, byte[] buffer)
+    {
+        // Don't send another application frame, ACK, FIN or carrier-drop signal in
+        // response to CLR. Allow the peer to release first, but never hold the
+        // listener slot indefinitely. Bytes after clear are not another dialogue.
+        using var drain = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+        drain.CancelAfter(settings.TerminalClearDrainTimeout);
+        var started = Stopwatch.GetTimestamp();
+        var outcome = "peer_eof";
+        long discardedBytes = 0;
+        try
+        {
+            while (true)
+            {
+                drain.Token.ThrowIfCancellationRequested();
+                var count = await stream.ReadAsync(buffer, drain.Token);
+                if (count == 0) break;
+                discardedBytes += count;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            outcome = stoppingToken.IsCancellationRequested ? "shutdown" : "deadline";
+        }
+        catch (IOException) { outcome = "peer_error"; }
+        catch (SocketException) { outcome = "peer_error"; }
+        Audit("terminal_clear_drain", new { outcome, discardedBytes,
+            elapsedMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds }, _session.TerminalId);
+        logger.LogInformation("NCC terminal clear drained for session {SessionId}: {Outcome}.", _session.Id, outcome);
+    }
 
     private bool IsHeaderOnlyRetransmission(NccWirePacket packet, ReadOnlySpan<byte> raw) =>
         _lastInboundMessage is { } previous
@@ -1119,6 +1162,8 @@ internal sealed class NccLinkProcessor(
         await _writeGate.WaitAsync(writeCts.Token);
         try
         {
+            if (_terminalCleared)
+                throw new IOException("The terminal has cleared the NCC dialogue.");
             frame = CaptureFrame(bytes.Span[1], bytes.Length, sentByHost: true);
             await stream.WriteAsync(bytes, writeCts.Token);
         }
