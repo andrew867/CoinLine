@@ -1,0 +1,4 @@
+services:
+  api:
+    environment:
+      COINLINE_CRAFT_IDENTIFIER_KEY: ${COINLINE_CRAFT_IDENTIFIER_KEY:-}

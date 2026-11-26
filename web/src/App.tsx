@@ -23,6 +23,7 @@ import { QuickAccessCustomersPage } from './pages/QuickAccessCustomersPage'
 import { TableVersions } from './pages/TableVersions'
 import { FieldEventsPage } from './pages/FieldEventsPage'
 import { FieldEventDestinationsPage } from './pages/FieldEventDestinationsPage'
+import { TechniciansPage } from './pages/TechniciansPage'
 import { OperatorsPage } from './pages/OperatorsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { SitesPage } from './pages/SitesPage'
@@ -97,6 +98,7 @@ export default function App() {
           <Route path="/field-events" element={<FieldEventsPage />} />
           <Route path="/cashbox" element={<CashboxQueryPage />} />
           <Route path="/field-event-destinations" element={<FieldEventDestinationsPage />} />
+          <Route path="/technicians" element={<TechniciansPage />} />
           <Route path="/uploads/:id" element={<UploadDetail />} />
           <Route path="/uploads" element={<UploadsPage />} />
           <Route path="/rate-plans/:id" element={<RatePlanDetail />} />

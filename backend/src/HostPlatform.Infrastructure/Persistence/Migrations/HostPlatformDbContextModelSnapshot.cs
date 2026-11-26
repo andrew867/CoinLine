@@ -1031,6 +1031,55 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("CraftDiagnostics");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.CraftMaintenanceAttribution", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayNameSnapshot")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EmployeeReferenceSnapshot")
+                        .HasColumnType("text");
+
+                    b.Property<string>("MatchStatus")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("TechnicianId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TechnicianId");
+
+                    b.HasIndex("TransactionId")
+                        .IsUnique();
+
+                    b.ToTable("CraftMaintenanceAttributions");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.CraftSession", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1080,6 +1129,54 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("TerminalId");
 
                     b.ToTable("CraftSessions");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.CraftTechnician", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("EmployeeReference")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("IdentifierFingerprint")
+                        .HasColumnType("text");
+
+                    b.Property<string>("IdentifierKeyId")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("IdentifierKeyId", "IdentifierFingerprint")
+                        .IsUnique();
+
+                    b.ToTable("CraftTechnicians");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.Customer", b =>
@@ -4665,6 +4762,24 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("CraftSession");
 
                     b.Navigation("Terminal");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.CraftMaintenanceAttribution", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.CraftTechnician", "Technician")
+                        .WithMany()
+                        .HasForeignKey("TechnicianId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.DlogTransaction", "Transaction")
+                        .WithOne()
+                        .HasForeignKey("HostPlatform.Domain.CraftMaintenanceAttribution", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Technician");
+
+                    b.Navigation("Transaction");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.CraftSession", b =>

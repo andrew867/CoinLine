@@ -3664,8 +3664,12 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             var maintenance = events.GetProperty("items").EnumerateArray()
                 .Where(row => row.GetProperty("category").GetString() == "maintenance").ToList();
             Assert.Contains(maintenance, row => row.GetProperty("summary").GetString() == "Technician entered maintenance mode (opcode 996)");
-            Assert.Contains(maintenance, row => row.GetProperty("summary").GetString() == "Terminal out of service (opcode 999)");
+            Assert.Contains(maintenance, row => row.GetProperty("summary").GetString() == "Terminal placed out of service (opcode 999)");
             Assert.All(maintenance, row => Assert.Equal(3, row.GetProperty("byteCount").GetInt32()));
+            var activity = await fx.Client.GetFromJsonAsync<JsonElement>("/api/technicians/activity", Json);
+            var recent = activity.GetProperty("items").EnumerateArray().Where(row => row.GetProperty("terminalId").ValueKind == JsonValueKind.String &&
+                row.GetProperty("terminalId").GetGuid() == terminalId).ToArray();
+            Assert.Contains(recent, row => row.GetProperty("opcode").GetInt32() == 996 && row.GetProperty("matchStatus").GetString() == "unconfigured");
         }
 
         Assert.True(batches.SetEquals(await BatchIdsAsync()));

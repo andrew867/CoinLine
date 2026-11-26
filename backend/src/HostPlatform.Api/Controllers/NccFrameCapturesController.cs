@@ -1,6 +1,7 @@
 using System.Text.Json;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Middleware;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure;
 using HostPlatform.Infrastructure.Persistence;
@@ -39,6 +40,7 @@ public sealed class NccFrameCapturesController(HostPlatformDbContext db) : Contr
         var row = await db.NccFrameCaptures.AsNoTracking().FirstOrDefaultAsync(c => c.Id == id, ct);
         if (row == null)
             return NotFound();
+        row.RawBytes = NccMaintenanceCapturePrivacy.Redact(row.RawBytes);
         var ordered = NccStreamReader.ReadOrdered(row.RawBytes, NccParseMode.DiagnosticCapture);
         return Ok(BuildInspectPayload(row, ordered));
     }
@@ -56,7 +58,7 @@ public sealed class NccFrameCapturesController(HostPlatformDbContext db) : Contr
 
         await using var ms = new MemoryStream();
         await file.CopyToAsync(ms, ct);
-        var bytes = ms.ToArray();
+        var bytes = NccMaintenanceCapturePrivacy.Redact(ms.ToArray());
 
         var entity = new NccFrameCapture
         {

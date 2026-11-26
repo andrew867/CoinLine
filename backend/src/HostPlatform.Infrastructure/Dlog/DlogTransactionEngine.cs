@@ -26,8 +26,15 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
         DateTime? capturedAtUtc,
         string? httpCorrelationId,
         CancellationToken ct,
-        bool deduplicateCashbox = false)
+        bool deduplicateCashbox = false,
+        CraftReportedMatch? craftMatch = null)
     {
+        if (DlogMaintenanceWire.TryRedactRecord(rawPayloadExact, explicitMessageType, firstByteIsMessageType, out var maintenance))
+        {
+            rawPayloadExact = maintenance;
+            explicitMessageType = DlogMaintenanceWire.RequestMessageType;
+            firstByteIsMessageType = true;
+        }
         var cap = capturedAtUtc ?? DateTime.UtcNow;
         var idem = deduplicateCashbox
             ? DlogIdempotency.ComputeKey(DlogCashboxWire.IdentityBytes(rawPayloadExact), direction, terminalId, null, null, "cashbox")
@@ -64,6 +71,15 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
         };
 
         db.DlogTransactions.Add(tx);
+        if (direction == DlogDirection.TerminalToHost && meta.MessageType == DlogMaintenanceWire.RequestMessageType &&
+            terminalId != null && nccSessionId != null && craftMatch != null)
+        {
+            db.CraftMaintenanceAttributions.Add(new CraftMaintenanceAttribution
+            {
+                TransactionId = tx.Id, TechnicianId = craftMatch.TechnicianId, MatchStatus = craftMatch.Status,
+                DisplayNameSnapshot = craftMatch.DisplayName, EmployeeReferenceSnapshot = craftMatch.EmployeeReference
+            });
+        }
         if (direction == DlogDirection.TerminalToHost && meta.MessageType is 6 or 7 &&
             FieldEventSummary.ReadCode(meta.MessageType, rawPayloadExact) is { } eventCode)
         {
