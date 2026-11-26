@@ -53,7 +53,7 @@ type UpdatedSet = { id: string; name: string; phoneId?: string | null; phoneDisp
 const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
 const callInParameters = 35
 
-export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false, firmwareSchedule, initialSchedulePhone }: {
+export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false, firmwareSchedule, initialSchedulePhone, initialScheduleRecord }: {
   setId: string
   revision: number
   versions: SavedRecord[]
@@ -61,6 +61,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   codeOnly?: boolean
   firmwareSchedule?: FirmwareSchedule | null
   initialSchedulePhone?: string
+  initialScheduleRecord?: number
 }) {
   const canAssign = canPerform('table-assignments', op.update)
   const canPreviewAssignment = canAssign || canPerform('table-assignments', op.read)
@@ -88,9 +89,15 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   })
   const [firmwareAllocation, setFirmwareAllocation] = useState<FirmwareAllocation | null>(null)
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
-  const [action, setAction] = useState<AssignmentAction>(canPreviewFull ? 'set' : 'records')
+  const requestedPartial = canSchedule && !codeOnly && !!initialSchedulePhone && initialScheduleRecord !== undefined
+  const [action, setAction] = useState<AssignmentAction>(requestedPartial ? 'schedule-records' : canPreviewFull ? 'set' : 'records')
   const [actions, setActions] = useState<Record<number, RecordAction>>({})
-  const [deliveryRecords, setDeliveryRecords] = useState<number[]>([])
+  const [deliveryRecords, setDeliveryRecords] = useState<number[]>(() => {
+    if (!requestedPartial || initialScheduleRecord === 94) return []
+    const matching = versions.filter(record => record.tableNumber === initialScheduleRecord)
+    return matching.length === 1 && matching[0].validationPassed && matching[0].payloadLengthBytes > 2
+      ? [matching[0].tableNumber] : []
+  })
   const [wireSelection, setWireSelection] = useState<number[] | null>(null)
   const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null)
   const [personalizeAccessIdentity, setPersonalizeAccessIdentity] = useState(false)

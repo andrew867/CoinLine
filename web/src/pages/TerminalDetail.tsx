@@ -1,4 +1,5 @@
 import { SpecialCallback } from './SpecialCallback'
+import { RoutineCallInPanel } from './RoutineCallInPanel'
 import { TerminalInventoryPanel } from './TerminalInventoryPanel'
 import { PhoneDownloadReview, downloadSchedulePath } from '../components/DownloadReviewReminder'
 import { rememberDownloadReview } from '../api/downloadReviews'
@@ -702,7 +703,6 @@ export function TerminalDetail() {
               ? <Link to={`/table-sets/${assign.tableSetId}`}>{assign.tableSetName ?? assignedSet?.name ?? assign.tableSetId}</Link>
               : <span>{assign.tableSetName ?? assignedSet?.name ?? assign.tableSetId}</span>}
           </div>
-          {canReadTableSets && canPerform('table-records', op.read) && <div><Link to={`/table-sets/${assign.tableSetId}?record=35#config-heading`}>Review routine call-in settings</Link></div>}
           {terminalActive && canReadTableSets && canRequestReload && <div><Link to={downloadSchedulePath(assign.tableSetId, term.id)}>Schedule assigned configuration</Link></div>}
           {canReadTableSets && term.terminalFamilyId && <div><Link to={`/table-sets/${assign.tableSetId}?family=${encodeURIComponent(term.terminalFamilyId)}#family-review-heading`}>
             Review table requirements for this family</Link></div>}
@@ -737,6 +737,9 @@ export function TerminalDetail() {
         </button>
       </form>}
       </>}
+
+      {canReadAssignment && canPerform('table-records', op.read) && assign !== undefined &&
+        <RoutineCallInPanel key={`call-in-${id}`} terminalId={id} assignmentKey={assign?.tableSetId ?? ''} terminalActive={terminalActive} />}
 
       {(canReadDiagnostics || canSaveSnapshot || canRequestCdr || canRequestReload) && <>
       <h2 style={{ marginTop: 24 }}>Field diagnostics</h2>

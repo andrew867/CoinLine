@@ -8,6 +8,7 @@
 | POST | `/api/terminals` | Create |
 | GET | `/api/terminals/create-options` | Minimal site, firmware, family and permitted group choices for phone registration |
 | GET | `/api/terminals/{id}` | Detail |
+| GET | `/api/terminals/{id}/routine-call-in` | Assigned and acknowledged MT35 settings and latest observed routine contact; source evidence is permission-scoped |
 | GET | `/api/terminals/firmware-options` | Minimal installed-version choices for phone inventory |
 | GET | `/api/terminals/{id}/table-assignment-options` | Minimal table-set choices for phone assignments, excluding firmware-scheduler-only sets |
 | GET | `/api/terminals/{id}/lifecycle` | Manager activity, lifecycle dates and current revision |

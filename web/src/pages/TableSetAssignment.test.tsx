@@ -40,6 +40,43 @@ it('opens an exact phone in full-download mode without scheduling until confirme
   expect(readDownloadReviews()).toEqual([{ terminalId: 'other-phone', tableSetId: 'review-set', reason: 'inventory' }])
 })
 
+it('preselects only a valid call-in record from an exact phone review', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 1, 'table-assignments': 3, downloads: 4 })
+  vi.mocked(apiGet).mockImplementation(async path => (path === '/api/tables/scope-options?targetType=terminal'
+    ? [{ id: 'review-phone', displayName: 'Review phone' }] : []) as never)
+  vi.mocked(apiGetRaw).mockResolvedValue(Response.json({ targets: [{ id: 'review-phone', displayName: 'Review phone', eligible: true }], recordNumbers: [35] }))
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ scheduled: 1, alreadyScheduled: 0 }))
+  const versions = [
+    { id: 'version-29', tableNumber: 29, definitionName: 'Advertising', payloadLengthBytes: 200, validationPassed: true, configurationId: null },
+    { id: 'version-35', tableNumber: 35, definitionName: 'Routine call-in', payloadLengthBytes: 21, validationPassed: true, configurationId: null },
+  ]
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({ id: 'review-set', name: 'Review set', status: 1, revision: 1, optionalRecordRemovals: [], firmwareFindings: [], versions }))
+  render(<MemoryRouter initialEntries={['/table-sets/review-set?schedulePhone=review-phone&scheduleRecord=35']}>
+    <Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes>
+  </MemoryRouter>)
+  await screen.findByRole('option', { name: 'Review phone' })
+  expect(screen.getByLabelText('Phone')).toHaveValue('review-phone')
+  expect(screen.getByLabelText('Assignment action')).toHaveValue('schedule-records')
+  expect(screen.getByLabelText(/MT35.*Routine call-in/)).toBeChecked()
+  expect(screen.getByLabelText(/MT29.*Advertising/)).not.toBeChecked()
+  expect(apiPostRaw).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Preview phones' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Schedule for 1 phone' }))
+  expect(await screen.findByText('Scheduled for 1 phone. Already scheduled for 0.')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/review-set/schedules', expect.objectContaining({ terminalIds: ['review-phone'], recordNumbers: [35] }))
+})
+
+it('does not default to a full download when the requested call-in record is absent', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { downloads: 4 })
+  vi.mocked(apiGet).mockResolvedValue([{ id: 'review-phone', displayName: 'Review phone' }] as never)
+  render(<MemoryRouter><TableSetAssignment setId="review-set" revision={1} versions={[]} optionalRecords={[]}
+    initialSchedulePhone="review-phone" initialScheduleRecord={35} /></MemoryRouter>)
+  await screen.findByRole('option', { name: 'Review phone' })
+  expect(screen.getByLabelText('Assignment action')).toHaveValue('schedule-records')
+  expect(screen.getByRole('button', { name: 'Preview phones' })).toBeDisabled()
+  expect(apiPostRaw).not.toHaveBeenCalled()
+})
+
 it('does not clear a full configuration review when only a selected record is scheduled', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { downloads: 4 })
   const review = { terminalId: 'review-phone', tableSetId: 'review-set', reason: 'assignment' as const }

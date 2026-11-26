@@ -26,6 +26,12 @@ Assignments for **table sets** can apply at customer, site, or terminal scope de
 
 Custom operator profiles may permit membership management separately from group administration. A membership-only operator selects a group from the membership lookup. Operators with Add can stage new memberships, and operators with Delete can stage removals. Read-only operators can inspect the list but cannot save changes.
 
+## Routine call-ins
+
+The phone detail page compares its assigned MT35 call-in parameters with the last acknowledged MT35, and identifies the most recent retained routine MT8 contact when the operator has session access. The repeat and retry intervals, call-record threshold and optional clock adjustment are displayed in the terminal clock domain. Assignment and acknowledgment are not interchangeable, and no predicted UTC contact time is presented.
+
+Authorized operators can open the assigned native editor or make a separate draft for a phone-specific change without mutating an existing shared set. Publication and assignment or selected-record delivery are separate, explicitly reviewed actions.
+
 ## API
 
 REST endpoints under `/api/customers`, `/api/sites`, `/api/terminals` — see [API overview](../api/overview.md) and OpenAPI.

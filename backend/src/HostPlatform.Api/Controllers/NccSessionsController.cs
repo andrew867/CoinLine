@@ -11,12 +11,15 @@ namespace HostPlatform.Api.Controllers;
 public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionOutbound outbound) : ControllerBase
 {
     /// <param name="includeArchived">When false (default), rows with <see cref="NccSessionStatus.Archived"/> are omitted.</param>
+    /// <param name="sessionId">Optional exact retained session identifier.</param>
     /// <param name="ct">Cancellation token.</param>
     [HttpGet]
     public async Task<ActionResult<IEnumerable<object>>> List([FromQuery] bool includeArchived = false,
-        CancellationToken ct = default)
+        [FromQuery] Guid? sessionId = null, CancellationToken ct = default)
     {
         var q = db.NccSessions.AsNoTracking();
+        if (sessionId.HasValue)
+            q = q.Where(s => s.Id == sessionId.Value);
         if (!includeArchived)
             q = q.Where(s => s.Status != NccSessionStatus.Archived);
 
