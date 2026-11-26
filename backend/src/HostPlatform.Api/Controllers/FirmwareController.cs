@@ -53,14 +53,60 @@ public sealed class FirmwareController(
     public async Task<ActionResult<object>> TransitionReview([FromQuery] Guid terminalId, [FromQuery] Guid targetFirmwareVersionId,
         [FromQuery] Guid? candidateSetId, CancellationToken ct)
     {
-        if (!OperatorPermissions.Allows(HttpContext, "phones", PermissionOperation.Read) ||
-            !OperatorPermissions.Allows(HttpContext, "firmware-registry", PermissionOperation.Read) ||
-            !OperatorPermissions.Allows(HttpContext, "table-sets", PermissionOperation.Read) ||
-            !OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read) ||
-            !OperatorPermissions.Allows(HttpContext, "table-assignments", PermissionOperation.Read)) return Forbid();
+        if (!CanReadTransition()) return Forbid();
         var review = await FirmwareTransitionReview.BuildAsync(db, terminalId, targetFirmwareVersionId, candidateSetId, ct);
         return review == null ? NotFound(new { error = "The selected phone, firmware or candidate set was not found." }) : Ok(review);
     }
+
+    public sealed record AccessStagingRequest(Guid TerminalId, Guid TargetFirmwareVersionId, Guid CandidateSetId, string? Name, string? PreviewToken = null);
+
+    [HttpPost("transition-access/preview")]
+    public async Task<ActionResult<object>> PreviewAccessStaging(AccessStagingRequest body, CancellationToken ct)
+    {
+        if (!CanReadTransition()) return Forbid();
+        try
+        {
+            var plan = await FirmwareAccessStaging.BuildAsync(db, body.TerminalId, body.TargetFirmwareVersionId, body.CandidateSetId, body.Name, ct);
+            return plan == null ? NotFound(new { error = "The phone, target firmware or candidate set was not found." }) : Ok(plan.Preview);
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    [Authorize(Policy = Policies.RequireOperator)]
+    [HttpPost("transition-access")]
+    public async Task<ActionResult<object>> StageAccessConfiguration(AccessStagingRequest body, CancellationToken ct)
+    {
+        if (!CanReadTransition() || !OperatorPermissions.Allows(HttpContext, "firmware-jobs", PermissionOperation.Read) ||
+            !OperatorPermissions.Allows(HttpContext, "table-sets", PermissionOperation.Add)) return Forbid();
+        try
+        {
+            await using var transaction = db.Database.IsRelational()
+                ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            var plan = await FirmwareAccessStaging.BuildAsync(db, body.TerminalId, body.TargetFirmwareVersionId, body.CandidateSetId, body.Name, ct);
+            if (plan == null) return NotFound(new { error = "The phone, target firmware or candidate set was not found." });
+            if (plan.Preview.PreviewToken != body.PreviewToken)
+                return Conflict(new { error = "The phone, source or candidate changed. Preview the target draft again." });
+            var draft = plan.CreateDraft();
+            db.TableSets.Add(draft);
+            ApiAudit.Write(db, HttpContext, "firmware.configuration", "stage_access_draft", draft.Id.ToString(), new
+            {
+                plan.Preview.SourceSetId, plan.Preview.CandidateSetId, plan.TargetFirmwareId,
+                plan.Preview.SourceBytes, plan.Preview.TargetBytes, plan.Preview.ChangedBytes, plan.Preview.RecordCount
+            }, body.TerminalId);
+            await db.SaveChangesAsync(ct);
+            if (transaction != null) await transaction.CommitAsync(ct);
+            return Created($"/api/tables/sets/{draft.Id}", new { draft.Id, plan.Preview.ChangedBytes });
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsSerializationConflict(ex.GetBaseException()))
+        { return Conflict(new { error = "The phone or candidate changed concurrently. Preview the target draft again." }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    private bool CanReadTransition() => OperatorPermissions.Allows(HttpContext, "phones", PermissionOperation.Read) &&
+        OperatorPermissions.Allows(HttpContext, "firmware-registry", PermissionOperation.Read) &&
+        OperatorPermissions.Allows(HttpContext, "table-sets", PermissionOperation.Read) &&
+        OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read) &&
+        OperatorPermissions.Allows(HttpContext, "table-assignments", PermissionOperation.Read);
 
     [HttpGet("versions")]
     public async Task<ActionResult<IEnumerable<object>>> FirmwareVersions(CancellationToken ct) =>
