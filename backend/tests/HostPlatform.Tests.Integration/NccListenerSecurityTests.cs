@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.Json;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Ncc;
@@ -13,6 +15,75 @@ namespace HostPlatform.Tests.Integration;
 
 public sealed class NccListenerSecurityTests
 {
+    [Fact]
+    public async Task Terminal_clear_preserves_carrier_until_peer_eof_and_does_not_dispatch_more_frames()
+    {
+        await using var baseFactory = new NccFactory();
+        await using var factory = baseFactory.WithWebHostBuilder(web => web
+            .UseSetting("Ncc:TerminalClearDrainMilliseconds", "4000"));
+        using var bootstrap = factory.CreateClient();
+        using var socket = await ConnectAsync(baseFactory.Port);
+        await WaitSessionsAsync(factory, 1, 1);
+        await SendAndReadAckAsync(socket);
+        await socket.GetStream().WriteAsync(Clear());
+        var session = await WaitForClearAsync(factory);
+        Assert.False(socket.Client.Poll(200_000, SelectMode.SelectRead));
+
+        var outbound = factory.Services.GetRequiredService<INccSessionOutbound>();
+        Assert.DoesNotContain(session, outbound.BoundSessionIds());
+        // A packet sent after CLR is not the start of another dialogue.
+        var trailing = Message();
+        var stream = socket.GetStream();
+        await stream.WriteAsync(trailing);
+        Assert.False(socket.Client.Poll(200_000, SelectMode.SelectRead));
+        socket.Client.Shutdown(SocketShutdown.Send);
+        await AssertClosedAsync(stream);
+        await WaitSessionsAsync(factory, 1, 0);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        var frames = await db.NccSessionFrames.Where(frame => frame.NccSessionId == session).OrderBy(frame => frame.Sequence).ToListAsync();
+        Assert.Equal(new byte?[] { 0, NccControl.Ack, NccControl.Clr }, frames.Select(frame => frame.LinkControl).ToArray());
+        var audit = await db.AuditEvents.SingleAsync(row => row.Action == "terminal_clear_drain" && row.TerminalSessionId == session.ToString());
+        using var detail = JsonDocument.Parse(audit.DetailJson);
+        Assert.Equal("peer_eof", detail.RootElement.GetProperty("outcome").GetString());
+        Assert.Equal(trailing.Length, detail.RootElement.GetProperty("discardedBytes").GetInt64());
+    }
+
+    [Fact]
+    public async Task Terminal_clear_without_peer_eof_is_bounded_and_unexpected_disconnect_does_not_drain()
+    {
+        await using var baseFactory = new NccFactory();
+        await using var factory = baseFactory.WithWebHostBuilder(web => web
+            .UseSetting("Ncc:TerminalClearDrainMilliseconds", "1200"));
+        using var bootstrap = factory.CreateClient();
+        Guid cleared;
+        using (var socket = await ConnectAsync(baseFactory.Port))
+        {
+            await WaitSessionsAsync(factory, 1, 1);
+            await SendAndReadAckAsync(socket);
+            await socket.GetStream().WriteAsync(Clear());
+            cleared = await WaitForClearAsync(factory);
+            await AssertClosedAsync(socket);
+        }
+        await WaitSessionsAsync(factory, 1, 0);
+        using (var unexpected = await ConnectAsync(baseFactory.Port))
+        {
+            await WaitSessionsAsync(factory, 2, 1);
+            await SendAndReadAckAsync(unexpected);
+            var stream = unexpected.GetStream();
+            unexpected.Client.Shutdown(SocketShutdown.Send);
+            await AssertClosedAsync(stream);
+        }
+        await WaitSessionsAsync(factory, 2, 0);
+        await using var scope = factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        var audit = Assert.Single(await db.AuditEvents.Where(row => row.Action == "terminal_clear_drain").ToListAsync());
+        Assert.Equal(cleared.ToString(), audit.TerminalSessionId);
+        using var detail = JsonDocument.Parse(audit.DetailJson);
+        Assert.Equal("deadline", detail.RootElement.GetProperty("outcome").GetString());
+        Assert.Equal(0, detail.RootElement.GetProperty("discardedBytes").GetInt64());
+    }
+
     [Fact]
     public async Task Default_listener_is_loopback_and_releases_a_connection_slot_after_disconnect()
     {
@@ -96,6 +167,22 @@ public sealed class NccListenerSecurityTests
         Control = 0, TerminalId = [1, 2, 3, 4, 5], Data = [84, 0x11, 0x22]
     });
 
+    private static byte[] Clear() => NccFrameCodec.Encode(new NccWirePacket { Control = NccControl.Clr });
+
+    private static async Task<Guid> WaitForClearAsync(WebApplicationFactory<Program> factory)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(7));
+        while (true)
+        {
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var session = await db.NccSessionFrames.AsNoTracking().Where(frame => !frame.SentByHost && frame.LinkControl == NccControl.Clr)
+                .Select(frame => (Guid?)frame.NccSessionId).FirstOrDefaultAsync(timeout.Token);
+            if (session.HasValue) return session.Value;
+            await Task.Delay(50, timeout.Token);
+        }
+    }
+
     private static async Task SendAndReadAckAsync(TcpClient client, bool fragmented = false)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(7));
@@ -127,12 +214,14 @@ public sealed class NccListenerSecurityTests
         catch { client.Dispose(); throw; }
     }
 
-    private static async Task AssertClosedAsync(TcpClient client)
+    private static Task AssertClosedAsync(TcpClient client) => AssertClosedAsync(client.GetStream());
+
+    private static async Task AssertClosedAsync(NetworkStream stream)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(7));
         try
         {
-            Assert.Equal(0, await client.GetStream().ReadAsync(new byte[1], timeout.Token));
+            Assert.Equal(0, await stream.ReadAsync(new byte[1], timeout.Token));
         }
         catch (IOException ex) when (ex.InnerException is SocketException { SocketErrorCode: SocketError.ConnectionReset or SocketError.ConnectionAborted })
         {
