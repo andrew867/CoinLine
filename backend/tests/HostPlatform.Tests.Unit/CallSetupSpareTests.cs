@@ -82,6 +82,20 @@ public sealed class CallSetupSpareTests
     }
 
     [Fact]
+    public void Modem_answer_off_count_changes_only_its_byte_and_retains_required_answer_detection()
+    {
+        var raw = Enumerable.Repeat((byte)0xA5, 36).ToArray();
+        raw[0] = 33; raw[24] = 1; raw[25] = 5; raw[26] = 10;
+        raw[27] = 1; raw[28] = 10; raw[29] = 10; raw[34] = 2;
+        var layout = NativeTableLayouts.Find(33, raw, NativeTableLayouts.Later)!;
+        Assert.Equal("Carrier/mark", Assert.Single(layout.Sections, section => section.Key == "debounce-3").Label);
+        Assert.Equal(raw, layout.Apply(raw, new Dictionary<string, string>()));
+        var modified = layout.Apply(raw, new Dictionary<string, string> { ["debounce-2.off"] = "25" });
+        var expected = raw.ToArray(); expected[25] = 25;
+        Assert.Equal(expected, modified);
+    }
+
+    [Fact]
     public void Verified_answer_supervision_shape_exposes_each_row_and_tail_spare_byte()
     {
         var layout = Assert.Single(NativeTableLayouts.DraftTemplates(49));

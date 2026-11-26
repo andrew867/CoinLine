@@ -66,7 +66,7 @@ public static partial class NativeTableLayouts
              Field("laptopSeizeTime", "Data device line seizure time (10 ms ticks)", 10, Word),
              ..(later ? new[] { Field("answerRemovalDelay", "Delay after answer tone removal (10 ms ticks)", 12, Word) }
                 : new[] { new NativeTableField("spare.timer", "Spare timer word (10 ms ticks)", 12, Word, IsSpare: true) }),
-             Field("carrierDelay", "Delay after carrier detection (10 ms ticks)", 14, Word),
+             Field("carrierDelay", "Delay after carrier/mark detection (10 ms ticks)", 14, Word),
              Field("turnaroundDelay", "Receive-to-transmit delay (10 ms ticks)", 16, Word),
              Toggle("groundStart", "Use ground-start line seizure", 33, 1),
              Toggle("carrierLossTimeout", "Enable carrier-loss timeout", 33, 2),
@@ -76,7 +76,7 @@ public static partial class NativeTableLayouts
              Field("busyThreshold", "Busy signal threshold", 35),
              .. SpareFlags("spare.general", "General modem configuration", 33, 0xFC),
              .. SpareFlags("spare.answer", "Answer-tone configuration", 34, 0xF1)]),
-        .. Rows("debounce", 5, i => new[] { "Dial tone", "Busy and ringback", "Answer tone", "Carrier", "Lost carrier" }[i], (i, key) =>
+        .. Rows("debounce", 5, i => new[] { "Dial tone", "Busy and ringback", "Answer tone", "Carrier/mark", "Lost carrier" }[i], (i, key) =>
             [Field($"{key}.interval", "Interval", 18 + i * 3), Field($"{key}.off", "Off count", 19 + i * 3),
              Field($"{key}.on", "On count", 20 + i * 3)])
     ];
