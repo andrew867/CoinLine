@@ -113,6 +113,32 @@ public sealed class NativeTableLayoutTests
         Assert.Equal(9, later.Apply(updated, internationalRate)[1183]);
     }
 
+    [Theory]
+    [InlineData("2", "-1", "25", "0", "0", "02FFFF190000000000")]
+    [InlineData("1", "60", "25", "60", "25", "013C0019003C001900")]
+    [InlineData("1", "60", "25", "60", "10", "013C0019003C000A00")]
+    public void Local_pricing_presets_change_only_the_selected_tariff(string classification, string initialPeriod,
+        string initialCharge, string additionalPeriod, string additionalCharge, string expected)
+    {
+        var template = Assert.Single(NativeTableLayouts.DraftTemplates(73), item => item.Profile == NativeTableLayouts.MultiPay);
+        var record = NativeTableLayouts.CreateDraftTemplate(template);
+        record[39] = 0xA5;
+        const int start = 40 + 23 * 9;
+        foreach (var layout in NativeTableLayouts.Candidates(73, record))
+        {
+            Assert.Equal(record, layout.Apply(record, new Dictionary<string, string>()));
+            var updated = layout.Apply(record, new Dictionary<string, string>
+            {
+                ["rate-23.classification"] = classification, ["rate-23.initialPeriod"] = initialPeriod,
+                ["rate-23.initialCharge"] = initialCharge, ["rate-23.additionalPeriod"] = additionalPeriod,
+                ["rate-23.additionalCharge"] = additionalCharge
+            });
+            Assert.Equal(record[..start], updated[..start]);
+            Assert.Equal(Convert.FromHexString(expected), updated[start..(start + 9)]);
+            Assert.Equal(record[(start + 9)..], updated[(start + 9)..]);
+        }
+    }
+
     [Fact]
     public void Set_based_rating_keeps_wire_codes_and_unrelated_bits()
     {

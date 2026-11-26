@@ -30,6 +30,7 @@ import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPr
 import { RegionalRatingPreview } from './RegionalRatingPreview'
 import { LanguageOrderPanel } from './LanguageOrderPanel'
 import { languageOrderKeys } from './languageOrderPlan'
+import { TerminalTariffPricing } from './TerminalTariffPricing'
 
 type Field = {
   key: string
@@ -564,6 +565,22 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!canEdit || busy}>
           <legend>{current.label}</legend>
+          {number === 73 && /^rate-\d+$/.test(current.key) &&
+            ['classification', 'initialPeriod', 'initialCharge', 'additionalPeriod', 'additionalCharge'].every(name => current.fields.some(field => field.key === `${current.key}.${name}`)) &&
+            <TerminalTariffPricing key={`${current.key}:${layout.revision}:${current.fields.map(field => effectiveValue(field)).join(':')}`} value={name => keyValue(current, name)} editable={canEdit && !busy} onStage={changes => {
+              if (!canEdit || busy) return
+              const updated = { ...edits }
+              for (const [name, value] of Object.entries(changes)) {
+                const field = current.fields.find(item => item.key === `${current.key}.${name}`)
+                if (!field) continue
+                if (field.value === value) delete updated[field.key]
+                else updated[field.key] = value
+              }
+              setEdits(updated)
+              onDirty(Object.keys(updated).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0
+                || clearedKeys.size > 0 || hasScreeningChanges)
+              setMessage('')
+            }} />}
           {(number === 132 || number === 133) && current.key === 'rotation' && <p className="page-intro">
             This record retains its own header bytes. The verified graphical terminal uses MT131 to control rotation for all 24 screens.
           </p>}
