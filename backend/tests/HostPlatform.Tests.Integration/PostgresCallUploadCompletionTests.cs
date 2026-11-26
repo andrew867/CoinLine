@@ -95,6 +95,26 @@ public sealed class PostgresCallUploadCompletionTests
             Assert.Equal(new byte[] { 13 }, end.Data);
             await Send(stream, (byte)(NccControl.Ack | NccControl.Clr | end.Control));
         }
+        // Cashbox records can be present in the same explicit upload and are
+        // independently observable without retaining the report contents.
+        using (var socket = await Begin())
+        {
+            var box = new byte[57]; box[0] = 38;
+            new byte[] { 128, 2, 29, 10, 11, 12 }.CopyTo(box, 1);
+            Convert.FromHexString("00001001").CopyTo(box, 8);
+            BinaryPrimitives.WriteInt32LittleEndian(box.AsSpan(13), 25);
+            var collection = new byte[71]; collection[0] = 51;
+            Convert.FromHexString("00001002").CopyTo(collection, 5);
+            BinaryPrimitives.WriteUInt16LittleEndian(collection.AsSpan(9), 0x0248);
+            BinaryPrimitives.WriteInt32LittleEndian(collection.AsSpan(11), 25);
+            box.AsSpan(1).CopyTo(collection.AsSpan(15));
+            var stream = socket.GetStream();
+            await Send(stream, 1, [.. box, .. collection, 13]);
+            AssertAck(await Read(stream));
+            var end = await Read(stream);
+            Assert.Equal(new byte[] { 13 }, end.Data);
+            await Send(stream, (byte)(NccControl.Ack | NccControl.Clr | end.Control));
+        }
         // An incomplete explicit report is never given an application completion.
         using (var socket = await Begin())
         {
@@ -118,12 +138,52 @@ public sealed class PostgresCallUploadCompletionTests
         Assert.Equal(new ushort[] { 0x0246, 0x0247 }, callSequences.Order());
         var frames = await db.NccSessionFrames.Where(row => row.NccSession!.TerminalId == phone.Id).ToListAsync();
         Assert.All(frames.Where(row => !row.SentByHost && row.WireLength is 239 or 201 or 111 or 51 or 64), row => Assert.Empty(row.RawBytes));
+        var observations = new List<JsonElement>();
+        foreach (var sessionId in frames.Select(row => row.NccSessionId).Distinct())
+        {
+            var detail = await api.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{sessionId}/upload-observations");
+            Assert.Single(detail.EnumerateObject());
+            var recorded = detail.GetProperty("callUploadFrames").EnumerateArray().ToArray();
+            foreach (var observation in recorded)
+            {
+                var sequence = observation.GetProperty("sequence").GetInt32();
+                Assert.Empty(frames.Single(row => row.NccSessionId == sessionId && row.Sequence == sequence).RawBytes);
+                Assert.DoesNotContain("5550196", observation.GetRawText());
+                Assert.DoesNotContain("ABABAB", observation.GetRawText(), StringComparison.OrdinalIgnoreCase);
+                Assert.All(observation.EnumerateObject(), property => Assert.Contains(property.Name,
+                    new[] { "sequence", "parsed", "endsDialogue", "records" }));
+                if (observation.GetProperty("records").ValueKind == JsonValueKind.Array)
+                    Assert.All(observation.GetProperty("records").EnumerateArray(), record =>
+                        Assert.Equal(new[] { "byteCount", "messageType" }, record.EnumerateObject().Select(property => property.Name).Order()));
+            }
+            observations.AddRange(recorded);
+        }
+        // Every original explicit upload frame must be correlated to its own session;
+        // receipt retransmissions do not create new upload observations.
+        Assert.Equal(15, observations.Count);
+        Assert.Contains(observations, observation => Headers(observation).SequenceEqual(new[] { (53, 54), (53, 54), (56, 81), (10, 11), (60, 28) }));
+        Assert.Contains(observations, observation => observation.GetProperty("endsDialogue").ValueKind == JsonValueKind.True &&
+            Headers(observation).SequenceEqual(new[] { (10, 11), (60, 28), (13, 1) }));
+        Assert.Contains(observations, observation => observation.GetProperty("endsDialogue").ValueKind == JsonValueKind.True &&
+            Headers(observation).SequenceEqual(new[] { (38, 57), (51, 71), (13, 1) }));
+        var unrecognized = Assert.Single(observations, observation => !observation.GetProperty("parsed").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, unrecognized.GetProperty("records").ValueKind);
+        Assert.Equal(JsonValueKind.Null, unrecognized.GetProperty("endsDialogue").ValueKind);
+        using (var anonymous = factory.CreateClient())
+        {
+            using var denied = await anonymous.GetAsync($"/api/ncc/sessions/{frames[0].NccSessionId}/upload-observations");
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+        }
         var statusRecords = await db.DlogTransactions.Where(row => row.TerminalId == phone.Id && (row.MessageType == 10 || row.MessageType == 60)).ToListAsync();
         Assert.Contains(statusRecords, row => row.MessageType == 10 && row.RawPayload.Length == 11);
         Assert.Contains(statusRecords, row => row.MessageType == 60 && row.RawPayload.Length == 28);
         var batch = Assert.Single(await db.DownloadBatches.Where(row => row.TerminalId == phone.Id).ToListAsync());
         Assert.Equal(queuedId, batch.Id);
         Assert.Equal(DownloadBatchStatus.Pending, batch.Status);
+
+        static IEnumerable<(int, int)> Headers(JsonElement observation) => observation.GetProperty("records").ValueKind == JsonValueKind.Array
+            ? observation.GetProperty("records").EnumerateArray().Select(record => (record.GetProperty("messageType").GetInt32(), record.GetProperty("byteCount").GetInt32()))
+            : [];
 
         async Task<TcpClient> Begin()
         {

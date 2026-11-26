@@ -19,7 +19,7 @@ public static class ApiAudit
     /// <param name="resource">Resource identifier or description.</param>
     /// <param name="detail">Serializable detail payload.</param>
     /// <param name="terminalId">Optional terminal scope.</param>
-    public static void Write(
+    public static AuditEvent Write(
         HostPlatformDbContext db,
         HttpContext? http,
         string category,
@@ -35,7 +35,7 @@ public static class ApiAudit
                           ?? http.Items["CorrelationId"]?.ToString();
         }
 
-        db.AuditEvents.Add(new AuditEvent
+        var audit = new AuditEvent
         {
             Category = category,
             Action = action,
@@ -44,6 +44,8 @@ public static class ApiAudit
             DetailJson = JsonSerializer.Serialize(detail, JsonOpts),
             CorrelationId = correlation,
             TerminalId = terminalId
-        });
+        };
+        db.AuditEvents.Add(audit);
+        return audit;
     }
 }
