@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Cryptography;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
@@ -227,6 +228,66 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             return BadRequest(new { error = ex.Message });
         }
     }
+
+    [HttpPost("numbering-overlay/preview")]
+    public Task<ActionResult> PreviewNumberingOverlay(Guid id, int number, [FromBody] NumberingOverlayRequest body, CancellationToken ct) =>
+        NumberingOverlay(id, number, body, false, ct);
+
+    [HttpPost("numbering-overlay/apply")]
+    public Task<ActionResult> ApplyNumberingOverlay(Guid id, int number, [FromBody] NumberingOverlayRequest body, CancellationToken ct) =>
+        NumberingOverlay(id, number, body, true, ct);
+
+    private async Task<ActionResult> NumberingOverlay(Guid id, int number, NumberingOverlayRequest body, bool apply, CancellationToken ct)
+    {
+        if (number != NumberingPlanWire.MessageType)
+            return BadRequest(new { error = "Ordinary-routing overlays are supported only for MT62." });
+        var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (set == null) return NotFound();
+        if (set.Status != TableSetStatus.Draft)
+            return Conflict(new { error = "Create a draft copy to import an overlay into a published set." });
+        var versions = await ReadVersions(id, number, ct);
+        if (versions.Count != 1)
+            return Conflict(new { error = "The set must contain exactly one numbering-plan record." });
+        var version = versions[0];
+        if (version.TableRevision != body.Revision || !string.Equals(version.PayloadSha256Hex, body.Sha256, StringComparison.OrdinalIgnoreCase))
+            return Conflict(new { error = "The record changed. Reopen the editor and preview the overlay again." });
+
+        var current = TableDistributionService.GetEffectivePayload(version);
+        var (layout, error) = ResolveLayout(set, number, current, body.Profile);
+        if (layout == null) return BadRequest(new { error = error ?? "Choose a supported numbering-plan layout." });
+        if (body.SourceProfile != layout.Profile || body.Profile != layout.Profile)
+            return BadRequest(new { error = "Choose the overlay's original firmware layout. It must match the destination layout." });
+        try
+        {
+            var updated = NumberingPlanOverlayWire.Apply(current, body.Overlay);
+            var findings = NumberingPlanWire.Review(updated, later: layout.Profile == NativeTableLayouts.Later);
+            var changedBytes = current.Zip(updated).Count(pair => pair.First != pair.Second);
+            var resultSha256 = Convert.ToHexString(SHA256.HashData(updated)).ToLowerInvariant();
+            var previewToken = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                setId = set.Id, set.Version, versionId = version.Id, version.TableRevision, version.PayloadSha256Hex, layout.Profile, resultSha256
+            }))).ToLowerInvariant();
+            var canApply = changedBytes > 0 && !findings.Any(finding => finding.Blocking);
+            if (!apply)
+                return Ok(new { changedBytes, resultSha256, findings, canApply, previewToken });
+            if (body.PreviewToken != previewToken)
+                return Conflict(new { error = "The source or destination changed. Preview the overlay again." });
+            if (findings.Any(finding => finding.Blocking))
+                return BadRequest(new { error = "Resolve the blocking numbering-plan findings before applying the overlay." });
+            if (changedBytes != 0)
+                await tables.UpsertVersionAsync(set.Id, version.TableDefinitionId, version.TableRevision + 1,
+                    updated, version.SortOrder, version.DependsOnTableDefinitionId, ct, body.Revision, body.Sha256,
+                    screeningDescriptionsJson: version.ScreeningDescriptionsJson, screeningLayoutProfile: version.ScreeningLayoutProfile);
+            return NoContent();
+        }
+        catch (DbUpdateConcurrencyException)
+        { return Conflict(new { error = "The record changed. Reopen the editor and preview the overlay again." }); }
+        catch (InvalidOperationException ex)
+        { return BadRequest(new { error = ex.Message }); }
+    }
+
+    public sealed record NumberingOverlayRequest(int Revision, string Sha256, string Profile, string SourceProfile,
+        NumberingPlanOverlay Overlay, string? PreviewToken);
 
     internal static (NativeTableLayout? Layout, string? Error) ResolveLayout(TableSet set, int number, byte[] data,
         string? requestedProfile, string? savedProfile = null)
