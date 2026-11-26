@@ -1,14 +1,20 @@
 import { useRef, useState } from 'react'
 import { authorableDisplayText, westernDisplayGlyphs } from './advertisingGlyphs'
-import { makePromptWorksheet, maxPromptWorksheetBytes, planPromptImport, readPromptRow, type PromptImportPlan, type PromptRow } from './visualPromptWorksheetCodec'
+import { canonicalPromptText, makePromptWorksheet, maxPromptWorksheetBytes, planPromptImport, readPromptRow, type PromptImportPlan, type PromptRow } from './visualPromptWorksheetCodec'
 
 const pageSize = 25
 
-export function VisualPromptWorksheet({ number, rows, edits, editable, onStage, onUndo }: {
+type PromptCoverage = 'blank' | 'populated' | 'unmapped'
+export type VisualPromptCompanion = { number: number; status: 'compatible' | 'missing' | 'ambiguous' | 'incompatible'; rows: PromptCoverage[] }
+const coverageLabels: Record<PromptCoverage, string> = { blank: 'Blank', populated: 'Text present', unmapped: 'Unmapped glyphs' }
+const companionLabels = { compatible: 'Available', missing: 'Not in this set', ambiguous: 'Multiple records', incompatible: 'Incompatible record' }
+
+export function VisualPromptWorksheet({ number, rows, edits, editable, companions, onStage, onUndo }: {
   number: number
   rows: PromptRow[]
   edits: Record<string, string>
   editable: boolean
+  companions?: VisualPromptCompanion[] | null
   onStage: (changes: Record<string, string>) => void
   onUndo: (key: string) => void
 }) {
@@ -20,9 +26,19 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, onStage, 
   const [error, setError] = useState('')
   const fileGeneration = useRef(0)
   const needle = query.trim().toLowerCase()
+  const compatible = (companions ?? []).filter(companion => companion.status === 'compatible' && companion.rows.length === rows.length)
+  const activeFilter = status === 'coverage' && compatible.length === 0 ? 'all' : status
+  function differentCoverage(row: PromptRow) {
+    const value = readPromptRow(row, edits)
+    const current = value === null || !authorableDisplayText(value, 20) ? 'unmapped' : canonicalPromptText(value) ? 'populated' : 'blank'
+    const coverage = [current, ...compatible.map(companion => companion.rows[row.row])]
+    return coverage.includes('blank') && coverage.includes('populated')
+  }
+  const coverageDifferenceCount = rows.filter(differentCoverage).length
   const matches = rows.filter(row => {
     const value = readPromptRow(row, edits)
-    return (status === 'all' || (status === 'changed' && Object.hasOwn(edits, row.key)) || (status === 'unmapped' && value === null))
+    return (activeFilter === 'all' || (activeFilter === 'changed' && Object.hasOwn(edits, row.key)) || (activeFilter === 'unmapped' && value === null)
+      || (activeFilter === 'coverage' && differentCoverage(row)))
       && (!needle || row.label.toLowerCase().includes(needle) || String(row.row) === needle || value?.toLowerCase().includes(needle))
   })
   const pages = Math.max(1, Math.ceil(matches.length / pageSize))
@@ -54,11 +70,20 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, onStage, 
   }
 
   return <section className="visual-prompt-worksheet" aria-label="Visual prompt worksheet">
-    <p className="page-intro">Fixed wire rows, 20 display cells each. Labels identify known message lines. Editing a row never inserts, removes or shifts another row. Review other language records separately.</p>
+    <p className="page-intro">Fixed wire rows, 20 display cells each. Labels identify known message lines. Editing a row never inserts, removes or shifts another row.</p>
+    {companions && <section className="visual-prompt-companions" aria-label="Companion language coverage">
+      <h3>Companion language coverage</h3>
+      <p>Compare the current rows, including staged edits, with saved rows in the same set. A blank line in one language can be intentional; this is a review aid, not a translation check or a publication restriction.</p>
+      {companions.length ? <ul>{companions.map(companion => <li key={companion.number}><strong>MT{companion.number}</strong> · {
+        companion.status === 'compatible' && companion.rows.length !== rows.length ? 'Incompatible record' : companionLabels[companion.status]}</li>)}</ul>
+        : <p>No companion language records are catalogued for this target.</p>}
+      {compatible.length > 0 && <p role="status">{coverageDifferenceCount} {coverageDifferenceCount === 1 ? 'row has' : 'rows have'} both blank and populated language entries.</p>}
+    </section>}
     <div className="table-config-selectors">
       <label>Find prompt row<input type="search" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
-      <label>Show rows<select value={status} onChange={event => { setStatus(event.target.value); setPage(0) }}>
+      <label>Show rows<select value={activeFilter} onChange={event => { setStatus(event.target.value); setPage(0) }}>
         <option value="all">All rows</option><option value="changed">Changed rows</option><option value="unmapped">Unmapped rows</option>
+        {compatible.length > 0 && <option value="coverage">Blank in one language</option>}
       </select></label>
       <button type="button" className="quiet" disabled={invalidCount > 0} onClick={download}>Export worksheet JSON</button>
     </div>
@@ -69,7 +94,12 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, onStage, 
         const changed = Object.hasOwn(edits, row.key)
         const invalid = value !== null && !authorableDisplayText(value, 20)
         return <div className="visual-prompt-row" key={row.key}>
-          <div><strong>Row {row.row}</strong><small>{row.label}</small></div>
+          <div><strong>Row {row.row}</strong><small>{row.label}</small>
+            {compatible.length > 0 && <div className="visual-prompt-coverage">
+              {compatible.map(companion => <span key={companion.number}>MT{companion.number}: {coverageLabels[companion.rows[row.row]]}</span>)}
+              {differentCoverage(row) && <strong>Check language coverage</strong>}
+            </div>}
+          </div>
           {value === null ? <div className="visual-prompt-unmapped">
             <span>Unmapped glyphs, original bytes retained</span>
             {editable && <button type="button" className="quiet" onClick={() => stage({ [row.key]: '' })}>Replace row {row.row}</button>}

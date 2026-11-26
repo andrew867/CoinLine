@@ -73,6 +73,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             revision = version.TableRevision,
             sha256 = version.PayloadSha256Hex,
             graphicalLinks = number is >= 131 and <= 133 ? await ReadGraphicalLinks(id, ct) : null,
+            visualPromptCompanions = VisualPromptCoverage.CompanionNumbers(number).Length > 0
+                ? await ReadVisualPromptCompanions(id, number, firmware, ct) : null,
             numberingPlan = number == NumberingPlanWire.MessageType && NumberingPlanWire.Supports(raw)
                 ? NumberingPlanWire.Read(raw, later: layout.Profile == NativeTableLayouts.Later) : null,
             numberingFormatCapacity = number == NumberingPlanWire.MessageType
@@ -302,6 +304,20 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                 ambiguous.Add(number);
         }
         return NativeTableLayouts.ReviewGraphicalLinks(records, ambiguous);
+    }
+
+    private async Task<VisualPromptCompanion[]> ReadVisualPromptCompanions(Guid id, int number, FirmwareTableProfile? firmware, CancellationToken ct)
+    {
+        var result = new List<VisualPromptCompanion>();
+        foreach (var companion in VisualPromptCoverage.CompanionNumbers(number))
+        {
+            // Do not suggest absent language types where a complete target catalogue excludes them.
+            if (firmware?.CompleteCatalogue == true && !firmware.VerifiedLengths.ContainsKey(companion)) continue;
+            var versions = await ReadVersions(id, companion, ct);
+            result.Add(VisualPromptCoverage.Inspect(companion,
+                versions.Select(TableDistributionService.GetEffectivePayload).ToArray()));
+        }
+        return result.ToArray();
     }
 
     internal static SortedDictionary<int, string> ReadScreeningDescriptions(string? json) =>

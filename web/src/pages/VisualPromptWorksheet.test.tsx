@@ -114,3 +114,37 @@ it('offers a read-only worksheet and never exposes import or replacement control
   expect(screen.queryByText('Import a worksheet or review supported glyphs')).toBeNull()
   expect(screen.queryByRole('button', { name: 'Save record' })).toBeNull()
 })
+
+it('compares compatible saved companion rows, distinguishes opaque cells, and updates coverage for staged text without editing companions', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+  const companionRows = Array.from({ length: 400 }, (_, index) => index === 2 ? 'populated' : index === 3 ? 'unmapped' : 'blank')
+  vi.mocked(apiFetch).mockImplementation(async (_, init) => init?.method === 'PUT' ? new Response(null, { status: 204 })
+    : Response.json({ supported: true, editable: true, profile: 'Later packed profile', length: 8001, revision: 4,
+      sha256: 'fixture-sha', sections: sections(400), visualPromptCompanions: [
+        { number: 86, status: 'compatible', rows: companionRows },
+        { number: 98, status: 'missing', rows: [] },
+        { number: 99, status: 'ambiguous', rows: [] },
+      ] }))
+  render(<MemoryRouter><NativeTableEditor setId="fixture" number={85} revision={4} exchangeFile={null}
+    onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole('button', { name: 'Visual prompt worksheet' }))
+  expect(screen.getByText('2 rows have both blank and populated language entries.')).toBeVisible()
+  expect(screen.getByText('Not in this set', { exact: false })).toBeVisible()
+  expect(screen.getByText('Multiple records', { exact: false })).toBeVisible()
+  expect(screen.getByText('MT86: Unmapped glyphs')).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Show rows'), { target: { value: 'coverage' } })
+  expect(screen.getByRole('textbox', { name: /Row 0 text/ })).toBeVisible()
+  expect(screen.getByRole('textbox', { name: /Row 2 text/ })).toBeVisible()
+  expect(screen.queryByText('Row 1', { exact: true })).toBeNull()
+  expect(screen.queryByText('Row 3', { exact: true })).toBeNull()
+  fireEvent.change(screen.getByRole('textbox', { name: /Row 2 text/ }), { target: { value: 'Translated' } })
+  expect(screen.getByText('1 row has both blank and populated language entries.')).toBeVisible()
+  expect(screen.queryByRole('textbox', { name: /Row 2 text/ })).toBeNull()
+  fireEvent.change(screen.getByLabelText('Show rows'), { target: { value: 'changed' } })
+  expect(screen.getByRole('textbox', { name: /Row 2 text/ })).toHaveValue('Translated')
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true))
+  const [path, options] = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'PUT')!
+  expect(path).toBe('/api/tables/sets/fixture/records/85/fields')
+  expect(JSON.parse(options!.body as string).changes).toEqual({ 'prompt-2.text': 'Translated' })
+})

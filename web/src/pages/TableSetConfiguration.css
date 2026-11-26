@@ -32,6 +32,11 @@
 .advertising-spares .page-intro, .advertising-import-notice { font-size: .8rem; color: #526c61; }
 .advertising-spares label { margin-bottom: 4px; }
 .visual-prompt-worksheet { margin: 10px 0; }
+.visual-prompt-companions { margin-bottom: 12px; padding: 12px; background: #f7faf8; border: 1px solid #dce7e1; border-radius: 10px; }
+.visual-prompt-companions h3 { margin-top: 0; }
+.visual-prompt-companions ul { display: flex; flex-wrap: wrap; gap: 6px 18px; list-style: none; padding: 0; }
+.visual-prompt-coverage { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 4px; color: #526b60; font-size: .78rem; }
+.visual-prompt-coverage strong { color: #775923; }
 .visual-prompt-grid { border: 1px solid #dce7e1; border-radius: 10px; overflow: hidden; }
 .visual-prompt-row { display: grid; grid-template-columns: minmax(140px, 1.15fr) minmax(190px, 1fr) minmax(85px, auto); gap: 12px; align-items: center; padding: 10px 12px; border-bottom: 1px solid #e5ece8; }
 .visual-prompt-row:last-child { border-bottom: 0; }

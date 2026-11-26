@@ -16,6 +16,78 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresVisualPromptWorksheetTests
 {
     [PostgresIntegrationFact]
+    public async Task Companion_coverage_is_set_scoped_and_respects_complete_target_catalogues()
+    {
+        var key = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
+        client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var firmware = new FirmwareVersion { Label = "Synthetic two-language target", TableProfileId = FirmwareTableProfiles.GraphicalMultiPay180 };
+        var targeted = new TableSet { Name = "Targeted prompt set", TargetFirmwareVersionId = firmware.Id };
+        var unprofiled = new TableSet { Name = "Untargeted prompt set" };
+        var unrelated = new TableSet { Name = "Unrelated prompt set" };
+        var definitions = new List<TableDefinition>();
+        var expected = new Dictionary<Guid, byte[]>();
+        Add(targeted, 85, VisualPromptFixture.Create(85).Imported);
+        var sibling = VisualPromptFixture.Create(86).Imported.ToArray();
+        System.Text.Encoding.ASCII.GetBytes("Sibling private text").CopyTo(sibling, 1);
+        Add(targeted, 86, sibling);
+        // Deliberately keep an invalid record outside the complete catalogue. It is not suggested as a companion.
+        Add(targeted, 98, VisualPromptFixture.Create(98).Imported);
+        Add(unprofiled, 85, VisualPromptFixture.Create(85).Imported);
+        Add(unprofiled, 98, [98, 0]);
+        Add(unprofiled, 99, VisualPromptFixture.Create(99).Imported);
+        Add(unprofiled, 99, VisualPromptFixture.Create(99).Imported);
+        Add(unrelated, 86, VisualPromptFixture.Create(86).Imported);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.Add(firmware); db.AddRange(definitions); db.AddRange(targeted, unprofiled, unrelated);
+            await db.SaveChangesAsync();
+        }
+
+        var snapshot = await Read(targeted);
+        var companion = Assert.Single(snapshot.GetProperty("visualPromptCompanions").EnumerateArray());
+        Assert.Equal(86, companion.GetProperty("number").GetInt32());
+        Assert.Equal("compatible", companion.GetProperty("status").GetString());
+        var rows = companion.GetProperty("rows");
+        Assert.Equal(400, rows.GetArrayLength());
+        Assert.Equal("populated", rows[0].GetString());
+        Assert.Equal("unmapped", rows[1].GetString());
+        Assert.Equal("blank", rows[2].GetString());
+        Assert.DoesNotContain("Sibling private text", snapshot.GetRawText());
+        snapshot = await Read(unprofiled);
+        var reports = snapshot.GetProperty("visualPromptCompanions").EnumerateArray().ToDictionary(r => r.GetProperty("number").GetInt32());
+        Assert.Equal("missing", reports[86].GetProperty("status").GetString());
+        Assert.Equal("incompatible", reports[98].GetProperty("status").GetString());
+        Assert.Equal("ambiguous", reports[99].GetProperty("status").GetString());
+        Assert.All(reports.Values, r => Assert.Equal(0, r.GetProperty("rows").GetArrayLength()));
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            foreach (var (id, bytes) in expected)
+            {
+                var version = await db.TableVersions.Include(v => v.TablePayload).SingleAsync(v => v.Id == id);
+                Assert.Equal(bytes, TableDistributionService.GetEffectivePayload(version));
+                Assert.Equal(1, version.TableRevision);
+            }
+        }
+
+        Task<JsonElement> Read(TableSet set) => client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{set.Id}/records/85/fields");
+        void Add(TableSet set, int number, byte[] bytes)
+        {
+            var definition = new TableDefinition { Name = "Synthetic companion", TableNumber = number };
+            definitions.Add(definition);
+            var version = CarrierSchedulerSpareFixture.Version(definition, bytes, 1);
+            set.Versions.Add(version); expected.Add(version.Id, bytes.ToArray());
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task All_prompt_wire_layouts_save_exact_rows_and_reject_invalid_or_stale_edits()
     {
         var key = Guid.NewGuid().ToString("N");
