@@ -62,6 +62,7 @@ public static class OperatorPermissions
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
             ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
+            ("FirmwareTariffStaging", A, "Create"),
             ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Firmware", A, "StageAccessConfiguration StageScreeningConfiguration"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
             ("Tables", A | U, "FirmwareOptions"));
@@ -69,6 +70,7 @@ public static class OperatorPermissions
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("TerminalTariffReferences", R, "Get"),
+            ("FirmwareTariffStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
             ("ConfigurationLibrary", R, "List Options"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
