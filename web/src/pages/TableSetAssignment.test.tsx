@@ -77,6 +77,42 @@ it('does not default to a full download when the requested call-in record is abs
   expect(apiPostRaw).not.toHaveBeenCalled()
 })
 
+it('preselects the individual MT35 assignment, previews a random time and confirms exactly that seed', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 1, 'table-records': 3, 'table-assignments': 1 })
+  vi.mocked(apiGet).mockResolvedValue([{ id: 'review-phone', displayName: 'Review phone' }] as never)
+  const randomization = { mode: 'window', windowStart: '01:00:00', windowEnd: '04:00:00', seed: '11111111-2222-3333-4444-555555555555' }
+  const preview = { previewToken: 'reviewed-times', changeCount: 1, setCount: 1, pendingCount: 0, rolloutId: null,
+    callInRandomization: randomization, targets: [{ id: 'review-phone', displayName: 'Review phone', reason: null,
+      baseSetName: 'Current set', callInTime: '02:34:56', changes: [{ tableNumber: 35, action: 'replace', required: false }] }] }
+  vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json(preview)).mockResolvedValueOnce(Response.json(preview))
+    .mockResolvedValueOnce(Response.json({ changed: 1, sets: [{ id: 'new-set', name: 'Randomized set', phoneDisplayName: 'Review phone' }] }))
+  const versions = [{ tableNumber: 35, definitionName: 'Routine call-in', payloadLengthBytes: 21, validationPassed: true, configurationId: null }]
+  render(<MemoryRouter><TableSetAssignment setId="review-set" revision={1} versions={versions} optionalRecords={[]}
+    initialRandomizePhone="review-phone" /></MemoryRouter>)
+  await screen.findByRole('option', { name: 'Review phone' })
+  expect(screen.getByLabelText('Phone')).toHaveValue('review-phone')
+  expect(screen.getByLabelText('Assignment action')).toHaveValue('records')
+  expect(screen.getByLabelText(/MT35.*Routine call-in/)).toHaveValue('copy')
+  expect(screen.getByLabelText("Randomize each phone's routine MT35 call-in time")).toBeChecked()
+  fireEvent.change(screen.getByLabelText('Randomization range'), { target: { value: 'window' } })
+  fireEvent.change(screen.getByLabelText('Earliest call-in (phone clock)'), { target: { value: '01:00:00' } })
+  fireEvent.change(screen.getByLabelText('Latest call-in (phone clock)'), { target: { value: '04:00:00' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview record update' }))
+  expect(await screen.findByText('02:34:56')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenNthCalledWith(1, '/api/tables/sets/review-set/record-updates/preview',
+    expect.objectContaining({ targetId: 'review-phone', copyRecords: [35], callInRandomization: {
+      mode: 'window', windowStart: '01:00:00', windowEnd: '04:00:00' } }))
+  fireEvent.change(screen.getByLabelText('Latest call-in (phone clock)'), { target: { value: '03:00:00' } })
+  expect(screen.queryByText('02:34:56')).toBeNull()
+  expect(screen.queryByRole('button', { name: /Update 1 phone/ })).toBeNull()
+  fireEvent.change(screen.getByLabelText('Latest call-in (phone clock)'), { target: { value: '04:00:00' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Preview record update' }))
+  fireEvent.click(await screen.findByRole('button', { name: 'Update 1 phone' }))
+  expect(await screen.findByRole('link', { name: 'Randomized set · Review phone' })).toHaveAttribute('href', '/table-sets/new-set')
+  expect(apiPostRaw).toHaveBeenNthCalledWith(3, '/api/tables/sets/review-set/record-updates',
+    expect.objectContaining({ previewToken: 'reviewed-times', copyRecords: [35], callInRandomization: randomization }))
+})
+
 it('does not clear a full configuration review when only a selected record is scheduled', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { downloads: 4 })
   const review = { terminalId: 'review-phone', tableSetId: 'review-set', reason: 'assignment' as const }

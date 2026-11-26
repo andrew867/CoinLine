@@ -42,6 +42,8 @@ it('compares intended and acknowledged times, source records, and uncertainty wi
   expect(screen.getByText('1 prepared or running batch with an unacknowledged MT35.')).toBeInTheDocument()
   expect(screen.getByRole('link', { name: 'Open acknowledging download' })).toHaveAttribute('href', '/downloads/fixture-batch')
   expect(screen.getByRole('link', { name: 'Open contact' })).toHaveAttribute('href', '/ncc-sessions?sessionId=fixture-session')
+  expect(screen.getByRole('link', { name: "Randomize this phone's call-in time" })).toHaveAttribute('href',
+    '/table-sets/fixture-set?randomizePhone=fixture-phone#table-assignment-heading')
   expect(screen.getByText(/No next-contact UTC time is inferred/)).toBeInTheDocument()
   expect(apiGet).toHaveBeenCalledWith('/api/terminals/fixture-phone/routine-call-in')
   fireEvent.click(screen.getByText('Create a separate draft for call-in changes'))
@@ -60,6 +62,7 @@ it('shows restricted sources without creating links or offering a copy', async (
   expect(await screen.findAllByText('Not available with your permissions')).toHaveLength(2)
   expect(screen.queryByRole('link', { name: 'Open acknowledging download' })).toBeNull()
   expect(screen.queryByRole('link', { name: 'Open contact' })).toBeNull()
+  expect(screen.queryByRole('link', { name: "Randomize this phone's call-in time" })).toBeNull()
   expect(screen.queryByText('Create a separate draft for call-in changes')).toBeNull()
 })
 

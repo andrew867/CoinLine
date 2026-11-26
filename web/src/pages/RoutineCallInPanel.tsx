@@ -50,6 +50,7 @@ export function RoutineCallInPanel({ terminalId, assignmentKey, terminalActive }
   const [copyName, setCopyName] = useState('')
   const [copying, setCopying] = useState(false)
   const canOpenSet = canPerform('table-sets', op.read)
+  const canRandomize = canOpenSet && canPerform('table-records', op.update)
   const canCopy = canOpenSet && canPerform('table-sets', op.add) && canPerform('table-records', op.update)
 
   useEffect(() => {
@@ -87,6 +88,8 @@ export function RoutineCallInPanel({ terminalId, assignmentKey, terminalActive }
       <div className="row-actions">
         <button type="button" onClick={() => setReload(value => value + 1)}>Refresh call-in review</button>
         {review.assigned.tableSetId && canOpenSet && <Link to={`/table-sets/${review.assigned.tableSetId}?record=35#config-heading`}>Open assigned MT35 editor</Link>}
+        {review.assigned.tableSetId && review.assigned.settings && terminalActive && canRandomize &&
+          <Link to={`/table-sets/${review.assigned.tableSetId}?randomizePhone=${encodeURIComponent(terminalId)}#table-assignment-heading`}>Randomize this phone's call-in time</Link>}
       </div>
       <dl className="native-table-summary">
         <div><dt>Assigned MT35</dt><dd>{statusText[review.assigned.status] ?? review.assigned.status}</dd>

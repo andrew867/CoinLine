@@ -44,16 +44,19 @@ type AssignmentAction = 'set' | 'records' | 'schedule-records'
 type UpdateTarget = Omit<Target, 'eligible'> & {
   baseSetName: string | null
   changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean; personalized?: boolean }[]
+  callInTime?: string | null
 }
+type CallInRandomization = { mode: 'source-time' | 'window'; windowStart?: string; windowEnd?: string; seed?: string }
 type UpdatePreview = {
   changeCount: number; setCount: number; previewToken: string; targets: UpdateTarget[]
   rolloutId: string | null; pendingCount: number
+  callInRandomization?: CallInRandomization | null
 }
 type UpdatedSet = { id: string; name: string; phoneId?: string | null; phoneDisplayName?: string | null }
 const changeLabels = { add: 'Add', replace: 'Replace', keep: 'Keep', remove: 'Remove', absent: 'Already absent' }
 const callInParameters = 35
 
-export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false, firmwareSchedule, initialSchedulePhone, initialScheduleRecord }: {
+export function TableSetAssignment({ setId, revision, versions, optionalRecords, codeOnly = false, firmwareSchedule, initialSchedulePhone, initialScheduleRecord, initialRandomizePhone }: {
   setId: string
   revision: number
   versions: SavedRecord[]
@@ -62,6 +65,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   firmwareSchedule?: FirmwareSchedule | null
   initialSchedulePhone?: string
   initialScheduleRecord?: number
+  initialRandomizePhone?: string
 }) {
   const canAssign = canPerform('table-assignments', op.update)
   const canPreviewAssignment = canAssign || canPerform('table-assignments', op.read)
@@ -70,9 +74,12 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const canUpdateRecords = canPerform('table-records', op.update)
   const canPreviewRecords = !codeOnly && (canReadRollouts || canUpdateRecords)
   const canPreviewFull = canPreviewAssignment || canSchedule
+  const requestedRandomization = canPreviewRecords && !!initialRandomizePhone
+    && versions.filter(record => record.tableNumber === callInParameters).length === 1
+    && versions.some(record => record.tableNumber === callInParameters && record.validationPassed && record.payloadLengthBytes === 21)
   const [scope, setScope] = useState<Scope>('terminal')
   const [options, setOptions] = useState<Option[]>([])
-  const [targetId, setTargetId] = useState(canSchedule && !codeOnly ? initialSchedulePhone ?? '' : '')
+  const [targetId, setTargetId] = useState(requestedRandomization ? initialRandomizePhone! : canSchedule && !codeOnly ? initialSchedulePhone ?? '' : '')
   const [secondTarget, setSecondTarget] = useState('')
   const [regions, setRegions] = useState<Option[]>([])
   const [groupRegion, setGroupRegion] = useState('')
@@ -90,8 +97,8 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [firmwareAllocation, setFirmwareAllocation] = useState<FirmwareAllocation | null>(null)
   const [scheduleRefresh, setScheduleRefresh] = useState(0)
   const requestedPartial = canSchedule && !codeOnly && !!initialSchedulePhone && initialScheduleRecord !== undefined
-  const [action, setAction] = useState<AssignmentAction>(requestedPartial ? 'schedule-records' : canPreviewFull ? 'set' : 'records')
-  const [actions, setActions] = useState<Record<number, RecordAction>>({})
+  const [action, setAction] = useState<AssignmentAction>(requestedRandomization ? 'records' : requestedPartial ? 'schedule-records' : canPreviewFull ? 'set' : 'records')
+  const [actions, setActions] = useState<Record<number, RecordAction>>(requestedRandomization ? { [callInParameters]: 'copy' } : {})
   const [deliveryRecords, setDeliveryRecords] = useState<number[]>(() => {
     if (!requestedPartial || initialScheduleRecord === 94) return []
     const matching = versions.filter(record => record.tableNumber === initialScheduleRecord)
@@ -101,6 +108,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
   const [wireSelection, setWireSelection] = useState<number[] | null>(null)
   const [updatePreview, setUpdatePreview] = useState<UpdatePreview | null>(null)
   const [personalizeAccessIdentity, setPersonalizeAccessIdentity] = useState(false)
+  const [randomizeCallIn, setRandomizeCallIn] = useState(requestedRandomization)
+  const [callInRange, setCallInRange] = useState<CallInRandomization['mode']>('source-time')
+  const [callInWindowStart, setCallInWindowStart] = useState('00:00:00')
+  const [callInWindowEnd, setCallInWindowEnd] = useState('23:59:59')
   const [stopOnIssue, setStopOnIssue] = useState(false)
   const [beginWithTerminalId, setBeginWithTerminalId] = useState('')
   const [rolloutRefresh, setRolloutRefresh] = useState(0)
@@ -229,6 +240,10 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
 
   async function updateRecords(apply: boolean) {
     if (!canPreviewRecords || (apply && !canUpdateRecords)) return
+    if (apply && randomizeCallIn && copyRecords.includes(callInParameters) && !updatePreview?.callInRandomization?.seed) {
+      setFeedback('Preview the random call-in times before applying them.')
+      return
+    }
     setBusy(true)
     setFeedback('')
     setResultSets([])
@@ -237,6 +252,9 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
       const response = await apiPostRaw(`/api/tables/sets/${setId}/record-updates${apply ? '' : '/preview'}`, {
         ...scopeSelection, sourceRevision: revision, copyRecords, removeRecords, stopOnIssue,
         ...(personalizeAccessIdentity && copyRecords.includes(21) ? { personalizeAccessIdentity: true } : {}),
+        ...(randomizeCallIn && copyRecords.includes(callInParameters) ? { callInRandomization: apply
+          ? updatePreview?.callInRandomization
+          : { mode: callInRange, ...(callInRange === 'window' ? { windowStart: callInWindowStart, windowEnd: callInWindowEnd } : {}) } } : {}),
         beginWithTerminalId: stopOnIssue ? beginWithTerminalId.trim() || undefined : undefined,
         ...(apply ? { previewToken: updatePreview?.previewToken, rolloutId: updatePreview?.rolloutId } : {}),
       })
@@ -420,6 +438,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               <select value={actions[number] ?? ''} onChange={(event) => {
                 setActions({ ...actions, [number]: event.target.value as RecordAction })
                 if (number === 21 && event.target.value !== 'copy') setPersonalizeAccessIdentity(false)
+                if (number === callInParameters && event.target.value !== 'copy') setRandomizeCallIn(false)
                 setUpdatePreview(null)
                 setFeedback('')
                 setResultSets([])
@@ -436,6 +455,31 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               Use each phone's registered wire ID in MT21
             </label>
             <p>When selected, each resulting set gets its own phone identity in the verified access record. The source manager numbers and all other settings are copied unchanged. Review the other settings before applying.</p>
+          </div>}
+          {copyRecords.includes(callInParameters) && <div className="table-config-selectors">
+            <label className="native-table-toggle">
+              <input type="checkbox" checked={randomizeCallIn} onChange={event => { setRandomizeCallIn(event.target.checked); clearReview() }} />
+              Randomize each phone's routine MT35 call-in time
+            </label>
+            {randomizeCallIn && <>
+              <label>Randomization range
+                <select value={callInRange} onChange={event => { setCallInRange(event.target.value as CallInRandomization['mode']); clearReview() }}>
+                  <option value="source-time">Midnight through source MT35 time</option>
+                  <option value="window">Explicit time window</option>
+                </select>
+              </label>
+              {callInRange === 'window' && <>
+                <label>Earliest call-in (phone clock)
+                  <input type="time" step={1} required value={callInWindowStart}
+                    onChange={event => { setCallInWindowStart(event.target.value); clearReview() }} />
+                </label>
+                <label>Latest call-in (phone clock)
+                  <input type="time" step={1} required value={callInWindowEnd}
+                    onChange={event => { setCallInWindowEnd(event.target.value); clearReview() }} />
+                </label>
+              </>}
+              <p>Each preview selects one time per phone within the inclusive daily range. Confirmation and rollout retries retain the reviewed times. Other MT35 bytes remain unchanged. These are saved phone-clock times, not UTC download dates.</p>
+            </>}
           </div>}
           <label className="native-table-toggle">
             <input type="checkbox" checked={stopOnIssue} onChange={event => { setStopOnIssue(event.target.checked); clearReview() }} />
@@ -507,6 +551,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           {phone.baseSetName && ` · ${phone.baseSetName}`}
           {phone.reason ? <p>{phone.reason}</p> : <p>{phone.changes.map(({ tableNumber, action, required, personalized }) =>
             `${changeLabels[action]} MT${tableNumber}${required ? ' (required)' : ''}${personalized ? ' (registered phone ID)' : ''}`).join(', ')}</p>}
+          {phone.callInTime && !phone.reason && <p>Proposed routine MT35 time: <strong>{phone.callInTime}</strong> (phone clock)</p>}
         </li>)}</ul>
         {canUpdateRecords && (updatePreview.changeCount > 0 || (updatePreview.rolloutId && updatePreview.targets.length > 0)) &&
           <button type="button" disabled={busy} onClick={() => void updateRecords(true)}>
