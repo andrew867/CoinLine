@@ -4,7 +4,7 @@ using HostPlatform.Protocols.Tables;
 namespace HostPlatform.Infrastructure.Tables;
 
 public sealed record TableRecordCopyEntry(
-    TableVersion Source, TableVersion? Destination, Guid? DependencyId, bool Required, string Action);
+    TableVersion Source, TableVersion? Destination, Guid? DependencyId, bool Required, string Action, string? Warning = null);
 
 public static class TableRecordCopy
 {
@@ -18,6 +18,8 @@ public static class TableRecordCopy
         var ordered = TableDistributionService.SelectRecords(source.Versions.ToArray(), selected);
 
         var destinationByType = destination.Versions.ToLookup(version => version.TableDefinition!.TableNumber);
+        var beforeFeatures = destinationByType[26].FirstOrDefault();
+        var afterFeatures = ordered.FirstOrDefault(version => VersionType(version) == 26) ?? beforeFeatures;
         var resultingTypes = destinationByType.Select(group => group.Key).Union(ordered.Select(VersionType)).ToArray();
         if (resultingTypes.Contains(CodeDownloadWire.MessageType) && resultingTypes.Length != 1)
             throw new InvalidOperationException("Keep the code download schedule in its own table set.");
@@ -55,7 +57,16 @@ public static class TableRecordCopy
                     && bytes.AsSpan().SequenceEqual(TableDistributionService.GetEffectivePayload(existing)) ? "keep" : "replace";
             if (action == "replace" && existing!.TableRevision == int.MaxValue)
                 throw new InvalidOperationException($"MT{number} has reached the maximum record revision.");
-            plan.Add(new(version, existing, dependencyId, !selected.Contains(number), action));
+            string? warning = null;
+            if (number == AdvertisingTableWire.MessageType && action == "replace" && existing != null)
+            {
+                var prior = TableDistributionService.GetEffectivePayload(existing);
+                if (IsAdvertising(prior) && IsAdvertising(bytes) &&
+                    AdvertisingTableWire.ReviewOnHook(prior, SplitPage(beforeFeatures)).VisibleMessages > 0 &&
+                    AdvertisingTableWire.ReviewOnHook(bytes, SplitPage(afterFeatures)).VisibleMessages == 0)
+                    warning = "This replacement removes the destination's visible idle text advertising. The source MT29 has no visible on-hook messages.";
+            }
+            plan.Add(new(version, existing, dependencyId, !selected.Contains(number), action, warning));
         }
 
         if ((long)destination.Versions.Select(version => version.SortOrder).DefaultIfEmpty(-1).Max()
@@ -64,6 +75,12 @@ public static class TableRecordCopy
         return plan;
 
         static int VersionType(TableVersion version) => version.TableDefinition!.TableNumber;
+        static bool IsAdvertising(byte[] bytes) => bytes.Length == AdvertisingTableWire.RecordLength && bytes[0] == AdvertisingTableWire.MessageType;
+        static bool SplitPage(TableVersion? version)
+        {
+            var data = version == null ? [] : TableDistributionService.GetEffectivePayload(version);
+            return data.Length == 72 && data[0] == 26 && (data[22] & 6) != 0;
+        }
     }
 
     private static TableVersion CopyAccessForPhone(TableVersion original, string registeredWireId)

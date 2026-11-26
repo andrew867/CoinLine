@@ -3,6 +3,7 @@ import { apiFetch, apiGet, apiPost, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { AdvertisingSimulator } from './AdvertisingSimulator'
 import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback'
+import { advertisingPage } from './advertisingPlayback'
 import { authorableAdvertisingText, glyphPalettes, normalizedAdvertisingText, advertisingDisplayWidth } from './advertisingGlyphs'
 import type { ExchangeFile } from './localDialingExchangeData'
 
@@ -188,6 +189,8 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
   const invalid = (slot: AdvertisingSlot, index: number) =>
     !slot.endSequence && !keepsImportedText(index, slot.text) && !authorableAdvertisingText(slot.text)
   const invalidSlots = slots?.some(invalid) ?? false
+  const visibleIdleText = slots && snapshot ? advertisingPage(slots, snapshot, 'onHook').active.filter(slot =>
+    slot.text.trim().length > 0 && (slot.mode === 0 ? slot.durationTicks > 0 : slot.mode >= 1 && slot.mode <= 5)).length : null
 
   useEffect(() => onDirty(dirty || blockChanged), [dirty, blockChanged, onDirty])
 
@@ -290,6 +293,7 @@ function AdvertisingEditor({ setId, draft, revision, onSaved, onDirty }: Pick<Pr
       <summary>{draft ? 'Edit advertising messages' : 'View advertising messages'}</summary>
       <p className="page-intro">Use up to 20 display cells per slot, including supported Western accents. Duration 0 skips a static slot. Mark the first unused slot in each rotation as End sequence. An unmarked slot with empty text and a duration displays a blank line.</p>
       {typeof onHookEnabled === 'boolean' && <p>On-hook advertising is {onHookEnabled ? 'enabled' : 'disabled'} in the feature record.</p>}
+      {onHookEnabled === true && visibleIdleText === 0 && <p role="alert">The idle text rotation has no visible messages. Downloading this MT29 will leave the phone without idle text advertising. Check message 1, the end marker and display durations.</p>}
       {!slots && !feedback && <p>Loading messages…</p>}
       {slots && (
         <form onSubmit={(event) => void save(event)}>

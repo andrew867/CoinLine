@@ -9,6 +9,7 @@ type Choices = { name: string; familyId: string; paymentMode: number; pricing: s
 type Preview = { previewToken: string; canCreate: boolean; targetFirmware: string; changedNumbers: number[]; recordCount: number;
   family: { familyLabel: string; documented: boolean; tables: { name: string; required: boolean; status: string }[] };
   provisioning: { operatingType: string | null; acceptedCoinSlots: number | null; configuredCardRanges: number | null;
+    visibleOnHookTextMessages?: number | null;
     findings: { tableNumber: number; message: string }[] };
   findings: { tableNumber: number; blocking: boolean; message: string }[] }
 
@@ -113,7 +114,8 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
           <dt>Records copied</dt><dd>{review.recordCount}</dd><dt>Records changed</dt><dd>{review.changedNumbers.length ? review.changedNumbers.map(number => `MT${number}`).join(', ') : 'None'}</dd>
           <dt>Operating mode</dt><dd>{review.provisioning.operatingType ?? 'Not verified'}</dd>
           <dt>Payable coin slots</dt><dd>{review.provisioning.acceptedCoinSlots ?? 'Not verified'}</dd>
-          <dt>Card acceptance ranges</dt><dd>{review.provisioning.configuredCardRanges ?? 'Not verified'}</dd></dl>
+          <dt>Card acceptance ranges</dt><dd>{review.provisioning.configuredCardRanges ?? 'Not verified'}</dd>
+          {review.provisioning.visibleOnHookTextMessages != null && <><dt>Visible idle text messages (MT29)</dt><dd>{review.provisioning.visibleOnHookTextMessages}</dd></>}</dl>
         <h3>Remaining setup checks</h3>
         {!review.family.documented && <p>The selected terminal family has no complete documented checklist.</p>}
         {review.family.tables.filter(row => row.required && row.status !== 'present').map(row => <p key={row.name}>{row.name}: {row.status}</p>)}

@@ -43,7 +43,7 @@ type RecordAction = '' | 'copy' | 'remove'
 type AssignmentAction = 'set' | 'records' | 'schedule-records'
 type UpdateTarget = Omit<Target, 'eligible'> & {
   baseSetName: string | null
-  changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean; personalized?: boolean }[]
+  changes: { tableNumber: number; action: 'add' | 'replace' | 'keep' | 'remove' | 'absent'; required: boolean; personalized?: boolean; warning?: string | null }[]
   callInTime?: string | null
 }
 type CallInRandomization = { mode: 'source-time' | 'window'; windowStart?: string; windowEnd?: string; seed?: string }
@@ -551,6 +551,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
           {phone.baseSetName && ` · ${phone.baseSetName}`}
           {phone.reason ? <p>{phone.reason}</p> : <p>{phone.changes.map(({ tableNumber, action, required, personalized }) =>
             `${changeLabels[action]} MT${tableNumber}${required ? ' (required)' : ''}${personalized ? ' (registered phone ID)' : ''}`).join(', ')}</p>}
+          {!phone.reason && phone.changes.filter(change => change.warning).map(change => <p key={change.tableNumber} role="alert">{change.warning}</p>)}
           {phone.callInTime && !phone.reason && <p>Proposed routine MT35 time: <strong>{phone.callInTime}</strong> (phone clock)</p>}
         </li>)}</ul>
         {canUpdateRecords && (updatePreview.changeCount > 0 || (updatePreview.rolloutId && updatePreview.targets.length > 0)) &&

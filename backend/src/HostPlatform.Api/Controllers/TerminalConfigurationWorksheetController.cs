@@ -159,7 +159,7 @@ public sealed class TerminalConfigurationWorksheetController(HostPlatformDbConte
                 choices.Where(row => row.Action == "clear").Select(row => row.Number).ToArray(), body.PersonalizeAccessIdentity ? phone.TerminalIdHex : null);
             if (TableDistributionService.AccessRecordIssue(plan.Set.Versions.Where(row => row.TableDefinition!.TableNumber == 21).ToArray(), phone.TerminalIdHex) is { } accessIssue)
                 return BadRequest(new { error = accessIssue + " Choose a matching access record or explicitly personalize MT21." });
-            var changes = plan.Changes.Select(change => new { change.TableNumber, change.Action, change.Required, change.Personalized,
+            var changes = plan.Changes.Select(change => new { change.TableNumber, change.Action, change.Required, change.Personalized, change.Warning,
                 current = persistedBasis == null ? null : Find(persistedBasis, change.TableNumber),
                 result = Proposed(plan.Set, change.TableNumber) }).ToArray();
             var changed = plan.Changes.Any(change => change.Action is "add" or "replace" or "remove");

@@ -5,6 +5,8 @@ namespace HostPlatform.Protocols.Tables;
 public sealed record AdvertisingSlot(string Text, int DurationTicks, int Mode, bool BlankBefore, bool? EndSequence = null,
     int? SpareByte = null, int? ReservedFlags = null, bool ContainsUnmappedGlyphs = false);
 
+public sealed record AdvertisingRotationContent(int SlotLimit, int VisibleMessages, int? FirstEndSlot, int HiddenMessages);
+
 /// <summary>Text advertising profile with twenty fixed-width slots.</summary>
 public static class AdvertisingTableWire
 {
@@ -39,6 +41,22 @@ public static class AdvertisingTableWire
                 endSequence, slot[3], slot[2] & ReservedFlagsMask, unmapped);
         }
         return slots;
+    }
+
+    /// <summary>Review the first on-hook page without interpreting text after its end marker as active.</summary>
+    public static AdvertisingRotationContent ReviewOnHook(ReadOnlySpan<byte> record, bool splitPage)
+    {
+        var slots = Read(record);
+        var limit = splitPage ? 10 : SlotCount;
+        var end = Array.FindIndex(slots, 0, limit, slot => slot.EndSequence == true);
+        var activeCount = end < 0 ? limit : end;
+        return new(limit, slots.Take(activeCount).Count(IsVisible), end < 0 ? null : end + 1,
+            slots.Take(limit).Skip(activeCount).Count(IsVisible));
+
+        // Static duration zero skips the display. Other recognized modes may
+        // display using their own flash or scroll timing even at duration zero.
+        static bool IsVisible(AdvertisingSlot slot) => slot.EndSequence != true && !string.IsNullOrWhiteSpace(slot.Text) &&
+            (slot.Mode == 0 ? slot.DurationTicks > 0 : slot.Mode is >= 1 and <= 5);
     }
 
     public static byte[] Encode(IReadOnlyList<AdvertisingSlot> slots, ReadOnlySpan<byte> original = default)
