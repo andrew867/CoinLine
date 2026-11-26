@@ -23,6 +23,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<TerminalInmateConfiguration> TerminalInmateConfigurations => Set<TerminalInmateConfiguration>();
     public DbSet<TerminalCallbackRequest> TerminalCallbackRequests => Set<TerminalCallbackRequest>();
     public DbSet<TerminalEvent> TerminalEvents => Set<TerminalEvent>();
+    public DbSet<TerminalIdentityCutoverItem> TerminalIdentityCutoverItems => Set<TerminalIdentityCutoverItem>();
     public DbSet<TerminalStatusRecord> TerminalStatusRecords => Set<TerminalStatusRecord>();
     public DbSet<NccSession> NccSessions => Set<NccSession>();
     public DbSet<NccSessionFrame> NccSessionFrames => Set<NccSessionFrame>();
@@ -103,6 +104,21 @@ public class HostPlatformDbContext : DbContext
             b.Property(t => t.TerminalFamilyId).HasMaxLength(48);
             b.HasOne(t => t.TransportEndpoint).WithMany().HasForeignKey(t => t.TransportEndpointId);
             b.HasOne(t => t.FirmwareVersion).WithMany().HasForeignKey(t => t.FirmwareVersionId);
+        });
+        modelBuilder.Entity<TerminalIdentityCutoverItem>(b =>
+        {
+            b.HasOne<Terminal>().WithMany().HasForeignKey(row => row.TerminalId).OnDelete(DeleteBehavior.Restrict);
+            b.Property(row => row.Version).IsConcurrencyToken();
+            b.Property(row => row.SourceWireId).HasMaxLength(10);
+            b.Property(row => row.TargetWireId).HasMaxLength(10);
+            b.Property(row => row.SourcePayloadSha256Hex).HasMaxLength(64);
+            b.Property(row => row.TargetPayloadSha256Hex).HasMaxLength(64);
+            b.HasIndex(row => row.JobId);
+            b.HasIndex(row => row.DueAtUtc);
+            b.HasIndex(row => row.TerminalId).IsUnique().HasFilter("\"FinishedAtUtc\" IS NULL");
+            b.HasIndex(row => row.TargetWireId).IsUnique().HasFilter("\"FinishedAtUtc\" IS NULL");
+            b.ToTable(table => table.HasCheckConstraint("CK_TerminalIdentityCutoverItems_DecimalIds",
+                "\"SourceWireId\" ~ '^[0-9]{10}$' AND \"TargetWireId\" ~ '^[0-9]{10}$' AND \"SourceWireId\" <> \"TargetWireId\""));
         });
         modelBuilder.Entity<TerminalInventory>(b =>
         {

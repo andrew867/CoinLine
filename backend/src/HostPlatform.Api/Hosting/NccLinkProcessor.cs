@@ -53,6 +53,7 @@ internal sealed class NccLinkProcessor(
     private bool _timeSyncAwaitingAck;
     private DownloadBatch? _batch;
     private ScheduledTableDownload? _scheduledDownload;
+    private TerminalIdentityCutoverItem? _identityCutover;
     private bool _installStarted;
     private bool _mandatoryFullInstall;
     private bool _firmwareDialogue;
@@ -218,7 +219,7 @@ internal sealed class NccLinkProcessor(
         _lastReceivedSequence = frame.Sequence;
         var control = NccControl.IsControlPacket(packet.Control);
         var hex = control ? string.Empty : Convert.ToHexString(packet.TerminalId);
-        var terminal = control ? null : await MatchTerminalAsync(hex);
+        var terminal = control ? null : await MatchTerminalAsync(hex, frame.CreatedAtUtc);
         if (!control)
         {
             _session.TerminalId = terminal?.Id;
@@ -425,7 +426,8 @@ internal sealed class NccLinkProcessor(
             if (returned == null && await TryOfferCallbackAsync(stream, terminal.Id, packet.TerminalId, continuation, cashboxStatus: cashboxStatus))
                 return;
             await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true, cashboxStatus,
-                mandatoryFull);
+                mandatoryFull, allowCutover: callIn || applicationType == TableDownloadRequestType &&
+                    (packet.Data[1] & DlogTableRequestWire.CraftUpdate) != 0);
         }
     }
 
@@ -673,15 +675,32 @@ internal sealed class NccLinkProcessor(
         await SendDialogueReplyAsync(stream, request, acknowledgement, dialogue);
     }
 
-    private async Task<Terminal?> MatchTerminalAsync(string hex)
+    private async Task<Terminal?> MatchTerminalAsync(string hex, DateTime capturedAtUtc)
     {
         var rows = await db.Terminals.AsNoTracking()
             .Select(t => new { t.Id, t.TerminalIdHex, t.SiteId })
             .ToListAsync(stoppingToken);
         var hit = rows.FirstOrDefault(t => string.Equals(t.TerminalIdHex, hex, StringComparison.OrdinalIgnoreCase));
-        if (hit == null)
+        if (hit != null)
+            return await db.Terminals.AsNoTracking().FirstOrDefaultAsync(t => t.Id == hit.Id, stoppingToken);
+        // A reserved replacement is not a general alias. It is eligible only
+        // after the dedicated MT21 transfer may have applied, on a separate call.
+        if (_session.TerminalId != null)
             return null;
-        return await db.Terminals.AsNoTracking().FirstOrDefaultAsync(t => t.Id == hit.Id, stoppingToken);
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var fresh = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var activated = await TerminalIdentityCutoverDelivery.ConfirmAsync(fresh, hex, _session.Id,
+                capturedAtUtc, stoppingToken);
+            return activated is { } id
+                ? await db.Terminals.AsNoTracking().SingleAsync(row => row.Id == id, stoppingToken) : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Identity cutover confirmation could not be stored ({ErrorType}).", ex.GetType().Name);
+            return null;
+        }
     }
 
     private async Task WriteAckAsync(NetworkStream stream, byte requestControl)
@@ -830,7 +849,8 @@ internal sealed class NccLinkProcessor(
         var terminal = await db.Terminals.AsNoTracking().SingleOrDefaultAsync(phone => phone.Id == offer.Request.TerminalId, stoppingToken);
         if (terminal != null)
             await StartInstallAsync(stream, offer.Frame.TerminalId, terminal, offer.Continuation == CallbackContinuation.CallIn,
-                cashboxStatus: offer.CashboxStatus, mandatoryFull: offer.Continuation == CallbackContinuation.FullInstall);
+                cashboxStatus: offer.CashboxStatus, mandatoryFull: offer.Continuation == CallbackContinuation.FullInstall,
+                allowCutover: offer.Continuation == CallbackContinuation.CallIn);
     }
 
     private async Task<TerminalCallbackRequest?> RecordCallbackReturnAsync(Guid terminalId)
@@ -1020,7 +1040,7 @@ internal sealed class NccLinkProcessor(
     }
 
     private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn,
-        bool deliverAssignedTables = false, byte[]? cashboxStatus = null, bool mandatoryFull = false)
+        bool deliverAssignedTables = false, byte[]? cashboxStatus = null, bool mandatoryFull = false, bool allowCutover = false)
     {
         if (_installStarted)
         {
@@ -1034,6 +1054,9 @@ internal sealed class NccLinkProcessor(
             await SendInstallEndAsync(stream, terminalId);
             return;
         }
+
+        if (await TryStartIdentityCutoverAsync(stream, terminalId, terminal, allowCutover, mandatoryFull, cashboxStatus))
+            return;
 
         // A cold install or memory recovery cannot use a previously queued
         // subset or a different scheduled configuration as its starting set.
@@ -1099,6 +1122,40 @@ internal sealed class NccLinkProcessor(
         }
 
         await SendBatchAsync(stream, terminalId, terminal, _batch, cashboxStatus);
+    }
+
+    private async Task<bool> TryStartIdentityCutoverAsync(NetworkStream stream, byte[] terminalId, Terminal terminal,
+        bool ordinaryRequest, bool mandatoryFull, byte[]? cashboxStatus)
+    {
+        TerminalIdentityCutoverDelivery.Claim claim;
+        try
+        {
+            await using var scope = scopes.CreateAsyncScope();
+            var freshDb = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var freshTables = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
+            claim = await TerminalIdentityCutoverDelivery.ClaimAsync(freshDb, freshTables, terminal.Id, _session.Id,
+                ordinaryRequest, mandatoryFull, clock.GetUtcNow().UtcDateTime, stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning("Identity cutover dispatch could not be stored ({ErrorType}).", ex.GetType().Name);
+            await SendInstallEndAsync(stream, terminalId, cashboxStatus);
+            return true;
+        }
+        if (!claim.Hold)
+            return false;
+        if (claim.ItemId is not { } itemId || claim.BatchId is not { } batchId)
+        {
+            await SendInstallEndAsync(stream, terminalId, cashboxStatus);
+            return true;
+        }
+        _identityCutover = await db.TerminalIdentityCutoverItems.SingleAsync(row => row.Id == itemId, stoppingToken);
+        _batch = await db.DownloadBatches.Include(row => row.TableSet).SingleAsync(row => row.Id == batchId, stoppingToken);
+        _installStarted = true;
+        // The dedicated claim has checked the reviewed old identity, exact
+        // replacement record and staged assignment. Use ordinary ACK pacing.
+        await SendBatchAsync(stream, terminalId, terminal, _batch, cashboxStatus);
+        return true;
     }
 
     private async Task<bool> TryStartScheduledBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal,
@@ -1198,6 +1255,14 @@ internal sealed class NccLinkProcessor(
             .Where(i => i.DownloadBatchId == batch.Id)
             .OrderBy(i => i.StepIndex)
             .ToListAsync(stoppingToken);
+
+        var access = items.Select(item => item.TableVersion).OfType<TableVersion>()
+            .Where(version => version.TableDefinition?.TableNumber == 21).ToArray();
+        if (_identityCutover == null && TableDistributionService.AccessRecordIssue(access, terminal.TerminalIdHex) is { } accessIssue)
+        {
+            await RejectBatchBeforeSendAsync(stream, terminalId, items, accessIssue, cashboxStatus);
+            return;
+        }
 
         if (queuedByOperator)
         {
@@ -1302,6 +1367,13 @@ internal sealed class NccLinkProcessor(
                 Advance(queued, TableDownloadTrigger.HeaderSent);
             }
 
+            if (_identityCutover != null && frame.Item != null && _identityCutover.PossiblyAppliedAtUtc == null)
+            {
+                // Commit the recovery evidence before attempting the actual
+                // record. A disconnected write may have reached the phone.
+                _identityCutover.MarkPossiblyApplied(clock.GetUtcNow().UtcDateTime);
+                await db.SaveChangesAsync(stoppingToken);
+            }
             transfer.InFlight = await WriteMessageAsync(stream, transfer.TerminalId, frame.Data);
             if (frame.Item is { } sent && frame.EndsTable)
             {
@@ -1412,6 +1484,8 @@ internal sealed class NccLinkProcessor(
         matched.Succeeded = true;
         matched.LastAckStatus = "ack";
         matched.ErrorDetail = null;
+        if (_identityCutover != null && tableType == 21)
+            _identityCutover.MarkApplicationAcknowledged(clock.GetUtcNow().UtcDateTime);
         await db.SaveChangesAsync(stoppingToken);
 
         if (_firmwareTables is { } transfer)
@@ -1480,6 +1554,7 @@ internal sealed class NccLinkProcessor(
         }
 
         _batch.UpdatedAtUtc = DateTime.UtcNow;
+        _identityCutover?.EndTransfer(clock.GetUtcNow().UtcDateTime, _batch.LastError);
         try
         {
             CoveredPartialWork? covered = null;
