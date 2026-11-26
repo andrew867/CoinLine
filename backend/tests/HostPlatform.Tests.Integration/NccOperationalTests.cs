@@ -2848,6 +2848,133 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             link.Stream.WriteAsync(Control((byte)(NccControl.Ack | frame.Control)));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Callback_return_after_completed_craft_download_uses_distinct_dialogue_on_the_same_socket(bool codeOnly)
+    {
+        byte[] wireId = Convert.FromHexString(codeOnly ? "0000000297" : "0000000298");
+        var terminals = await fx.Client.GetFromJsonAsync<JsonElement>("/api/terminals", Json);
+        var seed = terminals.EnumerateArray().Single(t => t.GetProperty("terminalIdHex").GetString() == Convert.ToHexString(KnownId));
+        using var created = await fx.Client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId = seed.GetProperty("siteId").GetGuid(), displayName = "Same-session callback fixture",
+            terminalIdHex = Convert.ToHexString(wireId), status = 0
+        }, Json);
+        created.EnsureSuccessStatusCode();
+        var phone = (await created.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+        var assignment = await CreateRateTableSetAsync("Same-session Craft baseline");
+        var assignmentPath = $"/api/terminals/{phone}/table-assignment";
+        using var assigned = await fx.Client.PostAsJsonAsync(assignmentPath, new { tableSetId = assignment }, Json);
+        assigned.EnsureSuccessStatusCode();
+
+        string? codePath = null;
+        Guid? codeBatch = null;
+        if (codeOnly)
+        {
+            using var codeSet = await fx.Client.PostAsJsonAsync("/api/tables/sets", new { name = "Same-session disabled code schedule" }, Json);
+            codeSet.EnsureSuccessStatusCode();
+            var codeSetId = (await codeSet.Content.ReadFromJsonAsync<JsonElement>(Json)).GetProperty("id").GetGuid();
+            codePath = $"/api/tables/sets/{codeSetId}";
+            var fieldsPath = $"{codePath}/records/94/fields";
+            var record = await fx.Client.GetFromJsonAsync<JsonElement>(fieldsPath, Json);
+            using var initialized = await fx.Client.PostAsJsonAsync(fieldsPath, record.GetProperty("templates")[0], Json);
+            initialized.EnsureSuccessStatusCode();
+            using var published = await fx.Client.PostAsync($"{codePath}/publish?confirm=true", null);
+            published.EnsureSuccessStatusCode();
+            using var scheduled = await fx.Client.PostAsJsonAsync($"{codePath}/schedules", new
+            {
+                targetType = "terminal", targetId = phone, terminalIds = new[] { phone }
+            }, Json);
+            scheduled.EnsureSuccessStatusCode();
+            codeBatch = (await fx.Client.GetFromJsonAsync<JsonElement>($"{codePath}/schedules", Json))[0].GetProperty("lastBatchId").GetGuid();
+        }
+
+        var callbackPath = $"/api/terminals/{phone}/special-callback";
+        using var callback = await fx.Client.PutAsJsonAsync(callbackPath, new
+        {
+            terminalClockOffsetMinutes = 0, deliverAssignedTables = !codeOnly
+        }, Json);
+        callback.EnsureSuccessStatusCode();
+        var before = await BatchIdsAsync();
+        await using var link = await OpenAsync();
+        await SendAsync(0, [DlogTimeSyncWire.Request]);
+        Assert.Equal(DlogTimeSyncWire.Response, (await ReadAndAckAsync()).Data[0]);
+        Assert.Equal(DlogCallbackWire.Schedule, (await ReadAndAckAsync()).Data[0]);
+        Assert.Equal(new byte[] { 13 }, (await ReadAndAckAsync()).Data);
+
+        // Craft still receives its ordinary data assignment, not the code record.
+        await SendAsync(1, [DlogTableRequestWire.MessageType, DlogTableRequestWire.CraftUpdate]);
+        Assert.Equal(new byte[] { 18 }, (await ReadAndAckAsync()).Data);
+        await ReadTariffAsync();
+        await SendAsync(2, [14, 73]);
+        Assert.Equal(new byte[] { 13 }, (await ReadAndAckAsync()).Data);
+        var full = await WaitNewBatchAsync(before, 2);
+        Assert.Equal(assignment, full.GetProperty("tableSetId").GetGuid());
+        var fullId = full.GetProperty("id").GetGuid();
+        var allPrepared = await BatchIdsAsync();
+        Assert.True(allPrepared.SetEquals(before.Append(fullId)));
+        if (codeOnly)
+            Assert.Equal("Ready", (await fx.Client.GetFromJsonAsync<JsonElement>($"{codePath}/schedules", Json))[0].GetProperty("status").GetString());
+
+        // A distinct acknowledged MT9 after the full dialogue must run its own
+        // batch on the SAME socket, rather than merely being marked returned.
+        await SendAsync(3, [DlogCallbackWire.Return]);
+        Assert.Equal(new byte[] { 18 }, (await ReadAndAckAsync()).Data);
+        if (codeOnly)
+        {
+            var disabled = await ReadAndAckAsync();
+            Assert.Equal(100, disabled.Data.Length);
+            Assert.Equal(CodeDownloadWire.MessageType, disabled.Data[0]);
+            Assert.False(CodeDownloadWire.IsEnabled(disabled.Data));
+            await SendAsync(0, [14, CodeDownloadWire.MessageType]);
+        }
+        else
+        {
+            await ReadTariffAsync();
+            await SendAsync(0, [14, 73]);
+        }
+        Assert.Equal(new byte[] { 13 }, (await ReadAndAckAsync()).Data);
+        var returned = codeBatch is { } preparedId ? await WaitBatchAsync(preparedId, 2) : await WaitNewBatchAsync(allPrepared, 2);
+        Assert.NotEqual(fullId, returned.GetProperty("id").GetGuid());
+        Assert.Equal(full.GetProperty("nccSessionId").GetGuid(), returned.GetProperty("nccSessionId").GetGuid());
+        if (codeOnly)
+            Assert.Equal("Delivered", (await fx.Client.GetFromJsonAsync<JsonElement>($"{codePath}/schedules", Json))[0].GetProperty("status").GetString());
+        else
+            allPrepared.Add(returned.GetProperty("id").GetGuid());
+        Assert.NotEqual(JsonValueKind.Null, (await fx.Client.GetFromJsonAsync<JsonElement>(callbackPath, Json)).GetProperty("callback").GetProperty("returnedAtUtc").ValueKind);
+
+        // Another return without a newly acknowledged callback cannot start a
+        // third download or mutate either of the already completed batches.
+        await SendAsync(1, [DlogCallbackWire.Return]);
+        Assert.Equal(new byte[] { 13 }, (await ReadAndAckAsync()).Data);
+        Assert.True(allPrepared.SetEquals(await BatchIdsAsync()));
+        Assert.Equal(assignment, (await fx.Client.GetFromJsonAsync<JsonElement>(assignmentPath, Json)).GetProperty("tableSetId").GetGuid());
+
+        async Task SendAsync(byte id, byte[] data)
+        {
+            await link.Stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { Control = id, TerminalId = wireId, Data = data }));
+            AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        }
+
+        async Task<NccWirePacket> ReadAndAckAsync()
+        {
+            var packet = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | packet.Control)));
+            return packet;
+        }
+
+        async Task ReadTariffAsync()
+        {
+            for (var offset = 0; offset < 1192; offset += NccConstants.MaxDataSize)
+            {
+                var part = await ReadAndAckAsync();
+                if (offset == 0) Assert.Equal(73, part.Data[0]);
+                Assert.Equal(Math.Min(NccConstants.MaxDataSize, 1192 - offset), part.Data.Length);
+            }
+        }
+    }
+
     [Fact]
     public async Task Terminal_identity_tracks_catalogue_changes_and_first_matched_contact_separately()
     {

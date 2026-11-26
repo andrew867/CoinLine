@@ -513,13 +513,32 @@ internal sealed class NccLinkProcessor(
                 }
             }
             var mandatoryFull = applicationType == TableDownloadRequestType && DlogTableRequestWire.RequiresFullAssignment(packet.Data[1]);
-            var returned = applicationType == DlogCallbackWire.Return ? await RecordCallbackReturnAsync(terminal.Id) : null;
+            var isCallbackReturn = applicationType == DlogCallbackWire.Return;
+            // A phone can return an acknowledged callback after ending a separate
+            // Craft download on this same socket. Do not consume a callback while
+            // a transfer is still active or an identity transition owns the link.
+            var completedEarlierDownload = _installStarted && !HasPendingInstall &&
+                _batch?.Status == DownloadBatchStatus.Completed && _identityCutover == null;
+            var returned = isCallbackReturn && (!_installStarted || completedEarlierDownload)
+                ? await RecordCallbackReturnAsync(terminal.Id) : null;
+            if (returned != null && completedEarlierDownload)
+            {
+                // Retain the completed batch in storage, but release only the
+                // per-dialogue state so this genuine, distinct return can claim
+                // its own queued work. Duplicate or unacknowledged MT9 requests
+                // do not reset the transfer guard.
+                _batch = null;
+                _scheduledDownload = null;
+                _mandatoryFullInstall = false;
+                _installStarted = false;
+            }
             var continuation = callIn ? CallbackContinuation.CallIn : mandatoryFull ? CallbackContinuation.FullInstall : CallbackContinuation.Install;
             if (returned == null && await TryOfferCallbackAsync(stream, terminal.Id, packet.TerminalId, continuation, cashboxStatus: cashboxStatus))
                 return;
             await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true, cashboxStatus,
                 mandatoryFull, allowCutover: callIn || applicationType == TableDownloadRequestType &&
-                    (packet.Data[1] & DlogTableRequestWire.CraftUpdate) != 0);
+                    (packet.Data[1] & DlogTableRequestWire.CraftUpdate) != 0,
+                distinctCallbackDialogue: returned != null && completedEarlierDownload);
         }
     }
 
@@ -1148,7 +1167,8 @@ internal sealed class NccLinkProcessor(
     }
 
     private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn,
-        bool deliverAssignedTables = false, byte[]? cashboxStatus = null, bool mandatoryFull = false, bool allowCutover = false)
+        bool deliverAssignedTables = false, byte[]? cashboxStatus = null, bool mandatoryFull = false, bool allowCutover = false,
+        bool distinctCallbackDialogue = false)
     {
         if (_installStarted)
         {
@@ -1209,7 +1229,7 @@ internal sealed class NccLinkProcessor(
             var (batch, _) = await tables.PrepareDownloadBatchAsync(
                 terminal.Id, tableSetId.Value, DownloadScope.Full, null,
                 stoppingToken,
-                "ncc-install-" + _session.Id.ToString("N"),
+                (distinctCallbackDialogue ? "ncc-callback-" : "ncc-install-") + _session.Id.ToString("N"),
                 nccSessionId: _session.Id);
             prepared = batch;
             await db.SaveChangesAsync(stoppingToken);
