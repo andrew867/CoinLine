@@ -13,6 +13,7 @@ Packages, artifacts, compatibility rules, targets, jobs:
 | Table layouts | `GET .../table-profiles` |
 | Configuration transition review | `GET .../transition-review?terminalId={id}&targetFirmwareVersionId={id}&candidateSetId={id}`; candidate is optional |
 | Target management-access draft | `POST .../transition-access/preview`, `POST .../transition-access` |
+| Target 200-to-180 screening draft | `POST .../transition-screening/preview`, `POST .../transition-screening` |
 | Targets | `GET/POST .../targets` |
 | Jobs | `GET .../jobs`, `POST /api/terminals/{id}/firmware-jobs`, `GET .../jobs/{id}`, `simulate`, `approve`, `cancel` |
 
@@ -23,6 +24,8 @@ Register a build with `label`, optional `buildId` and optional `tableProfileId` 
 `GET /api/firmware/transition-review` returns source and target version metadata, assigned and candidate set identities, known record lengths, action categories, layout review flags and active or outstanding download counts. It does not return record payloads or modify the database. `configurationReadyForReview` refers only to the structural checks. `upgradeQualified` remains false until a separate device qualification workflow exists. Read permission is required for firmware jobs, firmware registry, phones, table sets, records and assignments.
 
 The management-access draft preview accepts `terminalId`, `targetFirmwareVersionId`, `candidateSetId` and `name`. It checks the assigned source and separate target candidate, the registered MT21 lengths and phone identity. The result contains the source/candidate set IDs, source/target byte counts, changed target byte count, retained record count and `previewToken`, not access digits or raw records. Submit the same selection and name with the token to `POST .../transition-access` to create an unpublished, unassigned target draft. The request fails if the reviewed configuration changed. Only MT21 identity and manager number fields are carried forward; other candidate bytes remain unchanged. Preview requires the same read permissions as the transition review; creating the draft additionally requires Table sets Add permission. Neither endpoint changes an installation, assignment, download schedule or firmware job.
+
+The screening preview accepts the same selection and name plus optional `tariffChoices` and `carrierChoices` objects mapping source reference indexes to target reference indexes (for example `{"tariffChoices":{"0":7}}`). It returns the 200 and 180 slot counts, configured and changed slot counts, changed and cleared candidate positions, reserved/later-only counts, description and retained-record counts, exact matching reference options, blocking/advisory findings, `canCreate` and a `previewToken`. It does not return dialed digits, description text or raw records. Apply the same request and preview token at `POST .../transition-screening`; stale state or a changed mapping returns HTTP 409, unresolved findings return HTTP 400. The cloned target draft changes only common MT92 fields and source descriptions, retaining candidate reserved bytes and all other records. Access permission and draft creation gates match the management-access endpoints. There is no assignment, job or delivery side effect.
 
 !!! danger "Live flashing"
     **`Firmware:AllowLiveFlashing`** default **false**. DLA/XMODEM **`HARDWARE VALIDATION REQUIRED`**.
