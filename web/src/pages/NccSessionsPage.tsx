@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiDownload, apiGet, apiPostBareOk } from '../api/client'
+import { NccClockObservations } from './NccClockObservations'
 
 type NccSessionRow = {
   id: string
@@ -166,6 +167,7 @@ export function NccSessionsPage() {
       </p>
 
       {sessionId && <p>Showing the selected retained session, including archived records. <Link to="/ncc-sessions">Show all sessions</Link></p>}
+      {sessionId && !loading && !err && rows.some(row => row.id === sessionId) && <NccClockObservations key={sessionId} sessionId={sessionId} />}
       {!sessionId && <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
         <input
           type="checkbox"
@@ -214,6 +216,7 @@ export function NccSessionsPage() {
                 <td>{r.endedAtUtc ? formatUtc(r.endedAtUtc) : <em>—</em>}</td>
                 <td>
                   <code style={{ fontSize: 12 }}>{r.correlationId || '—'}</code>
+                  {!sessionId && <div><Link to={`/ncc-sessions?sessionId=${encodeURIComponent(r.id)}`}>View session</Link></div>}
                 </td>
                 <td>
                   {r.terminalId ? (

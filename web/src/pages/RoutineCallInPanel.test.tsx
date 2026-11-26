@@ -67,10 +67,14 @@ it('shows restricted sources without creating links or offering a copy', async (
 })
 
 it('opens a retained archived session using the narrow session filter', async () => {
-  vi.mocked(apiGet).mockResolvedValue([{ id: 'fixture-session', terminalId: null, correlationId: 'fixture-contact', status: 2,
-    startedAtUtc: '2026-11-25T04:00:00Z', endedAtUtc: null, lastFrameSampleHex: null }])
+  vi.mocked(apiGet).mockResolvedValueOnce([{ id: 'fixture-session', terminalId: null, correlationId: 'fixture-contact', status: 2,
+    startedAtUtc: '2026-11-25T04:00:00Z', endedAtUtc: null, lastFrameSampleHex: null }]).mockResolvedValueOnce({ clockOffers: [] })
   render(<MemoryRouter initialEntries={['/ncc-sessions?sessionId=fixture-session']}><NccSessionsPage /></MemoryRouter>)
   await screen.findByText('fixture-contact')
-  expect(apiGet).toHaveBeenCalledExactlyOnceWith('/api/ncc/sessions?includeArchived=true&sessionId=fixture-session')
+  await screen.findByText(/No retained clock offer/)
+  expect(vi.mocked(apiGet).mock.calls).toEqual([
+    ['/api/ncc/sessions?includeArchived=true&sessionId=fixture-session'],
+    ['/api/ncc/sessions/fixture-session?clockOnly=true'],
+  ])
   expect(screen.getByRole('link', { name: 'Show all sessions' })).toHaveAttribute('href', '/ncc-sessions')
 })

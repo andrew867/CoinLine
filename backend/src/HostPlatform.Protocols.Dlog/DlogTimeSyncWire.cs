@@ -17,4 +17,13 @@ public static class DlogTimeSyncWire
         (byte)time.Second,
         (byte)(time.DayOfWeek + 1)
     ];
+
+    public static DateTime? DecodeResponse(ReadOnlySpan<byte> data)
+    {
+        if (data.Length != 8 || data[0] != Response ||
+            DlogFieldLayouts.ReadClock(data.Slice(1, 6)) is not { } time ||
+            data[7] != (byte)(time.DayOfWeek + 1))
+            return null;
+        return DateTime.SpecifyKind(time, DateTimeKind.Utc);
+    }
 }
