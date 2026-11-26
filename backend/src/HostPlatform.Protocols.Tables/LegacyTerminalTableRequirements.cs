@@ -2,7 +2,8 @@ using HostPlatform.Domain;
 
 namespace HostPlatform.Protocols.Tables;
 
-public sealed record FamilyRecordEvidence(int Number, int Length, string Format, int[] ScreeningSlots);
+public sealed record FamilyRecordEvidence(int Number, int Length, string Format, int[] ScreeningSlots,
+    string? ScreeningFit = null, string? ScreeningNote = null);
 public sealed record FamilyTableRequirement(string Name, bool Required, int[] Candidates, FamilyRecordEvidence[] Records,
     string Status, string? Note = null);
 public sealed record TerminalFamilyTableReview(string FamilyId, string FamilyLabel, bool Documented, int? ScreeningEntries,
@@ -74,6 +75,10 @@ public static class LegacyTerminalTableRequirements
         "mtr20-multipay" => new(200, [.. LaterRequired.Except([Group.Interface]), Group.Coin, Group.Prompts],
             [Group.Interface, Group.Advertising, Group.Carrier, Group.Modem, Group.Communications, Group.CallIn,
                 Group.Keys, Group.Restrictions, Group.CompressedDialing, Group.AudioGram], true),
+        "mtr20-desk" => new(200, [.. LaterRequired.Except([Group.Interface]), Group.Prompts],
+            [Group.Interface, Group.Advertising, Group.Carrier, Group.Modem, Group.Communications, Group.CallIn,
+                Group.Keys, Group.Restrictions, Group.CompressedDialing, Group.AudioGram], true,
+            "The shared MTR 2.0 terminal topic lists Desk type 37 and requires coin validation only for Multi-pay and Coin Basic. No separate Desk table list was identified; this is the shared checklist, not an independently qualified Desk wire profile."),
         "mtr20-coin-basic" => new(200, [.. CoinRequired, Group.CallIn], [.. CoinOptional, Group.CompressedDialing, Group.AudioGram]),
         "mtr20-card-graphical" => new(50, [.. EarlyRequired.Except([Group.Carrier]), Group.Graphics],
             [.. Early17Optional, Group.Carrier, Group.AudioGram, Group.Spare], true),
@@ -128,15 +133,48 @@ public static class LegacyTerminalTableRequirements
                         : firmware?.CompleteCatalogue == true ? "unsupported"
                         : layouts.Count > 0 || (number == 29 && data.Length == AdvertisingTableWire.RecordLength)
                             ? "recognized" : "unverified";
-                return new FamilyRecordEvidence(number, data.Length, format, CallScreeningWire.IsRecord(number)
-                    ? layouts.Select(layout => layout.Sections.Count).Distinct().Order().ToArray() : []);
+                var slots = CallScreeningWire.IsRecord(number)
+                    ? layouts.Select(layout => layout.Sections.Count).Distinct().Order().ToArray() : [];
+                var (fit, screeningNote) = group == Group.Screening ? ScreeningFit(slots, format, reference.ScreeningEntries) : (null, null);
+                return new FamilyRecordEvidence(number, data.Length, format, slots, fit, screeningNote);
             }).ToArray();
+            var known = present.Where(record => record.Format is "verifiedLength" or "catalogueLength" or "recognized").ToArray();
             var status = candidates.Length == 0 ? "unmapped" : present.Length == 0 ? "missing"
                 : present.All(record => record.Format is "invalid" or "wrongLength" or "unsupported") ? "invalid"
-                : group == Group.Graphics && present.Count(record => record.Format is not ("invalid" or "wrongLength" or "unsupported")) != candidates.Length
-                    ? "partial" : "present";
+                : known.Length == 0 ? "review"
+                : group == Group.Graphics && known.Length != candidates.Length ? "partial"
+                : group == Group.Screening && known.All(record => record.ScreeningFit is "ambiguous" or "shorter" or "unknown") ? "review"
+                : "present";
+            if (group == Group.Prompts && firmware != null)
+            {
+                // A known primary/secondary pair is reviewed together. Do not
+                // require additional languages not established in the target.
+                var pair = new[] { new[] { 27, 28 }, new[] { 85, 86 } }
+                    .FirstOrDefault(types => types.All(type => candidates.Contains(type) && firmware.VerifiedLengths.ContainsKey(type)));
+                if (pair != null && known.Length > 0)
+                {
+                    var included = known.Count(record => pair.Contains(record.Number));
+                    if (included < pair.Length)
+                    {
+                        status = included == 0 ? "review" : "partial";
+                        var pairNote = $"The target catalogue identifies MT{pair[0]} and MT{pair[1]} as a prompt pair. This set includes {included} of those two known compatible records; an installed companion may be retained by a partial download.";
+                        note = note == null ? pairNote : note + " " + pairNote;
+                    }
+                }
+            }
             return new(name, required, candidates, present, status, note);
         }
+    }
+
+    private static (string Fit, string Note) ScreeningFit(int[] slots, string format, int logical)
+    {
+        if (slots.Length == 0) return ("unknown", "No packed screening editor capacity is established for this record.");
+        if (slots.Length > 1) return ("ambiguous", "The record has competing packed capacities. Confirm its native layout before treating it as the expected screening list.");
+        if (slots[0] == logical) return ("matching", $"The packed capacity matches the documented {logical}-entry list; active terminal behavior is not established by the count.");
+        if (format is "verifiedLength" or "catalogueLength")
+            return ("target", $"The known target length has {slots[0]} packed slots, while the legacy family lists {logical} entries. Keep the target evidence separate from the legacy active-entry limit.");
+        if (slots[0] > logical) return ("capacity", $"The record has {slots[0]} packed slots for a documented {logical}-entry list. The active-entry limit on this target is not established.");
+        return ("shorter", $"The packed capacity of {slots[0]} is below the documented {logical}-entry list. Confirm the target and layout; no compatible capacity is established by this record alone.");
     }
 
     private static (string Name, int[] Candidates) Describe(Group group, bool expandedPrompts) => group switch
