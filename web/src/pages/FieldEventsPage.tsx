@@ -5,6 +5,7 @@ import { FieldEventReference } from './FieldEventReference'
 import { PhoneStatusPanel } from './PhoneStatusPanel'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { alarmSeverityLabel } from './fieldEventLabels'
+import { CashboxQueryLink } from './CashboxQueryPage'
 import './FieldEventsPage.css'
 
 const categories = {
@@ -164,6 +165,7 @@ export function FieldEventsPage() {
             <p>
               {terminal.onCall ? 'NCC link active' : 'No active NCC link'}
               {terminal.lastSessionAtUtc && <> · Last contact {reportTime.format(new Date(terminal.lastSessionAtUtc))}</>}
+              <CashboxQueryLink terminalId={terminal.id} />
             </p>
           </div>
         )}

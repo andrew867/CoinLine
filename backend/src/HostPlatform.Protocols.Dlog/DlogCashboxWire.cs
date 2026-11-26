@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 
 namespace HostPlatform.Protocols.Dlog;
 
@@ -15,7 +16,27 @@ public static class DlogCashboxWire
     internal const int CollectionStatusOffset = 15;
 
     public sealed record Status(DateTime? TerminalTime, string BoxNumber, byte Flags, byte PercentFull,
-        int BalanceMinorUnits, ushort[] CoinCounts);
+        int BalanceMinorUnits, ushort[] CoinCounts)
+    {
+        // These three independent conditions have the same bit assignments in the verified older and later profiles.
+        public bool ValueThresholdExceeded => (Flags & 0x01) != 0;
+        public bool CapacityThresholdExceeded => (Flags & 0x02) != 0;
+        public bool CompletelyFull => (Flags & 0x04) != 0;
+        public int UnmappedSetBitCount => BitOperations.PopCount((uint)(Flags & 0xF8));
+        public string Condition
+        {
+            get
+            {
+                var conditions = new List<string>();
+                if (ValueThresholdExceeded && CapacityThresholdExceeded) conditions.Add("Value and capacity thresholds exceeded");
+                else if (ValueThresholdExceeded) conditions.Add("Value threshold exceeded");
+                else if (CapacityThresholdExceeded) conditions.Add("Capacity threshold exceeded");
+                if (CompletelyFull) conditions.Add("Cash box totally full");
+                return conditions.Count > 0 ? string.Join(", ", conditions)
+                    : UnmappedSetBitCount == 0 ? "Normal state" : "No mapped condition";
+            }
+        }
+    }
 
     public sealed record Collection(byte Flags, string CollectorId, string NewBoxNumber, ushort Sequence,
         int TotalMinorUnits, Status RemovedBox);

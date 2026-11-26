@@ -1,0 +1,19 @@
+.cashbox-query-page { width: min(100%, 1100px); margin: 20px auto; display: grid; gap: 16px; }
+.cashbox-query-controls, .cashbox-query-ledger { background: white; border: 1px solid var(--border, #d5ded9); border-radius: 12px; padding: 16px; min-width: 0; }
+.cashbox-query-controls h2, .cashbox-query-ledger h2 { margin-top: 0; }
+.cashbox-find-nav { margin: 12px 0; }
+.cashbox-find-nav span[role="status"] { font-size: .88rem; opacity: .8; }
+.cashbox-phone { background: #f0f6f2; border-radius: 7px; padding: 12px; display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; align-items: center; margin-top: 12px; }
+.cashbox-phone div { display: grid; gap: 3px; }
+.cashbox-phone span { font-variant-numeric: tabular-nums; opacity: .78; }
+.cashbox-summary { border: 1px solid #d5ded9; border-radius: 8px; padding: 12px; margin: 10px 0 15px; }
+.cashbox-summary h3 { margin-top: 0; }
+.cashbox-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: 9px; }
+.cashbox-metrics > div { padding: 10px; background: #f0f6f2; border-radius: 7px; display: grid; gap: 6px; align-content: start; }
+.cashbox-metrics > div > span, .cashbox-times dt { font-size: .8rem; opacity: .8; }
+.cashbox-metrics strong { font-size: 1rem; overflow-wrap: anywhere; }
+.cashbox-times { display: flex; flex-wrap: wrap; gap: 16px; }
+.cashbox-times dd { margin: 4px 0 0; }
+.cashbox-unmapped { display: block; font-size: .75rem; color: #80510f; font-weight: normal; }
+.cashbox-waiting { background: #fff5dc; border-radius: 6px; padding: 8px 10px; }
+.cashbox-query-link { margin-left: .7rem; align-self: center; }
