@@ -35,6 +35,10 @@ services:
       COINLINE_BOOTSTRAP_ADMIN_PASSWORD: ${COINLINE_BOOTSTRAP_ADMIN_PASSWORD:-}
       # NCC TCP listener. Leave it enabled; do not set COINLINE_NCC_LISTEN=0.
       COINLINE_NCC_PORT: "4000"
+      Ncc__BindAddress: 0.0.0.0
+      Ncc__MaxConcurrentConnections: ${COINLINE_NCC_MAX_CONNECTIONS:-32}
+      Ncc__ReadTimeoutSeconds: ${COINLINE_NCC_READ_TIMEOUT_SECONDS:-60}
+      Ncc__IdleTimeoutSeconds: ${COINLINE_NCC_IDLE_TIMEOUT_SECONDS:-120}
       ConnectionStrings__Default: Host=postgres;Port=5432;Database=coinline;Username=coinline;Password=coinline
       Platform__PayloadStorage__RootPath: /var/coinline/payloads
       CardPayments__SimulationMode: "false"
@@ -49,7 +53,7 @@ services:
         required: false
     ports:
       - "${COINLINE_API_BIND_ADDRESS:-127.0.0.1}:5006:5006"
-      - "4000:4000"
+      - "${COINLINE_NCC_BIND_ADDRESS:-127.0.0.1}:4000:4000"
       - "5060:5060/udp"
       - "40000-40007:40000-40007/udp"
     volumes:
