@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { apiGet, apiPost } from '../api/client'
+import { describeRatePricing, type RatePricing } from './RatePlanPricing'
 
 type Plan = { id: string; name: string }
+type Quote = { amountUsd: number; allowed: boolean; blocked: boolean; freeCall: boolean; emergency: boolean; pricing: RatePricing | null }
 
 export function RatingQuoteTool() {
   const [plans, setPlans] = useState<Plan[]>([])
@@ -13,7 +15,7 @@ export function RatingQuoteTool() {
   const [mode, setMode] = useState(1)
   const [minutes, setMinutes] = useState(1)
   const [quoteLoading, setQuoteLoading] = useState(false)
-  const [out, setOut] = useState<string | null>(null)
+  const [out, setOut] = useState<Quote | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
   useEffect(() => {
@@ -36,14 +38,14 @@ export function RatingQuoteTool() {
     setQuoteLoading(true)
     setOut(null)
     try {
-      const j = await apiPost<Record<string, unknown>>('/api/rating/quote', {
+      const j = await apiPost<Quote>('/api/rating/quote', {
         dialedDigits: digits,
         mode,
         ratePlanId: planId || null,
         customerId: customerId.trim() || null,
         assumedDurationMinutes: minutes,
       })
-      setOut(JSON.stringify(j, null, 2))
+      setOut(j)
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : 'error')
     } finally {
@@ -103,7 +105,13 @@ export function RatingQuoteTool() {
         </form>
       )}
       {out !== null && (
-        <pre style={{ marginTop: 16, background: '#f6f6f6', padding: 12 }}>{out}</pre>
+        <section aria-label="Quote result">
+          <h2>{out.allowed ? `Estimated charge: $${out.amountUsd.toFixed(2)}` : out.blocked ? 'Call blocked' : 'No rate available'}</h2>
+          {out.pricing && <p>{describeRatePricing(out.pricing)}</p>}
+          {out.freeCall && <p>Free call</p>}{out.emergency && <p>Emergency call</p>}
+          <h3>Technical quote details</h3>
+          <pre style={{ marginTop: 16, background: '#f6f6f6', padding: 12 }}>{JSON.stringify(out, null, 2)}</pre>
+        </section>
       )}
     </div>
   )

@@ -1141,7 +1141,10 @@ internal sealed class NccLinkProcessor(
             customerId,
             1m,
             DateTime.UtcNow), stoppingToken);
-        var wire = DlogRateWire.QuoteFromDecision(quote.Allowed, quote.Blocked, quote.AmountUsd, request.CallType);
+        var wire = quote.Allowed && quote.Pricing is { Mode: not CallPricingMode.LegacyProrated } pricing
+            ? DlogRateWire.QuoteFromPricing(pricing.FirstChargeUsd, pricing.FollowingChargeUsd,
+                pricing.Mode == CallPricingMode.FlatCall, request.CallType)
+            : DlogRateWire.QuoteFromDecision(quote.Allowed, quote.Blocked, quote.AmountUsd, request.CallType);
         var response = DlogRateWire.EncodeResponse(wire);
         var call = new CallRecord
         {

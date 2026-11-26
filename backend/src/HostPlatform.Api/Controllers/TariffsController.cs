@@ -18,20 +18,27 @@ public sealed class TariffsController(HostPlatformDbContext db) : ControllerBase
             return NotFound();
         if (t.RatePlanVersion.Status == RatePlanVersionStatus.Published)
             return BadRequest("Cannot edit tariffs on a published version.");
+        var pricingMode = body.PricingMode ?? t.PricingMode;
+        var initialCharge = body.InitialChargeUsd ?? t.InitialChargeUsd;
+        if (CallPricing.ValidationIssue(pricingMode, initialCharge, body.RatePerMinuteUsd) is { } issue)
+            return BadRequest(new { error = issue });
         t.Name = string.IsNullOrWhiteSpace(body.Name) ? "Tariff" : body.Name.Trim();
         t.RatePerMinuteUsd = body.RatePerMinuteUsd;
+        t.PricingMode = pricingMode;
+        t.InitialChargeUsd = initialCharge;
         t.Notes = body.Notes?.Trim() ?? string.Empty;
         ApiAudit.Write(db, HttpContext, "rating", "update_tariff", $"Tariff/{id}", new
         {
             t.RatePlanVersionId,
             t.Name,
-            t.RatePerMinuteUsd
+            t.RatePerMinuteUsd, t.PricingMode, t.InitialChargeUsd
         });
         await db.SaveChangesAsync(ct);
         return NoContent();
     }
 
-    public sealed record TariffUpdateDto(string? Name, decimal RatePerMinuteUsd, string? Notes);
+    public sealed record TariffUpdateDto(string? Name, decimal RatePerMinuteUsd, string? Notes,
+        CallPricingMode? PricingMode = null, decimal? InitialChargeUsd = null);
 
     /// <summary>Deletes a tariff only when no destination prefix or time band references it (FKs set null on delete of referenced tariff is avoided by this guard).</summary>
     [HttpDelete("{id:guid}")]

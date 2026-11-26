@@ -35,6 +35,8 @@ public class RateRule : AuditableEntity
     public RateRuleOutcome Outcome { get; set; } = RateRuleOutcome.Rated;
     /// <summary>Per-minute airtime when <see cref="RateRuleOutcome"/> is <see cref="RateRuleOutcome.Rated"/> (UAT for field certification).</summary>
     public decimal RatePerMinuteUsd { get; set; }
+    public CallPricingMode PricingMode { get; set; }
+    public decimal InitialChargeUsd { get; set; }
     /// <summary>Opaque legacy / diagnostic payload (JSON).</summary>
     public string Expression { get; set; } = "{}";
 }
@@ -80,6 +82,8 @@ public class Tariff : AuditableEntity
     public RatePlanVersion? RatePlanVersion { get; set; }
     public string Name { get; set; } = string.Empty;
     public decimal RatePerMinuteUsd { get; set; }
+    public CallPricingMode PricingMode { get; set; }
+    public decimal InitialChargeUsd { get; set; }
     public string Notes { get; set; } = string.Empty;
 }
 

@@ -90,6 +90,8 @@ public sealed class RatingOperationsController(HostPlatformDbContext db) : Contr
         freeCall = r.FreeCall,
         emergency = r.Emergency,
         airtimeSource = r.AirtimeSource.ToString(),
+        pricing = r.Pricing is { } pricing ? new { pricingMode = pricing.Mode, pricing.InitialChargeUsd, pricing.RatePerMinuteUsd,
+            pricing.FirstChargeUsd, pricing.FollowingChargeUsd } : null,
         diagnostics = r.Diagnostics.Select(d => new { d.Code, d.Severity, d.Message }),
         determinismFingerprint = r.DeterminismFingerprint,
         determinismInputJson = r.DeterminismInputJson,

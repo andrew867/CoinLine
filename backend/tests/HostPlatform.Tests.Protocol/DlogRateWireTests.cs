@@ -4,6 +4,16 @@ namespace HostPlatform.Tests.Protocol;
 
 public class DlogRateWireTests
 {
+    [Theory]
+    [InlineData(true, .25, 0, 0, "4002FFFF1900FFFF000000000000000000000000000000000000")]
+    [InlineData(false, .25, .25, 0, "40013C0019003C000000000000003C0019003C00000000000000")]
+    [InlineData(false, .25, .10, 0xA5, "40063C0019003C000000000000003C000A003C00000000000000")]
+    public void Pricing_ladder_is_encoded_directly_not_multiplied_by_an_estimated_duration(bool flat, double first, double following, byte callType, string expected)
+    {
+        var wire = DlogRateWire.QuoteFromPricing((decimal)first, (decimal)following, flat, callType);
+        Assert.Equal(Convert.FromHexString(expected), DlogRateWire.EncodeResponse(wire));
+    }
+
     [Fact]
     public void Response_is_26_bytes_and_type_64()
     {

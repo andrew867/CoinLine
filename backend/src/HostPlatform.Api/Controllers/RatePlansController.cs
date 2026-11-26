@@ -100,6 +100,8 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
                     Pattern = r.Pattern,
                     Outcome = r.Outcome,
                     RatePerMinuteUsd = r.RatePerMinuteUsd,
+                    PricingMode = r.PricingMode,
+                    InitialChargeUsd = r.InitialChargeUsd,
                     Expression = r.Expression
                 });
             }
@@ -118,6 +120,8 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
                     RatePlanVersionId = ver.Id,
                     Name = ot.Name,
                     RatePerMinuteUsd = ot.RatePerMinuteUsd,
+                    PricingMode = ot.PricingMode,
+                    InitialChargeUsd = ot.InitialChargeUsd,
                     Notes = ot.Notes
                 };
                 db.Tariffs.Add(nt);
@@ -223,6 +227,8 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
                 r.Pattern,
                 r.Outcome,
                 r.RatePerMinuteUsd,
+                r.PricingMode,
+                r.InitialChargeUsd,
                 r.Expression
             }),
             tariffs = v.Tariffs.OrderBy(t => t.Name).ThenBy(t => t.Id).Select(t => new
@@ -230,6 +236,8 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
                 t.Id,
                 t.Name,
                 t.RatePerMinuteUsd,
+                t.PricingMode,
+                t.InitialChargeUsd,
                 t.Notes
             }),
             destinationPrefixes = v.DestinationPrefixes.OrderBy(d => d.PrefixDigits).Select(d => new
@@ -258,6 +266,8 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
             return NotFound();
         if (v.Status == RatePlanVersionStatus.Published)
             return BadRequest("Cannot edit rules on a published version; create a new draft version.");
+        if (CallPricing.ValidationIssue(body.PricingMode, body.InitialChargeUsd, body.RatePerMinuteUsd) is { } issue)
+            return BadRequest(new { error = issue });
         var rule = new RateRule
         {
             RatePlanVersionId = v.Id,
@@ -266,6 +276,8 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
             Pattern = body.Pattern,
             Outcome = body.Outcome,
             RatePerMinuteUsd = body.RatePerMinuteUsd,
+            PricingMode = body.PricingMode,
+            InitialChargeUsd = body.InitialChargeUsd,
             Expression = string.IsNullOrEmpty(body.Expression) ? "{}" : body.Expression
         };
         db.RateRules.Add(rule);
@@ -275,7 +287,7 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
             body.Priority,
             body.Pattern,
             body.Outcome,
-            body.RatePerMinuteUsd
+            body.RatePerMinuteUsd, body.PricingMode, body.InitialChargeUsd
         });
         await db.SaveChangesAsync(ct);
         return Created($"/api/rate-rules/{rule.Id}", new { rule.Id });
@@ -287,7 +299,7 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
         string Pattern,
         RateRuleOutcome Outcome,
         decimal RatePerMinuteUsd,
-        string? Expression);
+        string? Expression, CallPricingMode PricingMode = CallPricingMode.LegacyProrated, decimal InitialChargeUsd = 0);
 
     /// <summary>Adds a reusable tariff row on a <strong>draft</strong> plan version (referenced by prefixes / time bands).</summary>
     [HttpPost("{planId:guid}/versions/{versionId:guid}/tariffs")]
@@ -299,20 +311,25 @@ public sealed class RatePlansController(HostPlatformDbContext db) : ControllerBa
             return NotFound();
         if (v.Status == RatePlanVersionStatus.Published)
             return BadRequest("Cannot add tariffs to a published version; create a draft version.");
+        if (CallPricing.ValidationIssue(body.PricingMode, body.InitialChargeUsd, body.RatePerMinuteUsd) is { } issue)
+            return BadRequest(new { error = issue });
         var t = new Tariff
         {
             RatePlanVersionId = v.Id,
             Name = string.IsNullOrWhiteSpace(body.Name) ? "Tariff" : body.Name.Trim(),
             RatePerMinuteUsd = body.RatePerMinuteUsd,
+            PricingMode = body.PricingMode,
+            InitialChargeUsd = body.InitialChargeUsd,
             Notes = body.Notes?.Trim() ?? string.Empty
         };
         db.Tariffs.Add(t);
-        ApiAudit.Write(db, HttpContext, "rating", "add_tariff", $"RatePlanVersion/{v.Id}", new { t.Name, t.RatePerMinuteUsd });
+        ApiAudit.Write(db, HttpContext, "rating", "add_tariff", $"RatePlanVersion/{v.Id}", new { t.Name, t.RatePerMinuteUsd, t.PricingMode, t.InitialChargeUsd });
         await db.SaveChangesAsync(ct);
         return Created($"/api/tariffs/{t.Id}", new { t.Id });
     }
 
-    public sealed record TariffCreateDto(string? Name, decimal RatePerMinuteUsd, string? Notes);
+    public sealed record TariffCreateDto(string? Name, decimal RatePerMinuteUsd, string? Notes,
+        CallPricingMode PricingMode = CallPricingMode.LegacyProrated, decimal InitialChargeUsd = 0);
 
     /// <summary>Adds a destination prefix row (longest-prefix match in <see cref="HostPlatform.Rating.RatingEngine"/>).</summary>
     [HttpPost("{planId:guid}/versions/{versionId:guid}/destination-prefixes")]

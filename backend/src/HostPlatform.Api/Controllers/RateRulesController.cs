@@ -18,11 +18,17 @@ public sealed class RateRulesController(HostPlatformDbContext db) : ControllerBa
             return NotFound();
         if (rule.RatePlanVersion.Status == RatePlanVersionStatus.Published)
             return BadRequest("Cannot edit rules on a published version.");
+        var pricingMode = body.PricingMode ?? rule.PricingMode;
+        var initialCharge = body.InitialChargeUsd ?? rule.InitialChargeUsd;
+        if (CallPricing.ValidationIssue(pricingMode, initialCharge, body.RatePerMinuteUsd) is { } issue)
+            return BadRequest(new { error = issue });
         rule.Priority = body.Priority;
         rule.MatchKind = body.MatchKind;
         rule.Pattern = body.Pattern;
         rule.Outcome = body.Outcome;
         rule.RatePerMinuteUsd = body.RatePerMinuteUsd;
+        rule.PricingMode = pricingMode;
+        rule.InitialChargeUsd = initialCharge;
         rule.Expression = string.IsNullOrEmpty(body.Expression) ? "{}" : body.Expression;
         ApiAudit.Write(db, HttpContext, "rating", "update_rate_rule", $"RateRule/{id}", new
         {
@@ -30,7 +36,7 @@ public sealed class RateRulesController(HostPlatformDbContext db) : ControllerBa
             body.Priority,
             body.Pattern,
             body.Outcome,
-            body.RatePerMinuteUsd
+            body.RatePerMinuteUsd, rule.PricingMode, rule.InitialChargeUsd
         });
         await db.SaveChangesAsync(ct);
         return NoContent();
@@ -42,5 +48,5 @@ public sealed class RateRulesController(HostPlatformDbContext db) : ControllerBa
         string Pattern,
         RateRuleOutcome Outcome,
         decimal RatePerMinuteUsd,
-        string? Expression);
+        string? Expression, CallPricingMode? PricingMode = null, decimal? InitialChargeUsd = null);
 }
