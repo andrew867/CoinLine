@@ -1,9 +1,13 @@
+using System.Buffers.Binary;
+
 namespace HostPlatform.Protocols.Tables;
 
 public sealed record GraphicalRecordPresence(int Number, string Availability);
 public sealed record GraphicalLinkReference(int SourceRecord, string SourceSectionKey, string SourceSection, string SourceField, string FieldKey,
     string Role, int Address, string Target, string TargetState, string? Advisory);
-public sealed record GraphicalLinkReview(GraphicalRecordPresence[] Records, GraphicalLinkReference[] References);
+public sealed record GraphicalUsageScreen(int RecordNumber, int ScreenNumber, byte KindCode, ushort ScreenOwnerCode, ushort[] KeyOwnerCodes);
+public sealed record GraphicalUsageConfiguration(ushort? CollectionDurationDays, GraphicalUsageScreen[] Screens);
+public sealed record GraphicalLinkReview(GraphicalRecordPresence[] Records, GraphicalLinkReference[] References, GraphicalUsageConfiguration Usage);
 
 public static partial class NativeTableLayouts
 {
@@ -60,7 +64,7 @@ public static partial class NativeTableLayouts
                 }
             }
         }
-        return new(presence.ToArray(), links.ToArray());
+        return new(presence.ToArray(), links.ToArray(), ReadUsageConfiguration(included));
 
         void Add(int source, string sectionKey, string section, string field, string key, string role, int address)
         {
@@ -101,5 +105,29 @@ public static partial class NativeTableLayouts
                     "The target is not a mixed screen, but the reference has nonzero panel bits. Verify terminal behavior.");
             return (label, "resolved", null);
         }
+    }
+
+    private static GraphicalUsageConfiguration ReadUsageConfiguration(IReadOnlyDictionary<int, byte[]> included)
+    {
+        // Only the MT131 header controls this reporting period. Do not use the
+        // other stored headers as substitutes when MT131 is absent.
+        ushort? duration = included.TryGetValue(131, out var header)
+            ? BinaryPrimitives.ReadUInt16LittleEndian(header.AsSpan(1)) : null;
+        var screens = new List<GraphicalUsageScreen>();
+        foreach (var (number, record) in included.OrderBy(row => row.Key))
+        {
+            for (var slot = 0; slot < ScreensPerRecord; slot++)
+            {
+                var offset = ScreenOffset(slot);
+                var owners = new ushort[ButtonsPerScreen];
+                for (var button = 0; button < owners.Length; button++)
+                    owners[button] = BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(offset + ScreenButtons + button * ButtonSize));
+                // A mixed screen's panel usage accumulates under main-screen
+                // ownership and the six main key positions, not panel owners.
+                screens.Add(new(number, (number - 131) * ScreensPerRecord + slot + 1, record[offset],
+                    BinaryPrimitives.ReadUInt16LittleEndian(record.AsSpan(offset + ScreenAttributes + 11)), owners));
+            }
+        }
+        return new(duration, screens.ToArray());
     }
 }

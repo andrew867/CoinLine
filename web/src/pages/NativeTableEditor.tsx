@@ -7,6 +7,7 @@ import { CarrierBrandingPreview } from './CarrierLibraryPage'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
 import { GraphicalLinkReviewPanel, type GraphicalLinkReview } from './GraphicalLinkReviewPanel'
+import { GraphicalUsageConfigurationPanel } from './GraphicalUsageConfigurationPanel'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
 import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
 import { LocalDialingImport } from './LocalDialingImport'
@@ -385,6 +386,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         <GraphicalAdvertisingSimulator setId={setId} number={number} sections={layout.sections} edits={edits} />
         <GraphicalLinkReviewPanel review={layout.graphicalLinks ?? null} number={number}
           onOpenSection={key => { setSearch(''); setSectionKey(key) }} />
+        <GraphicalUsageConfigurationPanel usage={layout.graphicalLinks?.usage} records={layout.graphicalLinks?.records ?? []}
+          number={number} edits={edits} onOpenSection={key => { setSearch(''); setSectionKey(key) }} />
       </>}
       {((number === 150 && layout.length === 401) || (number === 151 && layout.length === 604)) &&
         <RegionalRatingPreview key={`${setId}:${number}`} number={number as 150 | 151}
