@@ -5,6 +5,7 @@ import { apiGet } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { mayOpenScreen } from '../components/Layout'
 import { CashboxQueryLink, CashboxQueryPage } from './CashboxQueryPage'
+import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 
 vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiFetch: vi.fn() }))
 
@@ -15,11 +16,17 @@ const receivedAtUtc = '2028-10-01T12:00:00Z'
 const terminalTime = '2028-10-01T08:00:00'
 const status = { boxNumber: '00000001', terminalTime, balanceMinorUnits: 75, percentFull: 40,
   condition: 'Value threshold exceeded', unmappedSetBitCount: 1, coinCounts: [0, 0, 0, 3] }
-const firstLedger = { statuses: [{ id: 'status-a', receivedAtUtc, status, isCurrent: true }], collections: [] }
+const reference = (value: number, revision: number, laterUncertainAttempt = false) => ({
+  status: 'acknowledged', tableRevision: revision, ackRecordedAtUtc: '2028-10-01T11:30:00Z', laterUncertainAttempt,
+  slots: [{ number: 2, valueMinorUnits: 5, validatorWindowEnabled: true, accepted: true },
+    { number: 4, valueMinorUnits: value, validatorWindowEnabled: true, accepted: true }],
+})
+const firstLedger = { statuses: [{ id: 'status-a', receivedAtUtc, status, isCurrent: true }], collections: [],
+  coinConfigurations: { 'status-a': { ...reference(25, 2), downloadBatchId: 'fixture-download' } } }
 const secondLedger = { statuses: [{ id: 'status-b', receivedAtUtc, status, isCurrent: false }], collections: [{
   id: 'collection', receivedAtUtc, terminalTime, boxNumber: '00000001', newBoxNumber: '00000002',
   totalMinorUnits: 125, removedBoxBalanceMinorUnits: 75, isSummed: true, coinCounts: [0, 0, 0, 3],
-}] }
+}], coinConfigurations: { 'status-b': reference(50, 4, true), collection: reference(10, 1) } }
 
 function mockReads() {
   vi.mocked(apiGet).mockImplementation(async path => {
@@ -47,10 +54,22 @@ it('finds and browses cashboxes across pages without treating collections or abs
   expect(within(summary).getByText('1 unmapped status bit set')).toBeVisible()
   expect(within(summary).getByText('2028-10-01 12:00:00 UTC')).toBeVisible()
   expect(within(summary).getByText('2028-10-01 08:00:00 (phone clock)')).toBeVisible()
+  expect(within(summary).getByText('Slot 2: 0 (configured 0.05)')).toBeVisible()
+  expect(within(summary).getByText('Slot 4: 3 (configured 0.25)')).toBeVisible()
+  expect(within(summary).getByText(/MT50 revision 2, acknowledged 2028-10-01 11:30:00 UTC/)).toBeVisible()
+  expect(within(summary).getByText(/not verified denominations of accumulated coins/)).toBeVisible()
+  expect(within(summary).getByRole('link', { name: 'Source download' })).toHaveAttribute('href', '/downloads/fixture-download')
   expect(screen.getByRole('button', { name: 'Find previous' })).toBeDisabled()
   fireEvent.click(screen.getByRole('button', { name: 'Find next' }))
   expect(await screen.findByText(/No current box status is available/)).toBeVisible()
-  expect(within(screen.getByRole('table', { name: 'Reported collections' })).getByText('1.25 (combined)')).toBeVisible()
+  const history = within(screen.getByRole('table', { name: 'Reported collections' }))
+  expect(history.getByText('1.25 (combined)')).toBeVisible()
+  expect(history.getByText(/Slot 4: 3 \(configured 0.10\)/)).toBeVisible()
+  const previous = within(screen.getByRole('table', { name: 'Latest status by box' }))
+  expect(previous.getByText('Slot 4: 3', { exact: true })).toBeVisible()
+  expect(previous.getByText(/A later transfer lacks a confirmed acknowledgement/)).toBeVisible()
+  expect(previous.queryByText(/configured 0.50/)).not.toBeInTheDocument()
+  expect(previous.queryByRole('link', { name: 'Source download' })).not.toBeInTheDocument()
   expect(screen.queryByRole('region', { name: 'Current reported cashbox' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Find next' }))
   expect(await screen.findByText('No cashbox reports yet.')).toBeVisible()
@@ -89,4 +108,24 @@ it('keeps the selected-phone shortcut and screen tied to cashbox read permission
   rerender(<MemoryRouter><CashboxQueryLink terminalId="fixture-0" /></MemoryRouter>)
   expect(screen.getByRole('link', { name: 'Query cashbox' })).toHaveAttribute('href', '/cashbox?terminalId=fixture-0')
   expect(mayOpenScreen('/cashbox', 'Operator', { cashbox: 1 })).toBe(true)
+})
+
+it('keeps raw counts when denomination evidence is missing, ambiguous or invalid and labels disabled slots explicitly', async () => {
+  const states = ['missing', 'ambiguous', 'invalid', 'disabled']
+  vi.mocked(apiGet).mockResolvedValue({ statuses: states.map((id, index) => ({ id, receivedAtUtc, isCurrent: false,
+    status: { ...status, boxNumber: `0000000${index + 1}` } })), collections: [], coinConfigurations: {
+    missing: { status: 'missing' }, ambiguous: { status: 'ambiguous' }, invalid: { status: 'invalid' },
+    disabled: { ...reference(25, 2), slots: [{ number: 4, valueMinorUnits: 25, validatorWindowEnabled: true, accepted: false }] },
+  } })
+  render(<MemoryRouter><TerminalCashboxPanel terminalId="fixture-0" /></MemoryRouter>)
+  const table = await screen.findByRole('table', { name: 'Latest status by box' })
+  const rows = within(table).getAllByRole('row').slice(1)
+  expect(within(rows[0]).getByText(/No matching MT50 acknowledgement before receipt/)).toBeVisible()
+  expect(within(rows[1]).getByText(/Multiple MT50 acknowledgements/)).toBeVisible()
+  expect(within(rows[2]).getByText(/no verified coin-slot layout/)).toBeVisible()
+  for (const row of rows.slice(0, 3)) {
+    expect(within(row).getByText('Slot 4: 3', { exact: true })).toBeVisible()
+    expect(within(row).queryByText(/configured 0/)).not.toBeInTheDocument()
+  }
+  expect(within(rows[3]).getByText('Slot 4: 3 (configured 0.25, not enabled for acceptance)')).toBeVisible()
 })

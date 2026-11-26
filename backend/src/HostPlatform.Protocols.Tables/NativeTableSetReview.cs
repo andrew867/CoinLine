@@ -1,5 +1,3 @@
-using System.Buffers.Binary;
-
 namespace HostPlatform.Protocols.Tables;
 
 public sealed record TableReviewFinding(int TableNumber, string Message);
@@ -16,7 +14,7 @@ public static class NativeTableSetReview
         var features = Get(records, 26, 72);
         var type = features?[1] switch { 1 => "Card only", 2 => "Multi-pay", 3 => "Coin only", _ => null };
         bool? advertising = features == null ? null : (features[22] & 1) != 0;
-        var coins = Get(records, 50, 105);
+        var coins = CoinValidationWire.ReadSlots(Get(records, CoinValidationWire.MessageType, CoinValidationWire.RecordLength) ?? []);
         var screenings = Get(records, 92, 3401);
         int? coinSlots = null;
         int? cardRanges = null;
@@ -24,14 +22,12 @@ public static class NativeTableSetReview
         if (coins != null)
         {
             coinSlots = 0;
-            for (var i = 0; i < 16; i++)
+            foreach (var slot in coins)
             {
-                var validator = coins[65 + i];
-                var value = BinaryPrimitives.ReadInt16LittleEndian(coins.AsSpan(1 + i * 2, 2));
-                if ((validator & 3) == 3 && value > 0)
+                if (slot.ValidatorWindowEnabled && slot.Accepted && slot.ValueMinorUnits > 0)
                     coinSlots++;
-                else if ((validator & 2) != 0)
-                    findings.Add(new(50, $"Coin slot {i + 1} accepts coins and needs an enabled validator window and a positive value."));
+                else if (slot.Accepted)
+                    findings.Add(new(50, $"Coin slot {slot.Number} accepts coins and needs an enabled validator window and a positive value."));
             }
             if (features?[1] is 2 or 3 && coinSlots == 0)
                 findings.Add(new(50, "The selected operating type accepts coins and this record enables no payable coin slots."));

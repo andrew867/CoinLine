@@ -11,6 +11,10 @@ test('finds a reported cashbox, browses to a collection, and opens a phone-speci
   const receivedAtUtc = '2028-10-01T12:00:00Z', terminalTime = '2028-10-01T08:00:00'
   const status = { boxNumber: '00000001', terminalTime, balanceMinorUnits: 75, percentFull: 40,
     condition: 'Value threshold exceeded', unmappedSetBitCount: 0, coinCounts: [0, 0, 0, 3] }
+  const reference = (value: number, revision: number, laterUncertainAttempt = false) => ({ status: 'acknowledged', tableRevision: revision,
+    ackRecordedAtUtc: '2028-10-01T11:30:00Z', laterUncertainAttempt, slots: [
+      { number: 4, valueMinorUnits: value, validatorWindowEnabled: true, accepted: true },
+    ] })
   const lockedReads: string[] = []
   await page.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url())
@@ -38,12 +42,14 @@ test('finds a reported cashbox, browses to a collection, and opens a phone-speci
     }
     if (url.pathname === `/api/terminals/${phones[0].id}/cashbox`) return route.fulfill({ json: {
       statuses: [{ id: 'alpha-status', receivedAtUtc, status, isCurrent: true }], collections: [],
+      coinConfigurations: { 'alpha-status': reference(25, 2) },
     } })
     if (url.pathname === `/api/terminals/${phones[1].id}/cashbox`) return route.fulfill({ json: {
       statuses: [{ id: 'beta-status', receivedAtUtc, status, isCurrent: false }], collections: [{
         id: 'beta-collection', receivedAtUtc, terminalTime, boxNumber: '00000001', newBoxNumber: '00000002',
         totalMinorUnits: 125, removedBoxBalanceMinorUnits: 75, isSummed: true, coinCounts: [0, 0, 0, 3],
       }],
+      coinConfigurations: { 'beta-status': reference(50, 4, true), 'beta-collection': reference(10, 1) },
     } })
     return route.fulfill({ status: 404 })
   })
@@ -53,17 +59,26 @@ test('finds a reported cashbox, browses to a collection, and opens a phone-speci
   const current = page.getByRole('region', { name: 'Current reported cashbox' })
   await expect(current.getByText('0.75')).toBeVisible()
   await expect(current.getByText('Value threshold exceeded')).toBeVisible()
-  await expect(current.getByText('Slot 4: 3', { exact: false })).toBeVisible()
+  await expect(current.getByText('Slot 4: 3 (configured 0.25)', { exact: true })).toBeVisible()
+  await expect(current.getByText(/MT50 revision 2, acknowledged 2028-10-01 11:30:00 UTC/)).toBeVisible()
+  await expect(current.getByText(/not verified denominations of accumulated coins/)).toBeVisible()
+  await expect(current.getByRole('link', { name: 'Source download' })).toHaveCount(0)
   await page.getByRole('button', { name: 'Find next' }).click()
   await expect(page.getByRole('combobox', { name: 'Phone' })).toHaveValue(phones[1].id)
   await expect(page.getByText(/No current box status is available/)).toBeVisible()
-  await expect(page.getByRole('table', { name: 'Reported collections' }).getByText('1.25 (combined)')).toBeVisible()
+  const history = page.getByRole('table', { name: 'Reported collections' })
+  await expect(history.getByText('1.25 (combined)')).toBeVisible()
+  await expect(history.getByText('Slot 4: 3 (configured 0.10)', { exact: true })).toBeVisible()
+  const previous = page.getByRole('table', { name: 'Latest status by box' })
+  await expect(previous.getByText('Slot 4: 3', { exact: true })).toBeVisible()
+  await expect(previous.getByText(/A later transfer lacks a confirmed acknowledgement/)).toBeVisible()
   await expect(current).toHaveCount(0)
   await page.goto(`/field-events?terminalId=${phones[0].id}`)
   await page.getByRole('link', { name: 'Query cashbox' }).click()
   await expect(page.getByRole('heading', { name: 'Selected phone' })).toBeVisible()
   await expect(page.getByText(phones[0].displayName, { exact: true })).toBeVisible()
   await expect(current.getByText('0.75')).toBeVisible()
+  await expect(current.getByText('Slot 4: 3 (configured 0.25)', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Find next' })).toHaveCount(0)
   await expect(page.getByRole('link', { name: 'Browse all cashboxes' })).toBeVisible()
   expect(lockedReads).toEqual([phones[0].id])

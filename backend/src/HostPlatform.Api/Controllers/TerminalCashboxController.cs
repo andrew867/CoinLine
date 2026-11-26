@@ -1,5 +1,7 @@
 using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Api.Authorization;
+using HostPlatform.Api.Services;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -36,10 +38,17 @@ public sealed class TerminalCashboxController(HostPlatformDbContext db) : Contro
     }
 
     [HttpGet]
-    public async Task<ActionResult<TerminalCashboxAccounting.Ledger>> Get(Guid terminalId, CancellationToken ct)
+    public async Task<ActionResult<CashboxLedgerView>> Get(Guid terminalId, CancellationToken ct)
     {
         if (!await db.Terminals.AnyAsync(terminal => terminal.Id == terminalId, ct))
             return NotFound();
-        return Ok(await TerminalCashboxAccounting.ReadAsync(db, terminalId, ct));
+        var ledger = await TerminalCashboxAccounting.ReadAsync(db, terminalId, ct);
+        var references = await CashboxCoinReferences.FindAsync(db, terminalId,
+            ledger.Statuses.Select(row => row.ReceivedAtUtc).Concat(ledger.Collections.Select(row => row.ReceivedAtUtc)),
+            OperatorPermissions.Allows(HttpContext, "downloads", PermissionOperation.Read), ct);
+        return Ok(new CashboxLedgerView(ledger.Statuses, ledger.Collections,
+            ledger.Statuses.Select(row => (row.Id, row.ReceivedAtUtc))
+                .Concat(ledger.Collections.Select(row => (row.Id, row.ReceivedAtUtc)))
+                .ToDictionary(row => row.Id, row => references[row.ReceivedAtUtc])));
     }
 }

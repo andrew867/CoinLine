@@ -146,14 +146,14 @@ public static partial class NativeTableLayouts
                 Field("adjust.year", "Calendar year offset from 1900", 13), .. DateTimeFields("adjust", 13).Skip(1),
                 Field("adjustment", "Time adjustment (signed seconds)", 19, SignedWord)]));
 
-        yield return Layout(50, 105, [Section("cash", "Cash box and escrow", [
+        yield return Layout(CoinValidationWire.MessageType, CoinValidationWire.RecordLength, [Section("cash", "Cash box and escrow", [
             Field("cashBoxVolume", "Cash box capacity", 81, Word), Field("escrowVolume", "Escrow capacity", 83, Word),
             Field("cashBoxThreshold", "Cash box volume threshold", 85, Word),
             Field("cashBoxValue", "Cash box value threshold (cents)", 87, SignedLong, min: 0),
             Field("escrowVolumeThreshold", "Escrow volume threshold", 91, Word),
             Field("escrowValue", "Escrow value threshold (cents)", 93, SignedLong, min: 0),
             .. SpareBytes("spare", 97, 8)]),
-            .. Rows("coin", 16, i => $"Coin slot {i + 1}", (i, key) =>
+            .. Rows("coin", CoinValidationWire.SlotCount, i => $"Coin slot {i + 1}", (i, key) =>
                 [Field($"{key}.value", "Coin value (cents)", 1 + i * 2, SignedWord, min: 0),
                  Field($"{key}.volume", "Coin volume", 33 + i * 2, Word),
                  Toggle($"{key}.window", "Enable validator window", 65 + i, 1),
