@@ -7,6 +7,60 @@ public sealed class CallScreeningWireTests
     [Theory]
     [InlineData(24, 60)]
     [InlineData(59, 85)]
+    [InlineData(59, 60)]
+    [InlineData(92, 60)]
+    [InlineData(92, 180)]
+    [InlineData(92, 200)]
+    public void Bulk_add_copies_only_assigned_entry_fields_into_a_vacant_slot(int number, int count)
+    {
+        var layout = Assert.Single(NativeTableLayouts.DraftTemplates(number), item => item.Sections.Count == count);
+        var source = NativeTableLayouts.CreateDraftTemplate(layout);
+        var target = NativeTableLayouts.CreateDraftTemplate(layout);
+        const int slot = 7;
+        var compact = layout.Profile == CallScreeningWire.CompactProfile;
+        var stride = compact ? 12 : 17;
+        var offset = 1 + (slot - 1) * stride;
+        source[offset] = 0xC3; source[offset + 1] = 0xB9; source[offset + 2] = 7;
+        source[offset + 3] = compact ? (byte)0xAC : (byte)15;
+        layout.Sections[slot - 1].Fields[0].Write(source, "90?");
+        if (compact)
+        {
+            target[offset + 1] = 0x50; target[offset + 3] = 0x80;
+        }
+        else
+        {
+            source[offset + 12] = 0xB1; source[offset + 13] = 0xFF; source[offset + 15] = 0xF1;
+            target[offset + 12] = 0xCD; target[offset + 13] = count == 180 ? (byte)0x80 : (byte)0x74; target[offset + 15] = 0xA6;
+        }
+        target[offset - 1] = 0xE2; target[offset + stride] = 0x99;
+        var original = target.ToArray();
+        Assert.True(CallScreeningWire.IsVacant(target, layout, slot));
+        Assert.True(CallScreeningWire.CanCopyEntry(source, layout, slot));
+        var copied = CallScreeningWire.CopyEntry(source, target, layout, slot);
+        Assert.Equal(original, target);
+        Assert.Equal("90?", layout.Sections[slot - 1].Fields[0].Read(copied));
+        Assert.Equal(original[..offset], copied[..offset]);
+        Assert.Equal(original[(offset + stride)..], copied[(offset + stride)..]);
+        if (compact)
+            Assert.Equal(new byte[] { 0xC3, 0x59, 7, 0xAC, 0x9A, 0xF0, 0, 0, 0, 0, 0, 0 }, copied[offset..(offset + stride)]);
+        else
+        {
+            Assert.Equal(source[offset..(offset + 12)], copied[offset..(offset + 12)]);
+            Assert.Equal(0xCD, copied[offset + 12]);
+            Assert.Equal(count == 180 ? 0xDF : 0x77, copied[offset + 13]);
+            Assert.Equal(original[(offset + 14)..(offset + stride)], copied[(offset + 14)..(offset + stride)]);
+        }
+        Assert.Throws<InvalidOperationException>(() => CallScreeningWire.CopyEntry(source, copied, layout, slot));
+        CallScreeningWire.Apply(copied, layout, [new(slot, "blank")], new Dictionary<string, string>());
+        Assert.False(CallScreeningWire.IsVacant(copied, layout, slot));
+        CallScreeningWire.Apply(copied, layout, [new(slot, "delete")], new Dictionary<string, string>());
+        Assert.True(CallScreeningWire.IsVacant(copied, layout, slot));
+        Assert.Equal(original, copied);
+    }
+
+    [Theory]
+    [InlineData(24, 60)]
+    [InlineData(59, 85)]
     public void Compact_screening_uses_twelve_byte_slots_and_preserves_shared_flag_bits(int number, int count)
     {
         var layout = Assert.Single(NativeTableLayouts.DraftTemplates(number), item => item.Profile == CallScreeningWire.CompactProfile);
