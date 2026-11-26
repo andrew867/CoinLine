@@ -17,6 +17,12 @@
 |----------------|---------|
 | `Ncc__Port` | Listener port. Takes precedence over `COINLINE_NCC_PORT`; defaults to `4000` when neither supplies a valid port. |
 | `COINLINE_NCC_LISTEN` | A value of `0` disables the listener. |
+| `Ncc__BindAddress` | Numeric listener address; default `127.0.0.1`. |
+| `Ncc__LoopbackOnly` | Force IPv4 loopback even if a different bind address is configured. Testing hosts always use loopback. |
+| `Ncc__MaxConcurrentConnections` | Maximum concurrent client sockets, default `32`. |
+| `Ncc__ReadTimeoutSeconds` | Maximum wait for a read or unfinished frame, default `60`. |
+| `Ncc__IdleTimeoutSeconds` | Maximum interval without a valid received frame, default `120`. INSTALL acknowledgement deadlines remain separate. |
+| `COINLINE_NCC_BIND_ADDRESS` | Docker host publication, default loopback; internal container listener binds explicitly. |
 | `SipModem__Enabled` | Enables the SIP audio inlet. The base lab Compose stack sets this to `true`. |
 | `SipModem__NccHost`, `SipModem__NccPort` | NCC destination for decoded modem bytes. |
 | `SipModem__Registrar`, `SipModem__Username`, `SipModem__Password`, `SipModem__AssignedNumber` | Optional SIP registration settings. Store lab values in the ignored `docker/sip.env`. |
