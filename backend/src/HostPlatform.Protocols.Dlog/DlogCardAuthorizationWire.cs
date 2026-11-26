@@ -14,6 +14,13 @@ public static class DlogCardAuthorizationWire
 
     public static bool IsRequest(byte messageType) => messageType is FormattedRequest or ExtendedRequest;
 
+    public static int RequestLength(byte messageType) => messageType switch
+    {
+        FormattedRequest => FormattedRequestLength,
+        ExtendedRequest => ExtendedRequestLength,
+        _ => 0
+    };
+
     public static bool TryBuildDecline(ReadOnlySpan<byte> data, out byte[] response)
     {
         return TryBuildDecision(data, approved: false, [], out response);

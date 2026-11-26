@@ -443,24 +443,27 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Theory]
-    [InlineData(1, 29, 3, 2)]
-    [InlineData(2, 39, 65, 22)]
+    [InlineData(1, 29, 3, 2, false)]
+    [InlineData(2, 39, 65, 22, false)]
+    [InlineData(2, 39, 65, 22, true)]
     public async Task Card_authorization_returns_only_decline_and_keeps_credentials_out_of_session(
-        byte requestType, int requestLength, byte replyType, int replyLength)
+        byte requestType, int requestLength, byte replyType, int replyLength, bool bundled)
     {
         await AssignRateTableSetAsync($"NCC card authorization test {requestType}");
         var batches = await BatchIdsAsync();
         var request = new byte[requestLength];
         request[0] = requestType;
         request[^3] = 0x5A;
+        byte[] wireRequest = bundled ? [.. request, .. TerminalCallDetail(53, 0x4241, 0x45), .. TerminalCallDetail(53, 0x4242, 0x35)] : request;
         await using var link = await OpenAsync();
-        await link.Stream.WriteAsync(Message(KnownId, request));
+        await link.Stream.WriteAsync(Message(KnownId, wireRequest));
         AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
         var reply = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
         var expected = new byte[replyLength];
         expected[0] = replyType;
         expected[1] = 1;
-        Assert.Equal(expected, reply.Data);
+        Assert.Equal(expected, reply.Data[..replyLength]);
+        Assert.Equal(bundled ? new byte[] { 5, 0x41, 0x42, 5, 0x42, 0x42 } : [], reply.Data[replyLength..]);
         Assert.Equal(KnownId, reply.TerminalId);
 
         var sessions = (await fx.Client.GetFromJsonAsync<JsonElement>("/api/ncc/sessions", Json))!;
@@ -477,19 +480,22 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Theory]
-    [InlineData(1, 29, 3, 2, "approve", "approved")]
-    [InlineData(2, 39, 65, 22, "approve", "approved")]
-    [InlineData(2, 39, 65, 22, "decline", "declined")]
-    [InlineData(2, 39, 65, 22, "invalid", "provider_invalid_decision")]
-    [InlineData(2, 39, 65, 22, "exception", "provider_failed")]
+    [InlineData(1, 29, 3, 2, "approve", "approved", false)]
+    [InlineData(2, 39, 65, 22, "approve", "approved", false)]
+    [InlineData(2, 39, 65, 22, "decline", "declined", false)]
+    [InlineData(2, 39, 65, 22, "invalid", "provider_invalid_decision", false)]
+    [InlineData(2, 39, 65, 22, "exception", "provider_failed", false)]
+    [InlineData(2, 39, 65, 22, "approve", "approved", true)]
+    [InlineData(1, 29, 3, 2, "decline", "declined", true)]
     public async Task Trusted_card_provider_is_fail_closed_retries_are_idempotent_and_audit_is_redacted(
-        byte requestType, int requestLength, byte replyType, int replyLength, string mode, string expectedOutcome)
+        byte requestType, int requestLength, byte replyType, int replyLength, string mode, string expectedOutcome, bool bundled)
     {
         var request = new byte[requestLength];
         request[0] = requestType;
         // Opaque synthetic test pattern; no account number, track data or issuer credential.
         request[^3] = 0x5A;
         request[^5] = 0xA5;
+        byte[] wireRequest = bundled ? [.. request, .. TerminalCallDetail(53, 0x4241, 0x45), .. TerminalCallDetail(53, 0x4242, 0x35)] : request;
         var provider = new OpaqueTestCardProvider(request, mode);
         await using var factory = new NccFactory();
         await using var host = factory.WithWebHostBuilder(builder =>
@@ -510,11 +516,12 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         using var tcp = new TcpClient();
         await tcp.ConnectAsync(IPAddress.Loopback, factory.Port);
         var stream = tcp.GetStream();
-        await stream.WriteAsync(Message(KnownId, request));
+        await stream.WriteAsync(Message(KnownId, wireRequest));
         AssertAck(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
         var response = Decode(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
         Assert.Equal(replyType, response.Data[0]);
-        Assert.Equal(replyLength, response.Data.Length);
+        Assert.Equal(replyLength + (bundled ? 6 : 0), response.Data.Length);
+        Assert.Equal(bundled ? new byte[] { 5, 0x41, 0x42, 5, 0x42, 0x42 } : [], response.Data[replyLength..]);
         Assert.Equal(mode == "approve" ? (byte)0 : (byte)1, response.Data[1]);
         if (requestType == 2 && mode == "approve")
             Assert.Equal("TESTREF1"u8.ToArray(), response.Data[2..10]);
@@ -522,7 +529,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
 
         // Both full and header-only retransmission preserve the original reply and do not call the provider twice.
         await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket
-            { Control = NccControl.ReTrans, TerminalId = KnownId, Data = request }));
+            { Control = NccControl.ReTrans, TerminalId = KnownId, Data = wireRequest }));
         AssertAck(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
         var repeated = Decode(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
         Assert.Equal(response.Data, repeated.Data);
@@ -539,16 +546,22 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var audit = await stored.AuditEvents.SingleAsync(row => row.Action == "card_authorization_decision");
         var metadata = JsonSerializer.Deserialize<JsonElement>(audit.DetailJson, Json);
         Assert.Equal(expectedOutcome, metadata.GetProperty("outcome").GetString());
-        Assert.Equal(3, metadata.EnumerateObject().Count());
+        Assert.Equal(5, metadata.EnumerateObject().Count());
+        Assert.Equal(wireRequest.Length, metadata.GetProperty("requestBytes").GetInt32());
+        Assert.Equal(bundled ? 2 : 0, metadata.GetProperty("bundledCallRecords").GetInt32());
         Assert.Equal("trusted_provider", metadata.GetProperty("provider").GetString());
         Assert.Equal(requestType, metadata.GetProperty("messageType").GetByte());
         Assert.Equal(beforeBatches, await stored.DownloadBatches.CountAsync());
         var sessionId = Guid.Parse(audit.TerminalSessionId!);
         var frames = await stored.NccSessionFrames.Where(row => row.NccSessionId == sessionId).ToListAsync();
-        var protectedFrames = frames.Where(frame => !frame.SentByHost && frame.WireLength == requestLength + 11).ToArray();
+        var protectedFrames = frames.Where(frame => !frame.SentByHost && frame.WireLength == wireRequest.Length + 11).ToArray();
         Assert.Equal(2, protectedFrames.Length);
         Assert.All(protectedFrames, frame => Assert.Empty(frame.RawBytes));
         Assert.All(frames.Where(frame => frame.SentByHost), frame => Assert.Empty(frame.RawBytes));
+        var callRecords = await stored.UploadBatches.Where(row => row.TerminalId == terminalId && row.IdempotencyKey.StartsWith("ncc-call-detail:"))
+            .Include(row => row.Records).ToListAsync();
+        Assert.Equal(bundled ? 2 : 0, callRecords.Count);
+        Assert.All(callRecords.SelectMany(row => row.Records), row => Assert.DoesNotContain("ABABAB", row.DecodedMetadataJson, StringComparison.OrdinalIgnoreCase));
     }
 
     private sealed class OpaqueTestCardProvider(byte[] expectedRequest, string mode) : INccCardAuthorizationProvider
@@ -571,6 +584,42 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                     : mode == "approve" && expectedRequest[0] == 2 ? "TESTREF1"u8.ToArray() : []
             });
         }
+    }
+
+    [Fact]
+    public async Task Malformed_authorization_suffix_is_declined_without_calling_provider_or_acknowledging_records()
+    {
+        var prefix = new byte[39]; prefix[0] = 2;
+        byte[] invalid = [.. prefix, .. TerminalCallDetail(53, 0x4341, 0x45), 53, 0];
+        var provider = new OpaqueTestCardProvider(prefix, "approve");
+        await using var factory = new NccFactory();
+        await using var host = factory.WithWebHostBuilder(builder =>
+            builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider)));
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(host, "fixture-malformed", "Admin");
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            provider.TerminalId = (await db.Terminals.SingleAsync(row => row.TerminalIdHex == Convert.ToHexString(KnownId))).Id;
+        }
+        using var tcp = new TcpClient(); await tcp.ConnectAsync(IPAddress.Loopback, factory.Port);
+        var stream = tcp.GetStream(); await stream.WriteAsync(Message(KnownId, invalid));
+        AssertAck(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
+        var response = Decode(await ReadFrameAsync(stream, TimeSpan.FromSeconds(5)));
+        Assert.True(DlogCardAuthorizationWire.TryBuildDecline(prefix, out var decline));
+        Assert.Equal(decline, response.Data); Assert.Equal(0, provider.Calls);
+        await stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | response.Control)));
+        var attempts = await client.GetFromJsonAsync<JsonElement>("/api/cards/authorization-attempts", Json);
+        var attempt = Assert.Single(attempts.EnumerateArray());
+        Assert.Equal("malformed_request", attempt.GetProperty("outcome").GetString());
+        Assert.Equal(invalid.Length, attempt.GetProperty("requestBytes").GetInt32());
+        Assert.Equal(JsonValueKind.Null, attempt.GetProperty("bundledCallRecords").ValueKind);
+        await using var check = host.Services.CreateAsyncScope();
+        var stored = check.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        Assert.Empty(await stored.UploadBatches.Where(row => row.TerminalId == provider.TerminalId && row.IdempotencyKey.StartsWith("ncc-call-detail:")).ToListAsync());
+        Assert.Empty(await stored.PaymentTransactions.ToListAsync());
+        var sessionId = attempt.GetProperty("nccSessionId").GetGuid();
+        var frame = Assert.Single(await stored.NccSessionFrames.Where(row => row.NccSessionId == sessionId && !row.SentByHost && row.WireLength == invalid.Length + 11).ToListAsync());
+        Assert.Empty(frame.RawBytes);
     }
 
     [Fact]
@@ -1207,19 +1256,35 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         .Single(element => element.GetProperty("label").GetString() == label).GetProperty("value").GetInt32();
 
     [Fact]
-    public async Task Rating_with_a_call_detail_suffix_keeps_the_suffix_out_of_captures()
+    public async Task Rating_with_a_call_detail_suffix_acknowledges_the_records_and_keeps_the_suffix_out_of_captures()
     {
         var request = DlogRateWire.EncodeRequest("5550187", international: false);
         await using var link = await OpenAsync();
-        await link.Stream.WriteAsync(Message(KnownId, [.. request, .. TerminalCallDetail(53, 0xF005, 0x45)]));
+        byte[] bundled = [.. request, .. TerminalCallDetail(53, 0xF005, 0x45)];
+        await link.Stream.WriteAsync(Message(KnownId, bundled));
         AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
-        Assert.Equal(64, Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5))).Data[0]);
+        var response = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(64, response.Data[0]);
+        Assert.Equal(new byte[] { 5, 0x05, 0xF0 }, response.Data[DlogRateWire.ResponseLength..]);
+        await link.Stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { Control = NccControl.ReTrans, TerminalId = KnownId, Data = bundled }));
+        AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(response.Data, Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5))).Data);
+        await link.Stream.WriteAsync(HeaderOnlyRetransmission(KnownId, 0));
+        AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+        Assert.Equal(response.Data, Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5))).Data);
         var call = await WaitCallAsync("5550187");
         var detail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/call-records/{call.GetProperty("id").GetGuid()}", Json);
         Assert.Equal(Convert.ToHexString(request), detail.GetProperty("requestRawHex").GetString());
         var sessions = await fx.Client.GetFromJsonAsync<JsonElement>("/api/ncc/sessions", Json);
         var session = sessions.EnumerateArray().First(row => row.GetProperty("socketBound").GetBoolean());
-        Assert.Equal("", session.GetProperty("lastFrameSampleHex").GetString());
+        var sessionDetail = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{session.GetProperty("id").GetGuid()}", Json);
+        Assert.All(sessionDetail.GetProperty("frames").EnumerateArray().Take(2), frame => Assert.Equal("", frame.GetProperty("rawHex").GetString()));
+        await using var scope = fx.Factory.Services.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        Assert.Single(await db.CallRecords.Where(row => row.DialedDigits == "5550187").ToListAsync());
+        var sessionId = session.GetProperty("id").GetGuid().ToString();
+        var cdrs = await db.UploadBatches.Where(row => row.IdempotencyKey.StartsWith("ncc-call-detail:") && row.DecodedMetadataJson.Contains(sessionId)).ToListAsync();
+        Assert.Single(cdrs);
     }
 
     private static byte[] TerminalCallDetail(byte type, ushort sequence, byte classification)

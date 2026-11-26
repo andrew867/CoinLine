@@ -10,7 +10,7 @@ namespace HostPlatform.Api.Hosting;
 // provider-supplied reference or message is persisted or returned here.
 internal sealed record CardAuthorizationAuditDetail(byte MessageType, string Outcome, string Provider,
     string? Reason = null, Guid? CardAccountId = null, Guid? QuoteId = null, decimal? QuotedAmountUsd = null,
-    ushort? CallSequence = null, Guid? OriginalDecisionId = null);
+    ushort? CallSequence = null, Guid? OriginalDecisionId = null, int? RequestBytes = null, int? BundledCallRecords = null);
 
 internal static class CardAuthorizationAudit
 {
@@ -44,17 +44,19 @@ internal static class CardAuthorizationAudit
                 return null;
             var outcome = SafeString(root, "outcome", Outcomes) ?? "unknown";
             var provider = SafeString(root, "provider", Providers) ?? "unrecorded";
+            var requestBytes = SafeCount(root, "requestBytes", 1, HostPlatform.Protocols.Ncc.NccConstants.MaxDataSize);
+            var bundledRecords = SafeCount(root, "bundledCallRecords", 0, 2);
             // Only the built-in synthetic provider can produce account/quote
             // evidence meaningful to this ledger.
             if (provider != LabProvider)
-                return new(messageType, outcome, provider);
+                return new(messageType, outcome, provider, RequestBytes: requestBytes, BundledCallRecords: bundledRecords);
             var amount = root.TryGetProperty("quotedAmountUsd", out var value)
                 && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var money) && money >= 0 ? (decimal?)money : null;
             var sequence = root.TryGetProperty("callSequence", out value) && value.ValueKind == JsonValueKind.Number
                 && value.TryGetUInt16(out var seq) ? (ushort?)seq : null;
             return new(messageType, outcome, provider, SafeString(root, "reason", Reasons),
                 SafeGuid(root, "cardAccountId"), SafeGuid(root, "quoteId"), amount, sequence,
-                SafeGuid(root, "originalDecisionId"));
+                SafeGuid(root, "originalDecisionId"), requestBytes, bundledRecords);
         }
         catch (JsonException) { return null; }
     }
@@ -109,4 +111,8 @@ internal static class CardAuthorizationAudit
     private static Guid? SafeGuid(JsonElement root, string key) =>
         root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.String
             && value.TryGetGuid(out var id) && id != Guid.Empty ? id : null;
+
+    private static int? SafeCount(JsonElement root, string key, int minimum, int maximum) =>
+        root.TryGetProperty(key, out var value) && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var number) && number >= minimum && number <= maximum ? number : null;
 }

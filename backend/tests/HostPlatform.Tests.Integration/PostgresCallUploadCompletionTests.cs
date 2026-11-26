@@ -22,6 +22,71 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresCallUploadCompletionTests
 {
     [PostgresIntegrationFact]
+    public async Task Immediate_card_and_rate_bundles_acknowledge_only_durable_call_records_across_reconnects()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
+        var key = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
+            .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()).UseSetting("Ncc:LoopbackOnly", "true"));
+        using var api = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
+        api.DefaultRequestHeaders.Add("X-API-Key", key);
+        var (phone, setId) = await Seed(factory.Services);
+        var wire = Convert.FromHexString(phone.TerminalIdHex);
+        var queued = await AccessRolloutFixture.Post(api, $"/api/terminals/{phone.Id}/downloads", new { tableSetId = setId });
+        var queuedId = queued.GetProperty("id").GetGuid();
+        var prefix = new byte[39]; prefix[0] = 2; prefix[^3] = 0xA5;
+        var first = Call(0x5341); var second = Call(0x5342);
+        byte[] request = [.. prefix, .. first, .. second];
+        Assert.Equal(147, request.Length);
+        byte[] receipts = [5, 0x41, 0x53, 5, 0x42, 0x53];
+        Assert.True(DlogCardAuthorizationWire.TryBuildDecline(prefix, out var decline));
+        int initialPayments;
+        await using (var scope = factory.Services.CreateAsyncScope())
+            initialPayments = await scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>().PaymentTransactions.CountAsync();
+
+        byte[] expected = [.. decline, .. receipts];
+        for (var pass = 0; pass < 2; pass++)
+            Assert.Equal(expected, await Exchange(request));
+        byte[] rated = [.. DlogRateWire.EncodeRequest("3335550120", false), .. first, .. second];
+        var quote = await Exchange(rated);
+        Assert.Equal(64, quote[0]); Assert.Equal(receipts, quote[DlogRateWire.ResponseLength..]);
+
+        var attempts = await api.GetFromJsonAsync<JsonElement>($"/api/cards/authorization-attempts?terminalId={phone.Id}");
+        Assert.Equal(2, attempts.GetArrayLength());
+        Assert.All(attempts.EnumerateArray(), row =>
+        {
+            Assert.Equal("provider_unavailable", row.GetProperty("outcome").GetString());
+            Assert.Equal(147, row.GetProperty("requestBytes").GetInt32());
+            Assert.Equal(2, row.GetProperty("bundledCallRecords").GetInt32());
+        });
+        await using var verify = factory.Services.CreateAsyncScope();
+        var db = verify.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+        Assert.Equal(initialPayments, await db.PaymentTransactions.CountAsync());
+        var cdrs = await db.UploadBatches.Include(row => row.Records).Where(row => row.TerminalId == phone.Id && row.IdempotencyKey.StartsWith(TerminalUploads.CallDetailPrefix)).ToListAsync();
+        Assert.Equal(2, cdrs.Count);
+        Assert.All(cdrs.SelectMany(row => row.Records), row => Assert.DoesNotContain("ABABAB", row.DecodedMetadataJson, StringComparison.OrdinalIgnoreCase));
+        var batch = Assert.Single(await db.DownloadBatches.Where(row => row.TerminalId == phone.Id).ToListAsync());
+        Assert.Equal(queuedId, batch.Id); Assert.Equal(DownloadBatchStatus.Pending, batch.Status);
+        var sessions = await db.NccSessionFrames.Where(row => row.NccSession!.TerminalId == phone.Id && !row.SentByHost && (row.WireLength == request.Length + 11 || row.WireLength == rated.Length + 11)).ToListAsync();
+        Assert.Equal(3, sessions.Count); Assert.All(sessions, row => Assert.Empty(row.RawBytes));
+
+        async Task<byte[]> Exchange(byte[] data)
+        {
+            using var socket = new TcpClient(); await socket.ConnectAsync(IPAddress.Loopback, port);
+            var stream = socket.GetStream();
+            await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { Control = 0, TerminalId = wire, Data = data }));
+            AssertAck(await Read(stream)); var response = await Read(stream);
+            await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { Control = (byte)(NccControl.Ack | NccControl.Clr | response.Control) }));
+            return response.Data;
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Explicit_upload_completes_after_all_records_and_replays_final_response_without_a_new_download()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
