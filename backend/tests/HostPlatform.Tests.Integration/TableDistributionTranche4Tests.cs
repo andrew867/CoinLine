@@ -526,7 +526,10 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
         using var unknown = await _client.GetAsync(endpoint + "?familyId=unknown");
         Assert.Equal(HttpStatusCode.BadRequest, unknown.StatusCode);
         var desk = await _client.GetFromJsonAsync<TerminalFamilyTableReview>(endpoint + "?familyId=mtr20-desk");
-        Assert.False(desk!.Documented);
+        Assert.True(desk!.Documented);
+        Assert.Contains("shared checklist", desk.Note);
+        Assert.DoesNotContain(desk.Tables, table => table.Name == "Coin validation");
+        Assert.Equal("matching", Assert.Single(Assert.Single(desk.Tables, table => table.Name == "Call screening").Records).ScreeningFit);
         using var published = await _client.PostAsync(path + "/publish?confirm=true", null);
         Assert.Equal(HttpStatusCode.NoContent, published.StatusCode);
     }

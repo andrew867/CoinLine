@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { apiGet } from '../api/client'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 
-type Evidence = { number: number; length: number; format: string; screeningSlots: number[] }
+type Evidence = { number: number; length: number; format: string; screeningSlots: number[]; screeningFit?: string | null; screeningNote?: string | null }
 type Requirement = { name: string; required: boolean; candidates: number[]; records: Evidence[]; status: string; note?: string | null }
 type Review = {
   familyId: string; familyLabel: string; documented: boolean; screeningEntries: number | null
@@ -12,7 +12,7 @@ type Review = {
 
 const statusText: Record<string, string> = {
   present: 'Candidate present', missing: 'Missing from set', partial: 'Partial record group',
-  invalid: 'Check record format', unmapped: 'Wire record unidentified',
+  invalid: 'Check record format', review: 'Candidate needs review', unmapped: 'Wire record unidentified',
 }
 const formatText: Record<string, string> = {
   verifiedLength: 'Emulated-terminal acknowledged length', catalogueLength: 'Known target catalogue length',
@@ -61,9 +61,9 @@ export function TerminalFamilyReview({ setId, initialFamily, dataKey, recordDirt
         <p>Maximizer lists {review.screeningEntries} screening entries for this family. The packed layout and segment
           counts depend on the installed firmware. The checklist describes a full installation. A partial download may omit records already on the phone.</p>
         <dl className="native-table-summary">
-          <div><dt>Mandatory families with candidates</dt><dd>{review.tables.filter(row => row.required && row.status === 'present').length}
+          <div><dt>Mandatory families with recognized candidates</dt><dd>{review.tables.filter(row => row.required && row.status === 'present').length}
             {' / '}{review.tables.filter(row => row.required).length}</dd></div>
-          <div><dt>Feature-specific families with candidates</dt><dd>{review.tables.filter(row => !row.required && row.status === 'present').length}
+          <div><dt>Feature-specific families with recognized candidates</dt><dd>{review.tables.filter(row => !row.required && row.status === 'present').length}
             {' / '}{review.tables.filter(row => !row.required).length}</dd></div>
         </dl>
         <div className="table-set-versions" role="region" aria-label="Family table requirements" tabIndex={0}>
@@ -79,6 +79,7 @@ export function TerminalFamilyReview({ setId, initialFamily, dataKey, recordDirt
                     MT{record.number}</Link> : `MT${record.number}`}
                   {' · '}{record.length.toLocaleString()} B · {formatText[record.format] ?? record.format}
                   {!!record.screeningSlots.length && <small>Packed editor slots {record.screeningSlots.join(' or ')}</small>}
+                  {record.screeningNote && <small>{record.screeningNote}</small>}
                 </div>)}
               </td>
             </tr>)}</tbody>
