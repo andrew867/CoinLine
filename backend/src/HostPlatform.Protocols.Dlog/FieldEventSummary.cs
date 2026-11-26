@@ -114,9 +114,10 @@ public static class FieldEventSummary
     {
         if (fields["statusFlags"] is not JsonArray flags)
             return null;
-        if (flags.Count > 0)
-            return string.Join(", ", flags.Select(flag => flag!.GetValue<string>()));
-
+        var parts = flags.Select(flag => flag!.GetValue<string>()).ToList();
+        if (TryInt(fields["unmappedStatusBits"], out var unmapped) && unmapped > 0)
+            parts.Add($"Unmapped status bits ({unmapped})");
+        if (parts.Count > 0) return string.Join(", ", parts);
         return fields["hasStatusBits"]?.GetValue<bool>() == true
             ? "Profile-specific status flags reported" : "No status flags reported";
     }
