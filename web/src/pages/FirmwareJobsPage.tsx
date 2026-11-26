@@ -2,6 +2,7 @@ import type { FormEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
+import { FirmwareTransitionReviewPanel } from './FirmwareTransitionReviewPanel'
 
 type Row = {
   id: string
@@ -72,6 +73,7 @@ export function FirmwareJobsPage() {
       <p style={{ fontSize: 14, color: '#444' }}>
         Simulation-first orchestration — use job detail to run simulation and operator approval (rollback notes).
       </p>
+      <FirmwareTransitionReviewPanel phones={terms} />
       {!loading && !err && terms.length === 0 && (
         <p role="status" style={{ color: '#a50', maxWidth: 720 }}>
           No terminals available — create a terminal before queueing jobs.
