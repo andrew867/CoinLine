@@ -8,6 +8,12 @@
 
 Operators with an Add-only Phones profile can register new phones. The registration form offers existing sites, installed firmware and terminal families without opening the full catalogues. The optional group is available only with Membership Add and follows the selected site's customer. Registering a phone does not require permission to read existing phone records.
 
+## Latest reported phone status
+
+Open **Terminal status**, select a phone by name and wire ID, and inspect **Latest reported phone status**. The panel shows the serial number contained in the last valid MT10, the Manager receipt time, and named status conditions grouped by hardware, memory, enclosure, cash box and line equipment. Separate labels distinguish a reported condition from one not indicated in that snapshot. An unmapped bit is called out rather than treated as clear. An unreadable later report does not erase the earlier valid report; its receipt time is shown separately.
+
+These are terminal observations from a matched NCC session, not a live hardware or health check. A phone with no valid report is distinguished from one reporting no named conditions. Inventory deactivation, last contact, event history and the latest status capture are separate observations. A status-only operator can use this panel without opening the phone registry or detailed message log. With message-log read access, the source status report is linked.
+
 ## Deactivation and reactivation
 
 The phone detail page includes a Manager lifecycle panel. Deactivate an idle phone to record the date and a deletion review date; the default is 45 days from the current UTC date, and an operator can change it. The Phones list can filter active and inactive Manager records independently of the reported operational status.
@@ -21,3 +27,11 @@ Unlike the legacy Manager's automatic deletion on the specified date, CoinLine u
 For a phone registered with the Inmate terminal family, the phone detail page has an Inmate terminal configuration panel. Select a named Inmate Feature Configuration and enter the external Inmate Setup Configuration ID supplied by the institution's separate setup system. Either reference can be left unassigned.
 
 The references are saved in the Manager database. The Inmate Setup contents and the terminal record encodings are not available in the verified catalogue, so saving does not create a download. Changing the phone to another family leaves the references inactive and permits explicitly clearing them. A feature configuration cannot be deleted while a phone references it.
+
+## Cashbox status
+
+Open **Money > Cashbox status** to find a phone by name or NCC wire ID and browse the matching phones in wire-ID order. From a selected phone in **Terminal status**, choose **Query cashbox** to open the same view limited to that phone. Choose **Browse all cashboxes** to leave that selection.
+
+The current reported box shows its balance, capacity percentage, condition, box number and reported coin counts. The manager receipt time is UTC; the phone's own reported clock is shown separately. Refresh reports only reads the manager's stored data and does not dial the phone. The collection history is separate: when a collection replaces the box, its balance does not establish the new box's contents. Wait for a new status report. A phone without reports is shown as such, not as having a zero balance.
+
+Coin counts are shown in terminal slot order because configured denominations can vary. If the manager recorded an MT50 application acknowledgement for the same phone before receiving the report, the configured positive slot values are shown with the acknowledged revision and receipt time. They are a configuration reference, not proof that accumulated coins were counted under that configuration. A later transfer without a confirmed acknowledgement, missing, ambiguous or unreadable MT50 evidence leaves the raw slots visible without a value label. Operators with Downloads Read can also open the source download. Unknown status bits are reported as unmapped rather than guessed. The screen requires Cashbox Read and does not provide any collection, money adjustment or configuration controls.

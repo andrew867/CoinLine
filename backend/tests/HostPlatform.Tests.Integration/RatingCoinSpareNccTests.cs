@@ -1,9 +1,11 @@
+using System.Buffers.Binary;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text.Json;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
 using HostPlatform.Protocols.Tables;
 using Microsoft.EntityFrameworkCore;
@@ -155,6 +157,29 @@ public sealed class RatingCoinSpareNccTests(NccListenFixture fx) : IClassFixture
         var timeline = completed.GetProperty("timeline").EnumerateArray().ToArray();
         Assert.Equal(records.Length, timeline.Length);
         Assert.All(timeline, item => Assert.Equal("ack", item.GetProperty("lastAckStatus").GetString()));
+
+        // The next matched MT38 report can reference that exact delivered MT50 revision.
+        // Its count and balance are preserved even though the configured value was edited.
+        var cashbox = new byte[DlogCashboxWire.StatusLength]; cashbox[0] = 38;
+        new byte[] { 126, 10, 1, 8, 0, 0 }.CopyTo(cashbox, 1); cashbox[11] = 1; cashbox[12] = 40;
+        BinaryPrimitives.WriteInt32LittleEndian(cashbox.AsSpan(13), 75);
+        BinaryPrimitives.WriteUInt16LittleEndian(cashbox.AsSpan(17), 3);
+        using (var tcp = new TcpClient())
+        {
+            await tcp.ConnectAsync(IPAddress.Loopback, fx.Port);
+            var stream = tcp.GetStream();
+            await stream.WriteAsync(Packet(0, [.. cashbox, 13])); AssertAck(await Read(stream));
+        }
+        var ledger = await fx.Client.GetFromJsonAsync<JsonElement>($"/api/terminals/{phoneId}/cashbox");
+        var report = Assert.Single(ledger.GetProperty("statuses").EnumerateArray());
+        Assert.Equal(75, report.GetProperty("status").GetProperty("balanceMinorUnits").GetInt32());
+        Assert.Equal(3, report.GetProperty("status").GetProperty("coinCounts")[0].GetInt32());
+        var reference = ledger.GetProperty("coinConfigurations").GetProperty(report.GetProperty("id").GetString()!);
+        Assert.Equal("acknowledged", reference.GetProperty("status").GetString());
+        Assert.Equal(batch, reference.GetProperty("downloadBatchId").GetGuid());
+        Assert.Equal(2, reference.GetProperty("tableRevision").GetInt32());
+        Assert.False(reference.GetProperty("laterUncertainAttempt").GetBoolean());
+        Assert.Equal(30, reference.GetProperty("slots")[0].GetProperty("valueMinorUnits").GetInt32());
         await using (var scope = fx.Factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();

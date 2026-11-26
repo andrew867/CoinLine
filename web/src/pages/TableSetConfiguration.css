@@ -77,6 +77,10 @@
 .table-config-preview-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .table-config-preview { background: #f2f8f5; border-radius: 8px; padding: 11px 13px; }
 .table-config-preview ul { margin-block: 5px 10px; max-height: 200px; overflow-y: auto; }
+.screening-bulk-panel { margin: 12px 0; }
+.screening-bulk-panel > summary { cursor: pointer; font-weight: 650; }
+.screening-bulk-panel table small { display: block; white-space: nowrap; }
+.screening-bulk-panel table td { vertical-align: top; }
 .table-record-copy > details { margin: 0; }
 .table-record-copy summary { margin: 0; }
 .table-record-copy form > fieldset {

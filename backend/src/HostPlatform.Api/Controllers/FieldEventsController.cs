@@ -1,5 +1,6 @@
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Authorization;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Dlog;
@@ -11,8 +12,55 @@ namespace HostPlatform.Api.Controllers;
 
 [ApiController]
 [Route("api/field-events")]
-public sealed class FieldEventsController(HostPlatformDbContext db) : ControllerBase
+public sealed class FieldEventsController(HostPlatformDbContext db, INccSessionOutbound outbound) : ControllerBase
 {
+    [HttpGet("phone-options")]
+    public async Task<IActionResult> PhoneOptions(CancellationToken ct)
+    {
+        var phones = await db.Terminals.AsNoTracking().OrderBy(phone => phone.DisplayName).ThenBy(phone => phone.Id)
+            .Select(phone => new
+            {
+                phone.Id, phone.DisplayName, phone.TerminalIdHex,
+                groupName = phone.TerminalGroup == null ? null : phone.TerminalGroup.Name,
+                lastSessionAtUtc = db.NccSessions.Where(session => session.TerminalId == phone.Id)
+                    .Max(session => (DateTime?)session.StartedAtUtc)
+            }).ToListAsync(ct);
+        return Ok(phones.Select(phone => new
+        {
+            phone.Id, phone.DisplayName, phone.TerminalIdHex, phone.groupName, phone.lastSessionAtUtc,
+            onCall = outbound.TryDescribe(phone.Id, out _)
+        }));
+    }
+
+    // The record has no terminal clock. Report the retained host capture time,
+    // not a time inferred from an alarm, phone registration or current clock.
+    [HttpGet("phones/{terminalId:guid}/current-status")]
+    public async Task<IActionResult> CurrentStatus(Guid terminalId, CancellationToken ct)
+    {
+        var phone = await db.Terminals.AsNoTracking().Where(row => row.Id == terminalId)
+            .Select(row => new { row.Id, row.DisplayName, row.TerminalIdHex, row.DeactivatedAtUtc }).SingleOrDefaultAsync(ct);
+        if (phone == null) return NotFound();
+        var reports = db.DlogTransactions.AsNoTracking().Where(row => row.TerminalId == terminalId && row.NccSessionId != null
+            && row.NccSession!.TerminalId == terminalId && row.Direction == (int)DlogDirection.TerminalToHost
+            && row.MessageType == TerminalStatusWire.MessageType);
+        var newest = await reports.OrderByDescending(row => row.CapturedAtUtc).ThenByDescending(row => row.Id)
+            .Select(row => new { row.Id, row.CapturedAtUtc, row.RawPayload }).FirstOrDefaultAsync(ct);
+        var valid = newest != null && TerminalStatusWire.Read(newest.RawPayload) != null ? newest
+            : await reports.Where(row => row.RawPayload.Length == TerminalStatusWire.RecordLength
+                    ? row.RawPayload[0] == TerminalStatusWire.MessageType : false)
+                .OrderByDescending(row => row.CapturedAtUtc).ThenByDescending(row => row.Id)
+                .Select(row => new { row.Id, row.CapturedAtUtc, row.RawPayload }).FirstOrDefaultAsync(ct);
+        var decoded = valid == null ? null : TerminalStatusWire.Read(valid.RawPayload);
+        return Ok(new
+        {
+            phone.Id, phone.DisplayName, phone.TerminalIdHex, phone.DeactivatedAtUtc,
+            latestReportAtUtc = newest?.CapturedAtUtc, statusReportId = valid?.Id, statusReportedAtUtc = valid?.CapturedAtUtc,
+            newerUnreadableReport = newest != null && newest.Id != valid?.Id,
+            serialNumber = decoded?.SerialNumber, groups = decoded?.Groups,
+            hasStatusBits = decoded?.HasStatusBits, unmappedSetBitCount = decoded?.UnmappedSetBitCount
+        });
+    }
+
     [HttpGet("reference")]
     public async Task<ActionResult<object>> Reference(CancellationToken ct)
     {

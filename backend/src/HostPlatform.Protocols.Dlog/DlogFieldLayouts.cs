@@ -80,24 +80,17 @@ internal static class DlogFieldLayouts
         if (raw.Length < TerminalStatusLength)
             return false;
 
-        fields["serialNumber"] = FieldEventCatalog.ReadTerminalSerial(raw[..TerminalStatusLength]);
+        var status = TerminalStatusWire.Read(raw[..TerminalStatusLength]);
+        if (status == null) return false;
+        fields["serialNumber"] = status.SerialNumber;
         var flags = new JsonArray();
-        AddFlags(flags, raw[6], ["Handset fault", "Telephony not responding", null, null, null, null, null, "Telephony communications fault"]);
-        AddFlags(flags, raw[7], ["Power interruption", "Display not responding", "Voice prompts unavailable", null, "Card reader blocked"]);
-        AddFlags(flags, raw[8], ["Call record checksum fault", "Statistics checksum fault", "Table checksum fault", "Other data checksum fault", "Call record store full", "EEPROM fault", "Memory lost", "Memory hardware fault"]);
-        AddFlags(flags, raw[9], ["Access cover open", "Keypad fault", "Phone removed from mount", "Cash box threshold reached", "Cash box cover open", "Cash box removed", "Cash box full", "Coin jam"]);
-        AddFlags(flags, raw[10], ["Coin escrow jam", "Coin validator fault", "Line check failed", "Data call failed"]);
+        foreach (var flag in status.Groups.SelectMany(group => group.Flags).Where(flag => flag.Asserted))
+            flags.Add(flag.Name);
         fields["statusFlags"] = flags;
-        fields["hasStatusBits"] = raw[6..TerminalStatusLength].IndexOfAnyExcept((byte)0) >= 0;
+        fields["hasStatusBits"] = status.HasStatusBits;
+        fields["unmappedStatusBits"] = status.UnmappedSetBitCount;
         note = "Named status bits shared by the inspected terminal profiles.";
         return true;
-    }
-
-    private static void AddFlags(JsonArray target, byte source, ReadOnlySpan<string?> labels)
-    {
-        for (var i = 0; i < labels.Length; i++)
-            if ((source & (1 << i)) != 0 && labels[i] is { } label)
-                target.Add(label);
     }
 
     private static bool TryDecodeSoftwareVersion(ReadOnlySpan<byte> raw, JsonObject fields, out string note)
@@ -231,6 +224,8 @@ internal static class DlogFieldLayouts
     {
         fields["timeStamp"] = FormatYmdhms(clock);
         fields["cashBoxStatus"] = status.Flags;
+        fields["cashBoxCondition"] = status.Condition;
+        fields["unmappedCashBoxStatusBits"] = status.UnmappedSetBitCount;
         fields["boxNumberBcd"] = status.BoxNumber;
         fields["percentFull"] = status.PercentFull;
         fields["currencyValue"] = status.BalanceMinorUnits;

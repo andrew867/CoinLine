@@ -11,6 +11,7 @@ import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } fr
 import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
 import { LocalDialingImport } from './LocalDialingImport'
 import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
+import { ScreeningBulkPanel } from './ScreeningBulkPanel'
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { RestrictedRouteReview, type RestrictedRouteRecord } from './RestrictedRouteReview'
@@ -527,6 +528,11 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           revision={layout.revision} sha256={layout.sha256} reference={keyValue(current, 'reference') ?? null}
           editable={canEdit} dirty={changed !== 0 || busy} onApplied={() => { setReload(count => count + 1); onSaved() }} />
       </>}
+      {showingSettings && current && screeningSlot != null && layout.screening && canPerform('table-records', op.update) &&
+        <ScreeningBulkPanel key={`${setId}:${number}:${screeningSlot}`} setId={setId} number={number} revision={layout.revision}
+          sha256={layout.sha256} profile={layout.profile} slot={screeningSlot}
+          dirty={busy || Object.keys(edits).length > 0 || hasScreeningChanges}
+          onApplied={sourceChanged => { if (sourceChanged) { setReload(count => count + 1); onSaved() } }} />}
       {showingSettings && number === 26 && layout.length === 72 && current?.key === 'display' &&
         ['languageCount', ...languageOrderKeys].every(key => current.fields.some(field => field.key === key)) &&
         <LanguageOrderPanel value={key => {
