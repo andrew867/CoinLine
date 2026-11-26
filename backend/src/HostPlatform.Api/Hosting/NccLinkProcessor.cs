@@ -614,13 +614,15 @@ internal sealed class NccLinkProcessor(
                 _mandatoryFullInstall = false;
                 _installStarted = false;
             }
-            var continuation = callIn ? CallbackContinuation.CallIn : mandatoryFull ? CallbackContinuation.FullInstall : CallbackContinuation.Install;
+            var ordinaryCraft = applicationType == TableDownloadRequestType && DlogTableRequestWire.IsOrdinaryCraftUpdate(packet.Data[1]);
+            var continuation = callIn ? CallbackContinuation.CallIn : mandatoryFull ? CallbackContinuation.FullInstall :
+                ordinaryCraft ? CallbackContinuation.CraftUpdate : CallbackContinuation.Install;
             if (returned == null && await TryOfferCallbackAsync(stream, terminal.Id, packet.TerminalId, continuation, cashboxStatus: cashboxStatus))
                 return;
             await StartInstallAsync(stream, packet.TerminalId, terminal, callIn, returned?.DeliverAssignedTables == true, cashboxStatus,
                 mandatoryFull, allowCutover: callIn || applicationType == TableDownloadRequestType &&
                     (packet.Data[1] & DlogTableRequestWire.CraftUpdate) != 0,
-                distinctCallbackDialogue: returned != null && completedEarlierDownload);
+                distinctCallbackDialogue: returned != null && completedEarlierDownload, allowAutomaticChangedRecords: ordinaryCraft);
         }
     }
 
@@ -1106,7 +1108,8 @@ internal sealed class NccLinkProcessor(
         if (terminal != null)
             await StartInstallAsync(stream, offer.Frame.TerminalId, terminal, offer.Continuation == CallbackContinuation.CallIn,
                 cashboxStatus: offer.CashboxStatus, mandatoryFull: offer.Continuation == CallbackContinuation.FullInstall,
-                allowCutover: offer.Continuation == CallbackContinuation.CallIn);
+                allowCutover: offer.Continuation == CallbackContinuation.CallIn,
+                allowAutomaticChangedRecords: offer.Continuation == CallbackContinuation.CraftUpdate);
     }
 
     private async Task<TerminalCallbackRequest?> RecordCallbackReturnAsync(Guid terminalId)
@@ -1136,7 +1139,7 @@ internal sealed class NccLinkProcessor(
         return true;
     }
 
-    private enum CallbackContinuation { TimeSync, CallIn, Install, FullInstall, ManagementReply }
+    private enum CallbackContinuation { TimeSync, CallIn, Install, FullInstall, ManagementReply, CraftUpdate }
 
     private sealed record CallbackOffer(TerminalCallbackRequest Request, DateTime DueAtUtc, NccWirePacket Frame,
         CallbackContinuation Continuation, byte[]? CashboxStatus)
@@ -1314,7 +1317,7 @@ internal sealed class NccLinkProcessor(
 
     private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn,
         bool deliverAssignedTables = false, byte[]? cashboxStatus = null, bool mandatoryFull = false, bool allowCutover = false,
-        bool distinctCallbackDialogue = false)
+        bool distinctCallbackDialogue = false, bool allowAutomaticChangedRecords = false)
     {
         if (_installStarted)
         {
@@ -1370,20 +1373,30 @@ internal sealed class NccLinkProcessor(
 
         _installStarted = true;
         DownloadBatch? prepared = null;
+        AuditEvent? selectionAudit = null;
         try
         {
+            var changes = allowAutomaticChangedRecords && !mandatoryFull && !callIn
+                ? await AcknowledgedTableChanges.SelectAsync(db, terminal, tableSetId.Value, _session.Id, stoppingToken)
+                : null;
             var (batch, _) = await tables.PrepareDownloadBatchAsync(
-                terminal.Id, tableSetId.Value, DownloadScope.Full, null,
+                terminal.Id, tableSetId.Value, changes?.DefinitionIds == null ? DownloadScope.Full : DownloadScope.Partial,
+                changes?.DefinitionIds,
                 stoppingToken,
                 (distinctCallbackDialogue ? "ncc-callback-" : "ncc-install-") + _session.Id.ToString("N"),
                 nccSessionId: _session.Id);
             prepared = batch;
+            if (changes != null)
+                selectionAudit = Audit("automatic_download_selection", new { batchId = batch.Id, tableSetId = tableSetId.Value,
+                    changes.BaselineId, changes.Reason, scope = batch.Scope.ToString(), itemCount = batch.Items.Count }, terminal.Id);
             await db.SaveChangesAsync(stoppingToken);
             _batch = batch;
             _mandatoryFullInstall = mandatoryFull;
         }
         catch (Exception ex)
         {
+            if (selectionAudit != null && db.Entry(selectionAudit).State == EntityState.Added)
+                db.Entry(selectionAudit).State = EntityState.Detached;
             if (prepared != null && db.Entry(prepared).State == EntityState.Added)
             {
                 foreach (var item in prepared.Items.ToArray())

@@ -11,4 +11,7 @@ public static class DlogTableRequestWire
     // An INSTALL or lost-memory request cannot rely on any previously
     // installed table. Cashbox restore is an independent request flag.
     public static bool RequiresFullAssignment(byte reason) => (reason & (Install | MemoryLost)) != 0;
+
+    public static bool IsOrdinaryCraftUpdate(byte reason) => reason == CraftUpdate ||
+        reason == (CraftUpdate | DlogCashboxWire.StatusRequestFlag);
 }
