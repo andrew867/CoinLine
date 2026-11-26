@@ -21,9 +21,9 @@ function fixture() {
   return { slots, revision: 1, sha256: 'fixture-digest', onHookEnabled: true, quickAccessEnabled: false, callEstablishedEnabled: false, scrollTicks: 10 }
 }
 
-async function openEditor() {
+async function openEditor(initial = fixture()) {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
-  let stored = fixture()
+  let stored = initial
   vi.mocked(apiFetch).mockImplementation(async (url, init) => {
     if (url !== endpoint) return new Response(null, { status: 404 })
     if (init?.method === 'PUT') {
@@ -42,6 +42,18 @@ async function openEditor() {
   fireEvent(details, new Event('toggle'))
   await screen.findByRole('group', { name: 'Message 1' })
 }
+
+it('warns when enabled idle advertising is terminated before a populated message', async () => {
+  const empty = fixture()
+  empty.slots[0] = blank()
+  await openEditor(empty)
+  expect(screen.getByText(/idle text rotation has no visible messages/)).toBeVisible()
+  const first = screen.getByRole('group', { name: 'Message 1' })
+  fireEvent.change(within(first).getByLabelText('Text'), { target: { value: 'IDLE DEMO' } })
+  // The second message becomes active once the first end marker is removed;
+  // the first itself has a zero-duration static mode and remains skipped.
+  expect(screen.queryByText(/idle text rotation has no visible messages/)).not.toBeInTheDocument()
+})
 const message = (number: number) => within(screen.getByRole('group', { name: `Message ${number}` }))
 function savedSlots(): AdvertisingSlot[] {
   const put = vi.mocked(apiFetch).mock.calls.find(([url, init]) => url === endpoint && init?.method === 'PUT')

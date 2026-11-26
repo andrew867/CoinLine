@@ -5,6 +5,41 @@ namespace HostPlatform.Tests.Unit;
 public sealed class AdvertisingTableWireTests
 {
     [Fact]
+    public void Idle_content_review_distinguishes_empty_terminated_skipped_and_split_messages()
+    {
+        var blank = new byte[AdvertisingTableWire.RecordLength]; blank[0] = AdvertisingTableWire.MessageType;
+        var empty = AdvertisingTableWire.ReviewOnHook(blank, false);
+        Assert.Equal(0, empty.VisibleMessages);
+        Assert.Equal(1, empty.FirstEndSlot);
+        var features = new byte[72]; features[0] = 26; features[22] = 1;
+        var records = new Dictionary<int, byte[]> { [26] = features, [29] = blank };
+        var review = NativeTableSetReview.Build(records);
+        Assert.Equal(0, review.VisibleOnHookTextMessages);
+        Assert.Contains(review.Findings, row => row.TableNumber == 29 && row.Message.Contains("message 1 ends the rotation"));
+        features[22] = 0;
+        Assert.DoesNotContain(NativeTableSetReview.Build(records).Findings, row => row.TableNumber == 29);
+
+        var slots = EmptySlots();
+        slots[0] = new("FIRST", 500, 0, false, false);
+        slots[1] = new("SKIPPED", 0, 0, false, false);
+        slots[2] = new("FLASH", 0, 1, false, false);
+        slots[4] = new("HIDDEN", 500, 0, false, false);
+        var data = AdvertisingTableWire.Encode(slots);
+        var visible = AdvertisingTableWire.ReviewOnHook(data, false);
+        Assert.Equal(2, visible.VisibleMessages); Assert.Equal(4, visible.FirstEndSlot); Assert.Equal(1, visible.HiddenMessages);
+        features[22] = 1; records[29] = data;
+        review = NativeTableSetReview.Build(records);
+        Assert.Equal(2, review.VisibleOnHookTextMessages);
+        Assert.Contains(review.Findings, row => row.TableNumber == 29 && row.Message.Contains("after the on-hook end marker"));
+
+        slots = Enumerable.Repeat(new AdvertisingSlot("", 0, 0, false, false), 20).ToArray();
+        slots[10] = new("CONNECTED", 500, 0, false, false);
+        data = AdvertisingTableWire.Encode(slots);
+        Assert.Equal(1, AdvertisingTableWire.ReviewOnHook(data, false).VisibleMessages);
+        Assert.Equal(0, AdvertisingTableWire.ReviewOnHook(data, true).VisibleMessages);
+    }
+
+    [Fact]
     public void Encodes_twenty_slots_and_preserves_unedited_imported_bytes()
     {
         var slots = Enumerable.Repeat(new AdvertisingSlot("", 0, 0, false), AdvertisingTableWire.SlotCount).ToArray();

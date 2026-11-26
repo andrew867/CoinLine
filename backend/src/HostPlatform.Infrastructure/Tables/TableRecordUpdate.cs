@@ -3,7 +3,7 @@ using HostPlatform.Protocols.Tables;
 
 namespace HostPlatform.Infrastructure.Tables;
 
-public sealed record TableRecordUpdateChange(int TableNumber, string Action, bool Required = false, bool Personalized = false);
+public sealed record TableRecordUpdateChange(int TableNumber, string Action, bool Required = false, bool Personalized = false, string? Warning = null);
 public sealed record TableRecordUpdatePlan(TableSet Set, IReadOnlyList<TableRecordUpdateChange> Changes);
 public sealed record TableRecordSourceSelection(TableSet Source, int[] Numbers);
 
@@ -82,7 +82,7 @@ public static class TableRecordUpdate
                     continue;
                 }
                 byNumber.Add(number, operations.Count);
-                operations.Add(new(number, entry.Action, entry.Required, personalized && number == 21));
+                operations.Add(new(number, entry.Action, entry.Required, personalized && number == 21, entry.Warning));
                 if (entry.Action == "keep")
                     continue;
 

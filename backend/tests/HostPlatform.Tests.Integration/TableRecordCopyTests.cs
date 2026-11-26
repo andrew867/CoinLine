@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
+using HostPlatform.Protocols.Tables;
 
 namespace HostPlatform.Tests.Integration;
 
@@ -8,6 +9,42 @@ namespace HostPlatform.Tests.Integration;
 public sealed class TableRecordCopyTests(ApiFixture factory)
 {
     private readonly HttpClient client = CreateClient(factory);
+
+    [Fact]
+    public async Task Copy_review_warns_before_replacing_working_idle_advertising_with_an_empty_record()
+    {
+        var source = await CreateAsync("sets", new { name = "Empty demo advertising" });
+        var destination = await CreateAsync("sets", new { name = "Working idle advertising" });
+        var definition = await CreateAsync("definitions", new { name = "Idle text fixture", tableNumber = 29 });
+        var feature = await CreateAsync("definitions", new { name = "Idle text fixture features", tableNumber = 26 });
+        var raw = new byte[481]; raw[0] = 29;
+        var features = new byte[72]; features[0] = 26; features[22] = 1;
+        var slots = Enumerable.Repeat(new AdvertisingSlot("", 0, 0, false, true), 20).ToArray();
+        slots[0] = new("FIRST", 500, 0, false, false);
+        slots[1] = new("SECOND", 500, 0, false, false);
+        await AddRaw(source, definition, raw, 0);
+        await AddRaw(destination, feature, features, 0);
+        await AddRaw(destination, definition, AdvertisingTableWire.Encode(slots), 1);
+        var donor = await Read(source); var before = await Read(destination);
+        var request = CopyRequest(source, donor, before, 29);
+        var path = $"/api/tables/sets/{destination}/record-copy";
+        using var response = await client.PostAsJsonAsync(path + "/preview", request);
+        response.EnsureSuccessStatusCode();
+        var entry = Assert.Single((await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("records").EnumerateArray());
+        Assert.Equal("replace", entry.GetProperty("action").GetString());
+        Assert.Contains("removes", entry.GetProperty("warning").GetString());
+        Assert.Equal(2, before.GetProperty("provisioning").GetProperty("visibleOnHookTextMessages").GetInt32());
+        Assert.Equal(before.GetRawText(), (await Read(destination)).GetRawText());
+        using var applied = await client.PostAsJsonAsync(path, request); applied.EnsureSuccessStatusCode();
+        var after = await Read(destination);
+        Assert.Equal(0, after.GetProperty("provisioning").GetProperty("visibleOnHookTextMessages").GetInt32());
+        Assert.Contains(after.GetProperty("provisioning").GetProperty("findings").EnumerateArray(), row =>
+            row.GetProperty("tableNumber").GetInt32() == 29 && row.GetProperty("message").GetString()!.Contains("no idle text advertising"));
+        Assert.Equal(Record(before, 26).GetRawText(), Record(after, 26).GetRawText());
+
+        Task<Guid> AddRaw(Guid set, Guid record, byte[] data, int order) => CreateAsync("versions", new
+        { tableSetId = set, tableDefinitionId = record, tableRevision = 1, payloadBase64 = Convert.ToBase64String(data), sortOrder = order });
+    }
 
     [Fact]
     public async Task Copies_selected_records_and_required_dependencies_without_replacing_unselected_records()

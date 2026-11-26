@@ -14,7 +14,7 @@ type Option = RecordSummary & { id: string; tableSetId: string; setName: string;
 type Options = { records: Option[]; total: number; page: number; pageSize: number }
 type Choice = { action: 'copy'; source: Option } | { action: 'clear' }
 type Preview = { previewToken: string; canApply: boolean; initialAssignment: boolean; family: FamilyReview | null;
-  changes: { tableNumber: number; action: string; required: boolean; personalized: boolean; current: AssignedRecord | null; result: RecordSummary | null }[] }
+  changes: { tableNumber: number; action: string; required: boolean; personalized: boolean; warning?: string | null; current: AssignedRecord | null; result: RecordSummary | null }[] }
 type Applied = { tableSetId: string; tableSetName: string; changedNumbers: number[]; removedNumbers: number[] }
 
 function recordLabel(record: RecordSummary | null) { return record ? `${record.configurationId ?? 'Unnamed configuration'} · revision ${record.revision}` : 'Not assigned' }
@@ -194,7 +194,7 @@ export function TerminalConfigurationWorksheet({ terminalId, assignmentKey, term
           <div className="worksheet-table-scroll"><table><caption>Proposed record changes</caption>
             <thead><tr><th>Record</th><th>Action</th><th>Current</th><th>Result</th></tr></thead>
             <tbody>{preview.changes.map(change => <tr key={change.tableNumber}>
-              <td>MT{change.tableNumber}</td><td>{actionLabels[change.action] ?? change.action}{change.required && <small>Required dependency</small>}{change.personalized && <small>Registered wire ID applied</small>}</td>
+              <td>MT{change.tableNumber}</td><td>{actionLabels[change.action] ?? change.action}{change.required && <small>Required dependency</small>}{change.personalized && <small>Registered wire ID applied</small>}{change.warning && <p role="alert">{change.warning}</p>}</td>
               <td>{recordLabel(change.current)}</td><td>{recordLabel(change.result)}</td>
             </tr>)}</tbody>
           </table></div>

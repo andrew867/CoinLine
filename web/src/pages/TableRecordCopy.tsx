@@ -5,7 +5,7 @@ type SetChoice = { id: string; name: string; status: number; targetFirmware: str
 type SourceRecord = { id: string; tableNumber: number; definitionName: string; validationPassed: boolean; payloadLengthBytes: number }
 type SourceDetail = { revision: number; versions: SourceRecord[] }
 type CopyRequest = { sourceSetId: string; sourceRevision: number; destinationRevision: number; recordNumbers: number[] }
-type CopyRecord = { tableNumber: number; definitionName: string; action: 'add' | 'replace' | 'keep'; required: boolean }
+type CopyRecord = { tableNumber: number; definitionName: string; action: 'add' | 'replace' | 'keep'; required: boolean; warning?: string | null }
 
 const actionLabels = { add: 'Add', replace: 'Replace', keep: 'Keep' }
 
@@ -144,6 +144,7 @@ export function TableRecordCopy({ setId, revision, customerId, disabled, onSaved
           <h3 id="record-copy-review">Copy review</h3>
           <ul>{preview.records.map((record) => <li key={record.tableNumber}>
             <strong>{actionLabels[record.action]} MT{record.tableNumber}</strong> {record.definitionName}{record.required && ' (required record)'}
+            {record.warning && <p role="alert">{record.warning}</p>}
           </li>)}</ul>
           {stale && <p>The draft changed. Review the copy again.</p>}
           {!changes && <p>The draft already contains these records.</p>}

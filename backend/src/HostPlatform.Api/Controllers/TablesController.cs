@@ -338,7 +338,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
             change.Source.TableDefinition!.TableNumber,
             DefinitionName = (change.Destination ?? change.Source).TableDefinition!.Name,
             change.Action,
-            change.Required
+            change.Required,
+            change.Warning
         }).ToArray();
 
         if (!preview && changes.Any(change => change.Action != "keep"))
