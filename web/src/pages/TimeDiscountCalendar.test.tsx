@@ -56,12 +56,14 @@ it('recalculates a staged calendar edit and saves only the selected field', asyn
   let { sections } = discountCalendarFixture()
   let revision = 1
   const saves: Record<string, string>[] = []
-  vi.mocked(apiFetch).mockImplementation(async (_, init) => {
+  vi.mocked(apiFetch).mockImplementation(async (path, init) => {
     if (init?.method === 'PUT') {
       const body = JSON.parse(init.body as string); saves.push(body.changes)
       sections = sections.map(section => ({ ...section, fields: section.fields.map(field => field.key in body.changes ? { ...field, value: body.changes[field.key] } : field) })); revision++
       return new Response(null, { status: 204 })
     }
+    if (path.includes('/records/93/')) return Response.json({ supported: true, profile: 'Later packed profile', length: 225, revision: 7,
+      sections: [{ fields: [ { key: 'discount-1.localMode', value: '1' }, { key: 'discount-1.localInitial', value: '80' }, { key: 'discount-1.localLater', value: '100' } ] }] })
     return Response.json({ supported: true, editable: true, profile: 'Later packed profile', length: 95, revision, sha256: `fixture-${revision}`, sections })
   })
   render(<MemoryRouter><NativeTableEditor setId="fixture" number={152} revision={1} exchangeFile={null}
@@ -74,6 +76,8 @@ it('recalculates a staged calendar edit and saves only the selected field', asyn
   fireEvent.change(screen.getByLabelText('Ends at hour'), { target: { value: '11' } })
   expect(screen.getByText('The selected MT152 period enables this payment and references a discount row.')).toBeVisible()
   expect(screen.getAllByText('MT93 discount 2').filter(item => item.tagName === 'DD')).toHaveLength(1)
+  expect(await screen.findByText('80% of normal charge')).toBeVisible()
+  expect(screen.getByText('100% of normal charge')).toBeVisible()
   expect(screen.queryByText(/These periods overlap/)).toBeNull()
   fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
   await waitFor(() => expect(saves).toEqual([{ 'period-0.endHour': '11' }]))

@@ -413,7 +413,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}
-      {number === 152 && layout.length === 95 && <TimeDiscountCalendar key={setId} value={key => {
+      {number === 152 && layout.length === 95 && <TimeDiscountCalendar key={setId} setId={setId} revision={layout.revision} value={key => {
         const field = layout.sections.flatMap(section => section.fields).find(item => item.key === key)
         return field && effectiveValue(field)
       }} />}
