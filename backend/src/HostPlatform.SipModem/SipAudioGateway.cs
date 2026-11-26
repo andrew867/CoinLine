@@ -22,6 +22,7 @@ public sealed class SipAudioGateway : IAsyncDisposable
     private readonly ILogger _logger;
     private readonly ConcurrentDictionary<string, ActiveCall> _calls = new();
     private SIPTransport? _transport;
+    private IPAddress _bindAddress = IPAddress.Loopback;
     private SIPRegistrationUserAgent? _registration;
     private int _rtpCursor;
     private volatile bool _registered;
@@ -57,13 +58,16 @@ public sealed class SipAudioGateway : IAsyncDisposable
     {
         if (Listening)
             return;
+        if (!IPAddress.TryParse(_options.BindAddress, out var bindAddress))
+            throw new InvalidOperationException("SipModem:BindAddress must be a numeric IP address.");
+        _bindAddress = bindAddress;
         _transport = new SIPTransport();
-        var channel = new SIPUDPChannel(new IPEndPoint(IPAddress.Any, _options.SipPort));
+        var channel = new SIPUDPChannel(new IPEndPoint(_bindAddress, _options.SipPort));
         _transport.AddSIPChannel(channel);
         SipPort = channel.ListeningSIPEndPoint.GetIPEndPoint().Port;
         _transport.SIPTransportRequestReceived += OnRequest;
         Listening = true;
-        _logger.LogInformation("SIP audio modem listening on UDP {Port}. Bytes go to {Host}:{NccPort}.", SipPort, _options.NccHost, _options.NccPort);
+        _logger.LogInformation("SIP audio modem listening on UDP {Address}:{Port}. Bytes go to {Host}:{NccPort}.", _bindAddress, SipPort, _options.NccHost, _options.NccPort);
         StartRegistration();
     }
 
@@ -175,7 +179,7 @@ public sealed class SipAudioGateway : IAsyncDisposable
         uas.Progress(SIPResponseStatusCodesEnum.Trying, null, null, null, null);
 
         var rtpPort = NextRtpPort();
-        var session = new RTPSession(false, false, false, IPAddress.Any, rtpPort);
+        var session = new RTPSession(false, false, false, _bindAddress, rtpPort);
         session.AcceptRtpFromAny = true;
         session.addTrack(new MediaStreamTrack(
             preferALaw ? SDPWellKnownMediaFormatsEnum.PCMA : SDPWellKnownMediaFormatsEnum.PCMU));

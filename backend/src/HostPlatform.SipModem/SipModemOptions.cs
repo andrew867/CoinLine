@@ -5,6 +5,8 @@ public sealed class SipModemOptions
     public const string SectionName = "SipModem";
 
     public bool Enabled { get; set; }
+    /// <summary>Numeric local bind address for SIP and RTP. Remote access is explicit.</summary>
+    public string BindAddress { get; set; } = "127.0.0.1";
     public int SipPort { get; set; } = 5060;
     public int RtpPortStart { get; set; } = 40000;
     public int MaxCalls { get; set; } = 4;

@@ -12,7 +12,7 @@ That starts PostgreSQL, the API, the management console, and the worker.
 | --- | --- | --- |
 | api | http://localhost:5006 | HTTP API. Swagger UI at `/swagger`. Liveness is `/health`. |
 | api | `localhost:4000` | NCC listener (`COINLINE_NCC_PORT=4000`). The listener stays enabled. |
-| api | `localhost:5060` UDP | SIP audio modem. G.711 only. Tones are Bell 202 at 1200 baud, the same pair `minimodem 1200` uses. Decoded bytes go to the listener on port 4000. RTP is UDP 40000–40007. Optional REGISTER: copy `sip.env.example` to `sip.env` and set the SIP credential, public IP, and assigned number. Platform status can run a loopback self-test. |
+| api | `localhost:5060` UDP | SIP audio modem. G.711 only. Tones are Bell 202 at 1200 baud, the same pair `minimodem 1200` uses. Decoded bytes go to the listener on port 4000. RTP is UDP 40000–40007. Optional REGISTER: copy `sip.env.example` to `sip.env` and configure the provider credentials and advertised address. SIP and RTP host publication are loopback-only by default; use `COINLINE_SIP_BIND_ADDRESS` only for a deliberately protected network or authenticated gateway. Platform status can run a loopback self-test. |
 | api | serial (optional) | Set `SerialModem__Enabled=true` and `SerialModem__PortName` to answer RING with ATA and bridge bytes to port 4000. Use a device path visible to the API process. A Linux container requires the device to be passed through. Off by default. |
 | web | http://localhost:8080 | Management console. `/api`, `/health`, `/health/live`, `/ready`, and `/swagger` are proxied to the API. |
 | postgres | `postgres:5432` on the Compose network | Not published on the host. |

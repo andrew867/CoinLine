@@ -24,6 +24,8 @@
 | `Ncc__IdleTimeoutSeconds` | Maximum interval without a valid received frame, default `120`. INSTALL acknowledgement deadlines remain separate. |
 | `COINLINE_NCC_BIND_ADDRESS` | Docker host publication, default loopback; internal container listener binds explicitly. |
 | `SipModem__Enabled` | Enables the SIP audio inlet. The base lab Compose stack sets this to `true`. |
+| `SipModem__BindAddress` | Numeric SIP and RTP bind address; default `127.0.0.1`. |
+| `COINLINE_SIP_BIND_ADDRESS` | Docker host SIP and RTP publication, default loopback. Remote access must be explicitly configured and network-restricted. |
 | `SipModem__NccHost`, `SipModem__NccPort` | NCC destination for decoded modem bytes. |
 | `SipModem__Registrar`, `SipModem__Username`, `SipModem__Password`, `SipModem__AssignedNumber` | Optional SIP registration settings. Store lab values in the ignored `docker/sip.env`. |
 | `SerialModem__Enabled`, `SerialModem__PortName` | Enable the serial ATA inlet and identify its serial device. |
