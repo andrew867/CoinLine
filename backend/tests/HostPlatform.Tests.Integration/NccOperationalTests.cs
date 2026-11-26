@@ -485,6 +485,8 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     [InlineData(2, 39, 65, 22, "decline", "declined", false)]
     [InlineData(2, 39, 65, 22, "invalid", "provider_invalid_decision", false)]
     [InlineData(2, 39, 65, 22, "exception", "provider_failed", false)]
+    [InlineData(2, 39, 65, 22, "http", "provider_http_error", false)]
+    [InlineData(2, 39, 65, 22, "timeout", "provider_timeout", false)]
     [InlineData(2, 39, 65, 22, "approve", "approved", true)]
     [InlineData(1, 29, 3, 2, "decline", "declined", true)]
     public async Task Trusted_card_provider_is_fail_closed_retries_are_idempotent_and_audit_is_redacted(
@@ -499,7 +501,8 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var provider = new OpaqueTestCardProvider(request, mode);
         await using var factory = new NccFactory();
         await using var host = factory.WithWebHostBuilder(builder =>
-            builder.ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider)));
+            builder.UseSetting("CardPayments:AuthorizationTimeoutMilliseconds", mode == "timeout" ? "200" : "5000")
+                .ConfigureServices(services => services.AddSingleton<INccCardAuthorizationProvider>(provider)));
         using var client = TestOperatorAuthentication.CreateAuthenticatedClient(host, "fixture", "Admin");
         var state = await client.GetFromJsonAsync<JsonElement>("/api/cards/simulation-state");
         Assert.True(state.GetProperty("runtimeAuthorizationProviderRegistered").GetBoolean());
@@ -577,12 +580,22 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 return ValueTask.FromResult(new NccCardAuthorizationDecision());
             if (mode == "exception")
                 throw new InvalidOperationException("Synthetic provider error");
+            if (mode == "http")
+                throw new HttpRequestException("Synthetic HTTP failure");
+            if (mode == "timeout")
+                return new ValueTask<NccCardAuthorizationDecision>(LateApproval());
             return ValueTask.FromResult(new NccCardAuthorizationDecision
             {
                 Approved = mode is "approve" or "invalid",
                 AuthorizationReference = mode == "invalid" ? new byte[1]
                     : mode == "approve" && expectedRequest[0] == 2 ? "TESTREF1"u8.ToArray() : []
             });
+        }
+
+        private static async Task<NccCardAuthorizationDecision> LateApproval()
+        {
+            await Task.Delay(1500); // Intentionally ignores cancellation; must never become a terminal approval.
+            return new() { Approved = true, AuthorizationReference = "TESTREF1"u8.ToArray() };
         }
     }
 
@@ -613,6 +626,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         Assert.Equal("malformed_request", attempt.GetProperty("outcome").GetString());
         Assert.Equal(invalid.Length, attempt.GetProperty("requestBytes").GetInt32());
         Assert.Equal(JsonValueKind.Null, attempt.GetProperty("bundledCallRecords").ValueKind);
+        Assert.Equal(new[] { 53, 53 }, attempt.GetProperty("suffixCdrTypes").EnumerateArray().Select(row => row.GetInt32()));
         await using var check = host.Services.CreateAsyncScope();
         var stored = check.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
         Assert.Empty(await stored.UploadBatches.Where(row => row.TerminalId == provider.TerminalId && row.IdempotencyKey.StartsWith("ncc-call-detail:")).ToListAsync());

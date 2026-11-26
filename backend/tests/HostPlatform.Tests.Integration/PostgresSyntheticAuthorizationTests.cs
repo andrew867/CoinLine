@@ -128,7 +128,11 @@ public sealed class PostgresSyntheticAuthorizationTests
         var raw = await restricted.GetStringAsync(path);
         Assert.DoesNotContain("must-not-return", raw);
         var history = JsonSerializer.Deserialize<JsonElement>(raw).EnumerateArray().ToArray();
-        Assert.All(history, row => Assert.Equal(15, row.EnumerateObject().Count()));
+        Assert.All(history, row =>
+        {
+            Assert.Equal(16, row.EnumerateObject().Count());
+            Assert.Equal(JsonValueKind.Null, row.GetProperty("suffixCdrTypes").ValueKind);
+        });
         Assert.All(history.Where(row => Value(row, "outcome") != "unknown"), row =>
         {
             Assert.Contains(row.GetProperty("requestBytes").GetInt32(), new[] { 29, 39 });

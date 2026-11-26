@@ -643,8 +643,12 @@ internal sealed class NccLinkProcessor(
         var canDecline = DlogCardAuthorizationWire.TryBuildDecline(protectedRequest.Span, out var decline);
         if (!bundleValid || !canDecline)
         {
+            var suffixTypes = DlogImmediateRequestWire.RecognizedSuffixTypes(request.Data, requestLength).Select(type => (int)type).ToArray();
+            logger.LogWarning("Malformed card authorization bundle: {RequestBytes} bytes; recognized suffix CDR types [{SuffixTypes}].",
+                request.Data.Length, string.Join(",", suffixTypes));
             await StoreCardAttemptAsync(NewCardAttempt(terminalId,
-                new CardAuthorizationAuditDetail(request.Data[0], "malformed_request", providerKind, RequestBytes: request.Data.Length)));
+                new CardAuthorizationAuditDetail(request.Data[0], "malformed_request", providerKind, RequestBytes: request.Data.Length,
+                    SuffixCdrTypes: suffixTypes)));
             // A complete known request header permits an explicit denial even if
             // its suffix is malformed. Never invoke the provider or acknowledge
             // records from an invalid bundle.
@@ -657,9 +661,21 @@ internal sealed class NccLinkProcessor(
         SyntheticAuthorizationEvidence? evidence = null;
         if (cardProvider != null)
         {
+            using var authorizationDeadline = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            authorizationDeadline.CancelAfter(settings.CardAuthorizationTimeout);
+            var deadlineToken = authorizationDeadline.Token;
+            // Separate scope: a provider that ignores cancellation cannot keep using
+            // the session's DbContext while its deadline decline is being recorded.
+            var invocation = Task.Run(async () =>
+            {
+                await using var scope = scopes.CreateAsyncScope();
+                deadlineToken.ThrowIfCancellationRequested();
+                var provider = scope.ServiceProvider.GetRequiredService<INccCardAuthorizationProvider>();
+                return await provider.AuthorizeAsync(terminalId, protectedRequest, deadlineToken);
+            }, CancellationToken.None);
             try
             {
-                var decision = await cardProvider.AuthorizeAsync(terminalId, protectedRequest, stoppingToken);
+                var decision = await invocation.WaitAsync(deadlineToken);
                 if (decision != null && DlogCardAuthorizationWire.TryBuildDecision(protectedRequest.Span, decision.Approved,
                         decision.AuthorizationReference.Span, out var encoded))
                 {
@@ -671,11 +687,26 @@ internal sealed class NccLinkProcessor(
                 else
                     outcome = "provider_invalid_decision";
             }
+            catch (OperationCanceledException) when (authorizationDeadline.IsCancellationRequested && !stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Card authorization provider exceeded its configured deadline.");
+                outcome = "provider_timeout";
+            }
+            catch (HttpRequestException) when (!stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Card authorization provider HTTP request failed.");
+                outcome = "provider_http_error";
+            }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
                 // Provider exceptions can contain protected request data. Log only the type.
                 logger.LogWarning("Card authorization provider failed ({ErrorType}).", ex.GetType().Name);
                 outcome = "provider_failed";
+            }
+            finally
+            {
+                // Observe late faults without retaining or logging provider messages.
+                _ = ObserveCardInvocationAsync(invocation);
             }
         }
 
@@ -734,6 +765,12 @@ internal sealed class NccLinkProcessor(
             request.Data[0], result, providerKind, lab?.Reason, lab?.CardAccountId, lab?.QuoteId,
             lab?.QuotedAmountUsd, lab?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null,
             request.Data.Length, receipts.Length / 3);
+    }
+
+    private static async Task ObserveCardInvocationAsync(Task<NccCardAuthorizationDecision> invocation)
+    {
+        try { await invocation; }
+        catch (Exception) { /* Outcomes are already recorded; never log late provider content. */ }
     }
 
     private bool TryImmediateReplyRetry(NccWirePacket request, out NccWirePacket reply)

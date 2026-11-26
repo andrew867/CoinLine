@@ -10,7 +10,8 @@ namespace HostPlatform.Api.Hosting;
 // provider-supplied reference or message is persisted or returned here.
 internal sealed record CardAuthorizationAuditDetail(byte MessageType, string Outcome, string Provider,
     string? Reason = null, Guid? CardAccountId = null, Guid? QuoteId = null, decimal? QuotedAmountUsd = null,
-    ushort? CallSequence = null, Guid? OriginalDecisionId = null, int? RequestBytes = null, int? BundledCallRecords = null);
+    ushort? CallSequence = null, Guid? OriginalDecisionId = null, int? RequestBytes = null, int? BundledCallRecords = null,
+    int[]? SuffixCdrTypes = null);
 
 internal static class CardAuthorizationAudit
 {
@@ -21,7 +22,7 @@ internal static class CardAuthorizationAudit
     { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
     private static readonly HashSet<string> Outcomes =
     [
-        "approved", "declined", "provider_unavailable", "provider_invalid_decision", "provider_failed",
+        "approved", "declined", "provider_unavailable", "provider_invalid_decision", "provider_failed", "provider_timeout", "provider_http_error",
         "audit_failed", "malformed_request", "unknown"
     ];
     private static readonly HashSet<string> Providers = ["synthetic_lab", "trusted_provider", "none", "unrecorded"];
@@ -46,17 +47,22 @@ internal static class CardAuthorizationAudit
             var provider = SafeString(root, "provider", Providers) ?? "unrecorded";
             var requestBytes = SafeCount(root, "requestBytes", 1, HostPlatform.Protocols.Ncc.NccConstants.MaxDataSize);
             var bundledRecords = SafeCount(root, "bundledCallRecords", 0, 2);
+            int[]? suffix = null;
+            if (outcome == "malformed_request" && root.TryGetProperty("suffixCdrTypes", out var types) &&
+                types.ValueKind == JsonValueKind.Array && types.GetArrayLength() <= 3 &&
+                types.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out var type) && type is 4 or 53 or 61))
+                suffix = types.EnumerateArray().Select(item => item.GetInt32()).ToArray();
             // Only the built-in synthetic provider can produce account/quote
             // evidence meaningful to this ledger.
             if (provider != LabProvider)
-                return new(messageType, outcome, provider, RequestBytes: requestBytes, BundledCallRecords: bundledRecords);
+                return new(messageType, outcome, provider, RequestBytes: requestBytes, BundledCallRecords: bundledRecords, SuffixCdrTypes: suffix);
             var amount = root.TryGetProperty("quotedAmountUsd", out var value)
                 && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var money) && money >= 0 ? (decimal?)money : null;
             var sequence = root.TryGetProperty("callSequence", out value) && value.ValueKind == JsonValueKind.Number
                 && value.TryGetUInt16(out var seq) ? (ushort?)seq : null;
             return new(messageType, outcome, provider, SafeString(root, "reason", Reasons),
                 SafeGuid(root, "cardAccountId"), SafeGuid(root, "quoteId"), amount, sequence,
-                SafeGuid(root, "originalDecisionId"), requestBytes, bundledRecords);
+                SafeGuid(root, "originalDecisionId"), requestBytes, bundledRecords, suffix);
         }
         catch (JsonException) { return null; }
     }

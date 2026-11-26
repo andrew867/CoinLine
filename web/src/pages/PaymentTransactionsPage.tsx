@@ -12,12 +12,13 @@ type Attempt = {
   id: string; terminalId: string | null; terminalDisplayName: string | null; nccSessionId: string | null
   createdAtUtc: string; messageType: number; outcome: string; provider: string; reason: string | null
   cardAccountId: string | null; quoteId: string | null; quotedAmountUsd: number | null; callSequence: number | null
-  requestBytes?: number | null; bundledCallRecords?: number | null
+  requestBytes?: number | null; bundledCallRecords?: number | null; suffixCdrTypes?: number[] | null
 }
 
 const outcomes: Record<string, string> = {
   approved: 'Approved', declined: 'Declined', provider_unavailable: 'No provider',
   provider_invalid_decision: 'Invalid provider decision', provider_failed: 'Provider failed',
+  provider_timeout: 'Provider timed out', provider_http_error: 'Provider HTTP error',
   audit_failed: 'Decision could not be recorded', malformed_request: 'Malformed request', unknown: 'Outcome unavailable',
 }
 const providers: Record<string, string> = {
@@ -89,7 +90,8 @@ export function PaymentTransactionsPage() {
               {row.nccSessionId && <div><small>Session {row.nccSessionId}</small></div>}</td>
             <td>MT{row.messageType} {row.messageType === 1 ? 'Formatted' : 'Extended'}{row.callSequence != null && <div><small>Call {row.callSequence}</small></div>}
               {row.requestBytes != null && <div><small>{row.requestBytes} application bytes{row.bundledCallRecords != null && ` · ${row.bundledCallRecords} bundled call ${row.bundledCallRecords === 1 ? 'record' : 'records'}`}</small></div>}
-              {row.outcome === 'malformed_request' && row.requestBytes != null && <div><small>Unrecognized request length or trailing record format</small></div>}</td>
+              {row.outcome === 'malformed_request' && row.requestBytes != null && <div><small>Unrecognized request length or trailing record format</small></div>}
+              {row.outcome === 'malformed_request' && row.suffixCdrTypes != null && <div><small>Recognized suffix CDR types: {row.suffixCdrTypes.length ? row.suffixCdrTypes.map(type => `MT${type}`).join(', ') : 'None'}</small></div>}</td>
             <td><StatusBadge label={outcomes[row.outcome] ?? 'Outcome unavailable'}
               variant={row.outcome === 'approved' ? 'ok' : row.outcome === 'unknown' ? 'neutral' : 'warn'} /></td>
             <td>{providers[row.provider] ?? 'Not recorded'}
