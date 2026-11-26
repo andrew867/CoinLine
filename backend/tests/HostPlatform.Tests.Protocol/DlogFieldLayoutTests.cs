@@ -109,6 +109,21 @@ public sealed class DlogFieldLayoutTests
         Assert.Equal(full, DlogTableRequestWire.RequiresFullAssignment(reason));
     }
 
+    [Theory]
+    [InlineData(0x01, true)]
+    [InlineData(0x81, true)]
+    [InlineData(0x00, false)]
+    [InlineData(0x02, false)]
+    [InlineData(0x04, false)]
+    [InlineData(0x86, false)]
+    [InlineData(0x09, false)]
+    [InlineData(0x80, false)]
+    [InlineData(0x11, false)]
+    public void Automatic_changes_require_an_explicit_ordinary_craft_request(byte reason, bool ordinary)
+    {
+        Assert.Equal(ordinary, DlogTableRequestWire.IsOrdinaryCraftUpdate(reason));
+    }
+
     [Fact]
     public void Unknown_alarm_and_maintenance_codes_stay_visible_in_decimal()
     {
