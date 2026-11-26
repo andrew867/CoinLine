@@ -9,6 +9,7 @@ import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
 import { GraphicalLinkReviewPanel, type GraphicalLinkReview } from './GraphicalLinkReviewPanel'
 import { GraphicalUsageConfigurationPanel } from './GraphicalUsageConfigurationPanel'
 import { NumberingPlanEditor, type NumberingPlan, type NumberingPlanChanges } from './NumberingPlanEditor'
+import { NumberingPlanOverlayPanel } from './NumberingPlanOverlayPanel'
 import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEditor'
 import { LocalDialingImport } from './LocalDialingImport'
 import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
@@ -444,6 +445,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         <button type="button" aria-pressed={!showingRules} onClick={() => setView('settings')}>Settings</button>
         <button type="button" aria-pressed={!!showingRules} onClick={() => setView('rules')}>Numbering rules</button>
       </div>}
+      {layout.numberingPlan && canEdit && <NumberingPlanOverlayPanel key={`${layout.profile}:${layout.revision}:${layout.sha256}`}
+        endpoint={endpoint} revision={layout.revision} sha256={layout.sha256} profile={layout.profile}
+        dirty={changed > 0 || ruleChanges || byteChanges > 0} busy={busy} onBusyChange={setBusy}
+        onApplied={() => { setMessage('Numbering overlay applied to the draft.'); setLayout(null); setReload(count => count + 1); onSaved() }} />}
       {layout.spareBytes && <div className="row-actions" role="group" aria-label="Spare table editor">
         <button type="button" aria-pressed={showingSettings} onClick={() => setView('settings')}>Settings</button>
         <button type="button" aria-pressed={!!showingBytes} onClick={() => setView('bytes')}>Byte grid</button>

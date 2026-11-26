@@ -43,10 +43,12 @@ internal static class NumberingProfileFixture
 public sealed class NumberingProfileNccTests(NccListenFixture fx) : IClassFixture<NccListenFixture>
 {
     [Theory]
-    [InlineData(FirmwareTableProfiles.MultiPay200)]
-    [InlineData(FirmwareTableProfiles.LaterMultiPay180)]
-    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180)]
-    public async Task Selected_numbering_records_are_delivered_on_original_batch(string profile)
+    [InlineData(FirmwareTableProfiles.MultiPay200, false)]
+    [InlineData(FirmwareTableProfiles.LaterMultiPay180, false)]
+    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180, false)]
+    [InlineData(FirmwareTableProfiles.MultiPay200, true)]
+    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180, true)]
+    public async Task Selected_numbering_records_are_delivered_on_original_batch(string profile, bool importOverlay)
     {
         var wire = Convert.FromHexString(Guid.NewGuid().ToString("N")[..10]);
         var records = new[] { NumberingProfileFixture.Create(profile) };
@@ -73,9 +75,26 @@ public sealed class NumberingProfileNccTests(NccListenFixture fx) : IClassFixtur
         {
             var path = $"/api/tables/sets/{set.Id}/records/{record.Layout.Number}/fields";
             var read = await fx.Client.GetFromJsonAsync<JsonElement>(path);
-            using var saved = await fx.Client.PutAsJsonAsync(path, new { revision = read.GetProperty("revision").GetInt32(),
-                sha256 = read.GetProperty("sha256").GetString(), profile = record.Layout.Profile, changes = record.Changes, numberingPlan = record.Plan });
-            saved.EnsureSuccessStatusCode();
+            if (importOverlay)
+            {
+                var source = record.Expected.ToArray();
+                var overlay = new NumberingPlanOverlay(62, 353, [new(1, Convert.ToHexString(source[1..19])), new(32, Convert.ToHexString(source[32..]))]);
+                object Body(string? previewToken = null) => new { revision = read.GetProperty("revision").GetInt32(),
+                    sha256 = read.GetProperty("sha256").GetString(), profile = record.Layout.Profile, sourceProfile = record.Layout.Profile, overlay, previewToken };
+                using var preview = await fx.Client.PostAsJsonAsync(path + "/numbering-overlay/preview", Body());
+                preview.EnsureSuccessStatusCode();
+                var result = await preview.Content.ReadFromJsonAsync<JsonElement>();
+                Assert.True(result.GetProperty("canApply").GetBoolean());
+                using var applied = await fx.Client.PostAsJsonAsync(path + "/numbering-overlay/apply", Body(result.GetProperty("previewToken").GetString()));
+                applied.EnsureSuccessStatusCode();
+                record.Imported[19..32].CopyTo(record.Expected, 19);
+            }
+            else
+            {
+                using var saved = await fx.Client.PutAsJsonAsync(path, new { revision = read.GetProperty("revision").GetInt32(),
+                    sha256 = read.GetProperty("sha256").GetString(), profile = record.Layout.Profile, changes = record.Changes, numberingPlan = record.Plan });
+                saved.EnsureSuccessStatusCode();
+            }
         }
         using (var published = await fx.Client.PostAsync($"/api/tables/sets/{set.Id}/publish?confirm=true", null))
             published.EnsureSuccessStatusCode();
