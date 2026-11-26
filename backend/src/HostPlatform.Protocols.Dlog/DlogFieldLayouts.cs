@@ -231,6 +231,8 @@ internal static class DlogFieldLayouts
     {
         fields["timeStamp"] = FormatYmdhms(clock);
         fields["cashBoxStatus"] = status.Flags;
+        fields["cashBoxCondition"] = status.Condition;
+        fields["unmappedCashBoxStatusBits"] = status.UnmappedSetBitCount;
         fields["boxNumberBcd"] = status.BoxNumber;
         fields["percentFull"] = status.PercentFull;
         fields["currencyValue"] = status.BalanceMinorUnits;

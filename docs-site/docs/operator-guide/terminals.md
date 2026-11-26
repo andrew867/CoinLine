@@ -21,3 +21,11 @@ Unlike the legacy Manager's automatic deletion on the specified date, CoinLine u
 For a phone registered with the Inmate terminal family, the phone detail page has an Inmate terminal configuration panel. Select a named Inmate Feature Configuration and enter the external Inmate Setup Configuration ID supplied by the institution's separate setup system. Either reference can be left unassigned.
 
 The references are saved in the Manager database. The Inmate Setup contents and the terminal record encodings are not available in the verified catalogue, so saving does not create a download. Changing the phone to another family leaves the references inactive and permits explicitly clearing them. A feature configuration cannot be deleted while a phone references it.
+
+## Cashbox status
+
+Open **Money > Cashbox status** to find a phone by name or NCC wire ID and browse the matching phones in wire-ID order. From a selected phone in **Terminal status**, choose **Query cashbox** to open the same view limited to that phone. Choose **Browse all cashboxes** to leave that selection.
+
+The current reported box shows its balance, capacity percentage, condition, box number and reported coin counts. The manager receipt time is UTC; the phone's own reported clock is shown separately. Refresh reports only reads the manager's stored data and does not dial the phone. The collection history is separate: when a collection replaces the box, its balance does not establish the new box's contents. Wait for a new status report. A phone without reports is shown as such, not as having a zero balance.
+
+Coin counts are shown in terminal slot order because the denomination mapping can vary with configured MT50. Unknown status bits are reported as unmapped rather than guessed. The screen requires Cashbox Read and does not provide any collection, money adjustment or configuration controls.

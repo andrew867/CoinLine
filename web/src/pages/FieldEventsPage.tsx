@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api/client'
 import { FieldEventReference } from './FieldEventReference'
 import { alarmSeverityLabel } from './fieldEventLabels'
+import { CashboxQueryLink } from './CashboxQueryPage'
 import './FieldEventsPage.css'
 
 const categories = {
@@ -158,6 +159,7 @@ export function FieldEventsPage() {
             <p>
               {terminal.onCall ? 'NCC link active' : 'No active NCC link'}
               {terminal.lastSessionAtUtc && <> · Last contact {reportTime.format(new Date(terminal.lastSessionAtUtc))}</>}
+              <CashboxQueryLink terminalId={terminal.id} />
             </p>
           </div>
         )}

@@ -101,6 +101,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify cashbox query workflow
+        run: npm run e2e -- e2e/cashbox-query.spec.ts --output test-results/cashbox-query
+        env:
+          CI: "true"
+
       - name: Verify restricted route review workflow
         run: npm run e2e -- e2e/restriction-route-review.spec.ts --output test-results/restriction-route-review
         env:
