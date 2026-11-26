@@ -23,7 +23,7 @@ import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
 import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
-import { VisualPromptWorksheet } from './VisualPromptWorksheet'
+import { VisualPromptWorksheet, type VisualPromptCompanion } from './VisualPromptWorksheet'
 import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
 import { RegionalRatingPreview } from './RegionalRatingPreview'
 import { LanguageOrderPanel } from './LanguageOrderPanel'
@@ -61,6 +61,7 @@ type Layout = {
   sha256: string
   sections: Section[]
   graphicalLinks?: GraphicalLinkReview | null
+  visualPromptCompanions?: VisualPromptCompanion[] | null
   numberingPlan?: NumberingPlan | null
   numberingFormatCapacity?: number | null
   spareBytes?: string | null
@@ -443,7 +444,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         <button type="button" aria-pressed={showingPrompts} onClick={() => setView('prompts')}>Visual prompt worksheet</button>
       </div>}
       {showingPrompts && worksheetRows && <VisualPromptWorksheet key={`${number}:${layout.revision}:${layout.sha256}`}
-        number={number} rows={worksheetRows} edits={edits} editable={canEdit && !busy}
+        number={number} rows={worksheetRows} edits={edits} editable={canEdit && !busy} companions={layout.visualPromptCompanions}
         onStage={changes => {
           const updated = stagePromptChanges(worksheetRows, edits, changes)
           setEdits(updated); onDirty(Object.keys(updated).length > 0); setMessage('')
