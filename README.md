@@ -69,6 +69,8 @@ The default Compose stack is for local evaluation. For a real deployment, use th
 
 ## From a new phone to a working configuration
 
+For a demonstration installation, the [demo starter guide](docs/program/demo-configuration-seeds.md) explains how to initialize the separate earlier and later profile-specific data sets from a local bundle without assigning unreviewed records to a phone.
+
 1. Register the terminal, including its firmware profile and terminal type.
 2. Create a draft table set, or clone a known-good set for that firmware.
 3. Edit the phone's settings in the native table editors. Review the profile checks and any unconfigured optional families.

@@ -1,0 +1,10 @@
+services:
+  api:
+    environment:
+      Platform__Seed__EnableDemoData: "true"
+      Platform__Seed__DemoConfigurationBundlePath: /var/coinline/demo-seeds
+    volumes:
+      - type: bind
+        source: ${COINLINE_DEMO_BUNDLE:?Set COINLINE_DEMO_BUNDLE to the local expanded demo starter directory}
+        target: /var/coinline/demo-seeds
+        read_only: true
