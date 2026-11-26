@@ -6,6 +6,8 @@ The explicit upload handler now waits for a final MT13 at a recognized record bo
 
 The completion response uses the same packet ID for a terminal retry, including a header-only retransmission. Call details and statistics retain their existing per-phone deduplication. The upload does not select a queued table batch. Runtime rating and authorization are separate dialogues.
 
-Verification uses synthetic records with the observed frame sizes and record-type sequence, not retained raw customer data. Compatible terminal confirmation of a clean upload after the fix remains a separate acceptance gate.
+Verification uses synthetic records with the observed frame sizes and record-type sequence, not retained raw customer data.
 
 The isolated PostgreSQL TCP regression saved two MT53 records and six statistics reports, returned both MT5 receipts, sent MT13 after the final MT37 report, replayed the same completion on full-frame and header-only retries, and completed a later status-only upload. Replaying the complete upload did not increase the stored call or statistics counts. The pending table batch stayed pending. The protocol tests also verified a single-frame upload whose MT5 receipts and MT13 share a reply and rejection of incomplete record boundaries.
+
+After the verified manager update, a real emulated terminal retried the upload. The manager recognized the MT10/MT60/MT13 trailer, returned MT13, received the link acknowledgement and then handled a maintenance dialogue before the terminal cleared normally. The two previously stored coin call records remained unchanged, with no duplicates. The retry carried no new call records. A new rated call followed by a complete native upload, and equivalent physical-terminal acceptance, remain separate verification steps.

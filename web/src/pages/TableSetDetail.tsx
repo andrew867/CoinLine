@@ -232,7 +232,7 @@ export function TableSetDetail() {
         {d.targetFirmware && <p>Table layout <strong>{d.tableProfile ?? 'Unverified'}</strong></p>}
         {d.tableProfileEvidence && <p className="page-intro">{d.tableProfileEvidence.recordCount} known record lengths.
           {' '}{d.tableProfileEvidence.terminalAcknowledgedCount} acknowledged by emulated terminals.
-          {d.tableProfileEvidence.completeCatalogue && ' Records outside the compiled catalogue cannot be published for this target.'}
+          {d.tableProfileEvidence.completeCatalogue && ' Records outside the complete target catalogue cannot be published for this target.'}
           {d.tableProfileEvidence.observedLengthsOnly && ' Observed subset only; the full catalogue and ambiguous native layouts are not established.'}
           {d.tableProfileEvidence.evidenceNote && ` ${d.tableProfileEvidence.evidenceNote}`}</p>}
         {!!d.firmwareFindings?.length && <ul>{d.firmwareFindings.map((finding) => (

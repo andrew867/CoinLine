@@ -436,11 +436,11 @@ public sealed class TableDistributionTranche4Tests(ApiFixture factory)
     }
 
     [Fact]
-    public async Task Later_compiled_target_selects_its_native_editor_and_rejects_unlisted_or_wrong_length_records()
+    public async Task Later_known_target_selects_its_native_editor_and_rejects_unlisted_or_wrong_length_records()
     {
         using var firmware = await _client.PostAsJsonAsync("/api/firmware/versions", new
         {
-            label = "Later compiled profile fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180
+            label = "Later profile fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180
         });
         firmware.EnsureSuccessStatusCode();
         var targetFirmwareVersionId = (await firmware.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();

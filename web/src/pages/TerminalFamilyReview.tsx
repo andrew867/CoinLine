@@ -15,7 +15,7 @@ const statusText: Record<string, string> = {
   invalid: 'Check record format', unmapped: 'Wire record unidentified',
 }
 const formatText: Record<string, string> = {
-  verifiedLength: 'Emulated-terminal acknowledged length', catalogueLength: 'Compiled catalogue length',
+  verifiedLength: 'Emulated-terminal acknowledged length', catalogueLength: 'Known target catalogue length',
   recognized: 'Recognized editor layout', unverified: 'Unverified layout', unsupported: 'Absent from target catalogue',
   wrongLength: 'Wrong target length', invalid: 'Incomplete or duplicate record',
 }

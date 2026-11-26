@@ -3,7 +3,7 @@ using System.Buffers.Binary;
 namespace HostPlatform.Protocols.Ncc;
 
 /// <summary>
-/// Encoder/decoder for NCC on-wire framing. Length rules follow <c>NCCASM.ASM</c>
+/// Encoder/decoder for NCC on-wire framing. The count conventions are
 /// (control packet: <c>count==5</c>, no termid/msg bytes; message: <c>count&gt;=11</c>, termid+msg = <c>count-5</c>).
 /// On-air length is <c>count+1</c> octets (STX…ETX). CRC is <see cref="NccCrc16"/> over STX through last data byte (little-endian CRC on wire).
 /// </summary>
@@ -135,7 +135,7 @@ public static class NccFrameCodec
         return NccParseResult.Ok(pkt);
     }
 
-    /// <summary>Build wire frame. CRC covers buffer from STX through last data byte (per <c>ncco_snd_pkt</c> / <c>nccgen_crc</c>).</summary>
+    /// <summary>Build wire frame. CRC covers the buffer from STX through the last data byte.</summary>
     public static byte[] Encode(NccWirePacket packet)
     {
         ArgumentNullException.ThrowIfNull(packet.TerminalId);

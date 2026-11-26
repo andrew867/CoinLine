@@ -7,7 +7,7 @@ namespace HostPlatform.Tests.Unit;
 public sealed class FirmwareTableProfileTests
 {
     [Fact]
-    public void Every_catalogued_length_has_a_native_candidate_and_compiled_layouts_remain_exact()
+    public void Every_catalogued_length_has_a_native_candidate_and_known_layouts_remain_exact()
     {
         foreach (var profile in FirmwareTableProfiles.Catalog)
         {
@@ -76,7 +76,7 @@ public sealed class FirmwareTableProfileTests
     }
 
     [Fact]
-    public void Compiled_later_profile_is_distinct_from_the_acknowledged_earlier_profile()
+    public void Known_later_profile_is_distinct_from_the_acknowledged_earlier_profile()
     {
         var earlier = FirmwareTableProfiles.Find(FirmwareTableProfiles.MultiPay200)!;
         var later = FirmwareTableProfiles.Find(FirmwareTableProfiles.LaterMultiPay180)!;
@@ -98,7 +98,7 @@ public sealed class FirmwareTableProfileTests
     }
 
     [Fact]
-    public void Graphical_profile_has_the_compiled_later_catalogue_plus_three_display_records()
+    public void Graphical_profile_has_the_known_later_catalogue_plus_three_display_records()
     {
         var standard = FirmwareTableProfiles.Find(FirmwareTableProfiles.LaterMultiPay180)!;
         var graphical = FirmwareTableProfiles.Find(FirmwareTableProfiles.GraphicalMultiPay180)!;

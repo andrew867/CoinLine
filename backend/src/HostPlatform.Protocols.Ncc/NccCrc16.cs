@@ -1,9 +1,9 @@
 namespace HostPlatform.Protocols.Ncc;
 
-/// <summary>CRC-16 per reference firmware <c>_nccgen_crc</c> / <c>ncci_upd_crc</c> (initial value 0).</summary>
+/// <summary>NCC reflected CRC-16, polynomial 0xA001 and initial value zero.</summary>
 public static class NccCrc16
 {
-    /// <summary>256×uint16 from <c>NCCASM.ASM</c> <c>_ncc_crc_table</c>.</summary>
+    /// <summary>Lookup table for the reflected CRC polynomial.</summary>
     public static ReadOnlySpan<ushort> Table => TableStorage.Data;
 
     public static ushort Compute(ReadOnlySpan<byte> data)
@@ -27,7 +27,7 @@ public static class NccCrc16
 
     private static class TableStorage
     {
-        // Extracted from firmware _ncc_crc_table (see repo docs/generated/ncc_crc_table.py).
+        // One entry for each possible low-byte update.
         public static readonly ushort[] Data =
         [
             0x0000, 0xC0c1, 0xC181, 0x0140, 0xC301, 0x03c0, 0x0280, 0xC241,

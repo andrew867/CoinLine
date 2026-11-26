@@ -25,7 +25,7 @@ public class DlogTransaction : AuditableEntity
     public ICollection<DlogParseDiagnostic> ParseDiagnostics { get; set; } = new List<DlogParseDiagnostic>();
 }
 
-/// <summary>Catalog row seeded from OEM compatibility catalogue-derived registry (see Tranche 3 docs).</summary>
+/// <summary>Catalog row seeded from the known DLOG message registry.</summary>
 public class DlogMessageType
 {
     public int MtCode { get; set; }

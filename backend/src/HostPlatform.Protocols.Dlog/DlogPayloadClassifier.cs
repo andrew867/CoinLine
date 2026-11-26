@@ -76,7 +76,7 @@ public static class DlogPayloadClassifier
             {
                 Severity = "Info",
                 Code = "UNKNOWN_MT",
-                Message = $"Message type {mt} is not in the seeded OEM compatibility catalogue-derived registry.",
+                Message = $"Message type {mt} is not in the known DLOG message catalogue.",
                 Detail = "Preserve raw bytes; extend registry when firmware variant is confirmed."
             });
         }

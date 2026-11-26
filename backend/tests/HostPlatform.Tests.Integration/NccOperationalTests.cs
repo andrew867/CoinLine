@@ -2264,7 +2264,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
     }
 
     [Fact]
-    public async Task Later_compiled_profile_validates_untargeted_pickup_and_delivers_edited_records()
+    public async Task Later_known_profile_validates_untargeted_pickup_and_delivers_edited_records()
     {
         using var firmware = await fx.Client.PostAsJsonAsync("/api/firmware/versions",
             new { label = "Later transfer fixture", tableProfileId = FirmwareTableProfiles.LaterMultiPay180 }, Json);
