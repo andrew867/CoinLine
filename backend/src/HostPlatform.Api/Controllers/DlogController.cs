@@ -276,7 +276,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
         {
             FilterJson = JsonSerializer.Serialize(body),
             RequestedAtUtc = DateTime.UtcNow,
-            RequestedBy = HttpContext.Request.Headers["X-Operator-Id"].ToString()
+            RequestedBy = User.Identity?.Name ?? "unknown"
         };
         db.DlogReplayRequests.Add(auditRow);
 

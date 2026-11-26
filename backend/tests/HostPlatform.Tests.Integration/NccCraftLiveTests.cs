@@ -24,9 +24,7 @@ public sealed class NccCraftLiveFixture : IAsyncLifetime
         Environment.SetEnvironmentVariable(LiveCraftFlag, "1");
         Factory = new NccCraftLiveFactory();
         Port = Factory.Port;
-        Client = Factory.CreateClient();
-        Client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "craft-live@local");
-        Client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        Client = TestOperatorAuthentication.CreateAuthenticatedClient(Factory, "craft-live@local", "Admin");
         var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
@@ -74,7 +72,7 @@ public sealed class NccCraftLiveFactory : WebApplicationFactory<Program>
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
-        builder.UseEnvironment("Testing");
+        builder.UseEnvironment("Testing").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey);
         builder.UseSetting("Ncc:Listen", "1");
         builder.UseSetting("Ncc:Port", Port.ToString());
         builder.UseSetting("Craft:AllowLiveCraft", "true");

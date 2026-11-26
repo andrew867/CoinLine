@@ -14,9 +14,7 @@ public sealed class FieldEventCatalogueTests(ApiFixture factory)
     [Fact]
     public async Task Catalogue_preserves_decoded_meaning_and_original_report_while_editing_and_clearing_settings()
     {
-        using var client = factory.CreateClient();
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "fixture");
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         const string path = "/api/field-events/reference/alarm/22";
         var report = new DlogTransaction
         {

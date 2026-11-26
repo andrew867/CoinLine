@@ -1,18 +1,20 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 using HostPlatform.Api.Options;
 using Microsoft.Extensions.Options;
 
 namespace HostPlatform.Api.Middleware;
 
 /// <summary>Requires <c>X-API-Key</c> when <see cref="SecurityOptions.Mode"/> is <see cref="HostAuthMode.ApiKey"/>.</summary>
-public sealed class ApiKeyGateMiddleware(RequestDelegate next, IOptions<SecurityOptions> options, IConfiguration configuration)
+public sealed class ApiKeyGateMiddleware(RequestDelegate next, IOptions<SecurityOptions> options)
 {
     private readonly SecurityOptions _opts = options.Value;
-    private readonly bool _swaggerEnabled = configuration.GetValue("Swagger:Enabled", true);
+    private readonly byte[][] _keyHashes = options.Value.ApiKeys.Select(key => SHA256.HashData(Encoding.UTF8.GetBytes(key))).ToArray();
 
     public Task Invoke(HttpContext ctx)
     {
-        if (_opts.Mode != HostAuthMode.ApiKey)
+        if (_opts.Mode != HostAuthMode.ApiKey && _keyHashes.Length == 0)
             return next(ctx);
 
         var path = ctx.Request.Path.Value ?? "";
@@ -34,12 +36,11 @@ public sealed class ApiKeyGateMiddleware(RequestDelegate next, IOptions<Security
             return ctx.Response.WriteAsJsonAsync(new { error = "Missing X-API-Key" });
         }
 
-        var k = key.ToString();
-        foreach (var allowed in _opts.ApiKeys)
-        {
-            if (string.Equals(allowed, k, StringComparison.Ordinal))
-                return next(ctx);
-        }
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(key.ToString()));
+        var matched = false;
+        foreach (var allowed in _keyHashes)
+            matched |= CryptographicOperations.FixedTimeEquals(allowed, hash);
+        if (matched) return next(ctx);
 
         ctx.Response.StatusCode = (int)HttpStatusCode.Unauthorized;
         return ctx.Response.WriteAsJsonAsync(new { error = "Invalid API key" });
@@ -47,14 +48,6 @@ public sealed class ApiKeyGateMiddleware(RequestDelegate next, IOptions<Security
 
     private bool IsExempt(string path)
     {
-        if (path.StartsWith("/health", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (path.Equals("/ready", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (path.Equals("/metrics", StringComparison.OrdinalIgnoreCase))
-            return true;
-        if (_swaggerEnabled && path.StartsWith("/swagger", StringComparison.OrdinalIgnoreCase))
-            return true;
-        return false;
+        return path.TrimEnd('/').ToLowerInvariant() is "/health" or "/health/live" or "/health/ready" or "/ready";
     }
 }

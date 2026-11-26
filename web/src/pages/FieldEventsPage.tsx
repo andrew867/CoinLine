@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api/client'
 import { FieldEventReference } from './FieldEventReference'
+import { PhoneStatusPanel } from './PhoneStatusPanel'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { alarmSeverityLabel } from './fieldEventLabels'
 import { CashboxQueryLink } from './CashboxQueryPage'
 import './FieldEventsPage.css'
@@ -30,6 +32,7 @@ type FieldEvent = {
 type Terminal = {
   id: string
   displayName: string
+  terminalIdHex: string
   groupName: string | null
   onCall: boolean
   lastSessionAtUtc: string | null
@@ -54,6 +57,8 @@ export function FieldEventsPage() {
   const [query, setQuery] = useState('')
   const [error, setError] = useState(false)
   const [refresh, setRefresh] = useState(0)
+  const canReadPhones = canPerform('phones', op.read)
+  const canReadMessages = canPerform('message-log', op.read)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -66,7 +71,7 @@ export function FieldEventsPage() {
       try {
         const [events, terminals] = await Promise.all([
           readJson<{ items: FieldEvent[] }>(url, controller.signal),
-          readJson<Terminal[]>('/api/terminals', controller.signal),
+          readJson<Terminal[]>('/api/field-events/phone-options', controller.signal),
         ])
         if (!controller.signal.aborted) {
           setSnapshot({ items: events.items, terminals, updatedAt: new Date() })
@@ -108,7 +113,8 @@ export function FieldEventsPage() {
 
       {snapshot && (
         <div className="terminal-status-metrics" aria-label="Fleet overview">
-          <Link to="/terminals"><span>Registered phones</span><strong>{snapshot.terminals.length}</strong></Link>
+          {canReadPhones ? <Link to="/terminals"><span>Registered phones</span><strong>{snapshot.terminals.length}</strong></Link>
+            : <div><span>Registered phones</span><strong>{snapshot.terminals.length}</strong></div>}
           <div><span>Active NCC links</span><strong>{active}</strong></div>
           <div><span>{terminal ? 'Reports for this phone' : 'Recent reports'}</span><strong>{items.length}</strong></div>
         </div>
@@ -133,7 +139,7 @@ export function FieldEventsPage() {
               <option value="">All phones</option>
               {terminalId && !terminal && <option value={terminalId}>Selected phone</option>}
               {snapshot?.terminals.map((phone) => (
-                <option key={phone.id} value={phone.id}>{phone.displayName}</option>
+                <option key={phone.id} value={phone.id}>{phone.displayName} ({phone.terminalIdHex})</option>
               ))}
             </select>
           </label>
@@ -153,7 +159,7 @@ export function FieldEventsPage() {
         {terminal && (
           <div className="terminal-status-phone">
             <div>
-              <Link to={`/terminals/${terminal.id}`}>{terminal.displayName}</Link>
+              {canReadPhones ? <Link to={`/terminals/${terminal.id}`}>{terminal.displayName}</Link> : <strong>{terminal.displayName}</strong>}
               {terminal.groupName && <span>{terminal.groupName}</span>}
             </div>
             <p>
@@ -163,6 +169,8 @@ export function FieldEventsPage() {
             </p>
           </div>
         )}
+
+        {terminalId && <PhoneStatusPanel terminalId={terminalId} refresh={refresh} showReportLink={canReadMessages} />}
 
         {error && <p className="terminal-status-state" role="status">Could not refresh phone activity. Try Refresh.</p>}
         {!snapshot && !error && <p className="terminal-status-state" role="status">Loading phone reports…</p>}
@@ -179,7 +187,8 @@ export function FieldEventsPage() {
                 <span className="terminal-status-marker" data-category={event.category} aria-hidden="true" />
                 <div className="terminal-status-event-content">
                   <span className="terminal-status-event-type">{event.title}</span>
-                  <Link to={`/dlog/${event.id}`}>{event.summary ?? 'Report details unavailable'}</Link>
+                  {canReadMessages ? <Link to={`/dlog/${event.id}`}>{event.summary ?? 'Report details unavailable'}</Link>
+                    : <strong>{event.summary ?? 'Report details unavailable'}</strong>}
                   {event.operatorDescription && <span>Operator description: {event.operatorDescription}</span>}
                   {event.severity != null && <span className="terminal-status-event-type">Current severity: {alarmSeverityLabel(event.severity)}</span>}
                   {!terminalId && (event.terminalId

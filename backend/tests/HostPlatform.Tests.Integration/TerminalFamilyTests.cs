@@ -7,7 +7,7 @@ namespace HostPlatform.Tests.Integration;
 [Collection("IntegrationApi")]
 public sealed class TerminalFamilyTests(ApiFixture factory)
 {
-    private readonly HttpClient _client = factory.CreateClient();
+    private readonly HttpClient _client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
 
     [Fact]
     public async Task Terminal_family_can_be_selected_filtered_changed_and_cleared_independently_of_firmware()

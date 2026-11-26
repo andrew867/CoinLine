@@ -25,6 +25,9 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 
 var builder = WebApplication.CreateBuilder(args);
+if (string.IsNullOrWhiteSpace(builder.Configuration["urls"]) &&
+    !builder.Configuration.GetSection("Kestrel:Endpoints").GetChildren().Any())
+    builder.WebHost.UseUrls("http://127.0.0.1:5006");
 
 builder.Services.Configure<PlatformOptions>(builder.Configuration.GetSection(PlatformOptions.SectionName));
 builder.Services.Configure<SecurityOptions>(builder.Configuration.GetSection(SecurityOptions.SectionName));
@@ -59,12 +62,14 @@ builder.Services.AddAuthentication(OperatorAuthenticationHandler.SchemeName)
 builder.Services.AddSingleton<IAuthorizationHandler, MinimumRoleAuthorizationHandler>();
 builder.Services.AddAuthorization(o =>
 {
+    o.FallbackPolicy = new AuthorizationPolicyBuilder(OperatorAuthenticationHandler.SchemeName)
+        .RequireAuthenticatedUser().Build();
     o.AddPolicy(Policies.RequireOperator,
-        p => p.Requirements.Add(new MinimumRoleRequirement(Policies.MinimumRole(Policies.RequireOperator))));
+        p => p.RequireAuthenticatedUser().Requirements.Add(new MinimumRoleRequirement(Policies.MinimumRole(Policies.RequireOperator))));
     o.AddPolicy(Policies.RequireTechnician,
-        p => p.Requirements.Add(new MinimumRoleRequirement(Policies.MinimumRole(Policies.RequireTechnician))));
+        p => p.RequireAuthenticatedUser().Requirements.Add(new MinimumRoleRequirement(Policies.MinimumRole(Policies.RequireTechnician))));
     o.AddPolicy(Policies.RequireAdmin,
-        p => p.Requirements.Add(new MinimumRoleRequirement(Policies.MinimumRole(Policies.RequireAdmin))));
+        p => p.RequireAuthenticatedUser().Requirements.Add(new MinimumRoleRequirement(Policies.MinimumRole(Policies.RequireAdmin))));
 });
 
 var obsOpts = builder.Configuration.GetSection(ObservabilityOptions.SectionName).Get<ObservabilityOptions>() ?? new();
@@ -171,7 +176,7 @@ else
 
 var app = builder.Build();
 
-ValidateProductionSecurity(app);
+ValidateStartupSecurity(app);
 
 app.UseCors();
 app.UseRateLimiter();
@@ -194,15 +199,15 @@ var readyChecks = new HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready")
 };
-app.MapHealthChecks("/health/ready", readyChecks);
-app.MapHealthChecks("/ready", readyChecks);
+app.MapHealthChecks("/health/ready", readyChecks).AllowAnonymous();
+app.MapHealthChecks("/ready", readyChecks).AllowAnonymous();
 
-app.MapGet("/health/live", () => Results.Ok(new { status = "live", ts = DateTimeOffset.UtcNow }));
+app.MapGet("/health/live", () => Results.Ok(new { status = "live", ts = DateTimeOffset.UtcNow })).AllowAnonymous();
 
-app.MapGet("/health", () => Results.Ok(new { status = "healthy", ts = DateTimeOffset.UtcNow }));
+app.MapGet("/health", () => Results.Ok(new { status = "healthy", ts = DateTimeOffset.UtcNow })).AllowAnonymous();
 
 if (obsOpts.MetricsEnabled)
-    app.MapPrometheusScrapingEndpoint(obsOpts.MetricsPath);
+    app.MapPrometheusScrapingEndpoint(obsOpts.MetricsPath).RequireAuthorization();
 
 using (var scope = app.Services.CreateScope())
 {
@@ -212,20 +217,21 @@ using (var scope = app.Services.CreateScope())
         await db.Database.MigrateAsync();
     else
         await db.Database.EnsureCreatedAsync();
+    await OperatorAccountBootstrap.EnsureAsync(db, app.Configuration, app.Environment, platformOpts.Value.Seed.EnableDemoData);
     await SeedData.EnsureSeedAsync(db, platformOpts.Value.Seed.EnableDemoData);
 }
 
 app.Run();
 
-static void ValidateProductionSecurity(WebApplication app)
+static void ValidateStartupSecurity(WebApplication app)
 {
-    if (!app.Environment.IsProduction())
-        return;
+    // Materialize the signing key before migrations, seeding or hosted listeners start.
+    _ = app.Services.GetRequiredService<OperatorTokenSigningKey>();
     var sec = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecurityOptions>>().Value;
     if (sec.Mode == HostAuthMode.ApiKey && sec.ApiKeys.Length == 0)
     {
         throw new InvalidOperationException(
-            "Production requires configured API keys when Security:Mode is ApiKey (Security:ApiKeys, COINLINE_API_KEYS, or HOSTPLATFORM_API_KEYS).");
+            "Security:Mode ApiKey requires configured API keys (Security:ApiKeys, COINLINE_API_KEYS, or HOSTPLATFORM_API_KEYS).");
     }
 }
 

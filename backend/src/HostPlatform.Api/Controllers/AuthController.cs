@@ -19,6 +19,7 @@ namespace HostPlatform.Api.Controllers;
 public sealed class AuthController(HostPlatformDbContext db, OperatorTokenSigningKey signingKey) : ControllerBase
 {
     [HttpPost("login")]
+    [AllowAnonymous]
     public async Task<ActionResult<object>> Login([FromBody] LoginDto body, CancellationToken ct)
     {
         var username = (body.Username ?? "").Trim();

@@ -8,7 +8,7 @@ namespace HostPlatform.Tests.Integration;
 [Collection("IntegrationApi")]
 public sealed class CardTranche6Tests(ApiFixture factory)
 {
-    private readonly HttpClient _client = factory.CreateClient();
+    private readonly HttpClient _client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     [Fact]

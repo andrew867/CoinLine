@@ -25,11 +25,12 @@ public sealed class PostgresTerminalIdCutoverNccTests
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
         var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production").UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
             .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()).UseSetting("Ncc:LoopbackOnly", "true"));
-        using var api = factory.CreateClient();
+        using var api = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         api.DefaultRequestHeaders.Add("X-API-Key", key);
 
         foreach (var (profile, loseAck, conflict) in new[] {

@@ -2,4 +2,4 @@
 
 `coinline/web/src/api/client.ts` centralizes `fetch` to `/api` with optional API key header from env.
 
-Production: configure proxy or same-origin and **`X-API-Key`** when `Security:Mode=ApiKey`.
+All environments: sign in for an operator token, use the same-origin API proxy, and include `X-API-Key` when `Security:Mode=ApiKey`.

@@ -7,7 +7,7 @@ namespace HostPlatform.Tests.Integration;
 [Collection("IntegrationApi")]
 public sealed class InmateFeatureTests(ApiFixture factory)
 {
-    private readonly HttpClient _client = factory.CreateClient();
+    private readonly HttpClient _client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
 
     [Fact]
     public async Task Named_configurations_save_copy_update_and_delete_with_revision_checks()

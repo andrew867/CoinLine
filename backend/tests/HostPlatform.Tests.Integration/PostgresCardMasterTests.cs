@@ -23,10 +23,10 @@ public sealed class PostgresCardMasterTests
         var key = Guid.NewGuid().ToString("N");
         var password = Guid.NewGuid().ToString("N");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
-            .UseEnvironment("Production").UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey).UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
-        using var client = factory.CreateClient();
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         client.DefaultRequestHeaders.Add("X-API-Key", key);
         var read = new OperatorAccount { Username = "fixture-" + Guid.NewGuid().ToString("N"), DisplayName = "Fixture operator",
             Role = OperatorRole.Operator, PasswordHash = OperatorPassword.Hash(password), PermissionProfileJson = JsonSerializer.Serialize(new Dictionary<string, int>
@@ -97,7 +97,7 @@ public sealed class PostgresCardMasterTests
             }
             await SignIn(read);
             using (var denied = await client.PostAsJsonAsync(path + "/add", AddRequest(snapshot))) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-            client.DefaultRequestHeaders.Authorization = null;
+            TestOperatorAuthentication.Authenticate(client, factory);
             using (var missingMapping = await client.PostAsJsonAsync(path + "/add", new { definitionId = masterId, definitionRevision = rev, cards = snapshot.GetProperty("cards"), carriers = snapshot.GetProperty("carriers") }))
                 Assert.Equal(HttpStatusCode.BadRequest, missingMapping.StatusCode);
             using (var added = await client.PostAsJsonAsync(path + "/add", AddRequest(snapshot)))
@@ -178,7 +178,7 @@ public sealed class PostgresCardMasterTests
             var rolloutPath = $"/api/card-master/{masterId}/rollout";
             await SignIn(read);
             using (var denied = await client.PostAsJsonAsync(rolloutPath, new { revision = rev + 1, previewToken = "denied" })) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
-            client.DefaultRequestHeaders.Authorization = null;
+            TestOperatorAuthentication.Authenticate(client, factory);
             using var previewResponse = await client.PostAsJsonAsync(rolloutPath + "/preview", new { revision = rev + 1 });
             previewResponse.EnsureSuccessStatusCode(); var preview = await previewResponse.Content.ReadFromJsonAsync<JsonElement>();
             Assert.Equal(1, preview.GetProperty("eligiblePhones").GetInt32()); Assert.Equal(1, preview.GetProperty("scheduledPhones").GetInt32());

@@ -24,12 +24,12 @@ From the `coinline` package root:
 ```bash
 cd backend
 dotnet tool restore
-dotnet ef database update --project src/HostPlatform.Infrastructure --startup-project src/HostPlatform.Api
 dotnet run --project src/HostPlatform.Api --launch-profile http
 ```
 
-- API / Swagger: `http://localhost:5006` (see [OpenAPI](../api/openapi.md))
-- Set `COINLINE_API_KEYS` (or `Security:ApiKeys`) for non-development auth modes
+- API: `http://localhost:5006`; migrations run on startup.
+- In Development, configure `COINLINE_DEV_OPERATOR_PASSWORD` or use the random password shown once in startup output. Sign in as `operator` in the console.
+- All protected API calls, including Swagger, require an operator token. Outside Development, configure `COINLINE_OPERATOR_TOKEN_KEY` and an initial administrator; see [Authentication](../api/authentication.md).
 
 ## 3. CoinLine Management Console
 

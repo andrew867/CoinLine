@@ -53,7 +53,7 @@ public sealed partial class ManualCardLabTests
         settings.Validate();
         var test = new SyntheticCardFixtureProvider(settings.Destination);
         await using var host = new LabFactory(settings.Port, settings.ObserveExistingUploadOnly ? null : test);
-        using var client = host.CreateClient();
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(host);
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(settings.TimeoutSeconds));
         Guid terminalId;
         Guid accountId;
@@ -421,7 +421,7 @@ public sealed partial class ManualCardLabTests
     {
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
-            builder.UseEnvironment("Testing");
+            builder.UseEnvironment("Testing").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey);
             builder.UseSetting("Ncc:Listen", "1");
             builder.UseSetting("Ncc:Port", port.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("Platform:Seed:EnableDemoData", "false");

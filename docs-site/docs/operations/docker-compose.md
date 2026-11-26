@@ -6,7 +6,6 @@ Database and payload files are persisted in `docker/data/postgres` and `docker/d
 
 The lab SIP audio modem uses UDP `5060` and RTP ports `40000` through `40007`. Copy `sip.env.example` to the ignored `sip.env` and fill the optional registration settings when a registrar is required. The optional serial ATA listener uses `SerialModem__Enabled` and `SerialModem__PortName`.
 
-The production overlay sets `Production` and disables demo seeds. Provide `HOSTPLATFORM_API_KEYS` or `COINLINE_API_KEYS` for the API key gate. A nonempty `HOSTPLATFORM_API_KEYS` takes precedence. See [Production deployment](production-deployment.md).
-
+The production overlay sets `Production` and disables demo seeds. Provide a unique `COINLINE_OPERATOR_TOKEN_KEY` and `HOSTPLATFORM_API_KEYS` or `COINLINE_API_KEYS` for the additional deployment gate. All protected calls require a named operator token. On a fresh database, configure an initial administrator as described in the Docker README. A nonempty `HOSTPLATFORM_API_KEYS` takes precedence. See [Production deployment](production-deployment.md).
 
 For an isolated native acceptance listener that must never bind a LAN interface, set the API process environment variable `Ncc__LoopbackOnly=true`. This binds NCC to IPv4 loopback; an ordinary container's external published port will no longer reach that listener. Keep the normal deployment unchanged and use a dedicated test process or a deliberately isolated tunnel.

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
 
@@ -13,9 +14,7 @@ public sealed class AuthAccountTests(ApiFixture factory)
     public async Task An_admin_can_add_a_person_and_that_person_can_change_password()
     {
         var username = "desk-" + Guid.NewGuid().ToString("N")[..8];
-        var client = factory.CreateClient();
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", "operator");
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Role", "Admin");
+        var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
 
         var created = await client.PostAsJsonAsync("/api/auth/accounts", new
         {
@@ -30,7 +29,8 @@ public sealed class AuthAccountTests(ApiFixture factory)
         Assert.Equal(HttpStatusCode.OK, login.StatusCode);
 
         var asDesk = factory.CreateClient();
-        asDesk.DefaultRequestHeaders.TryAddWithoutValidation("X-Operator-Id", username);
+        asDesk.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString());
         var wrong = await asDesk.PostAsJsonAsync("/api/auth/password", new
         {
             currentPassword = "nope-nope",
@@ -44,11 +44,15 @@ public sealed class AuthAccountTests(ApiFixture factory)
             newPassword = "desk-pass-2"
         });
         Assert.Equal(HttpStatusCode.NoContent, changed.StatusCode);
+        using (var revoked = await asDesk.GetAsync("/api/auth/me"))
+            Assert.Equal(HttpStatusCode.Unauthorized, revoked.StatusCode);
 
         var oldLogin = await client.PostAsJsonAsync("/api/auth/login", new { username, password = "desk-pass-1" });
         Assert.Equal(HttpStatusCode.Unauthorized, oldLogin.StatusCode);
         var newLogin = await client.PostAsJsonAsync("/api/auth/login", new { username, password = "desk-pass-2" });
         Assert.Equal(HttpStatusCode.OK, newLogin.StatusCode);
+        asDesk.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer",
+            (await newLogin.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString());
 
         var me = await asDesk.GetAsync("/api/auth/me");
         Assert.Equal(HttpStatusCode.OK, me.StatusCode);
