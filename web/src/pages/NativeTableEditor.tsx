@@ -32,6 +32,7 @@ import { RegionalRatingPreview } from './RegionalRatingPreview'
 import { LanguageOrderPanel } from './LanguageOrderPanel'
 import { languageOrderKeys } from './languageOrderPlan'
 import { TerminalTariffPricing } from './TerminalTariffPricing'
+import { TerminalTariffReferencePanel } from './TerminalTariffReferencePanel'
 
 type Field = {
   key: string
@@ -567,6 +568,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
             || clearedKeys.size > 0 || hasScreeningChanges)
           setMessage('')
         }} />}
+      {showingSettings && current && number === 73 && /^rate-\d+$/.test(current.key) &&
+        <TerminalTariffReferencePanel key={`${setId}:${current.key}:${layout.revision}`} setId={setId} rateIndex={Number(current.key.slice(5))} />}
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!canEdit || busy}>
           <legend>{current.label}</legend>

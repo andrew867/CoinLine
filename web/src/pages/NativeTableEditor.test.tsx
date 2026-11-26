@@ -18,6 +18,33 @@ function renderEditor(number = 55) {
     onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} />)
 }
 
+it('reviews the selected saved tariff row even on a published read-only record, and discards the old row review', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 1 })
+  const layout = { supported: true, editable: false, profile: 'MTR 1.9 packed', length: 1192, revision: 1, sha256: 'fixture-hash',
+    sections: [0, 1].map(index => ({ key: `rate-${index}`, label: `Rate ${index}`, fields: [
+      { key: `rate-${index}.initialCharge`, label: 'Initial charge', editor: 'number', value: '25', min: 0, max: 65535, choices: null, maxLength: null, help: null },
+    ] })) }
+  vi.mocked(apiFetch).mockImplementation(async path => {
+    const selected = String(path).match(/tariffs\/(\d+)\/references$/)
+    if (!selected) return Response.json(layout)
+    return Response.json({ rateIndex: Number(selected[1]), setRevision: 1, profile: 'Fixture profile', review: {
+      supported: true, reason: null, groups: [{ recordNumber: 92, kind: 'Screening rules', use: 'configured', count: Number(selected[1]) + 1,
+        entries: [`Fixture entry ${selected[1]}`] }], reviewedRecords: [92], missingRecords: [], unreviewedRecords: [], warnings: [] } })
+  })
+  renderEditor(73)
+  expect(await screen.findByRole('heading', { name: 'What uses tariff 0?' })).toBeVisible()
+  expect(screen.getByLabelText('Initial charge')).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Review references' }))
+  expect(await screen.findByText(/Screening rules \(1 reference\)/)).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Section or entry'), { target: { value: 'rate-1' } })
+  expect(screen.getByRole('heading', { name: 'What uses tariff 1?' })).toBeVisible()
+  expect(screen.queryByText(/Screening rules \(1 reference\)/)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Review references' }))
+  expect(await screen.findByText(/Screening rules \(2 references\)/)).toBeVisible()
+  expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/tables/sets/set-fixture/tariffs/1/references')).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Save record' })).toBeNull()
+})
+
 it.each([
   ['flat', 'Whole call charge (cents)', '25', null, '2', '-1', '0', '0', '$0.25'],
   ['minute', 'Charge per minute (cents)', '25', null, '1', '60', '60', '25', '$1.25'],
