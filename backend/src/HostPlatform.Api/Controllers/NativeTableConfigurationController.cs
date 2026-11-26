@@ -226,7 +226,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         }
     }
 
-    private static (NativeTableLayout? Layout, string? Error) ResolveLayout(TableSet set, int number, byte[] data,
+    internal static (NativeTableLayout? Layout, string? Error) ResolveLayout(TableSet set, int number, byte[] data,
         string? requestedProfile, string? savedProfile = null)
     {
         if (savedProfile != null && requestedProfile != null && requestedProfile != savedProfile)
@@ -304,7 +304,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         return NativeTableLayouts.ReviewGraphicalLinks(records, ambiguous);
     }
 
-    private static SortedDictionary<int, string> ReadScreeningDescriptions(string? json) =>
+    internal static SortedDictionary<int, string> ReadScreeningDescriptions(string? json) =>
         json == null ? [] : JsonSerializer.Deserialize<SortedDictionary<int, string>>(json) ?? [];
 
     public sealed record ScreeningEdits(ScreeningSlotEdit[]? Actions, Dictionary<int, string?>? Descriptions);

@@ -101,8 +101,18 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify cashbox query workflow
+        run: npm run e2e -- e2e/cashbox-query.spec.ts --output test-results/cashbox-query
+        env:
+          CI: "true"
+
       - name: Verify restricted route review workflow
         run: npm run e2e -- e2e/restriction-route-review.spec.ts --output test-results/restriction-route-review
+        env:
+          CI: "true"
+
+      - name: Verify cross-configuration screening workflow
+        run: npm run e2e -- e2e/screening-bulk.spec.ts --output test-results/screening-bulk
         env:
           CI: "true"
 
@@ -123,6 +133,11 @@ jobs:
 
       - name: Verify configuration library workflow
         run: npm run e2e -- e2e/configuration-library.spec.ts --output test-results/configuration-library
+        env:
+          CI: "true"
+
+      - name: Verify current reported phone status workflow
+        run: npm run e2e -- e2e/current-phone-status.spec.ts --output test-results/current-phone-status
         env:
           CI: "true"
 

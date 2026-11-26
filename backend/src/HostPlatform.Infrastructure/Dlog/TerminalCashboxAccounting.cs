@@ -51,7 +51,8 @@ public static class TerminalCashboxAccounting
     private static async Task<List<Reading>> ReadReportsAsync(HostPlatformDbContext db, Guid terminalId, CancellationToken ct)
     {
         var rows = await db.DlogTransactions.AsNoTracking()
-            .Where(row => row.TerminalId == terminalId && row.NccSessionId != null && row.Direction == (int)DlogDirection.TerminalToHost &&
+            .Where(row => row.TerminalId == terminalId && row.NccSessionId != null && row.NccSession!.TerminalId == terminalId
+                && row.Direction == (int)DlogDirection.TerminalToHost &&
                 (row.MessageType == DlogCashboxWire.StatusType || row.MessageType == DlogCashboxWire.CollectionType))
             .OrderBy(row => row.CapturedAtUtc).ThenBy(row => row.Id)
             .Select(row => new Reading(row.Id, row.CapturedAtUtc, row.RawPayload)).ToListAsync(ct);

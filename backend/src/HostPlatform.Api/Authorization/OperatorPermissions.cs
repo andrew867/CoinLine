@@ -40,7 +40,7 @@ public static class OperatorPermissions
             ("Terminals", R, "Groups"), ("TerminalGroups", R, "Phones MembershipOptions"),
             ("Terminals", A | D, "AssignGroup AssignGroups"), ("TerminalGroups", A | D, "EditPhones"));
         Screen("phone-status", "Terminal status",
-            ("Terminals", R, "Events"), ("Terminals", U, "PostStatus"), ("FieldEvents", R, "List Reference"),
+            ("Terminals", R, "Events"), ("Terminals", U, "PostStatus"), ("FieldEvents", R, "List Reference PhoneOptions CurrentStatus"),
             ("Operator", R, "TerminalTimeline"));
         Screen("field-event-catalogue", "Alarm and maintenance catalogue",
             ("FieldEvents", U, "SaveReference"));
@@ -67,6 +67,7 @@ public static class OperatorPermissions
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("ConfigurationLibrary", R, "List Options"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
+            ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
             ("CardSequence", R, "Get"), ("CardSequence", U, "Move Add Remove Refresh Link"),
             ("GraphicalStarter", A, "Create"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),
@@ -94,7 +95,7 @@ public static class OperatorPermissions
             ("CallRecords", U, "Reconcile"));
         Screen("uploads", "Uploads", ("Uploads", R, "List Get"), ("Uploads", A, "Create Ingest"),
             ("Uploads", U, "Reprocess OperatorReview"), ("Terminals", A, "RequestCdrUpload"));
-        Screen("cashbox", "Cashbox accounting", ("TerminalCashbox", R, "Get"));
+        Screen("cashbox", "Cashbox accounting", ("TerminalCashbox", R, "Get Options"));
         Screen("ncc-sessions", "Phone sessions", ("NccSessions", R, "List Get Capture"), ("NccSessions", U, "Close Archive"));
         Screen("message-log", "Message log", ("Dlog", R, "MessageTypes CorrelationPairs MessagesLegacy Transactions TransactionById TransactionPayload Decode"),
             ("Dlog", A, "Ingest"), ("Dlog", U, "Replay"), ("Terminals", R, "DlogForTerminal"));

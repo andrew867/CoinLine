@@ -7,6 +7,7 @@ import { CustomersPage } from './pages/CustomersPage'
 import { Dashboard } from './pages/Dashboard'
 import { DownloadDetail } from './pages/DownloadDetail'
 import { DownloadsPage } from './pages/DownloadsPage'
+import { CashboxQueryPage } from './pages/CashboxQueryPage'
 import { DlogReplayDebug } from './pages/DlogReplayDebug'
 import { DlogTransactionDetail } from './pages/DlogTransactionDetail'
 import { DlogTransactions } from './pages/DlogTransactions'
@@ -94,6 +95,7 @@ export default function App() {
           <Route path="/downloads/:id" element={<DownloadDetail />} />
           <Route path="/downloads" element={<DownloadsPage />} />
           <Route path="/field-events" element={<FieldEventsPage />} />
+          <Route path="/cashbox" element={<CashboxQueryPage />} />
           <Route path="/field-event-destinations" element={<FieldEventDestinationsPage />} />
           <Route path="/uploads/:id" element={<UploadDetail />} />
           <Route path="/uploads" element={<UploadsPage />} />
