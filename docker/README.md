@@ -28,7 +28,7 @@ The base Compose file runs the API in Development and loads demo data. A real op
 
 ## Emulator
 
-Start the emulator on the host. Compose does not build or run it. Point it at TCP port 4000.
+Start the emulator on the host. Compose does not build or run it. Point it at TCP port 4000. The NCC listener is published on loopback by default. Set `COINLINE_NCC_BIND_ADDRESS` only if a secured LAN or gateway needs access. The default concurrent session limit is 32, receive timeout is 60 seconds, and idle timeout is 120 seconds without a valid frame. Adjust `COINLINE_NCC_MAX_CONNECTIONS`, `COINLINE_NCC_READ_TIMEOUT_SECONDS` and `COINLINE_NCC_IDLE_TIMEOUT_SECONDS` when required; the INSTALL acknowledgement deadline remains separate.
 
 ## Production overlay
 

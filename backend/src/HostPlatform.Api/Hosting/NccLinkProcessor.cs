@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net.Sockets;
 using HostPlatform.Api.Audit;
 using HostPlatform.Domain;
@@ -28,7 +29,8 @@ internal sealed class NccLinkProcessor(
     TimeProvider clock,
     ILogger logger,
     CancellationToken stoppingToken,
-    INccCardAuthorizationProvider? cardProvider)
+    INccCardAuthorizationProvider? cardProvider,
+    NccListenerSettings settings)
 {
     private const string Actor = "ncc-listener";
     private const byte EndDataMessageType = 13;
@@ -91,29 +93,44 @@ internal sealed class NccLinkProcessor(
         var decoder = new NccIncrementalStreamDecoder(NccParseMode.Strict);
         var stream = client.GetStream();
         var buf = new byte[1024];
+        var lastFrameAt = Stopwatch.GetTimestamp();
+        long? partialFrameAt = null;
         try
         {
             while (!stoppingToken.IsCancellationRequested)
             {
                 using var readCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+                // A partial frame or unrelated bytes do not renew the dialogue deadline.
+                var idleLeft = settings.IdleTimeout - Stopwatch.GetElapsedTime(lastFrameAt);
+                var timeout = Min(settings.ReadTimeout, idleLeft);
+                if (partialFrameAt is { } started)
+                    timeout = Min(timeout, settings.ReadTimeout - Stopwatch.GetElapsedTime(started));
                 if (HasPendingInstall || _callbackOffer != null)
-                    readCts.CancelAfter(AckWait);
+                    timeout = Min(timeout, AckWait - Stopwatch.GetElapsedTime(lastFrameAt));
+                if (timeout <= TimeSpan.Zero)
+                    readCts.Cancel();
+                else
+                    readCts.CancelAfter(timeout);
 
                 int n;
                 try
                 {
+                    readCts.Token.ThrowIfCancellationRequested();
                     n = await stream.ReadAsync(buf, readCts.Token);
                 }
                 catch (OperationCanceledException) when (!stoppingToken.IsCancellationRequested && HasPendingInstall)
                 {
                     var firmwareTransfer = _firmwareTables != null;
                     await FailOutstandingAsync("acknowledgement was missing", missingAcknowledgement: true);
-                    if (firmwareTransfer)
+                    if (firmwareTransfer || Stopwatch.GetElapsedTime(lastFrameAt) >= settings.IdleTimeout ||
+                        (partialFrameAt != null && Stopwatch.GetElapsedTime(partialFrameAt.Value) >= settings.ReadTimeout))
                         break;
                     continue;
                 }
                 catch (OperationCanceledException)
                 {
+                    if (!stoppingToken.IsCancellationRequested)
+                        logger.LogInformation("NCC session {SessionId} reached its receive deadline.", _session.Id);
                     break;
                 }
                 catch (Exception ex)
@@ -141,6 +158,10 @@ internal sealed class NccLinkProcessor(
                                 : null;
                             arrivals.Add((parsed, accepted));
                         }
+                        if (decoder.PendingByteCount == 0)
+                            partialFrameAt = null;
+                        else if (partialFrameAt == null || arrivals.Count > 0)
+                            partialFrameAt = Stopwatch.GetTimestamp();
                     }
                 }
                 catch (Exception ex)
@@ -157,6 +178,7 @@ internal sealed class NccLinkProcessor(
                         if (parse.Packet is { } retry && IsHeaderOnlyRetransmission(retry, parsed.Frame.RawBytes))
                         {
                             await AcceptFrameAsync(stream, retry, parsed.Frame.RawBytes, frame!, headerOnlyRetry: true);
+                            lastFrameAt = Stopwatch.GetTimestamp();
                             logger.LogInformation("NCC header-only retransmission acknowledged for session {SessionId}.", _session.Id);
                         }
                         else
@@ -168,6 +190,7 @@ internal sealed class NccLinkProcessor(
                     }
 
                     await AcceptFrameAsync(stream, packet, parsed.Frame.RawBytes, frame!);
+                    lastFrameAt = Stopwatch.GetTimestamp();
                     if ((packet.Control & NccControl.Clr) != 0)
                         return;
                 }
@@ -201,6 +224,8 @@ internal sealed class NccLinkProcessor(
             logger.LogInformation("NCC link closed {Remote}.", remote);
         }
     }
+
+    private static TimeSpan Min(TimeSpan left, TimeSpan right) => left <= right ? left : right;
 
     private bool IsHeaderOnlyRetransmission(NccWirePacket packet, ReadOnlySpan<byte> raw) =>
         _lastInboundMessage is { } previous
@@ -929,12 +954,14 @@ internal sealed class NccLinkProcessor(
 
     private async Task WriteCapturedFrameAsync(NetworkStream stream, ReadOnlyMemory<byte> bytes, CancellationToken ct)
     {
+        using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(ct, stoppingToken);
+        writeCts.CancelAfter(settings.ReadTimeout);
         NccSessionFrame frame;
-        await _writeGate.WaitAsync(ct);
+        await _writeGate.WaitAsync(writeCts.Token);
         try
         {
             frame = CaptureFrame(bytes.Span[1], bytes.Length, sentByHost: true);
-            await stream.WriteAsync(bytes, ct);
+            await stream.WriteAsync(bytes, writeCts.Token);
         }
         finally
         {

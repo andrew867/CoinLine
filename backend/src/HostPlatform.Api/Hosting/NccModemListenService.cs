@@ -1,4 +1,3 @@
-using System.Net;
 using System.Net.Sockets;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Dlog;
@@ -45,9 +44,8 @@ public sealed class NccModemListenService(
         else if (int.TryParse(Environment.GetEnvironmentVariable("COINLINE_NCC_PORT"), out var envPort) && envPort is > 0 and < 65536)
             port = envPort;
 
-        var bind = env.IsEnvironment("Testing") || config.GetValue<bool>("Ncc:LoopbackOnly")
-            ? IPAddress.Loopback : IPAddress.Any;
-        var listener = new TcpListener(bind, port);
+        var settings = NccListenerSettings.FromConfiguration(config, env.IsEnvironment("Testing"));
+        var listener = new TcpListener(settings.BindAddress, port);
         try
         {
             listener.Start();
@@ -58,7 +56,10 @@ public sealed class NccModemListenService(
             return;
         }
 
-        logger.LogInformation("NCC modem listener on port {Port}.", port);
+        logger.LogInformation("NCC modem listener on {Address}:{Port}; connection limit {Limit}.",
+            settings.BindAddress, port, settings.MaxConcurrentConnections);
+        using var slots = new SemaphoreSlim(settings.MaxConcurrentConnections, settings.MaxConcurrentConnections);
+        var clients = new HashSet<Task>();
         await CloseOrphanActiveSessionsAsync(stoppingToken);
         try
         {
@@ -79,23 +80,50 @@ public sealed class NccModemListenService(
                     break;
                 }
 
-                _ = Task.Run(() => HandleClientAsync(client, stoppingToken), stoppingToken);
+                clients.RemoveWhere(task => task.IsCompleted);
+                if (!slots.Wait(0))
+                {
+                    client.Dispose();
+                    logger.LogDebug("NCC connection declined at configured capacity.");
+                    continue;
+                }
+                clients.Add(HandleClientSafelyAsync(client, settings, slots, stoppingToken));
             }
         }
         finally
         {
             listener.Stop();
+            await Task.WhenAll(clients);
         }
     }
 
-    private async Task HandleClientAsync(TcpClient client, CancellationToken stoppingToken)
+    private async Task HandleClientSafelyAsync(TcpClient client, NccListenerSettings settings,
+        SemaphoreSlim slots, CancellationToken stoppingToken)
+    {
+        try
+        {
+            using (client)
+                await HandleClientAsync(client, settings, stoppingToken);
+        }
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested) { }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "NCC client processing ended unexpectedly.");
+        }
+        finally
+        {
+            slots.Release();
+        }
+    }
+
+    private async Task HandleClientAsync(TcpClient client, NccListenerSettings settings, CancellationToken stoppingToken)
     {
         await using var scope = scopes.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
         var tables = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
         var dlog = scope.ServiceProvider.GetRequiredService<DlogTransactionEngine>();
         var cardProvider = scope.ServiceProvider.GetService<INccCardAuthorizationProvider>();
-        var processor = new NccLinkProcessor(db, tables, dlog, outbound, scopes, clock, logger, stoppingToken, cardProvider);
+        var processor = new NccLinkProcessor(db, tables, dlog, outbound, scopes, clock, logger, stoppingToken, cardProvider, settings);
         await processor.RunAsync(client);
     }
 
