@@ -132,3 +132,19 @@
   .terminal-status-hero { flex-wrap: wrap; gap: 12px; }
   .terminal-status-metrics { gap: 6px; }
 }
+
+.current-phone-status { border: 1px solid var(--border, #d5ded9); border-radius: 9px; padding: 14px; margin: 16px 0; }
+.current-phone-status h3 { margin-top: 0; }
+.current-phone-status-header { margin: 12px 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 170px), 1fr)); gap: 10px; }
+.current-phone-status-header div { padding: 9px; border-radius: 6px; background: var(--surface-muted, #f2f6f4); }
+.current-phone-status-header dt { font-size: .8rem; opacity: .8; }
+.current-phone-status-header dd { margin: 4px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.current-phone-summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin: 10px 0; }
+.current-phone-warning { color: #825114; background: #fff5d9; padding: 6px 8px; border-radius: 5px; }
+.current-phone-status-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 270px), 1fr)); gap: 12px; }
+.current-phone-status-groups section { border: 1px solid var(--border, #d5ded9); border-radius: 7px; padding: 10px; }
+.current-phone-status-groups h4 { margin: 0 0 8px; }
+.current-phone-status-groups ul { margin: 0; padding: 0; list-style: none; }
+.current-phone-status-groups li { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; align-items: center; padding: 5px 0; border-top: 1px solid var(--border, #d5ded9); }
+.current-phone-status-groups li span:last-child { padding: 2px 5px; border-radius: 4px; background: #edf1ee; color: #355847; font-size: .78rem; white-space: nowrap; }
+.current-phone-status-groups li[data-asserted="true"] span:last-child { font-weight: 600; background: #fce3c6; color: #773d13; }
