@@ -1784,12 +1784,7 @@ internal sealed class NccLinkProcessor(
 
     private AuditEvent? Audit(string action, object detail, Guid? terminalId)
     {
-        ApiAudit.Write(db, null, "ncc", action, _session.Id.ToString(), detail, terminalId);
-        var ev = db.ChangeTracker.Entries<AuditEvent>()
-            .Select(e => e.Entity)
-            .LastOrDefault(e => e.Action == action && e.Resource == _session.Id.ToString());
-        if (ev == null)
-            return null;
+        var ev = ApiAudit.Write(db, null, "ncc", action, _session.Id.ToString(), detail, terminalId);
         ev.CorrelationId = _session.CorrelationId;
         ev.TerminalSessionId = _session.Id.ToString();
         return ev;

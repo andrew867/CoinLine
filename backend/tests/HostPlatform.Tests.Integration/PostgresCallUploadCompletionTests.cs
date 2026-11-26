@@ -158,6 +158,9 @@ public sealed class PostgresCallUploadCompletionTests
             }
             observations.AddRange(recorded);
         }
+        // Every original explicit upload frame must be correlated to its own session;
+        // receipt retransmissions do not create new upload observations.
+        Assert.Equal(15, observations.Count);
         Assert.Contains(observations, observation => Headers(observation).SequenceEqual(new[] { (53, 54), (53, 54), (56, 81), (10, 11), (60, 28) }));
         Assert.Contains(observations, observation => observation.GetProperty("endsDialogue").ValueKind == JsonValueKind.True &&
             Headers(observation).SequenceEqual(new[] { (10, 11), (60, 28), (13, 1) }));
