@@ -416,11 +416,18 @@ public class HostPlatformDbContext : DbContext
 
         modelBuilder.Entity<CardReadEvent>(b =>
         {
+            b.Property(e => e.PanLast4).HasMaxLength(4);
+            b.ToTable(t => t.HasCheckConstraint("CK_CardReadEvents_PanLast4", "\"PanLast4\" IS NULL OR \"PanLast4\" ~ '^[0-9]{4}$'"));
             b.HasOne(e => e.CardAccount).WithMany().HasForeignKey(e => e.CardAccountId);
             b.HasOne(e => e.Terminal).WithMany().HasForeignKey(e => e.TerminalId);
         });
 
-        modelBuilder.Entity<CardWriteEvent>(b => b.HasOne(e => e.CardAccount).WithMany().HasForeignKey(e => e.CardAccountId));
+        modelBuilder.Entity<CardWriteEvent>(b =>
+        {
+            b.Property(e => e.PanLast4).HasMaxLength(4);
+            b.ToTable(t => t.HasCheckConstraint("CK_CardWriteEvents_PanLast4", "\"PanLast4\" IS NULL OR \"PanLast4\" ~ '^[0-9]{4}$'"));
+            b.HasOne(e => e.CardAccount).WithMany().HasForeignKey(e => e.CardAccountId);
+        });
 
         modelBuilder.Entity<SmartcardProfile>(b =>
             b.HasOne(p => p.SmartcardType).WithMany().HasForeignKey(p => p.SmartcardTypeId));

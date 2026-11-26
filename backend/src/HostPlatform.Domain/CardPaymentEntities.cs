@@ -23,7 +23,7 @@ public class CardBalance : AuditableEntity
     public string Currency { get; set; } = "USD";
 }
 
-/// <summary>Ingested card read — raw JSON preserved for unknown protocols.</summary>
+/// <summary>Minimal observation of a card read. Never stores wire payloads or credentials.</summary>
 public class CardReadEvent : AuditableEntity
 {
     public Guid? CardAccountId { get; set; }
@@ -31,7 +31,8 @@ public class CardReadEvent : AuditableEntity
     public Guid? TerminalId { get; set; }
     public Terminal? Terminal { get; set; }
     public CardType ReportedCardType { get; set; } = CardType.Unknown;
-    public string RawPayloadJson { get; set; } = "{}";
+    public string? PanLast4 { get; set; }
+    public CardReadResult Result { get; set; } = CardReadResult.Unknown;
 }
 
 /// <summary>Physical write attempts are simulated only until HARDWARE_VALIDATION_REQUIRED gate clears.</summary>
@@ -39,8 +40,8 @@ public class CardWriteEvent : AuditableEntity
 {
     public Guid? CardAccountId { get; set; }
     public CardAccount? CardAccount { get; set; }
-    public string IntendedOperation { get; set; } = string.Empty;
-    public string RawPayloadJson { get; set; } = "{}";
+    public string? PanLast4 { get; set; }
+    public CardType ReportedCardType { get; set; } = CardType.Unknown;
     public CardWriteDisposition Disposition { get; set; } = CardWriteDisposition.Simulated;
     public bool SimulationMode { get; set; } = true;
 }

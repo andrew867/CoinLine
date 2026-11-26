@@ -17,7 +17,7 @@ From the **repository root**:
 bash docs-site/scripts/export-openapi.sh
 ```
 
-Requires **`DOTNET_ENVIRONMENT=Testing`** so startup does not connect to PostgreSQL during `swagger tofile` (uses in-memory DB + seed).
+The export scripts use `DOTNET_ENVIRONMENT=Testing`, an ephemeral signing key and disabled modem listeners, so startup uses an isolated in-memory database instead of PostgreSQL.
 
 Windows:
 

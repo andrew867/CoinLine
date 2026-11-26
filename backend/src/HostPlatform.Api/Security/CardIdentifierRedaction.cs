@@ -12,13 +12,8 @@ public static class CardIdentifierRedaction
         return "…" + token[^4..];
     }
 
-    /// <summary>Display-safe PAN fragment — assumes caller already stores last4 only.</summary>
-    public static string MaskPanLast4(string? panLast4)
-    {
-        if (string.IsNullOrEmpty(panLast4))
-            return "";
-        if (panLast4.Length <= 4)
-            return "••••" + panLast4;
-        return "••••" + panLast4[^4..];
-    }
+    /// <summary>Only an explicitly provided four-digit fragment is accepted; never retain an input PAN.</summary>
+    public static bool IsLast4(string? value) => value is { Length: 4 } && value.All(ch => ch is >= '0' and <= '9');
+
+    public static string MaskPanLast4(string? panLast4) => IsLast4(panLast4) ? "••••" + panLast4 : "";
 }

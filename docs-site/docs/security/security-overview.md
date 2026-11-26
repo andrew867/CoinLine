@@ -21,7 +21,7 @@ Sensitive mutations write **audit events** (categories vary by domain). Review [
 
 ## Payment-adjacent data
 
-Card APIs operate on **tokens**, masked fragments, and opaque payloads — **never** persist full track, PAN, or CVV through these endpoints in production without an approved PCI architecture.
+Card read/write observations retain only an optional last-four fragment, card type, outcome and related record identifiers. Legacy opaque input fields are ignored. Manual transaction amounts and reconciliation are retained without caller-provided raw payload or arbitrary detail. The migration discards historical opaque event data and preserves separately evidenced settlement records. Never send full PAN, track or CVV; use only authorized token references.
 
 ## Related
 
