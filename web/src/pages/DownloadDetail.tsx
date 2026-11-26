@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiPostBare, apiPostBareOk } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { StatusBadge } from '../components/StatusBadge'
+import './TableSetConfiguration.css'
 
 
 type Step = {
@@ -13,6 +16,7 @@ type Step = {
   succeeded: boolean
   errorDetail: string | null
   tableVersionId: string
+  tableNumber?: number
   tableDefinitionName: string
   payloadSha256Hex: string
 }
@@ -32,6 +36,10 @@ type Detail = {
   diagnosticsJson: string | null
   completedAtUtc: string | null
   createdAtUtc: string
+  sessionEvidence?: {
+    status: number; startedAtUtc: string; endedAtUtc: string | null; terminalClearObservedAtUtc: string | null
+    terminalClearSequence: number | null; releaseOutcome: string | null; releaseElapsedMilliseconds: number | null
+  } | null
   timeline: Step[]
 }
 
@@ -51,32 +59,44 @@ const acknowledgementLabels: Record<string, string> = {
 const itemStatusLabels: Record<number, string> = {
   0: 'Pending', 1: 'Queued', 2: 'In progress', 3: 'Succeeded', 4: 'Failed', 5: 'Cancelled', 6: 'Skipped',
 }
+const releaseLabels: Record<string, string> = {
+  peer_eof: 'Peer closed the transport after terminal clear', deadline: 'Host drain deadline reached',
+  peer_error: 'Transport error during release', shutdown: 'Listener shut down during release',
+}
+const sessionLabels: Record<number, string> = { 0: 'Open (stored session)', 1: 'Closed', 2: 'Archived' }
+function utcTime(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.valueOf()) ? value : date.toISOString()
+}
 export function DownloadDetail() {
   const { id } = useParams()
   const [d, setD] = useState<Detail | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refresh, setRefresh] = useState(0)
 
-  const load = () => {
-    if (!id) return
-    setErr(null)
-    apiFetch(`/api/downloads/${id}`)
-      .then((r) => {
-        if (!r.ok) throw new Error(String(r.status))
-        return r.json() as Promise<Detail>
-      })
-      .then(setD)
-      .catch((e) => setErr(e instanceof Error ? e.message : 'error'))
-  }
+  const load = () => setRefresh(count => count + 1)
 
   useEffect(() => {
-    load()
-  }, [id])
+    if (!id) return
+    const abort = new AbortController()
+    setErr(null); setRefreshing(true)
+    void apiFetch(`/api/downloads/${id}`, { signal: abort.signal })
+      .then((r) => {
+        if (!r.ok) throw new Error(`Could not load download (HTTP ${r.status}).`)
+        return r.json() as Promise<Detail>
+      })
+      .then(result => { if (!abort.signal.aborted) setD(result) })
+      .catch(error => { if (!abort.signal.aborted) setErr(error instanceof Error ? error.message : 'Could not load download.') })
+      .finally(() => { if (!abort.signal.aborted) setRefreshing(false) })
+    return () => abort.abort()
+  }, [id, refresh])
 
   async function cancel() {
     if (!id) return
     if (
       !window.confirm(
-        'Cancel this download orchestration batch? (Terminal-side state may still require HARDWARE_VALIDATION_REQUIRED checks.)'
+        'Cancel this host download batch? Records already accepted by the phone will not be erased.'
       )
     )
       return
@@ -93,7 +113,7 @@ export function DownloadDetail() {
     if (!id) return
     if (
       !window.confirm(
-        'Create a new download batch from this failed/cancelled run? Confirms server-side orchestration only.'
+        'Prepare a replacement batch from this failed or cancelled run? The phone must pick up the new batch during an eligible call.'
       )
     )
       return
@@ -109,7 +129,7 @@ export function DownloadDetail() {
   }
 
   if (!id) return <p>Missing id.</p>
-  if (!d) return err ? <p style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
+  if (!d || d.id !== id) return err ? <p role="alert" style={{ color: 'crimson' }}>{err}</p> : <p>Loading…</p>
 
   const statusLabel = (n: number) =>
     (
@@ -123,8 +143,13 @@ export function DownloadDetail() {
       } as Record<number, string>
     )[n] ?? String(n)
 
-  const canCancel = !d.scheduleId && (d.status === 0 || (d.status === 1 && !d.nccSessionId) || d.status === 5)
-  const canRetry = !d.scheduleId && (d.status === 3 || d.status === 4)
+  const canUpdate = canPerform('downloads', op.update)
+  const canCancel = canUpdate && !d.scheduleId && (d.status === 0 || (d.status === 1 && !d.nccSessionId) || d.status === 5)
+  const canRetry = canUpdate && !d.scheduleId && (d.status === 3 || d.status === 4)
+  const acknowledged = d.timeline.filter(step => step.succeeded && step.lastAckStatus === 'ack').length
+  const failed = d.timeline.filter(step => step.itemStatus === 4).length
+  const notSent = d.timeline.filter(step => step.lastAckStatus === 'not_sent').length
+  const session = d.sessionEvidence
 
   return (
     <div>
@@ -132,20 +157,50 @@ export function DownloadDetail() {
         <Link to="/downloads">← Downloads</Link>
       </p>
       <h1>Download batch</h1>
-      {err && <p style={{ color: 'crimson' }}>{err}</p>}
+      {err && <p role="alert" style={{ color: 'crimson' }}>{err}</p>}
       <p>
-        <strong>{statusLabel(d.status)}</strong> · Terminal <code>{d.terminalId}</code>
+        Host transfer: <StatusBadge label={statusLabel(d.status)} variant={d.status === 2 ? 'ok' : d.status === 3 ? 'bad' : 'neutral'} /> · Terminal <code>{d.terminalId}</code>
       </p>
-      {d.nccSessionId && <p>NCC session <code>{d.nccSessionId}</code></p>}
+      {d.nccSessionId && <p>NCC session {canPerform('ncc-sessions', op.read)
+        ? <Link to={`/ncc-sessions?sessionId=${encodeURIComponent(d.nccSessionId)}`}><code>{d.nccSessionId}</code></Link> : <code>{d.nccSessionId}</code>}</p>}
       {d.scheduleId && <p><Link to={`/table-sets/${d.tableSetId}`}>Manage scheduled download</Link></p>}
       <p>
         Set: {d.tableSetName ?? d.tableSetId} · Scope: {d.scope === 1 ? 'Partial' : 'Full'} · Retries: {d.retryCount}
       </p>
       {d.lastError && <p role="alert">{d.lastError}</p>}
-      {d.diagnosticsJson && (
-        <pre style={{ background: '#f6f8fa', padding: 12, fontSize: 12 }}>{d.diagnosticsJson}</pre>
-      )}
+      <section className="table-config-panel" aria-label="Host transfer evidence">
+        <h2>Host transfer evidence</h2>
+        {d.timeline.length > 0 ? <>
+          <p><strong>{acknowledged} of {d.timeline.length} records acknowledged</strong></p>
+          <progress aria-label="Record acknowledgements" max={d.timeline.length} value={acknowledged} style={{ width: 'min(100%, 32rem)' }} />
+          <p>{failed} failed · {notSent} explicitly not sent</p>
+        </> : <p>No prepared record steps retained.</p>}
+        {d.status === 2 && (d.timeline.length === 0 || acknowledged !== d.timeline.length) &&
+          <p role="status">The host marked this batch completed, but the retained timeline does not establish acknowledgement of every record.</p>}
+        {d.completedAtUtc && <p>Host batch finished: <time dateTime={d.completedAtUtc}>{utcTime(d.completedAtUtc)}</time></p>}
+        {session ? <dl>
+          <dt>Linked NCC session</dt><dd>{sessionLabels[session.status] ?? 'Unknown stored state'}</dd>
+          <dt>Session start</dt><dd><time dateTime={session.startedAtUtc}>{utcTime(session.startedAtUtc)}</time></dd>
+          {session.endedAtUtc && <><dt>Recorded session end</dt><dd><time dateTime={session.endedAtUtc}>{utcTime(session.endedAtUtc)}</time></dd></>}
+          <dt>Terminal-initiated clear</dt><dd>{session.terminalClearObservedAtUtc
+            ? <>Observed{session.terminalClearSequence != null && `, frame ${session.terminalClearSequence}`} at <time dateTime={session.terminalClearObservedAtUtc}>{utcTime(session.terminalClearObservedAtUtc)}</time></>
+            : 'Not recorded in the retained session'}</dd>
+          {session.terminalClearObservedAtUtc && <><dt>Transport release</dt><dd>{releaseLabels[session.releaseOutcome ?? ''] ?? 'No retained release observation'}
+            {session.releaseElapsedMilliseconds != null && Number.isFinite(session.releaseElapsedMilliseconds) && ` (${session.releaseElapsedMilliseconds.toFixed(1)} ms host time)`}</dd></>}
+        </dl> : <p>{d.nccSessionId ? 'No linked session evidence is available in this response.' : 'No terminal session assigned to this batch yet.'}</p>}
+        <p className="page-intro">A recorded clear or transport release is host-side protocol evidence, not proof that the terminal completed INSTALL.</p>
+      </section>
+      <section className="table-config-panel" aria-label="Terminal service verification">
+        <h2>Terminal service</h2>
+        <StatusBadge label="Not verified by this download" variant="neutral" />
+        <p>Record acknowledgements establish the transfer, not successful installation, warm restart, device checks or actual service. Verify the terminal display and behavior separately.</p>
+        {canPerform('phones', op.read) && <Link to={`/terminals/${d.terminalId}`}>View the phone's reported status</Link>}
+      </section>
+      {d.diagnosticsJson && <details><summary>Host diagnostic metadata</summary>
+        <pre style={{ background: '#f6f8fa', padding: 12, fontSize: 12, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{d.diagnosticsJson}</pre>
+      </details>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button type="button" disabled={refreshing} onClick={load}>{refreshing ? 'Refreshing…' : 'Refresh status'}</button>
         {canCancel && (
           <button type="button" onClick={() => void cancel()}>
             Cancel batch
@@ -166,7 +221,7 @@ export function DownloadDetail() {
         {d.timeline.map((s) => (
           <li key={s.id} style={{ marginBottom: 12 }}>
             <div>
-              Step {s.stepIndex}: <strong>{s.tableDefinitionName}</strong>
+              Step {s.stepIndex}: <strong>{s.tableDefinitionName}</strong>{s.tableNumber != null && <> · <code>MT{s.tableNumber}</code></>}
             </div>
             <div style={{ fontSize: 13, color: '#444' }}>
               Host phase: {s.hostDownloadPhaseName} · Acknowledgement: {acknowledgementLabels[s.lastAckStatus] ?? s.lastAckStatus} · Item status:{' '}

@@ -14,6 +14,8 @@
 
 Terminal-scoped download **start** lives under `POST /api/terminals/{id}/downloads`.
 
+The detail response includes `tableNumber` on each timeline item, and `sessionEvidence` when a retained NCC session is linked to the same phone. The evidence object contains the numeric session `status`, `startedAtUtc`, nullable `endedAtUtc`, `terminalClearObservedAtUtc`, `terminalClearSequence`, `releaseOutcome` and `releaseElapsedMilliseconds`. The latter two are nullable and are available when a corresponding retained terminal-clear release audit supplies recognized metadata. Release outcomes are `peer_eof`, `deadline`, `peer_error` or `shutdown`. No raw NCC frame or raw release audit is returned by this object. Absence of a retained observation is not proof that a terminal failed to clear. Batch completion, record acknowledgement and terminal service verification are separate facts.
+
 Start returns a `Pending` batch with the selected versions already prepared. Send `scope: "Partial"` and `partialTableDefinitionIds` to select records. The host includes their required records. The next eligible MT8, MT9 or ordinary MT44 claims the oldest pending batch for that phone after any eligible fleet schedule. The same batch ID records the wire transfer and the terminal's MT14 results. `nccSessionId` is null before pickup and identifies the resulting session afterward.
 
 An MT44 installation or memory-loss request instead delivers the full published assignment. Only after successful completion, an older partial request whose exact versions were all acknowledged can be cancelled as superseded. Its original history records the full batch ID but has no fabricated MT14s. Uncovered versions and future scheduled selections remain pending.
