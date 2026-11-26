@@ -12,8 +12,9 @@ test('shows authorization decisions independently from recorded payments', async
   }
   const attempts = [
     { ...common, id: 'attempt-approved', outcome: 'approved', reason: 'approved', quotedAmountUsd: 0.05,
-      cardAccountId: 'fixture-test-account', quoteId: 'fixture-quote', callSequence: 1 },
+      cardAccountId: 'fixture-test-account', quoteId: 'fixture-quote', callSequence: 1, requestBytes: 147, bundledCallRecords: 2 },
     { ...common, id: 'attempt-denied', outcome: 'declined', reason: 'quote_missing' },
+    { ...common, id: 'attempt-malformed', outcome: 'malformed_request', provider: 'none', requestBytes: 40, bundledCallRecords: null },
     { ...common, id: 'attempt-unknown', outcome: 'unknown', provider: 'unrecorded' },
   ]
   let loaded = 0
@@ -46,12 +47,14 @@ test('shows authorization decisions independently from recorded payments', async
   await expect(approved).toContainText('Synthetic workshop phone')
   await expect(approved).toContainText('Approved')
   await expect(approved).toContainText('USD 0.05')
+  await expect(approved).toContainText('147 application bytes · 2 bundled call records')
   await expect(approved.getByRole('link')).toHaveCount(0)
   await expect(history.getByText('No recent matching quote')).toBeVisible()
   await expect(history.getByText('Outcome unavailable', { exact: true })).toBeVisible()
+  await expect(history.getByText('Unrecognized request length or trailing record format')).toBeVisible()
   await expect(page.getByText('No payment transactions recorded.')).toBeVisible()
   await page.getByLabel('Authorization result').selectOption('not-approved')
-  await expect(history.getByRole('row')).toHaveCount(2)
+  await expect(history.getByRole('row')).toHaveCount(3)
   await expect(history.getByText('No recent matching quote')).toBeVisible()
   await expect(approved).toHaveCount(0)
   await page.getByLabel('Authorization result').selectOption('approved')

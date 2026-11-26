@@ -459,7 +459,8 @@ public sealed class CardsController(
             terminalDisplayName = entry.Row.TerminalId is { } id ? phones.GetValueOrDefault(id) : null,
             nccSessionId = Guid.TryParse(entry.Row.TerminalSessionId, out var parsed) ? (Guid?)parsed : null,
             entry.Row.CreatedAtUtc, entry.Detail.MessageType, entry.Detail.Outcome, entry.Detail.Provider,
-            entry.Detail.Reason, entry.Detail.CardAccountId, entry.Detail.QuoteId, entry.Detail.QuotedAmountUsd, entry.Detail.CallSequence
+            entry.Detail.Reason, entry.Detail.CardAccountId, entry.Detail.QuoteId, entry.Detail.QuotedAmountUsd, entry.Detail.CallSequence,
+            entry.Detail.RequestBytes, entry.Detail.BundledCallRecords
         }));
     }
 

@@ -316,6 +316,10 @@ internal sealed class NccLinkProcessor(
         var cardAuthorization = messageType is { } type && DlogCardAuthorizationWire.IsRequest(type);
         var callDetails = messageType is { } detailType && DlogCallDetailWire.IsRecord(detailType);
         var rateRequest = messageType == DlogRateWire.MessageTypeRequest;
+        var immediateRequestLength = 0;
+        IReadOnlyList<Range> immediateCallDetails = [];
+        var immediateBundleValid = (cardAuthorization || rateRequest) && DlogImmediateRequestWire.TrySplit(packet.Data,
+            out immediateRequestLength, out immediateCallDetails);
         var uploadAttention = messageType == DlogCallDetailWire.UploadAttention && packet.Data.Length >= 2;
         var explicitUpload = _callUploadPhoneId != null && !control && !headerOnlyRetry && !uploadAttention;
         DlogCallUploadWire.Frame? uploadFrame = null;
@@ -358,6 +362,12 @@ internal sealed class NccLinkProcessor(
             matched = terminal != null,
             unknown = !control && terminal == null,
             redactedMessageType = recordedBytes.Length == 0 ? messageType : null,
+            immediateRequest = cardAuthorization || rateRequest ? new
+            {
+                applicationBytes = packet.Data.Length,
+                validBundle = immediateBundleValid,
+                bundledCallRecords = immediateBundleValid ? (int?)immediateCallDetails.Count : null
+            } : null,
             callUploadEnd = uploadFrame?.EndsDialogue,
             callUpload = explicitUpload ? new
             {
@@ -461,6 +471,10 @@ internal sealed class NccLinkProcessor(
                 !await RecordFieldRecordsAsync(uploadFrame.Status.Select(range => packet.Data[range]), terminal))
                 throw new IOException("NCC call upload closed before acknowledgement: complete records were not stored.");
         }
+        var immediateReceipts = immediateBundleValid && immediateCallDetails.Count > 0 && terminal != null
+            ? await StoreCallDetailsAsync(packet.Data, terminal, immediateCallDetails) : [];
+        if (immediateBundleValid && immediateCallDetails.Count > 0 && immediateReceipts.Length != immediateCallDetails.Count * 3)
+            throw new IOException("NCC immediate-clear dialogue closed before acknowledgement: bundled call records were not stored.");
         if (terminal != null)
         {
             _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn || callDetails || uploadAttention || explicitUpload || statistics || cashboxReports.Count > 0
@@ -478,7 +492,8 @@ internal sealed class NccLinkProcessor(
                     _lastCallUploadEndRequest != null && ReferenceEquals(_lastDialogueRequest, _lastCallUploadEndRequest) ||
                     _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]
                     || DlogMaintenanceWire.HasRequestRecord(_lastDialogueRequest.Data)
-                    || (_lastDialogueRequest.Data.Length > 0 && DlogCardAuthorizationWire.IsRequest(_lastDialogueRequest.Data[0]))))
+                    || (_lastDialogueRequest.Data.Length > 0 && (DlogCardAuthorizationWire.IsRequest(_lastDialogueRequest.Data[0])
+                        || _lastDialogueRequest.Data[0] == DlogRateWire.MessageTypeRequest))))
                 await SendDialogueReplyAsync(stream, packet, reply.Data, "immediate dialogue retry");
             return;
         }
@@ -535,14 +550,14 @@ internal sealed class NccLinkProcessor(
 
         if (rateRequest)
         {
-            await TryRateAsync(stream, packet);
+            await TryRateAsync(stream, packet, immediateReceipts);
             return;
         }
 
         if (cardAuthorization)
         {
             if (terminal != null)
-                await AuthorizeCardAsync(stream, packet, terminal.Id);
+                await AuthorizeCardAsync(stream, packet, terminal.Id, immediateRequestLength, immediateBundleValid, immediateReceipts);
             return;
         }
 
@@ -609,24 +624,29 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task AuthorizeCardAsync(NetworkStream stream, NccWirePacket request, Guid terminalId)
+    private async Task AuthorizeCardAsync(NetworkStream stream, NccWirePacket request, Guid terminalId,
+        int requestLength, bool bundleValid, byte[] receipts)
     {
         var providerKind = cardProvider is SyntheticLabCardAuthorizationProvider ? CardAuthorizationAudit.LabProvider
             : cardProvider != null ? "trusted_provider" : "none";
-        if (!DlogCardAuthorizationWire.TryBuildDecline(request.Data, out var decline))
+        // A retry of the same dialogue does not create a second authorization.
+        if (TryImmediateReplyRetry(request, out var reply))
         {
-            await StoreCardAttemptAsync(NewCardAttempt(terminalId,
-                new CardAuthorizationAuditDetail(request.Data[0], "malformed_request", providerKind)));
+            await SendDialogueReplyAsync(stream, request, reply.Data, "card authorization retry");
             return;
         }
 
-        // A retry of the same dialogue does not create a second authorization.
-        if ((request.Control & NccControl.ReTrans) != 0 && _lastDialogueRequest is { } previous
-            && _lastDialogueReply is { } reply && previous.Data.AsSpan().SequenceEqual(request.Data)
-            && previous.TerminalId.AsSpan().SequenceEqual(request.TerminalId)
-            && NccControl.PacketId(previous.Control) == NccControl.PacketId(request.Control))
+        var protectedRequest = requestLength > 0 && request.Data.Length >= requestLength
+            ? request.Data.AsMemory(0, requestLength) : ReadOnlyMemory<byte>.Empty;
+        var canDecline = DlogCardAuthorizationWire.TryBuildDecline(protectedRequest.Span, out var decline);
+        if (!bundleValid || !canDecline)
         {
-            await SendDialogueReplyAsync(stream, request, reply.Data, "card authorization retry");
+            await StoreCardAttemptAsync(NewCardAttempt(terminalId,
+                new CardAuthorizationAuditDetail(request.Data[0], "malformed_request", providerKind, RequestBytes: request.Data.Length)));
+            // A complete known request header permits an explicit denial even if
+            // its suffix is malformed. Never invoke the provider or acknowledge
+            // records from an invalid bundle.
+            if (canDecline) await SendDialogueReplyAsync(stream, request, decline, "malformed card authorization decline");
             return;
         }
 
@@ -637,8 +657,8 @@ internal sealed class NccLinkProcessor(
         {
             try
             {
-                var decision = await cardProvider.AuthorizeAsync(terminalId, request.Data, stoppingToken);
-                if (decision != null && DlogCardAuthorizationWire.TryBuildDecision(request.Data, decision.Approved,
+                var decision = await cardProvider.AuthorizeAsync(terminalId, protectedRequest, stoppingToken);
+                if (decision != null && DlogCardAuthorizationWire.TryBuildDecision(protectedRequest.Span, decision.Approved,
                         decision.AuthorizationReference.Span, out var encoded))
                 {
                     response = encoded;
@@ -675,7 +695,7 @@ internal sealed class NccLinkProcessor(
                 var recordedDecision = await db.AuditEvents.AsNoTracking().SingleOrDefaultAsync(
                     row => row.Id == evidence.DecisionId, stoppingToken);
                 if (CardAuthorizationAudit.TryReplay(recordedDecision, terminalId, request.Data[0], evidence, out var replay)
-                    && DlogCardAuthorizationWire.TryBuildDecision(request.Data, replay.Approved,
+                    && DlogCardAuthorizationWire.TryBuildDecision(protectedRequest.Span, replay.Approved,
                         replay.AuthorizationReference.Span, out var replayResponse))
                 {
                     outcome = replay.Approved ? "approved" : "declined";
@@ -706,11 +726,21 @@ internal sealed class NccLinkProcessor(
             response = decline;
             outcome = "audit_failed";
         }
-        await SendDialogueReplyAsync(stream, request, response, $"card authorization {outcome}");
+        await SendDialogueReplyAsync(stream, request, [.. response, .. receipts], $"card authorization {outcome}");
 
         CardAuthorizationAuditDetail Detail(string result, SyntheticAuthorizationEvidence? lab) => new(
             request.Data[0], result, providerKind, lab?.Reason, lab?.CardAccountId, lab?.QuoteId,
-            lab?.QuotedAmountUsd, lab?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null);
+            lab?.QuotedAmountUsd, lab?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null,
+            request.Data.Length, receipts.Length / 3);
+    }
+
+    private bool TryImmediateReplyRetry(NccWirePacket request, out NccWirePacket reply)
+    {
+        reply = _lastDialogueReply!;
+        return (request.Control & NccControl.ReTrans) != 0 && _lastDialogueRequest is { } previous
+            && reply != null && previous.Data.AsSpan().SequenceEqual(request.Data)
+            && previous.TerminalId.AsSpan().SequenceEqual(request.TerminalId)
+            && NccControl.PacketId(previous.Control) == NccControl.PacketId(request.Control);
     }
 
     private AuditEvent NewCardAttempt(Guid terminalId, CardAuthorizationAuditDetail detail,
@@ -1197,8 +1227,13 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task TryRateAsync(NetworkStream stream, NccWirePacket packet)
+    private async Task TryRateAsync(NetworkStream stream, NccWirePacket packet, byte[] receipts)
     {
+        if (TryImmediateReplyRetry(packet, out var reply))
+        {
+            await SendDialogueReplyAsync(stream, packet, reply.Data, "rate request retry");
+            return;
+        }
         if (!DlogRateWire.TryParseRequest(packet.Data, out var request))
             return;
 
@@ -1274,14 +1309,7 @@ internal sealed class NccLinkProcessor(
             logger.LogWarning(ex, "Rate quote was not stored.");
         }
 
-        try
-        {
-            await WriteMessageAsync(stream, packet.TerminalId, response);
-        }
-        catch (Exception ex)
-        {
-            logger.LogInformation(ex, "Rate response was not sent.");
-        }
+        await SendDialogueReplyAsync(stream, packet, [.. response, .. receipts], "rate request");
     }
 
     private async Task StartInstallAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, bool callIn,

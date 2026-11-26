@@ -24,6 +24,8 @@ Major routes:
 
 Authorization history never returns raw requests, processor references or arbitrary audit JSON. Approval is not a payment transaction.
 
+New authorization observations include `requestBytes` and, for validated immediate-clear bundles, `bundledCallRecords` (zero through two). These are structural metadata only. Older observations may not have them; malformed suffixes have no validated record count. The history never contains card or trailing call-record bytes.
+
 Read results are `0` (unknown), `1` (succeeded), or `2` (failed). Supply `panLast4` only when it contains exactly four ASCII digits; the console displays a masked fragment. If a linked account already has a valid last-four fragment, the host can use it. Old clients may still send legacy opaque fields, but the host ignores them. A write record reports the simulation disposition, not physical card programming.
 
 The card-data migration removes legacy read/write payload and free-text operation columns, clears untrusted manual transaction details and raw payloads, and redacts historical read/write audit metadata. It preserves ledger amounts, reconciliation states, and matching host-generated settlement evidence. It does not erase historical backups or physical database storage; handle those separately under the deployment retention policy.
