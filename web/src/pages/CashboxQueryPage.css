@@ -17,3 +17,9 @@
 .cashbox-unmapped { display: block; font-size: .75rem; color: #80510f; font-weight: normal; }
 .cashbox-waiting { background: #fff5dc; border-radius: 6px; padding: 8px 10px; }
 .cashbox-query-link { margin-left: .7rem; align-self: center; }
+.cashbox-summary-coin-counts { margin-top: 12px; }
+.cashbox-coins { display: grid; gap: 4px; min-width: 12rem; }
+.cashbox-coins small { color: #526057; font-size: .78rem; }
+.cashbox-coins a { font-size: .8rem; width: fit-content; }
+.cashbox-coin-slots { list-style: none; display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0; padding: 0; }
+.cashbox-coin-slots li { border: 1px solid #d5ded9; padding: 3px 6px; border-radius: 5px; font-variant-numeric: tabular-nums; }
