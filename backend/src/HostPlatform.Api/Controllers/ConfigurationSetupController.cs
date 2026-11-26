@@ -45,7 +45,8 @@ public sealed class ConfigurationSetupController(HostPlatformDbContext db, Table
         catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
 
         if (!create)
-            return Ok(new { previewToken = prepared.Token, canCreate, source.Name, targetFirmware = source.TargetFirmwareVersion!.Label,
+            return Ok(new { previewToken = prepared.Token, canCreate, source.Name, sourceIsStarterDraft = source.Status == TableSetStatus.Draft,
+                targetFirmware = source.TargetFirmwareVersion!.Label,
                 changedNumbers = prepared.Changed.Keys.Order().ToArray(), recordCount = source.Versions.Count,
                 family = prepared.Family, provisioning = prepared.Provisioning, findings = prepared.Findings });
 
@@ -83,7 +84,8 @@ public sealed class ConfigurationSetupController(HostPlatformDbContext db, Table
         if (family == null) throw new ArgumentException("Choose the intended terminal family.");
         if (request.PaymentMode is < 0 or > 3) throw new ArgumentException("Choose a supported operating mode.");
         if (request.Pricing is not ("keep" or "host" or "flat" or "minute" or "split")) throw new ArgumentException("Choose a pricing structure.");
-        if (source.Status != TableSetStatus.Published) throw new InvalidOperationException("Choose a published base configuration.");
+        if (source.Status != TableSetStatus.Published && !(source.Status == TableSetStatus.Draft && source.IsDefault))
+            throw new InvalidOperationException("Choose a published base configuration or a designated default starter draft.");
         var profile = FirmwareTableProfiles.Find(source.TargetFirmwareVersion?.TableProfileId);
         if (profile == null || profile.ObservedLengthsOnly) throw new InvalidOperationException("The base configuration needs a registered, verified native table profile. Use the manual editor for other profiles.");
         if (source.Versions.Any(row => row.TableDefinition == null || !row.ValidationPassed) ||
@@ -127,7 +129,8 @@ public sealed class ConfigurationSetupController(HostPlatformDbContext db, Table
         var findings = TableSetFirmwareCompatibility.Review(projected).ToArray();
         var token = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new
         {
-            source.Id, source.Version, source.TargetFirmwareVersionId, firmwareRevision = source.TargetFirmwareVersion!.Version, profileId = profile.Id,
+            source.Id, source.Version, source.Status, source.IsDefault, source.TargetFirmwareVersionId,
+            firmwareRevision = source.TargetFirmwareVersion!.Version, profileId = profile.Id,
             request = request with { Name = name, PreviewToken = null }, records = source.Versions.OrderBy(row => row.Id).Select(row => new
             { row.Id, row.TableRevision, hash = TableDistributionService.ComputePayloadSha256Hex(row) })
         }))).ToLowerInvariant();

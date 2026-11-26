@@ -3,10 +3,10 @@ import { Link } from 'react-router-dom'
 import { apiPostRaw } from '../api/client'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 
-type Source = { id: string; name: string; status: number; targetFirmwareVersionId?: string | null; targetFirmware: string | null }
+type Source = { id: string; name: string; status: number; isDefault?: boolean; targetFirmwareVersionId?: string | null; targetFirmware: string | null }
 type Choices = { name: string; familyId: string; paymentMode: number; pricing: string; tariffIndex: string;
   firstChargeCents: string; followingChargeCents: string; advertising: string }
-type Preview = { previewToken: string; canCreate: boolean; targetFirmware: string; changedNumbers: number[]; recordCount: number;
+type Preview = { previewToken: string; canCreate: boolean; sourceIsStarterDraft?: boolean; targetFirmware: string; changedNumbers: number[]; recordCount: number;
   family: { familyLabel: string; documented: boolean; tables: { name: string; required: boolean; status: string }[] };
   provisioning: { operatingType: string | null; acceptedCoinSlots: number | null; configuredCardRanges: number | null;
     visibleOnHookTextMessages?: number | null;
@@ -17,7 +17,7 @@ const steps = ['Choose a starting configuration', 'Payment and pricing', 'Review
 const validInteger = (raw: string, max: number) => /^\d+$/.test(raw) && Number(raw) <= max
 
 export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Source[]; onCreated: () => void }) {
-  const available = sources.filter(source => source.status === 1 && !!source.targetFirmwareVersionId)
+  const available = sources.filter(source => !!source.targetFirmwareVersionId && (source.status === 1 || (source.status === 0 && source.isDefault)))
   const [step, setStep] = useState(0)
   const [sourceId, setSourceId] = useState('')
   const [choices, setChoices] = useState<Choices>({ name: '', familyId: '', paymentMode: 0, pricing: 'keep', tariffIndex: '',
@@ -59,7 +59,7 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
 
   return <section className="table-config-panel" aria-label="Guided configuration setup">
     <h2>Guided configuration setup</h2>
-    <p>Start from a published configuration for a matching registered firmware. This creates a reviewed draft only, never an assignment or a download.</p>
+    <p>Start from a published configuration or a designated default starter for a matching registered firmware. This creates a reviewed draft only, never an assignment or a download.</p>
     {created ? <>
       <h3>Draft created</h3><p role="status">Your source and its phones are unchanged.</p>
       <ul>
@@ -75,11 +75,12 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
       {error && <p role="alert">{error}</p>}
       {step === 0 && <fieldset disabled={busy}>
         <legend>Terminal and configuration</legend>
-        {available.length === 0 && <p>There are no published firmware-targeted configurations. Create or import a reviewed configuration in the ordinary editor first.</p>}
+        {available.length === 0 && <p>There are no published or default starter configurations with a registered firmware target. Choose the intended firmware in the ordinary editor first.</p>}
         <label>Starting configuration<select value={sourceId} onChange={event => { setSourceId(event.target.value); setReview(null); setError('') }}>
-          <option value="">Choose a published base</option>
-          {available.map(item => <option key={item.id} value={item.id}>{item.name} ({item.targetFirmware})</option>)}
+          <option value="">Choose a configuration</option>
+          {available.map(item => <option key={item.id} value={item.id}>{item.name} ({item.targetFirmware}){item.status === 0 ? ' · Default starter draft' : ''}</option>)}
         </select></label>
+        {source?.status === 0 && <p role="status">This starter is an unpublished example. The wizard copies it without changing it; missing site-specific and required records will still need to be completed.</p>}
         <TerminalFamilySelect value={choices.familyId} onChange={value => change('familyId', value)} emptyLabel="Choose family" />
         <label>Draft configuration name<input maxLength={120} value={choices.name} onChange={event => change('name', event.target.value)} /></label>
         <button type="button" disabled={!source || !choices.familyId || !choices.name.trim()} onClick={() => setStep(1)}>Next: payment and pricing</button>
@@ -110,6 +111,7 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
         <button type="button" disabled={!valid || busy} onClick={() => void submit(false)}>{busy ? 'Reviewing…' : 'Review draft'}</button>
       </fieldset>}
       {step === 2 && review && <div>
+        {review.sourceIsStarterDraft && <p role="status">This is a copy of an unpublished starter. Complete the required records and site-specific settings before publishing or assigning it.</p>}
         <dl><dt>Target firmware</dt><dd>{review.targetFirmware}</dd><dt>Terminal family</dt><dd>{review.family.familyLabel}</dd>
           <dt>Records copied</dt><dd>{review.recordCount}</dd><dt>Records changed</dt><dd>{review.changedNumbers.length ? review.changedNumbers.map(number => `MT${number}`).join(', ') : 'None'}</dd>
           <dt>Operating mode</dt><dd>{review.provisioning.operatingType ?? 'Not verified'}</dd>

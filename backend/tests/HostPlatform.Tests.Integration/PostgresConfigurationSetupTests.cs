@@ -17,6 +17,73 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresConfigurationSetupTests
 {
     [PostgresIntegrationFact]
+    public async Task Default_starter_draft_is_a_copy_only_setup_base_and_changes_require_a_new_preview()
+    {
+        var key = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
+        client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var firmware = new FirmwareVersion { Label = "Fixture starter target", TableProfileId = FirmwareTableProfiles.MultiPay200 };
+        var features = new byte[72]; features[0] = 26; features[1] = 2;
+        var starter = new TableSet { Name = "Fixture baseline", TargetFirmwareVersion = firmware, IsDefault = true };
+        var definition = new TableDefinition { Name = "Fixture feature record", TableNumber = 26 };
+        starter.Versions.Add(new TableVersion { TableDefinition = definition, TableRevision = 1, EmbeddedPayload = features,
+            PayloadSha256Hex = Convert.ToHexString(SHA256.HashData(features)).ToLowerInvariant(), SortOrder = 1 });
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.Add(starter); await db.SaveChangesAsync();
+        }
+        var endpoint = $"/api/tables/sets/{starter.Id}/setup";
+        object Request(string? token = null) => new { name = "Fixture starter copy", familyId = "mtr19-multipay",
+            paymentMode = 3, pricing = "keep", previewToken = token };
+        var first = await Preview();
+        await SetDefault(false);
+        using (var rejected = await client.PostAsJsonAsync(endpoint, Request(first))) Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        using (var nonDefault = await client.PostAsJsonAsync(endpoint + "/preview", Request())) Assert.Equal(HttpStatusCode.Conflict, nonDefault.StatusCode);
+        await SetDefault(true);
+        using (var stale = await client.PostAsJsonAsync(endpoint, Request(first))) Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
+        var fresh = await Preview();
+        using var response = await client.PostAsJsonAsync(endpoint, Request(fresh));
+        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
+        var copyId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var original = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TablePayload).SingleAsync(row => row.Id == starter.Id);
+            var copy = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TablePayload).SingleAsync(row => row.Id == copyId);
+            Assert.Equal(TableSetStatus.Draft, original.Status); Assert.True(original.IsDefault);
+            Assert.Equal(TableSetStatus.Draft, copy.Status); Assert.False(copy.IsDefault);
+            Assert.Equal(firmware.Id, copy.TargetFirmwareVersionId);
+            Assert.Equal(features, TableDistributionService.GetEffectivePayload(Assert.Single(original.Versions)));
+            var expected = features.ToArray(); expected[1] = 3;
+            Assert.Equal(expected, TableDistributionService.GetEffectivePayload(Assert.Single(copy.Versions)));
+            Assert.Empty(await db.TerminalTableAssignments.Where(row => row.TableSetId == copyId).ToListAsync());
+            Assert.Empty(await db.DownloadBatches.Where(row => row.TableSetId == copyId).ToListAsync());
+        }
+
+        async Task<string> Preview()
+        {
+            using var preview = await client.PostAsJsonAsync(endpoint + "/preview", Request());
+            preview.EnsureSuccessStatusCode(); var result = await preview.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(result.GetProperty("sourceIsStarterDraft").GetBoolean());
+            Assert.Contains(result.GetProperty("family").GetProperty("tables").EnumerateArray(), row => row.GetProperty("required").GetBoolean() && row.GetProperty("status").GetString() != "present");
+            return result.GetProperty("previewToken").GetString()!;
+        }
+        async Task SetDefault(bool value)
+        {
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var source = await db.TableSets.SingleAsync(row => row.Id == starter.Id);
+            source.IsDefault = value; source.Version++; await db.SaveChangesAsync();
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Reviewed_setup_clones_a_published_profile_with_only_the_chosen_payment_and_rate_bytes_changed()
     {
         var key = Guid.NewGuid().ToString("N");
