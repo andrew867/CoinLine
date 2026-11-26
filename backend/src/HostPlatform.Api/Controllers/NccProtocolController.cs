@@ -1,4 +1,5 @@
 using HostPlatform.Api.Middleware;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Ncc;
 using Microsoft.AspNetCore.Mvc;
@@ -19,6 +20,7 @@ public sealed class NccProtocolController(HostPlatformDbContext db) : Controller
     {
         if (!TryParseHex(body.RawHex, out var bytes, out var err))
             return BadRequest(new { error = err });
+        bytes = NccMaintenanceCapturePrivacy.Redact(bytes);
 
         var mode = ParseModeOrDefault(body.ParseMode);
         var ordered = NccStreamReader.ReadOrdered(bytes, mode);
@@ -60,7 +62,7 @@ public sealed class NccProtocolController(HostPlatformDbContext db) : Controller
         };
         try
         {
-            var wire = NccFrameCodec.Encode(pkt);
+            var wire = NccMaintenanceCapturePrivacy.Redact(NccFrameCodec.Encode(pkt));
             return Ok(new
             {
                 rawHex = Convert.ToHexString(wire),
@@ -101,6 +103,7 @@ public sealed class NccProtocolController(HostPlatformDbContext db) : Controller
             return BadRequest(new { error = "captureId or rawHex is required." });
         }
 
+        bytes = NccMaintenanceCapturePrivacy.Redact(bytes);
         var ordered = NccStreamReader.ReadOrdered(bytes, mode);
         var correlation = HttpContext.Request.Headers[CorrelationIdMiddleware.HeaderName].FirstOrDefault()
                           ?? HttpContext.Items["CorrelationId"]?.ToString();

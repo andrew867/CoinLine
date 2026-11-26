@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Sockets;
 using HostPlatform.Api.Audit;
+using HostPlatform.Api.Security;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
@@ -256,6 +257,12 @@ internal sealed class NccLinkProcessor(
             && NccControl.PacketId(previousEnd.Control) == NccControl.PacketId(packet.Control)
             && previousEnd.TerminalId.AsSpan().SequenceEqual(packet.TerminalId)
             && previousEnd.Data.AsSpan().SequenceEqual(packet.Data);
+        var repeatedMaintenance = !control && !headerOnlyRetry && (packet.Control & NccControl.ReTrans) != 0
+            && _lastDialogueRequest is { } previousMaintenance && ReferenceEquals(_lastInboundMessage, previousMaintenance)
+            && _lastDialogueReply != null && DlogMaintenanceWire.HasRequestRecord(previousMaintenance.Data)
+            && NccControl.PacketId(previousMaintenance.Control) == NccControl.PacketId(packet.Control)
+            && previousMaintenance.TerminalId.AsSpan().SequenceEqual(packet.TerminalId)
+            && previousMaintenance.Data.AsSpan().SequenceEqual(packet.Data);
         if (!control)
         {
             _session.TerminalId = terminal?.Id;
@@ -427,6 +434,7 @@ internal sealed class NccLinkProcessor(
                 && (reply.Data[0] is DlogCallDetailWire.Acknowledgement or DlogCallDetailWire.RequestUpload ||
                     _lastCallUploadEndRequest != null && ReferenceEquals(_lastDialogueRequest, _lastCallUploadEndRequest) ||
                     _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]
+                    || DlogMaintenanceWire.HasRequestRecord(_lastDialogueRequest.Data)
                     || (_lastDialogueRequest.Data.Length > 0 && DlogCardAuthorizationWire.IsRequest(_lastDialogueRequest.Data[0]))))
                 await SendDialogueReplyAsync(stream, packet, reply.Data, "immediate dialogue retry");
             return;
@@ -471,8 +479,13 @@ internal sealed class NccLinkProcessor(
 
         if (maintenanceRequest)
         {
-            await RecordFieldEventAsync(packet.Data, terminal);
-            if (terminal != null && DlogMaintenanceWire.TryBuildAcknowledgement(packet.Data, out var reply))
+            var complete = DlogMaintenanceWire.TryBuildAcknowledgement(packet.Data, out var reply);
+            if (!repeatedMaintenance)
+            {
+                var matches = terminal != null && complete ? await MatchMaintenanceReportsAsync(packet.Data) : null;
+                await RecordFieldEventAsync(packet.Data, terminal, matches);
+            }
+            if (terminal != null && complete)
                 await SendManagementReplyAsync(stream, packet, terminal.Id, reply, "maintenance");
             return;
         }
@@ -744,10 +757,43 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private Task<bool> RecordFieldEventAsync(byte[] data, Terminal? terminal) =>
-        RecordFieldRecordsAsync(FieldEventCatalog.SplitUpload(data), terminal);
+    private async Task<IReadOnlyList<CraftReportedMatch>> MatchMaintenanceReportsAsync(byte[] data)
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var protector = scope.ServiceProvider.GetRequiredService<CraftIdentifierProtector>();
+        var matches = new List<CraftReportedMatch>();
+        for (var offset = 0; DlogMaintenanceWire.HasRequestRecord(data.AsSpan(offset)); offset += DlogMaintenanceWire.RequestLength)
+        {
+            if (!protector.Configured) { matches.Add(new("unconfigured")); continue; }
+            var fingerprint = FingerprintMaintenanceRecord(protector, data.AsSpan(offset, DlogMaintenanceWire.RequestLength));
+            if (fingerprint == null) { matches.Add(new("malformed")); continue; }
+            try
+            {
+                var technician = await db.CraftTechnicians.AsNoTracking().SingleOrDefaultAsync(row => row.Enabled &&
+                    row.IdentifierKeyId == protector.KeyId && row.IdentifierFingerprint == fingerprint, stoppingToken);
+                matches.Add(technician == null ? new("unmatched") : new("matched", technician.Id, technician.DisplayName, technician.EmployeeReference));
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Association failure must not prevent the normal maintenance acknowledgement.
+                logger.LogWarning("Craft identifier association unavailable ({ErrorType}).", ex.GetType().Name);
+                matches.Add(new("unavailable"));
+            }
+        }
+        return matches;
+    }
 
-    private async Task<bool> RecordFieldRecordsAsync(IEnumerable<byte[]> records, Terminal? terminal)
+    private static string? FingerprintMaintenanceRecord(CraftIdentifierProtector protector, ReadOnlySpan<byte> record)
+    {
+        Span<char> identifier = stackalloc char[5];
+        try { return DlogMaintenanceWire.TryReadReportedIdentifier(record, identifier) ? protector.Fingerprint(identifier) : null; }
+        finally { identifier.Clear(); }
+    }
+
+    private Task<bool> RecordFieldEventAsync(byte[] data, Terminal? terminal, IReadOnlyList<CraftReportedMatch>? matches = null) =>
+        RecordFieldRecordsAsync(FieldEventCatalog.SplitUpload(data), terminal, matches);
+
+    private async Task<bool> RecordFieldRecordsAsync(IEnumerable<byte[]> records, Terminal? terminal, IReadOnlyList<CraftReportedMatch>? matches = null)
     {
         try
         {
@@ -758,6 +804,7 @@ internal sealed class NccLinkProcessor(
                 // Cashbox observations were committed before the link acknowledgement.
                 if (DlogCashboxWire.RecordLength(record[0]) > 0)
                     continue;
+                var match = record[0] == DlogMaintenanceWire.RequestMessageType && matches != null && i < matches.Count ? matches[i] : null;
                 await dlog.IngestAsync(
                     record,
                     DlogDirection.TerminalToHost,
@@ -769,7 +816,7 @@ internal sealed class NccLinkProcessor(
                     $"{_lastReceivedSequence}:{i++}",
                     capturedAt,
                     _session.CorrelationId,
-                    stoppingToken);
+                    stoppingToken, craftMatch: match);
             }
             return true;
         }

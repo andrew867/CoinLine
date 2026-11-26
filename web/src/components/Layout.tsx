@@ -14,6 +14,7 @@ const screenByPath: Record<string, string> = {
   '/field-events': 'phone-status',
   '/cashbox': 'cashbox',
   '/field-event-destinations': 'field-event-destinations',
+  '/technicians': 'technicians',
   '/rate-plans': 'rate-plans',
   '/rating-quote': 'rating',
   '/card-accounts': 'card-accounts',
@@ -66,6 +67,7 @@ const groups = [
       ['/downloads', 'Downloads'],
       ['/field-events', 'Terminal status'],
       ['/field-event-destinations', 'Event destinations'],
+      ['/technicians', 'Technicians and activity'],
     ],
   },
   {

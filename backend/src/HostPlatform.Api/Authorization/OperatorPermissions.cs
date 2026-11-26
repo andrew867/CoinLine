@@ -44,6 +44,8 @@ public static class OperatorPermissions
             ("Operator", R, "TerminalTimeline"));
         Screen("field-event-catalogue", "Alarm and maintenance catalogue",
             ("FieldEvents", U, "SaveReference"));
+        Screen("technicians", "Technician directory and activity", ("CraftTechnicians", R, "Directory Activity NearbyAlarms"),
+            ("CraftTechnicians", A, "Create"), ("CraftTechnicians", U, "Update"));
         Screen("field-event-destinations", "Alarm and maintenance destinations",
             ("FieldEventDestinations", R, "List Options Preview Queue"),
             ("FieldEventDestinations", A, "Create"), ("FieldEventDestinations", U, "Update"),

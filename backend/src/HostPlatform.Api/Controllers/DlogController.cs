@@ -163,7 +163,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
     }
 
     /// <summary>
-    /// Ingests a DLOG record; raw <paramref name="body.RawPayloadHex"/> is stored verbatim (unknown MTs are retained).
+    /// Ingests a DLOG record; known protected fields are removed before persistence.
     /// Writes an audit event on successful create.
     /// </summary>
     [HttpPost("transactions/ingest")]
@@ -177,6 +177,15 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
 
         if (!Enum.IsDefined(typeof(DlogDirection), body.Direction))
             return BadRequest(new { error = "Invalid direction enum value." });
+
+        var messageType = body.MessageType;
+        var firstByteIsMessageType = body.FirstByteIsMessageType;
+        if (DlogMaintenanceWire.TryRedactRecord(raw, messageType, firstByteIsMessageType, out var maintenance))
+        {
+            raw = maintenance;
+            messageType = DlogMaintenanceWire.RequestMessageType;
+            firstByteIsMessageType = true;
+        }
 
         var dir = (DlogDirection)body.Direction;
         var idem = DlogIdempotency.ComputeKey(
@@ -214,8 +223,8 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             body.TerminalId,
             body.NccSessionId,
             body.SessionCorrelationId,
-            body.MessageType,
-            body.FirstByteIsMessageType,
+            messageType,
+            firstByteIsMessageType,
             body.ClientIdempotencyKey,
             body.CapturedAtUtc,
             correlation,
@@ -230,7 +239,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             tx.IsUnknownMessageType,
             byteLength = tx.RawPayload.Length,
             idempotencyKey = tx.IdempotencyKey,
-            note = "Raw payload preserved in DlogTransactions.RawPayload; decode is non-authoritative."
+            note = "Safe payload retained; protected maintenance identifiers are not stored. Decode is non-authoritative."
         });
         await db.SaveChangesAsync(ct);
 
@@ -317,7 +326,13 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
         if (!DlogHex.TryParse(body.RawPayloadHex, out var raw, out var err))
             return BadRequest(new { error = err });
 
-        var meta = DlogPayloadClassifier.Classify(raw, body.MessageType, body.FirstByteIsMessageType);
+        var messageType = body.MessageType;
+        var firstByteIsMessageType = body.FirstByteIsMessageType;
+        if (DlogMaintenanceWire.TryRedactRecord(raw, messageType, firstByteIsMessageType, out var maintenance))
+        {
+            raw = maintenance; messageType = DlogMaintenanceWire.RequestMessageType; firstByteIsMessageType = true;
+        }
+        var meta = DlogPayloadClassifier.Classify(raw, messageType, firstByteIsMessageType);
         return Ok(new
         {
             decoded = meta,

@@ -19,6 +19,8 @@ public class HostPlatformDbContext : DbContext
     public DbSet<FieldEventCodeSetting> FieldEventCodeSettings => Set<FieldEventCodeSetting>();
     public DbSet<FieldEventDestinationRule> FieldEventDestinationRules => Set<FieldEventDestinationRule>();
     public DbSet<FieldEventRouteDecision> FieldEventRouteDecisions => Set<FieldEventRouteDecision>();
+    public DbSet<CraftTechnician> CraftTechnicians => Set<CraftTechnician>();
+    public DbSet<CraftMaintenanceAttribution> CraftMaintenanceAttributions => Set<CraftMaintenanceAttribution>();
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
@@ -190,6 +192,17 @@ public class HostPlatformDbContext : DbContext
             b.Property(row => row.Kind).HasMaxLength(16);
             b.Property(row => row.Status).HasMaxLength(16);
             b.Property(row => row.Destination).HasMaxLength(80);
+        });
+
+        modelBuilder.Entity<CraftTechnician>(b =>
+        {
+            b.Property(row => row.Version).IsConcurrencyToken();
+            b.HasIndex(row => new { row.IdentifierKeyId, row.IdentifierFingerprint }).IsUnique();
+        });
+        modelBuilder.Entity<CraftMaintenanceAttribution>(b =>
+        {
+            b.HasOne(row => row.Transaction).WithOne().HasForeignKey<CraftMaintenanceAttribution>(row => row.TransactionId);
+            b.HasOne(row => row.Technician).WithMany().HasForeignKey(row => row.TechnicianId).OnDelete(DeleteBehavior.Restrict);
         });
         modelBuilder.Entity<FieldEventDestinationRule>(b =>
         {

@@ -75,9 +75,9 @@ public static class FieldEventSummary
     private static readonly IReadOnlyDictionary<int, string> MaintenanceNames = new SortedDictionary<int, string>
     {
         [996] = "Technician entered maintenance mode",
-        [997] = "Coin service unavailable",
-        [998] = "Card reader service unavailable",
-        [999] = "Terminal out of service",
+        [997] = "Coin path placed out of service",
+        [998] = "Card reader placed out of service",
+        [999] = "Terminal placed out of service",
     };
 
     private static string? AlarmName(int number) => AlarmNames.GetValueOrDefault(number);

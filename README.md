@@ -26,7 +26,7 @@ The project consists of an NCC host, a PostgreSQL database, a REST API and a bro
 | **Advertising** | Author text messages and graphical screens, preview bitmap artwork and rotation, and configure supported softkey links. |
 | **Downloads** | Queue full or selected table deliveries, schedule fleet rollouts, and follow individual acknowledgement and failure states. |
 | **Calling and rating** | Configure screening, speed dial, quick-access keys, terminal tariffs, host rating plans and carrier policy. Review quotes and uploaded call records separately. |
-| **Field operations** | Read terminal alarms and maintenance events, inspect NCC sessions, cashbox reports, decoded uploads and audit history. |
+| **Field operations** | Read terminal alarms and maintenance events, inspect NCC sessions, cashbox reports, decoded uploads and audit history. Associate reported Craft activity with [technician profiles](docs/program/technician-activity.md). |
 | **Accounts and firmware** | Manage operators, card account administration and firmware packages. Runtime payment approvals and live firmware programming have separate integration and validation requirements. |
 
 ## How it works

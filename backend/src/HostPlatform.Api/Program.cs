@@ -57,6 +57,7 @@ if (!builder.Environment.IsEnvironment("Testing"))
 }
 
 builder.Services.AddSingleton<OperatorTokenSigningKey>();
+builder.Services.AddSingleton<CraftIdentifierProtector>();
 builder.Services.AddAuthentication(OperatorAuthenticationHandler.SchemeName)
     .AddScheme<AuthenticationSchemeOptions, OperatorAuthenticationHandler>(OperatorAuthenticationHandler.SchemeName, _ => { });
 builder.Services.AddSingleton<IAuthorizationHandler, MinimumRoleAuthorizationHandler>();
@@ -217,6 +218,7 @@ using (var scope = app.Services.CreateScope())
         await DatabaseBaseline.MigrateAsync(db);
     else
         await db.Database.EnsureCreatedAsync();
+    await NccMaintenanceCapturePrivacy.ScrubStoredAsync(db);
     await OperatorAccountBootstrap.EnsureAsync(db, app.Configuration, app.Environment, platformOpts.Value.Seed.EnableDemoData);
     await SeedData.EnsureSeedAsync(db, platformOpts.Value.Seed.EnableDemoData);
     if (platformOpts.Value.Seed.EnableDemoData && !string.IsNullOrWhiteSpace(platformOpts.Value.Seed.DemoConfigurationBundlePath))
@@ -229,6 +231,7 @@ static void ValidateStartupSecurity(WebApplication app)
 {
     // Materialize the signing key before migrations, seeding or hosted listeners start.
     _ = app.Services.GetRequiredService<OperatorTokenSigningKey>();
+    _ = app.Services.GetRequiredService<CraftIdentifierProtector>();
     var sec = app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<SecurityOptions>>().Value;
     if (sec.Mode == HostAuthMode.ApiKey && sec.ApiKeys.Length == 0)
     {
