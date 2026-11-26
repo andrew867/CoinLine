@@ -66,3 +66,44 @@ it('previews management access only and creates a separate unassigned target dra
   expect(within(region).getByText(/Target draft created, not assigned/)).toBeVisible()
   expect(screen.getByRole('status')).toHaveTextContent('Remote upgrade is not qualified.')
 })
+
+it('requires review of an ambiguous tariff and a fresh preview before creating a screening draft', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce([{ id: 'target', label: 'MTR 2.11', tableProfileId: 'later' }])
+    .mockResolvedValueOnce([{ id: 'candidate', name: 'Target draft', status: 0, targetFirmwareVersionId: 'target' }])
+    .mockResolvedValueOnce({ sourceFirmwareLabel: 'MTR 2.0', targetFirmwareLabel: 'MTR 2.11', sourceSetId: 'source',
+      candidateSetId: 'candidate', candidatePublished: false, activeSessions: 0, outstandingDownloads: 0,
+      configurationReadyForReview: false, upgradeQualified: false,
+      records: [{ tableNumber: 92, sourceBytes: 3401, targetExpectedBytes: 3061, candidateBytes: 3061,
+        action: 'candidate-replacement', detail: 'Review screening capacity.', targetAcknowledged: true, requiresLayoutReview: false }], findings: [] })
+  const initial = { sourceSlots: 200, targetSlots: 180, sourceConfiguredSlots: 8, changedSlots: 9,
+    sourceReservedSlots: 2, retainedLaterFlagsSlots: 0, descriptionCount: 1, recordCount: 12, canCreate: false,
+    changedPositions: [1, 2, 3, 4, 5, 6, 7, 8, 9], clearedTargetPositions: [9],
+    findings: [{ blocking: true, slot: null, message: 'Choose the target tariff for source 0 before staging.' }],
+    references: [{ kind: 'tariff', sourceIndex: 0, slots: [1, 2], options: [4, 7], targetIndex: null }], previewToken: 'blocked-token' }
+  vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json(initial)).mockResolvedValueOnce(Response.json({ ...initial,
+    canCreate: true, references: [{ ...initial.references[0], targetIndex: 7 }], findings: [], previewToken: 'reviewed-token' }))
+    .mockResolvedValueOnce(Response.json({ id: 'screening-draft', changedSlots: 9 }, { status: 201 }))
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<MemoryRouter><FirmwareTransitionReviewPanel phones={[{ id: 'phone', displayName: 'Fixture phone' }]} /></MemoryRouter>)
+  fireEvent.click(screen.getByRole('button', { name: 'Review a firmware transition' }))
+  fireEvent.change(await screen.findByLabelText('Target firmware'), { target: { value: 'target' } })
+  fireEvent.change(screen.getByLabelText('Prepared target configuration'), { target: { value: 'candidate' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Compare configurations' }))
+  const region = await screen.findByRole('region', { name: 'Carry forward screening rules' })
+  fireEvent.change(within(region).getByLabelText('New screening draft name'), { target: { value: 'Prepared screening' } })
+  fireEvent.click(within(region).getByRole('button', { name: 'Preview screening carry-forward' }))
+  expect(await within(region).findByText('200 source entries to 180 target entries.')).toBeVisible()
+  expect(within(region).getByText('Configured candidate positions becoming vacant (1):')).toBeVisible()
+  expect(within(region).getByText(/Choose the target tariff/)).toBeVisible()
+  expect(within(region).queryByRole('button', { name: 'Create screening target draft' })).not.toBeInTheDocument()
+  fireEvent.change(within(region).getByLabelText('Target tariff for 0'), { target: { value: '7' } })
+  expect(within(region).getByRole('status')).toHaveTextContent('Preview again')
+  fireEvent.click(within(region).getByRole('button', { name: 'Preview screening carry-forward' }))
+  expect(await within(region).findByRole('button', { name: 'Create screening target draft' })).toBeEnabled()
+  expect(apiPostRaw).toHaveBeenNthCalledWith(2, '/api/firmware/transition-screening/preview', expect.objectContaining({ tariffChoices: { '0': 7 } }))
+  fireEvent.click(within(region).getByRole('button', { name: 'Create screening target draft' }))
+  expect(await within(region).findByRole('link', { name: 'Open screening draft' })).toHaveAttribute('href', '/table-sets/screening-draft')
+  expect(apiPostRaw).toHaveBeenNthCalledWith(3, '/api/firmware/transition-screening', expect.objectContaining({ tariffChoices: { '0': 7 }, previewToken: 'reviewed-token' }))
+  fireEvent.click(within(region).getByRole('button', { name: 'Use as target candidate for further review' }))
+  expect(screen.getByLabelText('Prepared target configuration')).toHaveValue('screening-draft')
+})

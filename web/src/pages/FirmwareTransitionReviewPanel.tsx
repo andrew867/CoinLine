@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { FirmwareScreeningStagingPanel } from './FirmwareScreeningStagingPanel'
 
 type Phone = { id: string; displayName: string }
 type Version = { id: string; label: string; tableProfileId: string | null }
@@ -125,6 +126,13 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
             </>}
             {createdDraft && <p>Target draft created, not assigned. <Link to={`/table-sets/${createdDraft}`}>Open target draft and review remaining records</Link>.</p>}
           </section>}
+        {review.sourceSetId && review.candidateSetId && canPerform('table-sets', op.add) && review.records.some(record =>
+          record.tableNumber === 92 && record.sourceBytes === 3401 && record.targetExpectedBytes === 3061 && record.candidateBytes === 3061) &&
+          <FirmwareScreeningStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId}
+            candidateId={candidateId} parentBusy={busy} onBusyChange={setBusy} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }])
+              setCandidateId(id); setReview(null); resetStage()
+            }} />}
       </div>}
     </>}
   </section>

@@ -96,6 +96,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify firmware screening transition workflow
+        run: npm run e2e -- e2e/firmware-screening-transition.spec.ts --output test-results/firmware-screening-transition
+        env:
+          CI: "true"
+
       - name: Verify visual prompt worksheet workflow
         run: npm run e2e -- e2e/visual-prompt-worksheet.spec.ts --output test-results/visual-prompts
         env:

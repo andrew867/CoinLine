@@ -17,6 +17,14 @@ When the source and selected target set both contain an identified 18- or 48-byt
 
 Confirm to create a separate, unassigned draft. All other candidate records retain their bytes. Open the new draft and review the remaining source-to-target feature differences before publication. This step does not automatically migrate screening, card configuration, local exchanges, tariffs or other records, and does not create the upgrade job.
 
+### Prepare the target screening configuration
+
+When the source and candidate have the identified 200-entry and 180-entry MT92 records, **Prepare phone-specific screening rules** carries the source list into a separate target draft. It replaces the common fields and host descriptions at positions 1 through 180, including vacant and blanked entries; it never moves a rule to a different position. Candidate reserved bytes are retained. Source reserved data is not treated as later flags. If a changed candidate row has a later-only flag, resolve the conflict in the candidate before staging. Source entries, reserved bytes, descriptions or identified companion references beyond position 180 block the preview rather than disappearing.
+
+For a source tariff reference, the preview offers only target MT73 rows with the identical shared classification, time periods and charges. An exact same index or a unique exact match is selected automatically; choose among multiple equivalent rows if needed. If none match, prepare the target tariff first. Carrier references are distinct from tariff indexes; choose a unique existing target carrier identifier and independently review its routing and acceptance settings. Free unrated calls retain their 255 sentinel.
+
+Review the changed-position count, reference selections and findings, then confirm the new draft. Changing a reference requires a fresh preview. Other candidate records remain byte-for-byte unchanged, so review their pointers to screening positions, numbering rules, time discounts and the tariff effective date before publishing. Use the resulting draft as the next target candidate to continue preparation. This feature neither transfers a record to the phone nor qualifies the upgrade.
+
 ## Simulation and the native code scheduler
 
 Use the simulation job form to exercise the host's checks without opening a device transport. Inspect the resulting job, safety checks and rollback notes before planning any real upgrade. The execution policy reports whether the existing live transport is enabled.
