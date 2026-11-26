@@ -16,7 +16,7 @@ internal sealed record CallSetupSpareFixtureRecord(NativeTableLayout Layout, byt
 
 internal static class CallSetupSpareFixture
 {
-    public static int[] Numbers(string profile) => profile == FirmwareTableProfiles.MultiPay200 ? [31, 33] : [31, 33, 49];
+    public static int[] Numbers(string profile) => profile == FirmwareTableProfiles.MultiPay200 ? [26, 31, 33] : [26, 31, 33, 49];
     public static CallSetupSpareFixtureRecord Create(int number, string? profile)
     {
         var later = profile != FirmwareTableProfiles.MultiPay200;
@@ -27,6 +27,15 @@ internal static class CallSetupSpareFixture
         string spareKey;
         switch (number)
         {
+            case 26:
+                raw = new byte[72]; raw[0] = 26; raw[1] = 2; raw[2] = 1;
+                if (later) { raw[10] = 1; raw[12] = 1; }
+                raw[9] = 15; raw[54] = 0xA3; raw[71] = 7;
+                layout = NativeTableLayouts.Find(26, raw, later ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay)!;
+                expected = raw.ToArray(); expected[54] = 0x6B;
+                changes = new() { ["dataPortDirectoryAssistance"] = "true", ["spare.dataPort.bit6"] = "true", ["spare.dataPort.bit7"] = "false" };
+                spareKey = "spare.dataPort.bit6";
+                break;
             case 31:
                 raw = new byte[37]; raw[0] = 31;
                 raw.AsSpan(1, 9).Fill(0xA9); // opaque synthetic credential fixture

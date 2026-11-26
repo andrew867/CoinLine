@@ -49,6 +49,13 @@ public sealed class PostgresCallSetupSpareTests
                 var snapshot = await Read(path);
                 var fields = Fields(snapshot);
                 Assert.True(Find(fields, record.SpareKey).GetProperty("isSpare").GetBoolean());
+                if (number == 26)
+                {
+                    Assert.Equal("true", Find(fields, "dataPortEnabled").GetProperty("value").GetString());
+                    Assert.False(Find(fields, "dataPortDisableKeypad").GetProperty("isSpare").GetBoolean());
+                    Assert.True(Find(fields, "spare.dataPort.bit5").GetProperty("isSpare").GetBoolean());
+                    Assert.True(Find(fields, "spare.dataPort.bit7").GetProperty("isSpare").GetBoolean());
+                }
                 if (number == 31)
                 {
                     foreach (var credential in new[] { "craftAccessCode", "keyCardNumber" })
@@ -72,6 +79,7 @@ public sealed class PostgresCallSetupSpareTests
                 await Check(id, record.Imported, 1);
                 Dictionary<string, string> invalid = number switch
                 {
+                    26 => new() { ["spare.dataPort.bit4"] = "true" },
                     31 => new() { [later ? "spare.predial.bit4" : "cashBoxQuery"] = "true" },
                     33 => new() { [later ? "spare.timer" : "answerRemovalDelay"] = "1234" },
                     _ => new() { ["spare.byte32"] = "256" }
