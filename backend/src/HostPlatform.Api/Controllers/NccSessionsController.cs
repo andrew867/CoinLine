@@ -104,6 +104,11 @@ public sealed class NccSessionsController(HostPlatformDbContext db, INccSessionO
             .Select(e => e.DetailJson).ToListAsync(ct);
         var uploadFrames = uploadAudit.Select(CallUploadObservation.Read).OfType<CallUploadObservation>()
             .OrderBy(observation => observation.Sequence).ToArray();
+        var restores = await db.AuditEvents.AsNoTracking().Where(e => e.Category == "ncc" && e.Action == "call_upload_cashbox_restore" && e.TerminalSessionId == sessionKey)
+            .OrderBy(e => e.CreatedAtUtc).Select(e => new { e.CreatedAtUtc, e.DetailJson }).ToListAsync(ct);
+        var cashboxRestores = restores.Select(row => CallUploadCashboxRestoreObservation.Read(row.CreatedAtUtc, row.DetailJson))
+            .OfType<CallUploadCashboxRestoreObservation>().ToArray();
+        if (cashboxRestores.Length > 0) return Ok(new { callUploadFrames = uploadFrames, cashboxRestores });
         return Ok(new { callUploadFrames = uploadFrames });
     }
 

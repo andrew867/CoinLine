@@ -41,3 +41,12 @@ it('distinguishes an older session with no retained metadata from a proven empty
   expect(await within(section).findByText(/does not establish that the phone sent no call or cashbox records/)).toBeVisible()
   expect(within(section).queryByRole('table')).not.toBeInTheDocument()
 })
+
+it('explains a status-only completed upload and a missing known cashbox baseline without claiming the phone has no CDRs', async () => {
+  const section = await inspect({ callUploadFrames: [{ sequence: 11, parsed: true, endsDialogue: true,
+    records: [{ messageType: 10, byteCount: 11 }, { messageType: 60, byteCount: 28 }, { messageType: 13, byteCount: 1 }] }],
+    cashboxRestores: [{ observedAtUtc: '2028-01-01T01:00:05Z', available: false, sent: true, responseBytes: 1 }] })
+  expect(await within(section).findByText(/No current cashbox status was known/)).toBeVisible()
+  expect(within(section).getByText('0 call-detail records observed')).toBeVisible()
+  expect(within(section).getByText(/not a statement about records remaining in terminal storage/)).toBeVisible()
+})
