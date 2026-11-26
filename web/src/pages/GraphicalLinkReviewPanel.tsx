@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { StatusBadge } from '../components/StatusBadge'
+import type { GraphicalUsageConfiguration } from './GraphicalUsageConfigurationPanel'
 
 type Reference = {
   sourceRecord: number; sourceSectionKey: string; sourceSection: string; sourceField: string; fieldKey: string
@@ -8,6 +9,7 @@ type Reference = {
 export type GraphicalLinkReview = {
   records: { number: number; availability: string }[]
   references: Reference[]
+  usage?: GraphicalUsageConfiguration | null
 }
 
 const availability: Record<string, string> = {
