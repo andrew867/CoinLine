@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { FirmwareLocalDialingStagingPanel } from './FirmwareLocalDialingStagingPanel'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
@@ -134,6 +135,13 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
               setCandidateId(id); setReview(null); resetStage()
             }} />}
       </div>}
+      {review && review.sourceSetId && review.candidateSetId && review.records.some(record => record.tableNumber >= 101 && record.tableNumber <= 115 && record.sourceBytes === 403) &&
+          review.records.some(record => ((record.tableNumber >= 136 && record.tableNumber <= 149) || [154, 155].includes(record.tableNumber)) && record.targetExpectedBytes === 203) &&
+          review.records.some(record => record.tableNumber === 73 && record.sourceBytes === 1192 && record.candidateBytes === 1192) &&
+          <FirmwareLocalDialingStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
+            }} />}
     </>}
   </section>
 }

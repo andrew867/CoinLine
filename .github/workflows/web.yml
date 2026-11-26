@@ -121,6 +121,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify firmware local dialing transition workflow
+        run: npm run e2e -- e2e/firmware-local-dialing-transition.spec.ts --output test-results/firmware-local-dialing-transition
+        env:
+          CI: "true"
+
       - name: Verify restricted route review workflow
         run: npm run e2e -- e2e/restriction-route-review.spec.ts --output test-results/restriction-route-review
         env:
