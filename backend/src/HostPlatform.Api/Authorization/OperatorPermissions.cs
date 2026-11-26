@@ -67,6 +67,7 @@ public static class OperatorPermissions
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("ConfigurationLibrary", R, "List Options"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
+            ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
             ("CardSequence", R, "Get"), ("CardSequence", U, "Move Add Remove Refresh Link"),
             ("GraphicalStarter", A, "Create"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),

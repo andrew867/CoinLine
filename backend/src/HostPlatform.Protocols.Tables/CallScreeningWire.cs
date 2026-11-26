@@ -17,6 +17,61 @@ public static class CallScreeningWire
     public static bool NeedsLayoutChoice(int number) => number == 59;
     public static bool SupportsSpeedDial(NativeTableLayout layout) => layout.Number == 92 && layout.Length == 3061;
 
+    // A blanked entry can retain its call settings. Only the deleted/default assigned fields are vacant.
+    public static bool IsVacant(ReadOnlySpan<byte> record, NativeTableLayout layout, int slot)
+    {
+        var row = ReadRow(record, layout, slot);
+        if (layout.Profile == CompactProfile)
+            return row[0] == 0 && (row[1] & 0x0F) == 0 && row[2] == byte.MaxValue &&
+                (row[3] & 0x7F) == 0 && row[4..].IndexOfAnyExcept((byte)0) < 0;
+        return row[0] == 0 && row[1] == 0 && row[2] == byte.MaxValue && row[3..12].IndexOfAnyExcept((byte)0) < 0 &&
+            (row[13] & ~ReservedSecondaryFlags(layout)) == 0;
+    }
+
+    public static bool CanCopyEntry(ReadOnlySpan<byte> record, NativeTableLayout layout, int slot)
+    {
+        var row = ReadRow(record, layout, slot);
+        var pattern = layout.Sections[slot - 1].Fields[0].Read(record);
+        if (pattern == null) return false;
+        if (layout.Profile == CompactProfile) return pattern.Length > 0;
+        return row[3] <= 15 && (pattern.Length > 0 || row[3] != 0);
+    }
+
+    public static byte[] CopyEntry(ReadOnlySpan<byte> source, ReadOnlySpan<byte> destination, NativeTableLayout layout, int slot)
+    {
+        var original = ReadRow(source, layout, slot);
+        if (!CanCopyEntry(source, layout, slot)) throw new InvalidOperationException("Choose a saved screening entry with a recognized number pattern.");
+        if (!IsVacant(destination, layout, slot)) throw new InvalidOperationException("The destination screening slot is not vacant.");
+        var output = destination.ToArray();
+        var row = output.AsSpan(1 + (slot - 1) * original.Length, original.Length);
+        if (layout.Profile == CompactProfile)
+        {
+            row[0] = original[0];
+            row[1] = (byte)((row[1] & 0xF0) | (original[1] & 0x0F));
+            row[2] = original[2];
+            row[3] = (byte)((row[3] & 0x80) | (original[3] & 0x7F));
+            original[4..].CopyTo(row[4..]);
+        }
+        else
+        {
+            original[..12].CopyTo(row);
+            var reserved = ReservedSecondaryFlags(layout);
+            row[13] = (byte)((row[13] & reserved) | (original[13] & ~reserved));
+        }
+        return output;
+    }
+
+    private static byte ReservedSecondaryFlags(NativeTableLayout layout) => SupportsSpeedDial(layout) ? LaterSpareFlags : OlderSpareFlags;
+
+    private static ReadOnlySpan<byte> ReadRow(ReadOnlySpan<byte> record, NativeTableLayout layout, int slot)
+    {
+        if (!IsRecord(layout.Number) || record.Length != layout.Length || record[0] != layout.Number ||
+            slot < 1 || slot > layout.Sections.Count)
+            throw new InvalidOperationException("Choose a screening slot in a compatible record.");
+        var length = layout.Profile == CompactProfile ? CompactSlotLength : ExpandedSlotLength;
+        return record.Slice(1 + (slot - 1) * length, length);
+    }
+
     internal static void Initialize(Span<byte> record, NativeTableLayout layout)
     {
         var slotLength = layout.Profile == CompactProfile ? CompactSlotLength : ExpandedSlotLength;
@@ -75,7 +130,7 @@ public static class CallScreeningWire
             {
                 row[..12].Clear();
                 row[2] = byte.MaxValue;
-                row[13] &= SupportsSpeedDial(layout) ? LaterSpareFlags : OlderSpareFlags;
+                row[13] &= ReservedSecondaryFlags(layout);
             }
         }
     }
