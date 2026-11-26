@@ -599,6 +599,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
         var combined = TerminalCallDetail(53, 0x124A, 0x65);
         byte[] bundle = [.. card, .. coin, .. combined, 13];
         byte[] receipts = [5, 0x48, 0x12, 5, 0x49, 0x12, 5, 0x4A, 0x12];
+        byte[] completedReceipts = [.. receipts, 13];
         await using (var upload = await OpenAsync())
         {
             await upload.Stream.WriteAsync(Message(KnownId, [42, 0]));
@@ -610,7 +611,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             await upload.Stream.WriteAsync(Message(KnownId, bundle));
             AssertAck(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
             var actual = Decode(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
-            Assert.Equal(receipts, actual.Data);
+            Assert.Equal(completedReceipts, actual.Data);
             var stored = await fx.Client.GetFromJsonAsync<JsonElement>("/api/uploads", Json);
             var additions = stored.EnumerateArray().Where(row => !before.Contains(row.GetProperty("id").GetGuid())).ToArray();
             Assert.Equal(3, additions.Length);
@@ -646,7 +647,7 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             AssertAck(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
             var repeated = Decode(await ReadFrameAsync(upload.Stream, TimeSpan.FromSeconds(5)));
             Assert.Equal(actual.Control | NccControl.ReTrans, repeated.Control);
-            Assert.Equal(receipts, repeated.Data);
+            Assert.Equal(actual.Data, repeated.Data);
             await upload.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | actual.Control)));
         }
 
@@ -869,10 +870,15 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
                 AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
             }
 
+            var completion = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(new byte[] { 13 }, completion.Data);
+
             await link.Stream.WriteAsync(HeaderOnlyRetransmission(KnownId, 0));
             AssertAck(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                () => ReadFrameAsync(link.Stream, TimeSpan.FromMilliseconds(400)));
+            var repeatedCompletion = Decode(await ReadFrameAsync(link.Stream, TimeSpan.FromSeconds(5)));
+            Assert.Equal(completion.Control | NccControl.ReTrans, repeatedCompletion.Control);
+            Assert.Equal(completion.Data, repeatedCompletion.Data);
+            await link.Stream.WriteAsync(Control((byte)(NccControl.Ack | NccControl.Clr | completion.Control)));
         }
 
         await using (var replay = await OpenAsync())

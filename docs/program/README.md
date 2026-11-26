@@ -9,3 +9,4 @@
 - [Cross-configuration call-screening slots](screening-bulk-slots.md)
 - [Manually selected phone download preparation](manual-download-preparation.md)
 - [Cashbox status query](cashbox-status-query.md)
+- [Explicit call upload completion](call-upload-completion.md)
