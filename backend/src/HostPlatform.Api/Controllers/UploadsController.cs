@@ -7,6 +7,7 @@ using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Uploads;
 using HostPlatform.Protocols.Dlog;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -71,13 +72,24 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
             r.CreatedAtUtc
         }).ToArray();
         PerformanceReportReference? performanceReference = null;
+        CollectionReportReference? collectionReference = null;
+        CollectionReportReference? callInReference = null;
+        var mayReadReference = OperatorPermissions.Allows(HttpContext, "downloads", PermissionOperation.Read) &&
+            OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read);
         if (records.Any(record => record.TerminalStatistics?.MessageType == 37))
         {
-            performanceReference = OperatorPermissions.Allows(HttpContext, "downloads", PermissionOperation.Read) &&
-                OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read)
+            performanceReference = mayReadReference
                 ? await PerformanceReportReferences.FindAsync(db, u.TerminalId, u.CreatedAtUtc, ct)
                 : new("restricted");
         }
+        if (isTerminalCallDetail || records.Any(record => record.TerminalStatistics?.MessageType is 56 or 57 or 71))
+            collectionReference = mayReadReference
+                ? await CollectionReportReferences.FindAsync(db, u.TerminalId, u.CreatedAtUtc, CollectionPolicyWire.CallCarrierType, ct)
+                : new("restricted", CollectionPolicyWire.CallCarrierType);
+        if (isTerminalCallDetail)
+            callInReference = mayReadReference
+                ? await CollectionReportReferences.FindAsync(db, u.TerminalId, u.CreatedAtUtc, NativeTableLayouts.CallInRecord, ct)
+                : new("restricted", NativeTableLayouts.CallInRecord);
         return Ok(new
         {
             u.Id,
@@ -92,6 +104,8 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
             u.CreatedAtUtc,
             u.UpdatedAtUtc,
             performanceReference,
+            collectionReference,
+            callInReference,
             Records = records
         });
     }

@@ -6,6 +6,22 @@ namespace HostPlatform.Tests.Unit;
 
 public sealed class CollectionPolicyWireTests
 {
+    [Fact]
+    public void Report_reference_reads_exact_policy_fields_without_assuming_a_profile()
+    {
+        byte[] record = [34, 6, 15, 1, 3, 7, 20, 11, 25, 0, 0, 0, 0, 0xE6, 2, 6, 30, 1, 4];
+        var settings = CollectionPolicyWire.ReadCallCarrierSettings(record)!;
+        Assert.Equal((6, 15, 1, 3, 0xE6), ((int)settings.StartHour, (int)settings.StartMinute, (int)settings.Days, (int)settings.Threshold, (int)settings.PolicyFlags));
+        Assert.Equal(new[] { new CollectionTimestamp(7, 20), new CollectionTimestamp(11, 25), new CollectionTimestamp(0, 0), new CollectionTimestamp(0, 0) }, settings.Timestamps);
+        Assert.Equal((2, 6, 30, 1, 4), ((int)settings.DetailThreshold, (int)settings.DetailHour, (int)settings.DetailMinute, (int)settings.DetailDays, (int)settings.DetailHours));
+        Assert.Null(CollectionPolicyWire.ReadCallCarrierSettings(record[..18]));
+        record[0] = 35; Assert.Null(CollectionPolicyWire.ReadCallCarrierSettings(record));
+        var callIn = new byte[21]; callIn[0] = 35; callIn[12] = 255;
+        Assert.Equal(255, CollectionPolicyWire.ReadCallInRecordThreshold(callIn));
+        callIn[12] = 0; Assert.Equal(0, CollectionPolicyWire.ReadCallInRecordThreshold(callIn));
+        callIn[0] = 34; Assert.Null(CollectionPolicyWire.ReadCallInRecordThreshold(callIn));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
