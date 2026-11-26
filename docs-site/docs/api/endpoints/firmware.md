@@ -11,12 +11,15 @@ Packages, artifacts, compatibility rules, targets, jobs:
 | Versions | `GET/POST .../versions` |
 | Revise a build's layout | `POST .../versions/{id}/table-profile/preview`, `PUT .../versions/{id}/table-profile` |
 | Table layouts | `GET .../table-profiles` |
+| Configuration transition review | `GET .../transition-review?terminalId={id}&targetFirmwareVersionId={id}&candidateSetId={id}`; candidate is optional |
 | Targets | `GET/POST .../targets` |
-| Jobs | `GET/POST .../jobs`, `GET .../jobs/{id}`, `simulate`, `approve`, `cancel` |
+| Jobs | `GET .../jobs`, `POST /api/terminals/{id}/firmware-jobs`, `GET .../jobs/{id}`, `simulate`, `approve`, `cancel` |
 
 Register a build with `label`, optional `buildId` and optional `tableProfileId` from the table layout catalog. A table set can target a registered version independently of how many record lengths are known for it. Register builds separately when their table layouts differ.
 
 `GET /api/firmware/table-profiles` returns the known `verifiedLengths` for each profile and the subset `terminalAcknowledgedRecords` observed on OEM emulated firmware. The remaining lengths are recorded in the known target catalogues. `completeCatalogue` indicates that all provisionable message types were identified for the selected image profile. `observedLengthsOnly` identifies an incomplete acknowledged subset without a fixed native field layout. Its `evidenceNote` distinguishes successful emulated cold INSTALL from a host-completed table batch where INSTALL failed. An observed length constrains the matching record, but does not rule out unobserved message types or establish field meanings. Choose that profile only for a matching build.
+
+`GET /api/firmware/transition-review` returns source and target version metadata, assigned and candidate set identities, known record lengths, action categories, layout review flags and active or outstanding download counts. It does not return record payloads or modify the database. `configurationReadyForReview` refers only to the structural checks. `upgradeQualified` remains false until a separate device qualification workflow exists. Read permission is required for firmware jobs, firmware registry, phones, table sets, records and assignments.
 
 !!! danger "Live flashing"
     **`Firmware:AllowLiveFlashing`** default **false**. DLA/XMODEM **`HARDWARE VALIDATION REQUIRED`**.

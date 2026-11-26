@@ -127,7 +127,7 @@ public static class OperatorPermissions
             ("Firmware", A, "CreateFirmwareVersion CreatePackage AddArtifact AddCompatibilityRule CreateTarget"),
             ("Firmware", U, "PreviewFirmwareTableProfile SetFirmwareTableProfile"));
         Screen("firmware-jobs", "Firmware jobs",
-            ("Firmware", R, "ExecutionPolicy ListJobs Job"), ("Terminals", A, "StartFirmwareJob"),
+            ("Firmware", R, "ExecutionPolicy ListJobs Job TransitionReview"), ("Terminals", A, "StartFirmwareJob"),
             ("Firmware", U, "SimulateJob ExecuteLiveJob ApproveJob CancelJob"), ("Tables", U, "QueueFirmwareCancellation"));
         Screen("hardware-validation", "Hardware validation",
             ("HardwareValidation", R, "Checklists EvidenceGuide ListCapturedSessions GetCapturedSession"),

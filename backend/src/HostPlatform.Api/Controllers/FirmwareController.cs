@@ -49,6 +49,19 @@ public sealed class FirmwareController(
         new { profile.Id, profile.Label, profile.VerifiedLengths, profile.CompleteCatalogue, profile.ObservedLengthsOnly, profile.EvidenceNote,
             terminalAcknowledgedRecords = profile.TerminalAcknowledgedRecords.Order().ToArray() }));
 
+    [HttpGet("transition-review")]
+    public async Task<ActionResult<object>> TransitionReview([FromQuery] Guid terminalId, [FromQuery] Guid targetFirmwareVersionId,
+        [FromQuery] Guid? candidateSetId, CancellationToken ct)
+    {
+        if (!OperatorPermissions.Allows(HttpContext, "phones", PermissionOperation.Read) ||
+            !OperatorPermissions.Allows(HttpContext, "firmware-registry", PermissionOperation.Read) ||
+            !OperatorPermissions.Allows(HttpContext, "table-sets", PermissionOperation.Read) ||
+            !OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read) ||
+            !OperatorPermissions.Allows(HttpContext, "table-assignments", PermissionOperation.Read)) return Forbid();
+        var review = await FirmwareTransitionReview.BuildAsync(db, terminalId, targetFirmwareVersionId, candidateSetId, ct);
+        return review == null ? NotFound(new { error = "The selected phone, firmware or candidate set was not found." }) : Ok(review);
+    }
+
     [HttpGet("versions")]
     public async Task<ActionResult<IEnumerable<object>>> FirmwareVersions(CancellationToken ct) =>
         Ok(await db.FirmwareVersions.AsNoTracking()
