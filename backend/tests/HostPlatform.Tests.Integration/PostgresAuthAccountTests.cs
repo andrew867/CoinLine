@@ -7,7 +7,9 @@ using System.Text.Json;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure;
+using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Protocols.Dlog;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.Mvc.Controllers;
@@ -122,6 +124,34 @@ public sealed class PostgresAuthAccountTests
             db.AddRange(customer, site, phone);
             await db.SaveChangesAsync();
         }
+        const string destinations = "/api/field-event-destinations";
+        var destinationName = "Fixture " + Guid.NewGuid().ToString("N");
+        var destinationRule = new { kind = "alarm", code = 22, terminalId = phone.Id, destination = destinationName, revision = 0 };
+        using (var denied = await userClient.GetAsync(destinations))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await userClient.PostAsJsonAsync(destinations, destinationRule))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using var createdDestination = await adminClient.PostAsJsonAsync(destinations, destinationRule);
+        Assert.Equal(HttpStatusCode.Created, createdDestination.StatusCode);
+        var destinationId = (await createdDestination.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using (var duplicate = await adminClient.PostAsJsonAsync(destinations, destinationRule))
+            Assert.Equal(HttpStatusCode.Conflict, duplicate.StatusCode);
+        var destinationPreview = await adminClient.GetFromJsonAsync<JsonElement>($"{destinations}/preview?terminalId={phone.Id}&kind=alarm&code=22");
+        Assert.Equal(destinationName, destinationPreview.GetProperty("destination").GetString());
+        var fixtureCorrelation = Guid.NewGuid().ToString("N");
+        Guid routedTransaction;
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var engine = scope.ServiceProvider.GetRequiredService<DlogTransactionEngine>();
+            var report = await engine.IngestAsync([7, 26, 11, 23, 12, 0, 0, 22], DlogDirection.TerminalToHost, phone.Id,
+                null, fixtureCorrelation, 7, true, null, null, fixtureCorrelation, default);
+            routedTransaction = report.Id;
+        }
+        using (var removedRoute = await adminClient.DeleteAsync($"{destinations}/{destinationId}?revision=1"))
+            removedRoute.EnsureSuccessStatusCode();
+        var history = await adminClient.GetFromJsonAsync<JsonElement>($"{destinations}/queue?destination={Uri.EscapeDataString(destinationName)}");
+        Assert.Equal(routedTransaction, Assert.Single(history.EnumerateArray()).GetProperty("transactionId").GetGuid());
+        Assert.Equal(destinationId, Assert.Single(history[0].GetProperty("ruleIds").EnumerateArray()).GetGuid());
         var membershipPath = $"{phones}/{phone.Id}/groups";
         var membership = await userClient.GetFromJsonAsync<JsonElement>(membershipPath);
         using (var added = await userClient.PutAsJsonAsync(membershipPath,

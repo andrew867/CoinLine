@@ -64,6 +64,20 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
         };
 
         db.DlogTransactions.Add(tx);
+        if (direction == DlogDirection.TerminalToHost && meta.MessageType is 6 or 7 &&
+            FieldEventSummary.ReadCode(meta.MessageType, rawPayloadExact) is { } eventCode)
+        {
+            var destination = await FieldEventDestinationResolver.ResolveAsync(db, terminalId, eventCode.Kind, eventCode.Code, ct);
+            db.FieldEventRouteDecisions.Add(new FieldEventRouteDecision
+            {
+                TransactionId = tx.Id,
+                Kind = eventCode.Kind,
+                Code = eventCode.Code,
+                Status = destination.Status,
+                Destination = destination.Destination,
+                RuleIds = destination.RuleIds,
+            });
+        }
         foreach (var d in meta.Diagnostics)
         {
             db.DlogParseDiagnostics.Add(new DlogParseDiagnostic
