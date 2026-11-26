@@ -1,5 +1,7 @@
 import { useState } from 'react'
-import { apiGet } from '../api/client'
+import { Link } from 'react-router-dom'
+import { apiGet, apiPostRaw } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 type Phone = { id: string; displayName: string }
 type Version = { id: string; label: string; tableProfileId: string | null }
@@ -10,6 +12,7 @@ type RecordReview = { tableNumber: number; sourceBytes: number | null; targetExp
 type Review = { sourceFirmwareLabel: string | null; targetFirmwareLabel: string; sourceSetId: string | null; sourceSetName: string | null;
   candidateSetId: string | null; candidateSetName: string | null; candidatePublished: boolean; activeSessions: number; outstandingDownloads: number;
   configurationReadyForReview: boolean; upgradeQualified: boolean; records: RecordReview[]; findings: Finding[] }
+type AccessPreview = { sourceSetId: string; candidateSetId: string; sourceBytes: number; targetBytes: number; changedBytes: number; recordCount: number; previewToken: string }
 
 const actions: Record<string, string> = {
   'invalid-candidate': 'Invalid candidate', 'retire-from-target': 'Review retirement', 'unsupported-candidate': 'Unsupported record',
@@ -30,6 +33,12 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [review, setReview] = useState<Review | null>(null)
+  const [draftName, setDraftName] = useState('')
+  const [accessPreview, setAccessPreview] = useState<AccessPreview | null>(null)
+  const [createdDraft, setCreatedDraft] = useState<string | null>(null)
+  const [stageError, setStageError] = useState<string | null>(null)
+
+  function resetStage() { setAccessPreview(null); setCreatedDraft(null); setStageError(null) }
 
   async function loadOptions() {
     setOpen(true); setLoadingOptions(true); setError(null)
@@ -41,7 +50,7 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
   }
 
   async function preview() {
-    setBusy(true); setError(null); setReview(null)
+    setBusy(true); setError(null); setReview(null); resetStage()
     try {
       const query = new URLSearchParams({ terminalId: phoneId, targetFirmwareVersionId: targetId })
       if (candidateId) query.set('candidateSetId', candidateId)
@@ -50,19 +59,36 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
     finally { setBusy(false) }
   }
 
+  async function stageAccess(apply: boolean) {
+    setBusy(true); setStageError(null)
+    if (!apply) { setAccessPreview(null); setCreatedDraft(null) }
+    try {
+      const body = { terminalId: phoneId, targetFirmwareVersionId: targetId, candidateSetId: candidateId,
+        name: draftName.trim(), previewToken: apply ? accessPreview?.previewToken : undefined }
+      const response = await apiPostRaw(`/api/firmware/transition-access${apply ? '' : '/preview'}`, body)
+      const json = await response.json().catch(() => null)
+      if (!response.ok || !json) throw new Error(json?.error ?? `Target draft request failed (HTTP ${response.status}).`)
+      if (apply) { setCreatedDraft(json.id); setAccessPreview(null) }
+      else setAccessPreview(json as AccessPreview)
+    } catch (e) {
+      setStageError(e instanceof Error ? e.message : 'Unable to prepare the target draft.')
+      if (apply) setAccessPreview(null)
+    } finally { setBusy(false) }
+  }
+
   return <section style={{ border: '1px solid #ddd', borderRadius: 8, marginBottom: 20, padding: 16 }}>
     <h2 style={{ marginTop: 0 }}>Configuration transition review</h2>
     <p>Compare the phone's assigned configuration with a different registered firmware version. Review replacements and new records before planning an upgrade. This tool does not schedule a transfer, change an assignment, or certify compatibility.</p>
     {!open ? <button type="button" onClick={() => void loadOptions()}>Review a firmware transition</button> : <>
       {loadingOptions ? <p role="status">Loading firmware and configuration choices…</p> : <form onSubmit={e => { e.preventDefault(); void preview() }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 12 }}>
-          <label>Source phone<select style={{ display: 'block' }} value={phoneId} disabled={busy} onChange={e => { setPhoneId(e.target.value); setReview(null) }}>
+          <label>Source phone<select style={{ display: 'block' }} value={phoneId} disabled={busy} onChange={e => { setPhoneId(e.target.value); setReview(null); resetStage() }}>
             <option value="">Choose a phone</option>
             {phones.map(phone => <option key={phone.id} value={phone.id}>{phone.displayName}</option>)}</select></label>
-          <label>Target firmware<select style={{ display: 'block' }} value={targetId} disabled={busy} onChange={e => { setTargetId(e.target.value); setCandidateId(''); setReview(null) }}>
+          <label>Target firmware<select style={{ display: 'block' }} value={targetId} disabled={busy} onChange={e => { setTargetId(e.target.value); setCandidateId(''); setReview(null); resetStage() }}>
             <option value="">Choose a registered version</option>{versions.map(version => <option key={version.id} value={version.id}>
               {version.label}{version.tableProfileId ? '' : ' (layout not assigned)'}</option>)}</select></label>
-          <label>Prepared target configuration<select style={{ display: 'block' }} value={candidateId} disabled={busy || !targetId} onChange={e => { setCandidateId(e.target.value); setReview(null) }}>
+          <label>Prepared target configuration<select style={{ display: 'block' }} value={candidateId} disabled={busy || !targetId} onChange={e => { setCandidateId(e.target.value); setReview(null); resetStage() }}>
             <option value="">None, review source only</option>{sets.filter(set => set.targetFirmwareVersionId === targetId).map(set => <option key={set.id} value={set.id}>
               {set.name} ({set.status === 1 ? 'published' : 'draft'})</option>)}</select></label>
         </div>
@@ -84,6 +110,21 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
             <td>{record.targetAcknowledged ? 'Previously acknowledged' : 'Not acknowledged in catalogue'}{record.requiresLayoutReview && <><br />Field layout needs review</>}</td>
           </tr>)}</tbody>
         </table></div>
+        {review.sourceSetId && review.candidateSetId && canPerform('table-sets', op.add) && review.records.some(record =>
+          record.tableNumber === 21 && record.targetExpectedBytes === record.candidateBytes &&
+          [18, 48].includes(record.sourceBytes ?? 0) && [18, 48].includes(record.candidateBytes ?? 0)) &&
+          <section aria-label="Carry forward management access" style={{ marginTop: 18 }}>
+            <h3>Prepare phone-specific management access</h3>
+            <p>Copy the reviewed target candidate into a new draft using the assigned phone's MT21 identity, primary and alternate manager numbers. Target ADSI identifiers and every other record remain as supplied by the candidate. This does not assign, publish, download or qualify the upgrade.</p>
+            <label>New target draft name <input value={draftName} maxLength={120} disabled={busy} onChange={e => { setDraftName(e.target.value); resetStage() }} /></label>{' '}
+            <button type="button" disabled={busy || !draftName.trim()} onClick={() => void stageAccess(false)}>Preview management-access carry-forward</button>
+            {stageError && <p role="alert">{stageError}</p>}
+            {accessPreview && <>
+              <p>MT21: {accessPreview.sourceBytes} bytes to {accessPreview.targetBytes} bytes; {accessPreview.changedBytes} changed target bytes. {accessPreview.recordCount - 1} other records retained unchanged.</p>
+              <button type="button" disabled={busy} onClick={() => { if (window.confirm('Create this unassigned target draft?')) void stageAccess(true) }}>Create target draft</button>
+            </>}
+            {createdDraft && <p>Target draft created, not assigned. <Link to={`/table-sets/${createdDraft}`}>Open target draft and review remaining records</Link>.</p>}
+          </section>}
       </div>}
     </>}
   </section>

@@ -63,7 +63,7 @@ public static class OperatorPermissions
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
             ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
             ("Terminals", R, "Families"),
-            ("Tables", A, "CreateSet CloneSet"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
+            ("Tables", A, "CreateSet CloneSet"), ("Firmware", A, "StageAccessConfiguration"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
             ("Tables", A | U, "FirmwareOptions"));
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
@@ -128,7 +128,7 @@ public static class OperatorPermissions
             ("Firmware", A, "CreateFirmwareVersion CreatePackage AddArtifact AddCompatibilityRule CreateTarget"),
             ("Firmware", U, "PreviewFirmwareTableProfile SetFirmwareTableProfile"));
         Screen("firmware-jobs", "Firmware jobs",
-            ("Firmware", R, "ExecutionPolicy ListJobs Job TransitionReview"), ("Terminals", A, "StartFirmwareJob"),
+            ("Firmware", R, "ExecutionPolicy ListJobs Job TransitionReview PreviewAccessStaging"), ("Terminals", A, "StartFirmwareJob"),
             ("Firmware", U, "SimulateJob ExecuteLiveJob ApproveJob CancelJob"), ("Tables", U, "QueueFirmwareCancellation"));
         Screen("hardware-validation", "Hardware validation",
             ("HardwareValidation", R, "Checklists EvidenceGuide ListCapturedSessions GetCapturedSession"),
