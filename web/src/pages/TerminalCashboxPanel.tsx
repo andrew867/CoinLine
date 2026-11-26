@@ -99,7 +99,13 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
       <h2 id="cashbox-heading">Cashbox</h2>
       {error && <ErrorBanner message={error} />}
       {!ledger && !error && <LoadingBlock label="Loading cashbox reports…" />}
-      {ledger && ledger.statuses.length === 0 && ledger.collections.length === 0 && <EmptyHint>No cashbox reports yet.</EmptyHint>}
+      {ledger && ledger.statuses.length === 0 && ledger.collections.length === 0 && <>
+        <EmptyHint>No cashbox reports yet.</EmptyHint>
+        <div className="cashbox-waiting" role="note">
+          <strong>Current balance unknown.</strong> The manager has not received a cashbox status (MT38) or collection (MT51) report from this phone.
+          A successfully uploaded coin call can still exist without a cashbox report. Its charge and collected amount do not establish the current box balance.
+        </div>
+      </>}
       {hasHistory && <p>Amounts use the phone’s currency. The cashbox data is reported by the terminal, not calculated from quoted charges or deposited amounts.</p>}
       {current && <section className="cashbox-summary" aria-label="Current reported cashbox">
         <h3>Current reported cashbox</h3>
