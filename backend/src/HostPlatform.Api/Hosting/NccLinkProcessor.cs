@@ -52,6 +52,8 @@ internal sealed class NccLinkProcessor(
     private NccWirePacket? _lastTimeSync;
     private NccWirePacket? _lastDialogueReply;
     private NccWirePacket? _lastDialogueRequest;
+    private Guid? _callUploadPhoneId;
+    private NccWirePacket? _lastCallUploadEndRequest;
     private bool _timeSyncAwaitingAck;
     private DownloadBatch? _batch;
     private ScheduledTableDownload? _scheduledDownload;
@@ -245,6 +247,15 @@ internal sealed class NccLinkProcessor(
         var control = NccControl.IsControlPacket(packet.Control);
         var hex = control ? string.Empty : Convert.ToHexString(packet.TerminalId);
         var terminal = control ? null : await MatchTerminalAsync(hex, frame.CreatedAtUtc);
+        var repeatedUploadEnd = !control && !headerOnlyRetry
+            && (packet.Control & NccControl.ReTrans) != 0
+            && _lastCallUploadEndRequest is { } previousEnd
+            && ReferenceEquals(_lastInboundMessage, previousEnd)
+            && ReferenceEquals(_lastDialogueRequest, previousEnd)
+            && _lastDialogueReply != null
+            && NccControl.PacketId(previousEnd.Control) == NccControl.PacketId(packet.Control)
+            && previousEnd.TerminalId.AsSpan().SequenceEqual(packet.TerminalId)
+            && previousEnd.Data.AsSpan().SequenceEqual(packet.Data);
         if (!control)
         {
             _session.TerminalId = terminal?.Id;
@@ -256,12 +267,27 @@ internal sealed class NccLinkProcessor(
         var callDetails = messageType is { } detailType && DlogCallDetailWire.IsRecord(detailType);
         var rateRequest = messageType == DlogRateWire.MessageTypeRequest;
         var uploadAttention = messageType == DlogCallDetailWire.UploadAttention && packet.Data.Length >= 2;
+        var explicitUpload = _callUploadPhoneId != null && !control && !headerOnlyRetry && !uploadAttention;
+        DlogCallUploadWire.Frame? uploadFrame = null;
+        if (explicitUpload)
+            DlogCallUploadWire.TryParse(packet.Data, out uploadFrame);
         var reports = DlogTerminalStatisticsWire.FindReports(packet.Data, out var truncatedReport);
+        if (uploadFrame != null)
+        {
+            reports = uploadFrame.Statistics.ToList();
+            truncatedReport = false;
+        }
         var statistics = reports.Count > 0 || truncatedReport;
         var cashboxReports = DlogCashboxWire.FindReports(packet.Data, out var truncatedCashbox);
+        if (uploadFrame != null)
+        {
+            cashboxReports = uploadFrame.Cashbox.ToList();
+            truncatedCashbox = false;
+            callDetails = uploadFrame.CallDetails.Count > 0;
+        }
         var hasCashboxCollection = false;
         // A rate request can carry a call record after its fixed-length header.
-        var recordedBytes = cardAuthorization || callDetails || statistics || cashboxReports.Count > 0 || truncatedCashbox || messageType == 6 ||
+        var recordedBytes = explicitUpload || repeatedUploadEnd || cardAuthorization || callDetails || statistics || cashboxReports.Count > 0 || truncatedCashbox || messageType == 6 ||
             (rateRequest && packet.Data.Length > DlogRateWire.RequestLength) ? Array.Empty<byte>() : raw;
         _session.LastFrameSample = recordedBytes;
         _session.UpdatedAtUtc = DateTime.UtcNow;
@@ -281,7 +307,8 @@ internal sealed class NccLinkProcessor(
             terminalIdHex = hex,
             matched = terminal != null,
             unknown = !control && terminal == null,
-            redactedMessageType = recordedBytes.Length == 0 ? messageType : null
+            redactedMessageType = recordedBytes.Length == 0 ? messageType : null,
+            callUploadEnd = uploadFrame?.EndsDialogue
         }, _session.TerminalId);
 
         try
@@ -309,6 +336,18 @@ internal sealed class NccLinkProcessor(
                 await HandleTimeSyncControlAsync(stream, packet.Control);
             return;
         }
+
+        if (repeatedUploadEnd)
+        {
+            await Task.Delay(FirmwareLinkAckDelay, stoppingToken);
+            await WriteAckAsync(stream, packet.Control);
+            if (await SendDialogueReplyAsync(stream, packet, _lastDialogueReply!.Data, "call upload completion retry"))
+                _lastCallUploadEndRequest = packet;
+            return;
+        }
+
+        if (explicitUpload && (terminal == null || terminal.Id != _callUploadPhoneId || uploadFrame == null))
+            throw new IOException("NCC call upload closed before acknowledgement: unrecognized or incomplete upload record.");
 
         var maintenanceRequest = DlogMaintenanceWire.HasRequestRecord(packet.Data);
         var callIn = packet.Data is [RoutineCallInMessageType] or [DlogCallbackWire.Return];
@@ -354,10 +393,16 @@ internal sealed class NccLinkProcessor(
             }
         }
         var receipts = callDetails && terminal != null
-            ? await StoreCallDetailsAsync(packet.Data, terminal) : [];
+            ? await StoreCallDetailsAsync(packet.Data, terminal, uploadFrame?.CallDetails) : [];
+        if (uploadFrame != null)
+        {
+            if (receipts.Length != uploadFrame.CallDetails.Count * 3 ||
+                !await RecordFieldRecordsAsync(uploadFrame.Status.Select(range => packet.Data[range]), terminal))
+                throw new IOException("NCC call upload closed before acknowledgement: complete records were not stored.");
+        }
         if (terminal != null)
         {
-            _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn || callDetails || uploadAttention || statistics || cashboxReports.Count > 0
+            _firmwareDialogue |= maintenanceRequest || rateRequest || cardAuthorization || callIn || callDetails || uploadAttention || explicitUpload || statistics || cashboxReports.Count > 0
                 || packet.Data is [DlogTimeSyncWire.Request] or [TableDownloadRequestType, _, ..];
             // Give the terminal time to arm its reply timer after transmit completion.
             if (_firmwareDialogue)
@@ -369,9 +414,27 @@ internal sealed class NccLinkProcessor(
         {
             if (_lastDialogueReply is { } reply && ReferenceEquals(_lastInboundMessage, _lastDialogueRequest)
                 && (reply.Data[0] is DlogCallDetailWire.Acknowledgement or DlogCallDetailWire.RequestUpload ||
+                    _lastCallUploadEndRequest != null && ReferenceEquals(_lastDialogueRequest, _lastCallUploadEndRequest) ||
                     _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]
                     || (_lastDialogueRequest.Data.Length > 0 && DlogCardAuthorizationWire.IsRequest(_lastDialogueRequest.Data[0]))))
                 await SendDialogueReplyAsync(stream, packet, reply.Data, "immediate dialogue retry");
+            return;
+        }
+
+        if (uploadFrame != null)
+        {
+            if (uploadFrame.EndsDialogue)
+            {
+                // MT13 is the terminal's application-level end marker, not a link clear.
+                // Answer it only after all recognized upload records have been committed.
+                if (await SendDialogueReplyAsync(stream, packet, [.. receipts, EndDataMessageType], "call upload completion"))
+                {
+                    _callUploadPhoneId = null;
+                    _lastCallUploadEndRequest = packet;
+                }
+            }
+            else if (receipts.Length > 0)
+                await SendDialogueReplyAsync(stream, packet, receipts, "call detail");
             return;
         }
 
@@ -430,7 +493,11 @@ internal sealed class NccLinkProcessor(
                 && DlogAlarmWire.TryBuildAcknowledgement(packet.Data, out var acknowledgement))
                 await SendManagementReplyAsync(stream, packet, terminal.Id, acknowledgement, "alarm");
             else if (stored && terminal != null && uploadAttention)
+            {
+                _callUploadPhoneId = terminal.Id;
+                _lastCallUploadEndRequest = null;
                 await SendDialogueReplyAsync(stream, packet, [DlogCallDetailWire.RequestUpload], "call upload request");
+            }
         }
 
         if (terminal != null && (callIn || applicationType == TableDownloadRequestType && packet.Data.Length >= 2))
@@ -590,7 +657,7 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task<byte[]> StoreCallDetailsAsync(byte[] data, Terminal terminal)
+    private async Task<byte[]> StoreCallDetailsAsync(byte[] data, Terminal terminal, IReadOnlyList<Range>? records = null)
     {
         var replies = new List<byte>();
         try
@@ -598,18 +665,14 @@ internal sealed class NccLinkProcessor(
             var profile = await db.FirmwareVersions.AsNoTracking().Where(version => version.Id == terminal.FirmwareVersionId)
                 .Select(version => version.TableProfileId).FirstOrDefaultAsync(stoppingToken);
             var fullCombinedNumber = profile == FirmwareTableProfiles.MultiPay200;
-            for (var offset = 0; offset < data.Length;)
+            foreach (var range in records ?? LeadingCallDetails(data))
             {
-                var length = DlogCallDetailWire.RecordLength(data[offset]);
-                if (length == 0 || length > data.Length - offset)
-                    break;
-                var detail = DlogCallDetailWire.Decode(data.AsSpan(offset, length), fullCombinedNumber, out var fingerprint);
+                var detail = DlogCallDetailWire.Decode(data.AsSpan()[range], fullCombinedNumber, out var fingerprint);
                 await TerminalUploads.StoreAsync(db, terminal.Id, _session.Id, detail, fingerprint, stoppingToken);
                 await TrySettleSyntheticCallAsync(terminal.Id, fingerprint);
                 var receipt = new byte[3];
                 DlogCallDetailWire.WriteAcknowledgement(receipt, detail.Sequence);
                 replies.AddRange(receipt);
-                offset += length;
             }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -618,6 +681,20 @@ internal sealed class NccLinkProcessor(
                 _session.Id, ex.GetType().Name);
         }
         return replies.ToArray();
+    }
+
+    private static List<Range> LeadingCallDetails(byte[] data)
+    {
+        var records = new List<Range>();
+        for (var offset = 0; offset < data.Length;)
+        {
+            var length = DlogCallDetailWire.RecordLength(data[offset]);
+            if (length == 0 || length > data.Length - offset)
+                break;
+            records.Add(offset..(offset + length));
+            offset += length;
+        }
+        return records;
     }
 
     private async Task TrySettleSyntheticCallAsync(Guid terminalId, string fingerprint)
@@ -637,15 +714,17 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task<bool> RecordFieldEventAsync(byte[] data, Terminal? terminal)
+    private Task<bool> RecordFieldEventAsync(byte[] data, Terminal? terminal) =>
+        RecordFieldRecordsAsync(FieldEventCatalog.SplitUpload(data), terminal);
+
+    private async Task<bool> RecordFieldRecordsAsync(IEnumerable<byte[]> records, Terminal? terminal)
     {
         try
         {
-            var records = FieldEventCatalog.SplitUpload(data);
             var capturedAt = DateTime.UtcNow;
-            for (var i = 0; i < records.Count; i++)
+            var i = 0;
+            foreach (var record in records)
             {
-                var record = records[i];
                 // Cashbox observations were committed before the link acknowledgement.
                 if (DlogCashboxWire.RecordLength(record[0]) > 0)
                     continue;
@@ -657,7 +736,7 @@ internal sealed class NccLinkProcessor(
                     _session.CorrelationId,
                     record[0],
                     true,
-                    $"{_lastReceivedSequence}:{i}",
+                    $"{_lastReceivedSequence}:{i++}",
                     capturedAt,
                     _session.CorrelationId,
                     stoppingToken);
@@ -671,7 +750,7 @@ internal sealed class NccLinkProcessor(
         }
     }
 
-    private async Task SendDialogueReplyAsync(NetworkStream stream, NccWirePacket request, byte[] acknowledgement, string dialogue)
+    private async Task<bool> SendDialogueReplyAsync(NetworkStream stream, NccWirePacket request, byte[] acknowledgement, string dialogue)
     {
         try
         {
@@ -683,10 +762,12 @@ internal sealed class NccLinkProcessor(
 
             _lastDialogueRequest = _lastInboundMessage;
             logger.LogInformation("NCC {Dialogue} dialogue acknowledged for session {SessionId}.", dialogue, _session.Id);
+            return true;
         }
         catch (Exception ex)
         {
             logger.LogInformation(ex, "NCC {Dialogue} acknowledgement was not sent.", dialogue);
+            return false;
         }
     }
 
