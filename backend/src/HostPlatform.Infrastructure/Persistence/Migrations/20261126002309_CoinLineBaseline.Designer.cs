@@ -12,8 +12,8 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace HostPlatform.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(HostPlatformDbContext))]
-    [Migration("20261123130622_NccSessionFramesAndCallPayloads")]
-    partial class NccSessionFramesAndCallPayloads
+    [Migration("20261126002309_CoinLineBaseline")]
+    partial class CoinLineBaseline
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -487,6 +487,63 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("CardCredentials");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.CardMasterDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Archived")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<string>("CodeKey")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<byte[]>("RowPayload")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<int>("TableNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TableNumber", "CodeKey")
+                        .IsUnique();
+
+                    b.ToTable("CardMasterDefinitions");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.CardProduct", b =>
                 {
                     b.Property<Guid>("Id")
@@ -548,11 +605,14 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("RawPayloadJson")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<string>("PanLast4")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
 
                     b.Property<int>("ReportedCardType")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Result")
                         .HasColumnType("integer");
 
                     b.Property<Guid?>("TerminalId")
@@ -574,7 +634,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("TerminalId");
 
-                    b.ToTable("CardReadEvents");
+                    b.ToTable("CardReadEvents", t =>
+                        {
+                            t.HasCheckConstraint("CK_CardReadEvents_PanLast4", "\"PanLast4\" IS NULL OR \"PanLast4\" ~ '^[0-9]{4}$'");
+                        });
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.CardReconciliationBatch", b =>
@@ -637,13 +700,12 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Disposition")
                         .HasColumnType("integer");
 
-                    b.Property<string>("IntendedOperation")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<string>("PanLast4")
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
 
-                    b.Property<string>("RawPayloadJson")
-                        .IsRequired()
-                        .HasColumnType("text");
+                    b.Property<int>("ReportedCardType")
+                        .HasColumnType("integer");
 
                     b.Property<bool>("SimulationMode")
                         .HasColumnType("boolean");
@@ -662,7 +724,64 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.HasIndex("CardAccountId");
 
-                    b.ToTable("CardWriteEvents");
+                    b.ToTable("CardWriteEvents", t =>
+                        {
+                            t.HasCheckConstraint("CK_CardWriteEvents_PanLast4", "\"PanLast4\" IS NULL OR \"PanLast4\" ~ '^[0-9]{4}$'");
+                        });
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.CarrierLibraryEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<string>("CodeKey")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<byte[]>("RowPayload")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<int>("TableNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TableNumber", "CodeKey")
+                        .IsUnique();
+
+                    b.ToTable("CarrierLibraryEntries");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.CdrUploadRequest", b =>
@@ -1412,16 +1531,23 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("LastError")
                         .HasColumnType("text");
 
+                    b.Property<Guid?>("NccSessionId")
+                        .HasColumnType("uuid");
+
                     b.Property<string>("PartialDefinitionIdsJson")
                         .HasColumnType("text");
 
                     b.Property<int>("RetryCount")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("ScheduleId")
+                        .HasColumnType("uuid");
+
                     b.Property<int>("Scope")
                         .HasColumnType("integer");
 
                     b.Property<int>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<Guid>("TableSetId")
@@ -1446,9 +1572,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsUnique()
                         .HasFilter("\"ClientIdempotencyKey\" IS NOT NULL AND \"ClientIdempotencyKey\" <> ''");
 
+                    b.HasIndex("NccSessionId");
+
                     b.HasIndex("TableSetId");
 
                     b.HasIndex("TerminalId");
+
+                    b.HasIndex(new[] { "TerminalId" }, "IX_DownloadBatches_TerminalId_ActiveTransfer")
+                        .IsUnique()
+                        .HasFilter("\"NccSessionId\" IS NOT NULL AND \"Status\" = 1");
 
                     b.ToTable("DownloadBatches");
                 });
@@ -1582,6 +1714,174 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsUnique();
 
                     b.ToTable("EPurseProfiles");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.FieldEventCodeSetting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Code")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<int?>("Severity")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "Code")
+                        .IsUnique();
+
+                    b.ToTable("FieldEventCodeSettings", t =>
+                        {
+                            t.HasCheckConstraint("CK_FieldEventCodeSettings_KindCodeSeverity", "(\"Kind\" = 'alarm' AND \"Code\" BETWEEN 0 AND 255 AND (\"Severity\" IS NULL OR \"Severity\" BETWEEN 1 AND 4)) OR (\"Kind\" = 'maintenance' AND \"Code\" BETWEEN 0 AND 65535 AND \"Severity\" IS NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.FieldEventDestinationRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int?>("Code")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Destination")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<Guid?>("GroupId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<string>("RegionCode")
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("ScopeKey")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<Guid?>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ScopeKey")
+                        .IsUnique();
+
+                    b.ToTable("FieldEventDestinationRules", t =>
+                        {
+                            t.HasCheckConstraint("CK_FieldEventDestinationRules_KindCode", "(\"Kind\" = 'alarm' AND (\"Code\" IS NULL OR \"Code\" BETWEEN 0 AND 255)) OR (\"Kind\" = 'maintenance' AND (\"Code\" IS NULL OR \"Code\" BETWEEN 0 AND 65535))");
+                        });
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.FieldEventRouteDecision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Code")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Destination")
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.PrimitiveCollection<Guid[]>("RuleIds")
+                        .IsRequired()
+                        .HasColumnType("uuid[]");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TransactionId")
+                        .IsUnique();
+
+                    b.ToTable("FieldEventRouteDecisions");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.FirmwareArtifact", b =>
@@ -2042,6 +2342,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<string>("TableProfileId")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2055,6 +2359,57 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("FirmwareVersions");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.InmateFeatureConfiguration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<string>("NameKey")
+                        .IsRequired()
+                        .HasMaxLength(24)
+                        .HasColumnType("character varying(24)");
+
+                    b.Property<string>("SettingsJson")
+                        .IsRequired()
+                        .HasColumnType("jsonb");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NameKey")
+                        .IsUnique();
+
+                    b.ToTable("InmateFeatureConfigurations");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.NccFrameCapture", b =>
@@ -2161,12 +2516,18 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<byte?>("LinkControl")
+                        .HasColumnType("smallint");
+
                     b.Property<Guid>("NccSessionId")
                         .HasColumnType("uuid");
 
                     b.Property<byte[]>("RawBytes")
                         .IsRequired()
                         .HasColumnType("bytea");
+
+                    b.Property<bool>("SentByHost")
+                        .HasColumnType("boolean");
 
                     b.Property<int>("Sequence")
                         .HasColumnType("integer");
@@ -2188,11 +2549,72 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Version")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("WireLength")
+                        .HasColumnType("integer");
+
                     b.HasKey("Id");
 
                     b.HasIndex("NccSessionId", "Sequence");
 
                     b.ToTable("NccSessionFrames");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.OperatorAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("DisplayName")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("Enabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("PasswordHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("PermissionProfileJson")
+                        .HasColumnType("jsonb");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SessionGeneration")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Username")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Username")
+                        .IsUnique();
+
+                    b.ToTable("OperatorAccounts");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.PaymentTransaction", b =>
@@ -2243,6 +2665,94 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("CardAccountId");
 
                     b.ToTable("PaymentTransactions");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.QuickAccessCustomer", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Archived")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("BillingComments")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("City")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("ContactName")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(160)
+                        .HasColumnType("character varying(160)");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<string>("Phone")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("PostalCode")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("character varying(32)");
+
+                    b.Property<string>("Province")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)");
+
+                    b.Property<string>("Reference")
+                        .IsRequired()
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<string>("Street")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("character varying(256)");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Reference")
+                        .IsUnique();
+
+                    b.ToTable("QuickAccessCustomers", t =>
+                        {
+                            t.HasCheckConstraint("CK_QuickAccessCustomers_Reference", "\"Reference\" ~ '^[0-9]{6}$' AND \"Reference\" <> '000000'");
+                        });
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.RatePlan", b =>
@@ -2542,6 +3052,89 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("RemoteTableReloadRequests");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.ScheduledTableDownload", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CancellationReason")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("FirmwareSlotEndAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("LastBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("NccSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PreparedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.PrimitiveCollection<int[]>("RecordNumbers")
+                        .HasColumnType("integer[]");
+
+                    b.Property<Guid?>("SourceTableSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("TableSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AvailableAtUtc")
+                        .HasFilter("\"LastBatchId\" IS NULL AND \"NccSessionId\" IS NULL AND \"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
+
+                    b.HasIndex("LastBatchId");
+
+                    b.HasIndex("NccSessionId");
+
+                    b.HasIndex("SourceTableSetId");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique()
+                        .HasFilter("\"CompletedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
+
+                    b.HasIndex("TableSetId", "AvailableAtUtc");
+
+                    b.ToTable("ScheduledTableDownloads");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.Site", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2810,6 +3403,70 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("TablePayloads");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TableRecordUpdateRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("ChangedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("EndedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("FailureReason")
+                        .HasColumnType("text");
+
+                    b.Property<int>("NextTarget")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("PreviewToken")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RequestJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SkippedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("Stopped")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("TargetsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("SourceSetId", "EndedAtUtc");
+
+                    b.ToTable("TableRecordUpdateRuns");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TableSet", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2842,6 +3499,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<Guid?>("TargetFirmwareVersionId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2850,11 +3510,14 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
 
                     b.HasIndex("CustomerId");
+
+                    b.HasIndex("TargetFirmwareVersionId");
 
                     b.ToTable("TableSets");
                 });
@@ -2865,8 +3528,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CardMasterLinksJson")
+                        .HasColumnType("jsonb");
+
                     b.Property<byte[]>("Checksum")
                         .HasColumnType("bytea");
+
+                    b.Property<string>("ConfigurationId")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -2886,6 +3556,12 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("ScreeningDescriptionsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("ScreeningLayoutProfile")
+                        .HasColumnType("text");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("integer");
 
@@ -2896,6 +3572,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("uuid");
 
                     b.Property<int>("TableRevision")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<Guid>("TableSetId")
@@ -2924,6 +3601,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("TablePayloadId");
 
                     b.HasIndex("TableSetId");
+
+                    b.HasIndex("ConfigurationId", "TableDefinitionId");
 
                     b.ToTable("TableVersions");
                 });
@@ -2985,6 +3664,12 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("DeactivatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateOnly?>("DeletionReviewDate")
+                        .HasColumnType("date");
+
                     b.Property<string>("DisplayName")
                         .IsRequired()
                         .HasColumnType("text");
@@ -2997,6 +3682,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.Property<string>("TerminalFamilyId")
+                        .HasMaxLength(48)
+                        .HasColumnType("character varying(48)");
 
                     b.Property<Guid?>("TerminalGroupId")
                         .HasColumnType("uuid");
@@ -3016,6 +3705,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -3029,6 +3719,68 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("TransportEndpointId");
 
                     b.ToTable("Terminals");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalCallbackRequest", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("AcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("AcknowledgedSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("DeliverAssignedTables")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("DueAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ProgrammedForUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("RequestedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ReturnedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("TerminalClockOffsetMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("TerminalCallbackRequests");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TerminalDiagnosticSnapshot", b =>
@@ -3122,6 +3874,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("Code")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -3131,6 +3887,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
                     b.Property<Guid?>("CustomerId")
                         .HasColumnType("uuid");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -3144,6 +3903,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -3151,6 +3911,242 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("CustomerId");
 
                     b.ToTable("TerminalGroups");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalGroupMembership", b =>
+                {
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TerminalGroupId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("TerminalId", "TerminalGroupId");
+
+                    b.HasIndex("TerminalGroupId");
+
+                    b.ToTable("TerminalGroupMemberships");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalIdentityCutoverItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ActivatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ActivationError")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("ActivationSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ApplicationAcknowledgedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("DispatchBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("DispatchSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("DispatchStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("DueAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("FinishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("JobId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("NewIdentityObservedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("NewIdentityObservedSessionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("PossiblyAppliedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("SourceAccessRecordId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SourceAccessRecordRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SourceAssignmentRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("SourceFirmwareVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourcePayloadSha256Hex")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("SourceTableSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SourceTableSetRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SourceTerminalRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceWireId")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<Guid?>("StagedTableSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TargetPayloadSha256Hex")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("TargetWireId")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("TransferEndedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TransferError")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DueAtUtc");
+
+                    b.HasIndex("JobId");
+
+                    b.HasIndex("TargetWireId")
+                        .IsUnique()
+                        .HasFilter("\"FinishedAtUtc\" IS NULL");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique()
+                        .HasFilter("\"FinishedAtUtc\" IS NULL");
+
+                    b.ToTable("TerminalIdentityCutoverItems", t =>
+                        {
+                            t.HasCheckConstraint("CK_TerminalIdentityCutoverItems_DecimalIds", "\"SourceWireId\" ~ '^[0-9]{10}$' AND \"TargetWireId\" ~ '^[0-9]{10}$' AND \"SourceWireId\" <> \"TargetWireId\"");
+                        });
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInmateConfiguration", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("FeatureConfigurationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SetupConfigurationId")
+                        .HasMaxLength(6)
+                        .HasColumnType("character varying(6)");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FeatureConfigurationId");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("TerminalInmateConfigurations");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInventory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("TerminalInventories");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TerminalStatusRecord", b =>
@@ -3235,6 +4231,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("Version")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
@@ -3773,6 +4770,11 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HostPlatform.Domain.DownloadBatch", b =>
                 {
+                    b.HasOne("HostPlatform.Domain.NccSession", "NccSession")
+                        .WithMany()
+                        .HasForeignKey("NccSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("HostPlatform.Domain.TableSet", "TableSet")
                         .WithMany()
                         .HasForeignKey("TableSetId")
@@ -3784,6 +4786,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("TerminalId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("NccSession");
 
                     b.Navigation("TableSet");
 
@@ -3829,6 +4833,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("CardAccount");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.FieldEventRouteDecision", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.DlogTransaction", null)
+                        .WithOne()
+                        .HasForeignKey("HostPlatform.Domain.FieldEventRouteDecision", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.FirmwareArtifact", b =>
@@ -4067,6 +5080,46 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("Terminal");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.ScheduledTableDownload", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.DownloadBatch", "LastBatch")
+                        .WithMany()
+                        .HasForeignKey("LastBatchId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("HostPlatform.Domain.NccSession", "NccSession")
+                        .WithMany()
+                        .HasForeignKey("NccSessionId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("HostPlatform.Domain.TableSet", "SourceTableSet")
+                        .WithMany()
+                        .HasForeignKey("SourceTableSetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.TableSet", "TableSet")
+                        .WithMany()
+                        .HasForeignKey("TableSetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.Terminal", "Terminal")
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LastBatch");
+
+                    b.Navigation("NccSession");
+
+                    b.Navigation("SourceTableSet");
+
+                    b.Navigation("TableSet");
+
+                    b.Navigation("Terminal");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.Site", b =>
                 {
                     b.HasOne("HostPlatform.Domain.Customer", "Customer")
@@ -4122,13 +5175,29 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("SmartcardType");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TableRecordUpdateRun", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.TableSet", null)
+                        .WithMany()
+                        .HasForeignKey("SourceSetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TableSet", b =>
                 {
                     b.HasOne("HostPlatform.Domain.Customer", "Customer")
                         .WithMany()
                         .HasForeignKey("CustomerId");
 
+                    b.HasOne("HostPlatform.Domain.FirmwareVersion", "TargetFirmwareVersion")
+                        .WithMany()
+                        .HasForeignKey("TargetFirmwareVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("Customer");
+
+                    b.Navigation("TargetFirmwareVersion");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TableVersion", b =>
@@ -4197,6 +5266,17 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("TransportEndpoint");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TerminalCallbackRequest", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.Terminal", "Terminal")
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Terminal");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TerminalDiagnosticSnapshot", b =>
                 {
                     b.HasOne("HostPlatform.Domain.Terminal", "Terminal")
@@ -4226,6 +5306,178 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CustomerId");
 
                     b.Navigation("Customer");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalGroupMembership", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.TerminalGroup", null)
+                        .WithMany()
+                        .HasForeignKey("TerminalGroupId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithMany("AdditionalGroups")
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalIdentityCutoverItem", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInmateConfiguration", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.InmateFeatureConfiguration", "FeatureConfiguration")
+                        .WithMany()
+                        .HasForeignKey("FeatureConfigurationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithOne()
+                        .HasForeignKey("HostPlatform.Domain.TerminalInmateConfiguration", "TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("FeatureConfiguration");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalInventory", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithOne()
+                        .HasForeignKey("HostPlatform.Domain.TerminalInventory", "TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.OwnsOne("HostPlatform.Domain.TerminalInventoryDetails", "Details", b1 =>
+                        {
+                            b1.Property<Guid>("TerminalInventoryId")
+                                .HasColumnType("uuid");
+
+                            b1.Property<string>("AddressLine1")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<string>("AddressLine2")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<string>("AddressLine3")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<bool>("Basement")
+                                .HasColumnType("boolean");
+
+                            b1.Property<string>("BillingCustomerCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Contact")
+                                .HasMaxLength(80)
+                                .HasColumnType("character varying(80)");
+
+                            b1.Property<string>("DirectoryCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("DirectoryCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<decimal?>("EquipmentCost")
+                                .HasPrecision(12, 2)
+                                .HasColumnType("numeric(12,2)");
+
+                            b1.Property<string>("ExtensionCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("ExtensionCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<string>("HousingCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<bool>("Indoor")
+                                .HasColumnType("boolean");
+
+                            b1.Property<string>("IndustryCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("LocationGroupCode")
+                                .HasColumnType("text");
+
+                            b1.Property<decimal?>("LoopMileageCost")
+                                .HasPrecision(12, 2)
+                                .HasColumnType("numeric(12,2)");
+
+                            b1.Property<string>("MiscellaneousCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("MiscellaneousCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<bool>("PublicService")
+                                .HasColumnType("boolean");
+
+                            b1.Property<string>("RegionCode")
+                                .HasMaxLength(32)
+                                .HasColumnType("character varying(32)");
+
+                            b1.Property<string>("RevenueAccountingCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("Route")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<string>("SalespersonCode")
+                                .HasColumnType("text");
+
+                            b1.Property<string>("ServiceClass")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<string>("SignCode")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<int?>("SignCount")
+                                .HasColumnType("integer");
+
+                            b1.Property<string>("SiteDescription")
+                                .HasMaxLength(120)
+                                .HasColumnType("character varying(120)");
+
+                            b1.Property<string>("Stop")
+                                .HasMaxLength(24)
+                                .HasColumnType("character varying(24)");
+
+                            b1.Property<string>("TimeAreaCode")
+                                .HasMaxLength(2)
+                                .HasColumnType("character varying(2)");
+
+                            b1.Property<string>("VoucherAccountCode")
+                                .HasColumnType("text");
+
+                            b1.HasKey("TerminalInventoryId");
+
+                            b1.ToTable("TerminalInventories");
+
+                            b1.WithOwner()
+                                .HasForeignKey("TerminalInventoryId");
+                        });
+
+                    b.Navigation("Details")
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.TerminalStatusRecord", b =>
@@ -4439,6 +5691,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HostPlatform.Domain.Terminal", b =>
                 {
+                    b.Navigation("AdditionalGroups");
+
                     b.Navigation("Events");
                 });
 

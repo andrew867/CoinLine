@@ -214,7 +214,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
     var platformOpts = scope.ServiceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<PlatformOptions>>();
     if (db.Database.ProviderName?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true)
-        await db.Database.MigrateAsync();
+        await DatabaseBaseline.MigrateAsync(db);
     else
         await db.Database.EnsureCreatedAsync();
     await OperatorAccountBootstrap.EnsureAsync(db, app.Configuration, app.Environment, platformOpts.Value.Seed.EnableDemoData);

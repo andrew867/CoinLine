@@ -6,8 +6,6 @@ using HostPlatform.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
@@ -97,16 +95,12 @@ public sealed class PostgresCardEventPrivacyTests
     {
         // Use a unique isolated schema. Never downgrade or alter the shared test database schema.
         var connection = Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable)!;
-        var schema = "card_privacy_" + Guid.NewGuid().ToString("N");
-        await using (var server = new NpgsqlConnection(connection))
-        {
-            await server.OpenAsync();
-            await using var create = new NpgsqlCommand($"CREATE SCHEMA {schema}", server);
-            await create.ExecuteNonQueryAsync();
-        }
-        var scoped = new NpgsqlConnectionStringBuilder(connection) { SearchPath = schema }.ConnectionString;
+        var (scoped, schema) = await IsolatedSchemaAsync(connection);
         await using var db = new HostPlatformDbContext(new DbContextOptionsBuilder<HostPlatformDbContext>().UseNpgsql(scoped).Options);
-        await db.GetService<IMigrator>().MigrateAsync("20261125101718_AddQuickAccessCustomers");
+        // Recreate the old chain from its reviewed SQL archive, without installing old model classes.
+        await ApplyLegacySqlAsync(scoped, "schema-before-card-privacy.sql");
+        var refused = await Assert.ThrowsAsync<InvalidOperationException>(() => DatabaseBaseline.MigrateAsync(db));
+        Assert.Contains("upgrade-legacy.sql", refused.Message);
         var account = NewAccount(db, "12345"); // intentionally invalid legacy last-four field, not a card number
         var valid = NewAccount(db, "4242");
         var tx = new PaymentTransaction { CardAccountId = account.Id, Amount = 1m, DetailJson = Sentinel, RawPayloadJson = Sentinel };
@@ -127,7 +121,16 @@ public sealed class PostgresCardEventPrivacyTests
             INSERT INTO "CardWriteEvents" ("Id", "CardAccountId", "CreatedAtUtc", "UpdatedAtUtc", "CreatedBy", "UpdatedBy", "Version", "IntendedOperation", "RawPayloadJson", "Disposition", "SimulationMode")
             VALUES ({write}, {valid.Id}, {at}, {at}, 'fixture', 'fixture', 0, {Sentinel}, {Sentinel}, 0, TRUE)
             """);
-        await db.Database.MigrateAsync();
+        await ApplyLegacySqlAsync(scoped, "preflight.sql");
+        await ApplyLegacySqlAsync(scoped, "schema-before-card-privacy.sql");
+        await ApplyLegacySqlAsync(scoped, "card-privacy-upgrade.sql");
+        await ApplyLegacySqlAsync(scoped, "stamp-baseline.sql");
+        await DatabaseBaseline.MigrateAsync(db);
+        // A second complete upgrade must be a no-op, including the data scrubbing step.
+        await ApplyLegacySqlAsync(scoped, "preflight.sql");
+        await ApplyLegacySqlAsync(scoped, "schema-before-card-privacy.sql");
+        await ApplyLegacySqlAsync(scoped, "card-privacy-upgrade.sql");
+        await ApplyLegacySqlAsync(scoped, "stamp-baseline.sql");
         db.ChangeTracker.Clear();
         var readRow = await db.CardReadEvents.SingleAsync(e => e.Id == read);
         Assert.Null(readRow.PanLast4);
@@ -151,6 +154,130 @@ public sealed class PostgresCardEventPrivacyTests
             """, check);
         command.Parameters.AddWithValue("schema", schema);
         Assert.Equal(0L, (long)(await command.ExecuteScalarAsync())!);
+        Assert.Contains(DatabaseBaseline.MigrationId, await db.Database.GetAppliedMigrationsAsync());
+        Assert.Equal(44, (await db.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+
+        // Compare the active schema created by the single baseline with the upgraded schema.
+        var (freshConnection, _) = await IsolatedSchemaAsync(connection);
+        await using var fresh = new HostPlatformDbContext(new DbContextOptionsBuilder<HostPlatformDbContext>().UseNpgsql(freshConnection).Options);
+        Assert.Equal(new[] { DatabaseBaseline.MigrationId }, fresh.Database.GetMigrations());
+        await DatabaseBaseline.MigrateAsync(fresh);
+        Assert.Equal(new[] { DatabaseBaseline.MigrationId }, await fresh.Database.GetAppliedMigrationsAsync());
+        Assert.Empty(await fresh.Database.GetPendingMigrationsAsync());
+        Assert.False(fresh.Database.HasPendingModelChanges());
+        Assert.Equal(await ReadSchemaAsync(freshConnection), await ReadSchemaAsync(scoped));
+        await DatabaseBaseline.MigrateAsync(fresh);
+    }
+
+    [PostgresIntegrationFact]
+    public async Task Upgrade_of_earlier_recognized_schema_preserves_phone_configuration_and_applies_merged_workflow_tables()
+    {
+        var (scoped, _) = await IsolatedSchemaAsync(Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable)!);
+        // Use the generated archive's exact prefix, ending after its history insertion. No hand-authored replacement schema.
+        var archive = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "database", "legacy", "schema-before-card-privacy.sql"));
+        const string previous = "VALUES ('20261125101718_AddQuickAccessCustomers', '9.0.1');";
+        var historyInsert = archive.IndexOf(previous, StringComparison.Ordinal);
+        Assert.True(historyInsert >= 0);
+        const string blockEnd = "END $EF$;";
+        var end = archive.IndexOf(blockEnd, historyInsert, StringComparison.Ordinal);
+        Assert.True(end >= 0);
+        await ExecuteLegacySqlAsync(scoped, archive[..(end + blockEnd.Length)] + "\nCOMMIT;\n");
+        await using var db = new HostPlatformDbContext(new DbContextOptionsBuilder<HostPlatformDbContext>().UseNpgsql(scoped).Options);
+        Assert.Equal(39, (await db.Database.GetAppliedMigrationsAsync()).Count());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => DatabaseBaseline.MigrateAsync(db));
+
+        var customer = new Customer { Name = "Upgrade fixture", Code = "UPGRADE" };
+        var site = new Site { Customer = customer, Name = "Fixture location", Code = "FIXTURE" };
+        var phone = new Terminal { Site = site, DisplayName = "Fixture phone", TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() };
+        var set = new TableSet { Name = "Previously assigned configuration", Customer = customer, Status = TableSetStatus.Published };
+        var definition = new TableDefinition { Name = "Fixture advertisement", TableNumber = 29 };
+        var raw = new byte[481]; raw[0] = 29; raw[1] = 25;
+        var version = new TableVersion { TableDefinition = definition, TableSet = set, TableRevision = 1, EmbeddedPayload = raw,
+            PayloadSha256Hex = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(raw)).ToLowerInvariant() };
+        db.AddRange(phone, set, version, new TerminalTableAssignment { Terminal = phone, TableSet = set });
+        await db.SaveChangesAsync();
+
+        await ApplyLegacySqlAsync(scoped, "preflight.sql");
+        await ApplyLegacySqlAsync(scoped, "schema-before-card-privacy.sql");
+        await ApplyLegacySqlAsync(scoped, "card-privacy-upgrade.sql");
+        await ApplyLegacySqlAsync(scoped, "stamp-baseline.sql");
+        await DatabaseBaseline.MigrateAsync(db);
+        db.ChangeTracker.Clear();
+        Assert.Equal(44, (await db.Database.GetAppliedMigrationsAsync()).Count());
+        Assert.Empty(await db.Database.GetPendingMigrationsAsync());
+        Assert.Equal(set.Id, (await db.TerminalTableAssignments.SingleAsync(row => row.TerminalId == phone.Id)).TableSetId);
+        var retained = await db.TableVersions.SingleAsync(row => row.Id == version.Id);
+        Assert.Equal(raw, retained.EmbeddedPayload);
+        Assert.Equal(version.PayloadSha256Hex, retained.PayloadSha256Hex);
+        Assert.Equal(phone.DisplayName, (await db.Terminals.FindAsync(phone.Id))!.DisplayName);
+        Assert.Empty(await db.TerminalIdentityCutoverItems.ToListAsync());
+        Assert.Empty(await db.FieldEventCodeSettings.ToListAsync());
+        Assert.Empty(await db.FieldEventDestinationRules.ToListAsync());
+        Assert.Empty(await db.FieldEventRouteDecisions.ToListAsync());
+    }
+
+    [PostgresIntegrationFact]
+    public async Task Unrecognized_or_incomplete_migration_history_cannot_be_stamped_as_baseline()
+    {
+        var (scoped, _) = await IsolatedSchemaAsync(Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable)!);
+        await using var db = new HostPlatformDbContext(new DbContextOptionsBuilder<HostPlatformDbContext>().UseNpgsql(scoped).Options);
+        await db.Database.ExecuteSqlRawAsync("""
+            CREATE TABLE "__EFMigrationsHistory" ("MigrationId" varchar(150) PRIMARY KEY, "ProductVersion" varchar(32) NOT NULL);
+            INSERT INTO "__EFMigrationsHistory" VALUES ('fixture-unknown-migration','9.0.1');
+            """);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => DatabaseBaseline.MigrateAsync(db));
+        await Assert.ThrowsAsync<PostgresException>(() => ApplyLegacySqlAsync(scoped, "preflight.sql"));
+        await Assert.ThrowsAsync<PostgresException>(() => ApplyLegacySqlAsync(scoped, "stamp-baseline.sql"));
+        Assert.DoesNotContain(DatabaseBaseline.MigrationId, await db.Database.GetAppliedMigrationsAsync());
+    }
+
+    private static async Task<(string Connection, string Schema)> IsolatedSchemaAsync(string connection)
+    {
+        var schema = "coinline_baseline_" + Guid.NewGuid().ToString("N");
+        await using var server = new NpgsqlConnection(connection);
+        await server.OpenAsync();
+        await using var create = new NpgsqlCommand($"CREATE SCHEMA {schema}", server);
+        await create.ExecuteNonQueryAsync();
+        return (new NpgsqlConnectionStringBuilder(connection) { SearchPath = schema }.ConnectionString, schema);
+    }
+
+    private static async Task ApplyLegacySqlAsync(string connection, string filename)
+    {
+        var sql = await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "database", "legacy", filename));
+        await ExecuteLegacySqlAsync(connection, sql);
+    }
+
+    private static async Task ExecuteLegacySqlAsync(string connection, string sql)
+    {
+        await using var server = new NpgsqlConnection(connection);
+        await server.OpenAsync();
+        await using var command = new NpgsqlCommand(sql, server) { CommandTimeout = 120 };
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task<string[]> ReadSchemaAsync(string connection)
+    {
+        await using var server = new NpgsqlConnection(connection);
+        await server.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT 'column|' || concat_ws('|', table_name, column_name, data_type, is_nullable,
+                   coalesce(character_maximum_length::text, ''), coalesce(numeric_precision::text, ''), coalesce(numeric_scale::text, ''))
+            FROM information_schema.columns WHERE table_schema = current_schema() AND table_name <> '__EFMigrationsHistory'
+            UNION ALL
+            SELECT 'constraint|' || concat_ws('|', rel.relname, c.conname, c.contype::text,
+                   replace(pg_get_constraintdef(c.oid, true), quote_ident(current_schema()) || '.', ''))
+            FROM pg_constraint c JOIN pg_class rel ON rel.oid = c.conrelid JOIN pg_namespace n ON n.oid = rel.relnamespace
+            WHERE n.nspname = current_schema() AND rel.relname <> '__EFMigrationsHistory'
+            UNION ALL
+            SELECT 'index|' || concat_ws('|', tablename, indexname, replace(indexdef, quote_ident(current_schema()) || '.', ''))
+            FROM pg_indexes WHERE schemaname = current_schema() AND tablename <> '__EFMigrationsHistory'
+            ORDER BY 1
+            """, server);
+        await using var reader = await command.ExecuteReaderAsync();
+        var rows = new List<string>();
+        while (await reader.ReadAsync()) rows.Add(reader.GetString(0));
+        return rows.ToArray();
     }
 
     private static CardAccount NewAccount(HostPlatformDbContext db, string last4)
