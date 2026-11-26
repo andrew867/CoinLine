@@ -11,6 +11,12 @@ Firmware jobs is the place to prepare and review a proposed device update. A sim
 
 The comparison is read-only. It does not create a job, change an assignment, move the registered installed version, schedule a transfer or certify compatibility. See the [configuration transition review and qualification sequence](https://github.com/andrew867/CoinLine/blob/main/docs/program/firmware-configuration-transition.md) for the earlier MTR 2.0 and MTR 2.11-class example.
 
+### Prepare target terminal tariffs
+
+For the identified earlier 200-entry and later 180-entry terminal families, **Prepare phone-specific terminal tariffs** reviews the common 128-row MT73 tariff layout. All identical source tuples share a target definition, including invalid and unavailable rates. Existing exact tuples are reused. For a missing tuple, the tool proposes an empty invalid or unavailable target row outside 0 through 3, provided no included candidate record references that index. A nonzero invalid/unavailable tuple is not treated as empty. Active target tariffs are never replaced.
+
+Review the source indexes, classification, exact periods and charges, proposed target position and allocation action. Open **Protected target indexes** to see the relevant included record types. This review conservatively protects numeric fields even where a feature may be disabled. Unreviewed candidate records prevent all new allocation; missing companion records are identified for future review. Choose another eligible position if needed, preview again and confirm a separate draft. The target effective date and reserved header remain unchanged. Use the displayed source-to-target indexes when preparing screening and local exchanges; this tool does not automatically translate those references or establish device rating behavior.
+
 ### Prepare the target management-access configuration
 
 When the source and selected target set both contain an identified 18- or 48-byte MT21, the review offers **Prepare phone-specific management access**. Enter a name for a new draft and preview the carry-forward. The tool retains the source phone's registered wire ID and primary and alternate manager numbers, preserving the candidate's ADSI identifiers and remaining target fields. It does not display the access digits in the preview. The shorter target layout must fit both numbers; a malformed or ambiguous source is rejected rather than truncated.

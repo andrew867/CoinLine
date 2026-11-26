@@ -1,3 +1,4 @@
+import { FirmwareTariffStagingPanel } from './FirmwareTariffStagingPanel'
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
@@ -10,6 +11,7 @@ type Finding = { blocking: boolean; tableNumber: number | null; message: string 
 type RecordReview = { tableNumber: number; sourceBytes: number | null; targetExpectedBytes: number | null; candidateBytes: number | null;
   action: string; detail: string; targetAcknowledged: boolean; requiresLayoutReview: boolean }
 type Review = { sourceFirmwareLabel: string | null; targetFirmwareLabel: string; sourceSetId: string | null; sourceSetName: string | null;
+  sourceProfileId?: string | null; targetProfileId?: string | null;
   candidateSetId: string | null; candidateSetName: string | null; candidatePublished: boolean; activeSessions: number; outstandingDownloads: number;
   configurationReadyForReview: boolean; upgradeQualified: boolean; records: RecordReview[]; findings: Finding[] }
 type AccessPreview = { sourceSetId: string; candidateSetId: string; sourceBytes: number; targetBytes: number; changedBytes: number; recordCount: number; previewToken: string }
@@ -21,6 +23,10 @@ const actions: Record<string, string> = {
   'candidate-addition': 'New target record', 'candidate-replacement': 'Replacement supplied',
   'review-native-layout': 'Review field layout', 'candidate-unchanged': 'Same bytes and identified layout', 'candidate-changed': 'Changed target record',
 }
+
+const earlierTariffProfiles = new Set(['mtr19-multipay-200', 'mtr19-desk-200-single-compressed', 'mtr113-multipay-200-single-compressed', 'mtr20-early-multipay-200-single-compressed'])
+const laterTariffProfiles = new Set(['mtr2x-multipay-180-double-compressed', 'mtr2x-multipay-graphical-180-double-compressed',
+  'mtr120-multipay-180-double-compressed', 'mtr120-coin-basic-180-double-compressed', 'mtr211-multipay-180-double-compressed'])
 
 export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
   const [open, setOpen] = useState(false)
@@ -110,6 +116,14 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
             <td>{record.targetAcknowledged ? 'Previously acknowledged' : 'Not acknowledged in catalogue'}{record.requiresLayoutReview && <><br />Field layout needs review</>}</td>
           </tr>)}</tbody>
         </table></div>
+        {review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
+          laterTariffProfiles.has(review.targetProfileId ?? '') && review.records.some(record => record.tableNumber === 73 &&
+          record.sourceBytes === 1192 && record.targetExpectedBytes === 1192 && record.candidateBytes === 1192) &&
+          <FirmwareTariffStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }])
+              setCandidateId(id); setReview(null); resetStage()
+            }} />}
         {review.sourceSetId && review.candidateSetId && canPerform('table-sets', op.add) && review.records.some(record =>
           record.tableNumber === 21 && record.targetExpectedBytes === record.candidateBytes &&
           [18, 48].includes(record.sourceBytes ?? 0) && [18, 48].includes(record.candidateBytes ?? 0)) &&

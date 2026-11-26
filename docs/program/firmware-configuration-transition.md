@@ -19,6 +19,8 @@ The retained configuration evidence establishes these differences between the ea
 
 Source and target configuration should remain separate. Do not activate target records against the installed source profile, or edit the phone's registered firmware simply to enable a download.
 
+The reviewed MT73 carry-forward stages the common earlier classifications and signed period/unsigned charge tuples into a separate later candidate. It groups equal source rows, reuses exact existing target tuples, and proposes new allocations only in canonical empty invalid/unavailable positions. The candidate's local index domain 0 through 3 and the numeric tariff references in included screening, quick-access, later graphic, stored-value discount, area, international and local-exchange records remain protected. Other active or noncanonical target tuples are not overwritten. Unreviewed included records prevent allocation; absent companion records remain explicitly unknown. The preview identifies the source-to-target mapping to use in subsequent configuration migration; candidate header, date and all other records remain unchanged. Actual rating behavior is not established by a matching tuple or draft.
+
 ## Qualification sequence
 
 1. Identify the exact installed hardware family, installed version, target version and approved compatible image. Record the source assignment and effective records, including protected per-phone settings without recording their values in public evidence.
