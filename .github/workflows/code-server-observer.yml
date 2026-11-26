@@ -1,0 +1,29 @@
+name: Code-server observer
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/code_server_observer.py'
+      - 'tools/test_code_server_observer.py'
+      - '.github/workflows/code-server-observer.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'tools/code_server_observer.py'
+      - 'tools/test_code_server_observer.py'
+      - '.github/workflows/code-server-observer.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify receive-only loopback behavior
+        working-directory: tools
+        run: python3 -B -m unittest -v test_code_server_observer.py
