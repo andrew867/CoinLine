@@ -8,6 +8,12 @@
 
 Operators with an Add-only Phones profile can register new phones. The registration form offers existing sites, installed firmware and terminal families without opening the full catalogues. The optional group is available only with Membership Add and follows the selected site's customer. Registering a phone does not require permission to read existing phone records.
 
+## Latest reported phone status
+
+Open **Terminal status**, select a phone by name and wire ID, and inspect **Latest reported phone status**. The panel shows the serial number contained in the last valid MT10, the Manager receipt time, and named status conditions grouped by hardware, memory, enclosure, cash box and line equipment. Separate labels distinguish a reported condition from one not indicated in that snapshot. An unmapped bit is called out rather than treated as clear. An unreadable later report does not erase the earlier valid report; its receipt time is shown separately.
+
+These are terminal observations from a matched NCC session, not a live hardware or health check. A phone with no valid report is distinguished from one reporting no named conditions. Inventory deactivation, last contact, event history and the latest status capture are separate observations. A status-only operator can use this panel without opening the phone registry or detailed message log. With message-log read access, the source status report is linked.
+
 ## Deactivation and reactivation
 
 The phone detail page includes a Manager lifecycle panel. Deactivate an idle phone to record the date and a deletion review date; the default is 45 days from the current UTC date, and an operator can change it. The Phones list can filter active and inactive Manager records independently of the reported operational status.
