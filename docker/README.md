@@ -18,7 +18,7 @@ That starts PostgreSQL, the API, the management console, and the worker.
 | postgres | `postgres:5432` on the Compose network | Not published on the host. |
 | worker | no host port | Writes the worker heartbeat row only. It does not handle sessions. |
 
-The base Compose file runs the API in Development and loads demo data. A real operator token is still required. The API and console are published on loopback by default; opt in to a different host address with `COINLINE_API_BIND_ADDRESS` or `COINLINE_WEB_BIND_ADDRESS`. Migrations run when the API starts.
+The base Compose file runs the API in Development and loads demo data. A real operator token is still required. The API and console are published on loopback by default; opt in to a different host address with `COINLINE_API_BIND_ADDRESS` or `COINLINE_WEB_BIND_ADDRESS`. Migrations run when the API starts. If an existing database still uses the superseded migration history, follow the [legacy database upgrade](../backend/database/README.md) before starting the new release. Do not reset the data volume.
 
 ## Durable data
 

@@ -25,6 +25,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="..\..\database\legacy\*.sql">
+      <Link>database\legacy\%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
     <None Include="..\..\..\fixtures\hw_validation\sample_session_envelope_v1.json">
       <Link>fixtures\hw_validation\sample_session_envelope_v1.json</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
