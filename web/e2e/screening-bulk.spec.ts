@@ -76,6 +76,7 @@ test('previews bulk screening across configurations, resolves the scope conflict
   await expect(result.getByText(/No phones or downloads were changed/)).toBeVisible()
   expect(submitted).toEqual([{ revision: 3, sha256, profile, slot: 2, action: 'add', includePublished: true, customerScope: 'source', previewToken: 'ready' }])
   await result.getByRole('link', { name: 'Replacement screening draft' }).click()
+  await expect(page.getByRole('heading', { name: 'Table set: Replacement screening draft' })).toBeVisible()
   await page.getByLabel('Section or entry').selectOption('rule-1')
   await expect(page.getByLabel('Number pattern')).toHaveValue(pattern)
   await expect(page.getByLabel('Number pattern')).toBeEnabled()

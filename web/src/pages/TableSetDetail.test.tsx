@@ -1,5 +1,5 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { Link, MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch, apiGet } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
@@ -52,4 +52,49 @@ it('links a nonblocking provisioning finding to the matching carrier editor', as
   expect(await screen.findByText(/reference 180 is assigned to different rows/)).toBeVisible()
   fireEvent.click(screen.getByRole('link', { name: 'Review MT135' }))
   expect(await screen.findByRole('heading', { name: 'Configuration editor MT135' })).toBeVisible()
+})
+
+it('does not expose the old set editor while the replacement set is loading', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 3, 'table-records': 3 })
+  vi.mocked(apiGet).mockResolvedValue([])
+  const details = (id: string, name: string) => Response.json({
+    id, name, status: 0, revision: 1, optionalRecordRemovals: [], firmwareFindings: [], versions: [],
+  })
+  let finishReplacement!: (value: Response) => void
+  vi.mocked(apiFetch).mockImplementation(async path => path === '/api/tables/sets/old-set'
+    ? details('old-set', 'Old configuration')
+    : new Promise(resolve => { finishReplacement = resolve }))
+  render(<MemoryRouter initialEntries={['/table-sets/old-set?record=92']}>
+    <Link to="/table-sets/replacement-set?record=92">Replacement</Link>
+    <Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes>
+  </MemoryRouter>)
+  expect(await screen.findByRole('heading', { name: 'Table set: Old configuration' })).toBeVisible()
+  expect(screen.getByRole('heading', { name: 'Configuration editor MT92' })).toBeVisible()
+  fireEvent.click(screen.getByRole('link', { name: 'Replacement' }))
+  expect(screen.queryByRole('heading', { name: 'Table set: Old configuration' })).toBeNull()
+  expect(screen.queryByRole('heading', { name: 'Configuration editor MT92' })).toBeNull()
+  expect(screen.getByText('Loading…')).toBeVisible()
+  await act(async () => { finishReplacement(details('replacement-set', 'Replacement configuration')) })
+  expect(await screen.findByRole('heading', { name: 'Table set: Replacement configuration' })).toBeVisible()
+  expect(screen.getByRole('heading', { name: 'Configuration editor MT92' })).toBeVisible()
+})
+
+it('ignores a late response from the previous set after navigating', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 1 })
+  vi.mocked(apiGet).mockResolvedValue([])
+  const details = (id: string, name: string) => Response.json({
+    id, name, status: 0, revision: 1, optionalRecordRemovals: [], firmwareFindings: [], versions: [],
+  })
+  let finishOld!: (value: Response) => void
+  vi.mocked(apiFetch).mockImplementation(async path => path === '/api/tables/sets/old-set'
+    ? new Promise(resolve => { finishOld = resolve }) : details('replacement-set', 'Replacement configuration'))
+  render(<MemoryRouter initialEntries={['/table-sets/old-set']}>
+    <Link to="/table-sets/replacement-set">Replacement</Link>
+    <Routes><Route path="/table-sets/:id" element={<TableSetDetail />} /></Routes>
+  </MemoryRouter>)
+  fireEvent.click(screen.getByRole('link', { name: 'Replacement' }))
+  expect(await screen.findByRole('heading', { name: 'Table set: Replacement configuration' })).toBeVisible()
+  await act(async () => { finishOld(details('old-set', 'Old configuration')) })
+  expect(screen.getByRole('heading', { name: 'Table set: Replacement configuration' })).toBeVisible()
+  expect(screen.queryByRole('heading', { name: 'Table set: Old configuration' })).toBeNull()
 })
