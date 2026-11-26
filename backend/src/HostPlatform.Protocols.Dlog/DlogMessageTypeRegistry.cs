@@ -1,8 +1,8 @@
 namespace HostPlatform.Protocols.Dlog;
 
 /// <summary>
-/// Known DLOG message types from reference firmware <c>OEM compatibility catalogue</c> and <c>01_dlog_mt_payload_catalogue.md</c>.
-/// NPA/NXX wire values depend on <c>COMPRESS_LCD</c> — multiple rows share the same symbolic table index with different type bytes.
+/// Known DLOG message types and their dialogue classifications.
+/// NPA/NXX message types depend on the encoding format; different formats can represent the same logical segment.
 /// </summary>
 public static class DlogMessageTypeRegistry
 {
@@ -61,7 +61,7 @@ public static class DlogMessageTypeRegistry
         Add(49, "DLOG_MT_ANS_SUP_PARMS", "DLOG_MA_TAB_UPD", false);
         Add(50, "DLOG_MT_COIN_VAL_TABLE", "DLOG_MA_TAB_UPD", false);
         Add(51, "DLOG_MT_CASH_BOX_COLLECTION", "DLOG_MA_OUTPUT", false);
-        Add(53, "DLOG_MT_CALL_DETAILS", "DLOG_MA_MULT_OUT", false, "Second DLOG_MT_CALL_DETAILS define in OEM compatibility catalogue (value 53).");
+        Add(53, "DLOG_MT_CALL_DETAILS", "DLOG_MA_MULT_OUT", false, "Combined call detail record.");
         Add(55, "DLOG_MT_REP_DIAL_LIST", "DLOG_MA_TAB_UPD", false);
         Add(56, "DLOG_MT_CALL_STATS", "DLOG_MA_MULT_OUT", false);
         Add(57, "DLOG_MT_CARRIER_STATS", "DLOG_MA_MULT_OUT", false, "Earlier firmware wire type.");

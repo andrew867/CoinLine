@@ -30,4 +30,4 @@ Use this before merging protocol, API, or operator-facing features.
 - `dotnet test backend/HostPlatform.sln`
 - `cd web && npm ci && npm run build && npm run test`
 - `mkdocs build` for `docs-site` when documentation changed
-- `bash tools/public-docs-sanitize-check.sh` when public docs changed
+- `bash tools/public-docs-sanitize-check.sh <private-rules-file> [private-case-sensitive-rules-file]` when public material changes. Keep rule files outside the repository; each contains one extended regular expression per line. The public workflow always checks scanner behavior and safe diagnostics, and checks the maintainer policy on trusted runs when the repository's private rule settings are provided.

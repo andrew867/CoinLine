@@ -1,0 +1,37 @@
+name: Public reference language
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check detection and safe diagnostics
+        run: bash tools/test-public-docs-sanitize.sh
+      - name: Check public project language with maintainer policy
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        env:
+          REVIEW_RULES: ${{ secrets.COINLINE_PUBLIC_LANGUAGE_RULES }}
+          REVIEW_CASED_RULES: ${{ secrets.COINLINE_PUBLIC_LANGUAGE_CASED_RULES }}
+        run: |
+          if [[ -z "$REVIEW_RULES" ]]; then
+            echo 'Maintainer rule file not configured; scanner fixture checks passed.'
+            exit 0
+          fi
+          umask 077
+          printf '%s\n' "$REVIEW_RULES" > "$RUNNER_TEMP/public-review-rules"
+          if [[ -n "$REVIEW_CASED_RULES" ]]; then
+            printf '%s\n' "$REVIEW_CASED_RULES" > "$RUNNER_TEMP/public-review-cased-rules"
+            bash tools/public-docs-sanitize-check.sh "$RUNNER_TEMP/public-review-rules" "$RUNNER_TEMP/public-review-cased-rules"
+          else
+            bash tools/public-docs-sanitize-check.sh "$RUNNER_TEMP/public-review-rules"
+          fi

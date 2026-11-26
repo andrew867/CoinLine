@@ -1,7 +1,7 @@
 namespace HostPlatform.Protocols.Ncc;
 
 /// <summary>
-/// Length rules from <c>NCCASM.ASM</c> receive path and <c>ncco_snd_pkt</c>:
+/// NCC wire-frame length convention:
 /// on-wire length is <c>count + 1</c> (STX through ETX inclusive); CRC covers all but the last 3 octets.
 /// </summary>
 public static class NccFrameLayout
@@ -9,7 +9,7 @@ public static class NccFrameLayout
     /// <summary>Total bytes from STX through ETX inclusive for a valid <paramref name="count"/> field.</summary>
     public static int GetExpectedWireLength(byte count) => count + 1;
 
-    /// <summary>Bytes after count through last data byte (termid prefix + message) = <c>count - NCC_CONPKT_LEN</c>.</summary>
+    /// <summary>Bytes after count through the last data byte (terminal ID prefix + message) = count minus control-packet overhead.</summary>
     public static int GetTermAndDataLength(byte count) => count - NccConstants.ControlPayloadOverhead;
 
     public static bool IsPlausibleWireLength(int length)

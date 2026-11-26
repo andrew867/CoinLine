@@ -3,7 +3,7 @@
 | Term | Meaning |
 |------|---------|
 | **NCC** | Framed terminal↔host packetization (STX…ETX, CRC16, control vs message). |
-| **DLOG** | Message-keyed operational logs (MT registry derived from firmware headers in-repo). |
+| **DLOG** | Message-keyed operational records, classified by message type (MT). |
 | **MT** | DLOG message type (first octet when in-band). |
 | **Table set** | Published bundle of table versions for download orchestration. |
 | **Opaque payload** | Bytes stored as **blob + SHA-256** without inventing ROM/DAT layout in API. |
