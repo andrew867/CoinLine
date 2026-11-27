@@ -13,5 +13,6 @@
 - [Manually selected phone download preparation](manual-download-preparation.md)
 - [E-purse module inventory](module-inventory.md)
 - [Cashbox status query](cashbox-status-query.md)
+- [Regional rating and portable rate plan packages](regional-rating-packages.md)
 - [Explicit call upload completion](call-upload-completion.md)
 - [Editor catalogue byte-preservation regression](editor-catalogue-preservation.md)
