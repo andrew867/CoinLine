@@ -48,6 +48,10 @@ public static class RatingEngine
             return Finish(RatingDecisionKind.Blocked, false, true, false, false, 0m, req, diagnostics);
         }
 
+        var rules = req.PublishedVersion?.Rules.OrderByDescending(r => r.Priority).ThenByDescending(r => r.Pattern.Length).ToList() ?? [];
+        var selectedRule = req.Mode != RatingMode.Unknown && req.RatePlanId != null
+            ? rules.FirstOrDefault(rule => Matches(rule.MatchKind, rule.Pattern, digits)) : null;
+        var overrideFreeClass = selectedRule != null && RateRulePolicy.OverridesFreeClass(selectedRule);
         var classes = (req.NumberClasses ?? Array.Empty<DialedNumberClass>())
             .OrderBy(c => c.SortOrder)
             .ThenByDescending(c => c.Pattern.Length)
@@ -70,6 +74,11 @@ public static class RatingEngine
 
             if (nc.IsFree)
             {
+                if (overrideFreeClass)
+                {
+                    diagnostics.Add(new Diagnostic("FREE_CLASS_OVERRIDE", "Info", "An explicitly priced exact service in this plan overrides a free number class. Emergency and blocked classes remain authoritative."));
+                    continue;
+                }
                 diagnostics.Add(new Diagnostic("NUMBER_CLASS", "Info", $"Matched class '{nc.ClassName}' — free call."));
                 return Finish(RatingDecisionKind.FreeCall, true, false, true, false, 0m, req, diagnostics);
             }
@@ -81,7 +90,6 @@ public static class RatingEngine
             return Finish(RatingDecisionKind.DeniedUnknownPrefix, false, false, false, false, 0m, req, diagnostics);
         }
 
-        var rules = req.PublishedVersion.Rules.OrderByDescending(r => r.Priority).ThenByDescending(r => r.Pattern.Length).ToList();
         foreach (var rule in rules)
         {
             if (!Matches(rule.MatchKind, rule.Pattern, digits))
@@ -257,7 +265,7 @@ public static class RatingEngine
     {
         try
         {
-            return Regex.IsMatch(digits, pattern, RegexOptions.CultureInvariant);
+            return Regex.IsMatch(digits, pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(100));
         }
         catch
         {

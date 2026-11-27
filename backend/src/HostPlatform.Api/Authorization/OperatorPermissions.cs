@@ -128,6 +128,7 @@ public static class OperatorPermissions
             ("NccFrameCaptures", A, "Upload"), ("NccFrameCaptures", D, "Delete"));
         Screen("audit", "Audit", ("Audit", R, "Events"));
         Screen("rate-plans", "Rate plans", ("RatePlans", R, "List Get GetVersion"),
+            ("RatePlanPackages", R, "RegionalStarter Export Preview"), ("RatePlanPackages", A, "Import"),
             ("RatePlans", A, "Create CreateVersion AddRule AddTariff AddDestinationPrefix AddTimeBand"),
             ("RatePlans", U, "Publish"), ("RateRules", U, "Update"), ("Tariffs", U, "Update"),
             ("DestinationPrefixes", U, "Update"), ("TimeBands", U, "Update"),
