@@ -64,6 +64,7 @@ public static class OperatorPermissions
             ("FirmwareLocalDialingStaging", A, "Create"),
             ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
             ("FirmwareTariffStaging", A, "Create"),
+            ("FirmwareCarrierStaging", A, "Create"),
             ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Firmware", A, "StageAccessConfiguration StageScreeningConfiguration"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
             ("Tables", A | U, "FirmwareOptions"));
@@ -72,6 +73,7 @@ public static class OperatorPermissions
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("TerminalTariffReferences", R, "Get"),
             ("FirmwareTariffStaging", R, "Preview"),
+            ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
             ("ConfigurationLibrary", R, "List Options"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
