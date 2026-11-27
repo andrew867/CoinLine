@@ -10,7 +10,9 @@ afterEach(() => { cleanup(); vi.resetAllMocks() })
 it('reviews the actual payment and flat rate choices before creating only a draft', async () => {
   vi.mocked(apiGet).mockResolvedValue([{ id: 'mtr19-multipay', release: 'MTR 1.9', variant: 'Multi-pay', maximizerTypeNumbers: [28] }])
   const review = { previewToken: 'reviewed', canCreate: true, targetFirmware: 'MTR 1.9', changedNumbers: [26, 73], recordCount: 12,
-    family: { familyLabel: 'Multi-pay', documented: true, tables: [{ name: 'Carrier', required: true, status: 'missing' }] },
+    family: { familyLabel: 'Multi-pay', documented: true, tables: [{ name: 'Carrier', required: true, status: 'missing' }],
+      operatingMode: { expectedCode: 2, expectedLabel: 'Multi-pay', configuredCode: 3, configuredLabel: 'Coin only', status: 'differs',
+        message: 'Review whether the payment-mode difference is intentional for this phone.' } },
     provisioning: { operatingType: 'Coin only', acceptedCoinSlots: 1, configuredCardRanges: 0, findings: [] }, findings: [] }
   vi.mocked(apiPostRaw).mockImplementation(async path => String(path).endsWith('/preview') ? Response.json(review) : Response.json({ id: 'draft' }, { status: 201 }))
   const done = vi.fn()
@@ -31,6 +33,10 @@ it('reviews the actual payment and flat rate choices before creating only a draf
   fireEvent.click(screen.getByRole('button', { name: 'Review draft' }))
   expect(await screen.findByText('MT26, MT73')).toBeVisible()
   expect(screen.getByText('Carrier: missing')).toBeVisible()
+  expect(screen.getByText('Multi-pay (code 2)')).toBeVisible()
+  expect(screen.getByText('Coin only (code 3)')).toBeVisible()
+  expect(screen.getByText(/payment-mode difference is intentional/)).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Create reviewed draft' })).toBeEnabled()
   expect(apiPostRaw).toHaveBeenCalledTimes(1)
   fireEvent.click(screen.getByRole('button', { name: 'Create reviewed draft' }))
   expect(await screen.findByText('Draft created')).toBeVisible()

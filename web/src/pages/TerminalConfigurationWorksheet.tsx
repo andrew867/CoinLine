@@ -3,11 +3,13 @@ import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import './TerminalConfigurationWorksheet.css'
+import { FamilyOperatingModeNotice, type FamilyOperatingMode } from './FamilyOperatingModeNotice'
 
 type RecordSummary = { configurationId: string | null; revision: number; length: number; sha256: string }
 type AssignedRecord = RecordSummary & { id: string; setId: string; setName: string; validationPassed: boolean }
 type RecordRow = { number: number; name: string; family: string; familyRequired: boolean; canChoose: boolean; canClear: boolean; ambiguous: boolean; assigned: AssignedRecord | null }
-type FamilyReview = { familyLabel: string; documented: boolean; note?: string | null; tables: { name: string; required: boolean; status: string }[] }
+type FamilyReview = { familyLabel: string; documented: boolean; note?: string | null; tables: { name: string; required: boolean; status: string }[];
+  operatingMode?: FamilyOperatingMode | null }
 type Worksheet = { id: string; displayName: string; terminalIdHex: string; firmware: string | null; baseSetId: string | null; baseSetName: string | null;
   assignmentRevision: number | null; canUpdate: boolean; family: FamilyReview | null; records: RecordRow[] }
 type Option = RecordSummary & { id: string; tableSetId: string; setName: string; targetFirmware: string | null; issue: string | null }
@@ -25,6 +27,7 @@ function FamilyReviewNotice({ review }: { review: FamilyReview | null }) {
   const missing = review.tables.filter(row => row.required && row.status !== 'present')
   return <div className="worksheet-family-review">
     <strong>Legacy requirements: {review.familyLabel}</strong>
+    <FamilyOperatingModeNotice mode={review.operatingMode} />
     {missing.length > 0 ? <p role="note">Required families needing review: {missing.map(row => `${row.name} (${row.status})`).join(', ')}.</p>
       : <p>All documented required families have at least one matching record in the catalogue review.</p>}
     <p>This is a Manager configuration review, not proof of complete firmware INSTALL or device behavior.</p>

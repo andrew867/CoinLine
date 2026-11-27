@@ -15,6 +15,8 @@ function setup(recordDirty: boolean) {
     if (path === '/api/terminals/families') return [{ id: 'mtr20-desk', release: 'MTR 2.0', variant: 'Desk', maximizerTypeNumbers: [37] }] as never
     if (path === '/api/tables/sets/fixture/family-review?familyId=mtr20-desk') return {
       familyId: 'mtr20-desk', familyLabel: 'MTR 2.0 Desk', documented: true, screeningEntries: 200,
+      operatingMode: { expectedCode: 1, expectedLabel: 'Card only', configuredCode: 2, configuredLabel: 'Multi-pay', status: 'differs',
+        message: 'Review whether the payment-mode difference is intentional for this phone.' },
       note: 'Shared Desk checklist, not an independently qualified Desk wire profile.', tables: [
         { name: 'Call screening', required: true, candidates: [59, 92], status: 'review', records: [
           { number: 59, length: 1021, format: 'recognized', screeningSlots: [60, 85], screeningFit: 'ambiguous', screeningNote },
@@ -37,6 +39,10 @@ it('distinguishes ambiguous capacity, incomplete pairs, and recognized candidate
   const table = await screen.findByRole('region', { name: 'Family table requirements' })
   expect(screen.getByText(/Shared Desk checklist/)).toBeVisible()
   expect(screen.getByText('1 / 3')).toBeVisible()
+  const mode = screen.getByRole('note', { name: 'Terminal family and payment mode' })
+  expect(within(mode).getByText('Card only (code 1)')).toBeVisible()
+  expect(within(mode).getByText('Multi-pay (code 2)')).toBeVisible()
+  expect(within(mode).getByText(/payment-mode difference is intentional/)).toBeVisible()
   const screening = within(table).getByRole('row', { name: /Call screening/ })
   expect(within(screening).getByText('Candidate needs review')).toBeVisible()
   expect(within(screening).getByText('Packed editor slots 60 or 85')).toBeVisible()

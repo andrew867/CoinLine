@@ -9,6 +9,7 @@ import { apiGet, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { FirmwareScreeningStagingPanel } from './FirmwareScreeningStagingPanel'
 import { FirmwareCarrierStagingPanel } from './FirmwareCarrierStagingPanel'
+import { FamilyOperatingModeNotice, type FamilyOperatingMode } from './FamilyOperatingModeNotice'
 
 type Phone = { id: string; displayName: string }
 type Version = { id: string; label: string; tableProfileId: string | null }
@@ -17,6 +18,7 @@ type Finding = { blocking: boolean; tableNumber: number | null; message: string 
 type RecordReview = { tableNumber: number; sourceBytes: number | null; targetExpectedBytes: number | null; candidateBytes: number | null;
   action: string; detail: string; targetAcknowledged: boolean; requiresLayoutReview: boolean; replacementRecords?: number[] }
 type FamilyChecklist = { familyId: string; familyLabel: string; documented: boolean; screeningEntries: number | null; note: string | null;
+  operatingMode?: FamilyOperatingMode | null;
   tables: { name: string; required: boolean; candidates: number[]; status: string; note?: string | null;
     records: { number: number; length: number; format: string; screeningNote?: string | null }[] }[] }
 type Review = { sourceFirmwareLabel: string | null; targetFirmwareLabel: string; sourceSetId: string | null; sourceSetName: string | null;
@@ -131,6 +133,7 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
         {review.targetFamilyReview && <section aria-label="Target terminal family checklist" style={{ marginBottom: 16 }}>
           <h3>Target terminal family: {review.targetFamilyReview.familyLabel}</h3>
           {review.targetFamilyReview.note && <p>{review.targetFamilyReview.note}</p>}
+          <FamilyOperatingModeNotice mode={review.targetFamilyReview.operatingMode} />
           {review.targetFamilyReview.documented && <>
             <p>Mandatory families with recognized candidates: <strong>{review.targetFamilyReview.tables.filter(row => row.required && row.status === 'present').length} / {review.targetFamilyReview.tables.filter(row => row.required).length}</strong>. The legacy checklist is not an actual target INSTALL certificate.</p>
             <div style={{ overflowX: 'auto' }}><table cellPadding={7} style={{ width: '100%', borderCollapse: 'collapse' }}>
