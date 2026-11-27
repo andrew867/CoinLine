@@ -12,7 +12,7 @@ type Version = { id: string; label: string; tableProfileId: string | null }
 type Set = { id: string; name: string; status: number; targetFirmwareVersionId: string | null }
 type Finding = { blocking: boolean; tableNumber: number | null; message: string }
 type RecordReview = { tableNumber: number; sourceBytes: number | null; targetExpectedBytes: number | null; candidateBytes: number | null;
-  action: string; detail: string; targetAcknowledged: boolean; requiresLayoutReview: boolean }
+  action: string; detail: string; targetAcknowledged: boolean; requiresLayoutReview: boolean; replacementRecords?: number[] }
 type FamilyChecklist = { familyId: string; familyLabel: string; documented: boolean; screeningEntries: number | null; note: string | null;
   tables: { name: string; required: boolean; candidates: number[]; status: string; note?: string | null;
     records: { number: number; length: number; format: string; screeningNote?: string | null }[] }[] }
@@ -28,6 +28,8 @@ const actions: Record<string, string> = {
   'unverified-target': 'Target layout unverified', 'replace-candidate': 'Replace candidate', 'replace-required': 'Replacement needed',
   'review-source-omission': 'Review missing source feature', 'available-unassigned': 'Available, applicability unverified',
   'candidate-addition': 'New target record', 'candidate-replacement': 'Replacement supplied',
+  'candidate-family-replacement': 'Replacement family supplied', 'family-replacement-needed': 'Replacement family needs preparation',
+  'candidate-local-equivalent': 'Equivalent local tariff tuples', 'inactive-source-segment': 'Disabled source segment',
   'review-native-layout': 'Review field layout', 'candidate-unchanged': 'Same bytes and identified layout', 'candidate-changed': 'Changed target record',
 }
 
@@ -144,7 +146,8 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
           <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}><th>Record</th><th>Source bytes</th><th>Target bytes</th><th>Candidate bytes</th><th>Review</th><th>Target evidence</th></tr></thead>
           <tbody>{review.records.map(record => <tr key={record.tableNumber} style={{ borderBottom: '1px solid #eee' }}>
             <th scope="row">MT{record.tableNumber}</th><td>{record.sourceBytes ?? 'Not assigned'}</td><td>{record.targetExpectedBytes ?? 'Unknown'}</td>
-            <td>{record.candidateBytes ?? 'Not supplied'}</td><td><strong>{actions[record.action] ?? record.action}</strong><br />{record.detail}</td>
+            <td>{record.candidateBytes ?? 'Not supplied'}{record.replacementRecords?.map(number => <div key={number}>
+              {review.candidateSetId ? <Link to={`/table-sets/${review.candidateSetId}?record=${number}#config-heading`}>Review MT{number} replacement</Link> : `MT${number} replacement`}</div>)}</td><td><strong>{actions[record.action] ?? record.action}</strong><br />{record.detail}</td>
             <td>{record.targetAcknowledged ? 'Previously acknowledged' : 'Not acknowledged in catalogue'}{record.requiresLayoutReview && <><br />Field layout needs review</>}</td>
           </tr>)}</tbody>
         </table></div>

@@ -31,18 +31,20 @@ public sealed class PostgresFirmwareTransitionReviewTests
         var site = new Site { Customer = customer, Name = "Fixture site", Code = Guid.NewGuid().ToString("N")[..8] };
         var phone = new Terminal { Site = site, FirmwareVersion = earlier, DisplayName = "Fixture upgrade phone", TerminalFamilyId = "mtr20-multipay",
             TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() };
-        var definitions = new[] { 21, 26, 92, 101, 134 }.ToDictionary(number => number,
+        var definitions = new[] { 21, 22, 23, 26, 73, 92, 101, 134, 135, 136 }.ToDictionary(number => number,
             number => new TableDefinition { TableNumber = number, Name = $"Fixture MT{number}" });
-        var source = Set("Installed source", earlier, [(21, 18), (26, 72), (92, 3401), (101, 403)]);
+        var source = Set("Installed source", earlier, [(21, 18), (22, 661), (23, 678), (26, 72), (73, 1192), (92, 3401), (101, 403)]);
         var candidate = Set("Prepared later set", later, [(21, 48), (26, 72), (92, 3061), (134, 1153)]);
         var wrong = Set("Wrong target record length", later, [(21, 18), (26, 72), (92, 3061), (134, 1153)]);
         var wrongVersion = Set("Different target", earlier, [(21, 18)]);
+        var equivalent = Set("Target family equivalents", later, [(21, 48), (26, 72), (73, 1192), (92, 3061), (134, 1153), (135, 1109), (136, 203)]);
+        var differentRate = Set("Target family changed rate", later, [(21, 48), (26, 72), (73, 1192), (92, 3061), (134, 1153), (135, 1109), (136, 203)], localCharge: 50);
         var assignment = new TerminalTableAssignment { Terminal = phone, TableSet = source };
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             Assert.Equal("Npgsql.EntityFrameworkCore.PostgreSQL", db.Database.ProviderName);
-            db.AddRange(phone, source, candidate, wrong, wrongVersion, assignment);
+            db.AddRange(phone, source, candidate, wrong, wrongVersion, equivalent, differentRate, assignment);
             await db.SaveChangesAsync();
         }
         using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
@@ -62,7 +64,8 @@ public sealed class PostgresFirmwareTransitionReviewTests
         var baseline = await Read(path);
         Check(baseline, 21, "replace-required", 18, 48, null);
         Check(baseline, 92, "replace-required", 3401, 3061, null);
-        Check(baseline, 101, "unverified-target", 403, null, null);
+        Check(baseline, 101, "family-replacement-needed", 403, null, null);
+        Check(baseline, 22, "family-replacement-needed", 661, null, null);
         Check(baseline, 85, "available-unassigned", null, 8001, null);
         Assert.False(baseline.GetProperty("configurationReadyForReview").GetBoolean());
 
@@ -73,6 +76,18 @@ public sealed class PostgresFirmwareTransitionReviewTests
         Assert.True(sameSize.GetProperty("requiresLayoutReview").GetBoolean());
         Assert.True(sameSize.GetProperty("targetAcknowledged").GetBoolean());
         Check(prepared, 134, "candidate-addition", null, 1153, 1153);
+        var cardReplacement = Check(prepared, 22, "candidate-family-replacement", 661, null, null);
+        Assert.Equal(134, Assert.Single(cardReplacement.GetProperty("replacementRecords").EnumerateArray()).GetInt32());
+        Check(prepared, 23, "family-replacement-needed", 678, null, null);
+        var matching = await Read(path + $"&candidateSetId={equivalent.Id}");
+        Assert.Equal(135, Assert.Single(Check(matching, 23, "candidate-family-replacement", 678, null, null)
+            .GetProperty("replacementRecords").EnumerateArray()).GetInt32());
+        Assert.Equal(136, Assert.Single(Check(matching, 101, "candidate-local-equivalent", 403, null, null)
+            .GetProperty("replacementRecords").EnumerateArray()).GetInt32());
+        var nonmatching = await Read(path + $"&candidateSetId={differentRate.Id}");
+        Check(nonmatching, 101, "family-replacement-needed", 403, null, null);
+        Assert.Contains(nonmatching.GetProperty("findings").EnumerateArray(), row => row.GetProperty("blocking").GetBoolean() &&
+            row.GetProperty("tableNumber").ValueKind == JsonValueKind.Number && row.GetProperty("tableNumber").GetInt32() == 101);
         Assert.False(prepared.GetProperty("configurationReadyForReview").GetBoolean());
         Assert.False(prepared.GetProperty("upgradeQualified").GetBoolean());
         var family = prepared.GetProperty("targetFamilyReview");
@@ -114,12 +129,24 @@ public sealed class PostgresFirmwareTransitionReviewTests
         Assert.Equal(1, busy.GetProperty("outstandingDownloads").GetInt32());
         Assert.Contains(busy.GetProperty("findings").EnumerateArray(), row => row.GetProperty("message").GetString()!.Contains("outstanding management work"));
 
-        TableSet Set(string name, FirmwareVersion version, (int Type, int Length)[] records)
+        TableSet Set(string name, FirmwareVersion version, (int Type, int Length)[] records, byte localCharge = 25)
         {
             var set = new TableSet { Name = name, TargetFirmwareVersion = version, Status = TableSetStatus.Published, PublishedAtUtc = DateTime.UtcNow };
             foreach (var (type, size) in records)
             {
                 var bytes = new byte[size]; bytes[0] = (byte)type; bytes[^1] = 0xA5;
+                if (type == 73)
+                {
+                    Array.Clear(bytes, 1, bytes.Length - 1);
+                    for (var index = 0; index < 128; index++) bytes[40 + index * 9] = 4;
+                    bytes[40] = 2; bytes[43] = localCharge;
+                }
+                if (type is 101 or 136)
+                {
+                    var template = NativeTableLayouts.DraftTemplates(type).Single();
+                    bytes = template.Apply(NativeTableLayouts.CreateDraftTemplate(template), new Dictionary<string, string> { ["areaCode"] = "205" });
+                    bytes.AsSpan(3).Clear();
+                }
                 set.Versions.Add(CarrierSchedulerSpareFixture.Version(definitions[type], bytes, set.Versions.Count + 1));
             }
             return set;

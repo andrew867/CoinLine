@@ -14,7 +14,9 @@ it('reviews the target family requirements without changing the registered phone
     .mockResolvedValueOnce([{ id: 'mtr20-desk', release: 'MTR 2.0', variant: 'Desk', maximizerTypeNumbers: [37] }])
     .mockResolvedValueOnce({ sourceFirmwareLabel: 'MTR 2.0', targetFirmwareLabel: 'MTR 2.11', sourceSetId: 'source',
       candidateSetId: 'candidate', candidatePublished: true, activeSessions: 0, outstandingDownloads: 0,
-      configurationReadyForReview: false, upgradeQualified: false, records: [], findings: [], registeredFamilyId: 'mtr20-multipay',
+      configurationReadyForReview: false, upgradeQualified: false, findings: [], registeredFamilyId: 'mtr20-multipay', records: [
+        { tableNumber: 101, sourceBytes: 403, targetExpectedBytes: null, candidateBytes: null, action: 'candidate-local-equivalent',
+          detail: 'All local tariff tuples match.', targetAcknowledged: false, requiresLayoutReview: false, replacementRecords: [136] }],
       targetFamilyReview: { familyId: 'mtr20-desk', familyLabel: 'MTR 2.0 Desk', documented: true, screeningEntries: 200, note: null, tables: [
         { name: 'Dialing rules', required: true, candidates: [62], records: [], status: 'missing' },
         { name: 'Call screening', required: true, candidates: [92], status: 'present', records: [{ number: 92, length: 3061, format: 'verifiedLength', screeningNote: '180 packed slots' }] },
@@ -36,6 +38,8 @@ it('reviews the target family requirements without changing the registered phone
   expect(within(family).getByRole('row', { name: /Text advertising/ })).toHaveTextContent('Feature-specific')
   expect(within(family).getByRole('link', { name: 'MT92' })).toHaveAttribute('href', '/table-sets/candidate?record=92&family=mtr20-desk#config-heading')
   expect(within(family).getByText('180 packed slots')).toBeVisible()
+  expect(screen.getByText('Equivalent local tariff tuples')).toBeVisible()
+  expect(screen.getByRole('link', { name: 'Review MT136 replacement' })).toHaveAttribute('href', '/table-sets/candidate?record=136#config-heading')
   expect(apiGet).toHaveBeenLastCalledWith('/api/firmware/transition-review?terminalId=phone&targetFirmwareVersionId=target&candidateSetId=candidate&targetFamilyId=mtr20-desk')
   expect(apiPostRaw).not.toHaveBeenCalled()
 })
