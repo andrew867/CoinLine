@@ -96,7 +96,7 @@ internal sealed class SyntheticLabCardAuthorizationProvider(
         return wireAmount > 0 && wireAmount == decimal.Round(result.Amount, 2, MidpointRounding.AwayFromZero) ? wireAmount : null;
     }
 
-    private static bool TryIdentifyFixture(ReadOnlySpan<byte> data, out byte messageType, out string destination, out ushort sequence)
+    internal static bool TryIdentifyFixture(ReadOnlySpan<byte> data, out byte messageType, out string destination, out ushort sequence)
     {
         messageType = 0; destination = ""; sequence = 0;
         // Only the observed formatted synthetic test request is supported.
