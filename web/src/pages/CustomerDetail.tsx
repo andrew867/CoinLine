@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
 import { apiFetch } from '../api/client'
+import { HostRatePlanSelectionPanel } from './HostRatePlanSelectionPanel'
 
 
 type Console = {
@@ -117,6 +118,7 @@ export function CustomerDetail() {
       )}
 
       <h2>Rate plans</h2>
+      <HostRatePlanSelectionPanel key={customer.id} scope="customers" id={customer.id} />
       {data.ratePlans.length === 0 ? (
         <EmptyHint>No rate plans.</EmptyHint>
       ) : (

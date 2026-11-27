@@ -131,6 +131,7 @@ public static class OperatorPermissions
             ("RatePlans", A, "Create CreateVersion AddRule AddTariff AddDestinationPrefix AddTimeBand"),
             ("RatePlans", U, "Publish"), ("RateRules", U, "Update"), ("Tariffs", U, "Update"),
             ("DestinationPrefixes", U, "Update"), ("TimeBands", U, "Update"),
+            ("HostRatePlanSelections", R, "Customer Terminal"), ("HostRatePlanSelections", U, "SetCustomer SetTerminal"),
             ("Tariffs", D, "Delete"), ("DestinationPrefixes", D, "Delete"), ("TimeBands", D, "Delete"));
         Screen("number-classes", "Number classes", ("NumberClasses", R, "List"), ("NumberClasses", A, "Create"));
         Screen("rating", "Rating", ("RatingOperations", R, "Quote"), ("RatingOperations", A, "Authorize"));
