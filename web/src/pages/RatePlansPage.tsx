@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
+import { RatePlanPackagePanel } from './RatePlanPackagePanel'
 
 type Row = {
   id: string
@@ -49,6 +50,7 @@ export function RatePlansPage() {
       <p className="page-intro">
         Plans used when a phone asks for a price. Publish a version before phones can use it in the field.
       </p>
+      <RatePlanPackagePanel onImported={load} sources={rows} />
       {loading && <p role="status">Loading rate plans…</p>}
       {!loading && err && <p style={{ color: 'crimson' }}>{err}</p>}
       <form onSubmit={(e) => void createPlan(e)} style={{ display: 'flex', gap: 8, alignItems: 'flex-end', marginBottom: 16 }}>

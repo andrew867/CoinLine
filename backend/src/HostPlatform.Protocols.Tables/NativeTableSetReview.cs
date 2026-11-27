@@ -5,7 +5,7 @@ public sealed record TableReviewFinding(int TableNumber, string Message);
 public sealed record TableProvisioningReview(
     string? OperatingType, int? AcceptedCoinSlots, int? ConfiguredCardRanges,
     bool? OnHookAdvertising, IReadOnlyList<TableReviewFinding> Findings, int? VisibleOnHookTextMessages = null,
-    bool? GraphicalOnHookAdvertising = null);
+    bool? GraphicalOnHookAdvertising = null, CollectionConfigurationReview? CollectionConfiguration = null);
 
 public static class NativeTableSetReview
 {
@@ -57,6 +57,7 @@ public static class NativeTableSetReview
             var cards = Get(records, cardNumber, later ? 1153 : 661);
             var carriers = Get(records, carrierNumber, later ? 1109 : 678);
             var cardStride = later ? 36 : 33;
+            var hostCreditRanges = new List<(int Index, byte Carrier)>();
             if (cards != null)
             {
                 cardRanges ??= 0;
@@ -67,6 +68,8 @@ public static class NativeTableSetReview
                     if (row[6] is < 1 or > 9)
                         continue;
                     cardRanges++;
+                    if ((row[7] & 0x0C) == 0x0C && features?[1] != 3)
+                        hostCreditRanges.Add((index, row[32]));
                     if (row[..3].SequenceCompareTo(row.Slice(3, 3)) > 0)
                         findings.Add(new(cardNumber, $"Card range {index + 1} starts after its ending prefix."));
                     if (row[32] == byte.MaxValue)
@@ -88,7 +91,13 @@ public static class NativeTableSetReview
             }
 
             if (carriers != null)
+            {
                 ReviewCarrierSelections(carriers, later, features?[1], features?[49], findings);
+                ReviewHostCreditCarrierSelections(carriers, later, hostCreditRanges, findings);
+            }
+            else if (hostCreditRanges.Count != 0 && hostCreditRanges.All(range => range.Carrier == byte.MaxValue))
+                findings.Add(new(carrierNumber, "Host-validated credit-card ranges require a suitable carrier selection. Review the installed carrier record before attempting a card call."));
+            ReviewPaidScreening(records, later, hostCreditRanges.Count != 0, findings);
         }
 
         if (screenings != null)
@@ -116,7 +125,8 @@ public static class NativeTableSetReview
             foreach (var finding in MessagingServiceWire.OperatingFindings(messaging))
                 findings.Add(new(MessagingServiceWire.MessageType, finding));
 
-        return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings, visibleOnHookTextMessages, graphicalAdvertising);
+        return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings, visibleOnHookTextMessages, graphicalAdvertising,
+            CollectionConfigurationReview.Build(records));
     }
 
     private static byte[]? Get(IReadOnlyDictionary<int, byte[]> records, int number, int length) =>
@@ -134,6 +144,67 @@ public static class NativeTableSetReview
                 return offset;
         }
         return -1;
+    }
+
+    private static void ReviewHostCreditCarrierSelections(byte[] carriers, bool later,
+        List<(int Index, byte Carrier)> ranges, List<TableReviewFinding> findings)
+    {
+        if (ranges.Count == 0) return;
+        var positions = later ? new[] { 3, 6, 9 } : new[] { 3 };
+        foreach (var position in positions)
+        {
+            var reference = carriers[position];
+            if (reference == byte.MaxValue) continue;
+            var zone = position switch { 6 => "Intra-area", 9 => "Local", _ => "Default" };
+            var offset = FindCarrier(carriers, reference, later);
+            // The existing range-level check covers its own explicit choice.
+            // A separately selected default may still reject that same range.
+            var unsupported = ranges.Where(range => range.Carrier != reference &&
+                (offset < 0 || (carriers[offset + 3 + range.Index / 8] & 1 << (range.Index % 8)) == 0))
+                .Select(range => range.Index + 1).ToArray();
+            if (unsupported.Length != 0)
+                findings.Add(new(carriers[0], $"{zone} credit-card carrier reference {reference} does not accept host-validated card range(s) {string.Join(", ", unsupported)}. Review the actual carrier selected for intended card calls."));
+        }
+        var local = FindCarrier(carriers, 0, later);
+        if (local >= 0 && (carriers[local + 1] != 0 || carriers[local + 2] != 0) &&
+            (ranges.Any(range => range.Carrier == 0) || positions.Any(position => carriers[position] == 0)))
+            findings.Add(new(carriers[0], "Carrier reference 0 has nonzero carrier-code bytes. If this is the direct local exchange for card calls, confirm that no carrier access prefix is dialed."));
+    }
+
+    private static void ReviewPaidScreening(IReadOnlyDictionary<int, byte[]> records, bool later, bool hasHostCredit,
+        List<TableReviewFinding> findings)
+    {
+        if (Get(records, 92, later ? 3061 : 3401) is not { } screening) return;
+        var tariffs = Get(records, 73, 1192);
+        var numbering = Get(records, 62, 353);
+        int paid = 0, coinOnly = 0;
+        for (int offset = 1, position = 1; offset < screening.Length; offset += 17, position++)
+        {
+            var flags = screening[offset];
+            var classification = screening[offset + 1];
+            var payment = classification >> 4;
+            if ((screening[offset + 4] >> 4) == 0 || (classification & 15) == 11 ||
+                (flags & (1 | 8 | 128)) != 0 || payment is < 3 or > 7) continue;
+            paid++;
+            if ((flags & 0x40) != 0)
+            {
+                coinOnly++;
+                if (hasHostCredit && payment is 4 or 5)
+                    findings.Add(new(92, $"Screening rule {position} selects card payment but also restricts the route to coins. A swipe can be accepted while the subsequent call is rejected before authorization."));
+            }
+            var rate = screening[offset + 2];
+            if (tariffs == null || numbering == null || rate >= 128 || (flags & 4) != 0) continue;
+            var map = tariffs[40 + 9 * rate] switch { 0 => 10, 7 => 11, 8 => 9, _ => -1 };
+            if (map < 0) continue;
+            var result = numbering[map];
+            var zone = map switch { 10 => "intra-area", 11 => "inter-area", _ => "local" };
+            if ((result & 15) == 11)
+                findings.Add(new(62, $"Screening rule {position} uses host-rated {zone} tariff {rate}, but the MT62 response mapping denies a found {zone} rate. Review this even if the host quote is valid."));
+            else if ((result >> 4) == 2)
+                findings.Add(new(62, $"Screening rule {position} uses host-rated {zone} tariff {rate}, but the MT62 response mapping selects no payment for a found rate. Verify intended charging behavior."));
+        }
+        if (hasHostCredit && paid != 0 && coinOnly == paid)
+            findings.Add(new(92, "Every included explicit paid screening rule restricts the route to coins. If card-paid destinations are intended, review their coin-only flags. This does not determine unscreened routing."));
     }
 
     private static void ReviewCarrierSelections(ReadOnlySpan<byte> carriers, bool later, byte? operatingType, byte? rerouteFlags,

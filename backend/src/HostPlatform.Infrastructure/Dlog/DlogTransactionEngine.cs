@@ -41,8 +41,46 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
             rawPayloadExact[0] == FieldEventCatalog.SoftwareVersionMessageType &&
             await db.NccSessions.AnyAsync(session => session.Id == nccSessionId && session.TerminalId == terminalId, ct);
         var cap = capturedAtUtc ?? DateTime.UtcNow;
+        // MT38 is a snapshot, not an additive collection. An identical snapshot
+        // after an intervening report can be genuine new evidence of recovery.
+        // Scope retry deduplication to the immediately previous matched report;
+        // MT51 retains its existing cross-session collection identity.
+        string? cashboxContext = null;
+        if (deduplicateCashbox && rawPayloadExact[0] == DlogCashboxWire.StatusType)
+        {
+            var reports = db.DlogTransactions.AsNoTracking()
+                .Where(t => t.TerminalId == terminalId && t.Direction == (int)DlogDirection.TerminalToHost &&
+                    t.NccSessionId != null && t.NccSession!.TerminalId == terminalId &&
+                    (t.MessageType == DlogCashboxWire.StatusType || t.MessageType == DlogCashboxWire.CollectionType));
+            var previous = await reports.OrderByDescending(t => t.CapturedAtUtc).ThenByDescending(t => t.Id).FirstOrDefaultAsync(ct);
+            // A reconnect can replay an already removed box's status together
+            // with prior call records. Do not resurrect that snapshot merely
+            // because a genuine collection intervened.
+            var latestCollection = previous == null ? null : previous is { MessageType: DlogCashboxWire.CollectionType } ? previous : await reports
+                .Where(t => t.MessageType == DlogCashboxWire.CollectionType)
+                .OrderByDescending(t => t.CapturedAtUtc).ThenByDescending(t => t.Id).FirstOrDefaultAsync(ct);
+            if (latestCollection != null && HasCashboxLength(latestCollection.RawPayload, DlogCashboxWire.CollectionLength) &&
+                DlogCashboxWire.TryReadCollection(latestCollection.RawPayload.AsSpan(0, DlogCashboxWire.CollectionLength), out var collection) &&
+                DlogCashboxWire.TryReadStatus(rawPayloadExact, out var incoming) &&
+                collection.RemovedBox.BoxNumber == incoming.BoxNumber && collection.NewBoxNumber != incoming.BoxNumber)
+            {
+                var oldSnapshots = await reports.Where(t => t.MessageType == DlogCashboxWire.StatusType &&
+                    t.CapturedAtUtc <= latestCollection.CapturedAtUtc).OrderByDescending(t => t.CapturedAtUtc).ToListAsync(ct);
+                var old = oldSnapshots.FirstOrDefault(t => SameCashboxStatus(t.RawPayload, rawPayloadExact));
+                if (old != null) return old;
+            }
+            var initialization = previous == null ? null : await db.AuditEvents.AsNoTracking()
+                .Where(a => a.TerminalId == terminalId && a.Category == "cashbox" &&
+                    (a.Action == "initialize_empty_box" || a.Action == "initialize_default_box") &&
+                    a.CreatedAtUtc > previous.CapturedAtUtc)
+                .OrderByDescending(a => a.CreatedAtUtc).ThenByDescending(a => a.Id).FirstOrDefaultAsync(ct);
+            if (initialization == null && previous is { MessageType: DlogCashboxWire.StatusType } &&
+                SameCashboxStatus(previous.RawPayload, rawPayloadExact))
+                return previous;
+            cashboxContext = $"cashbox-status-after:{previous?.Id:N}:{initialization?.Id:N}";
+        }
         var idem = deduplicateCashbox
-            ? DlogIdempotency.ComputeKey(DlogCashboxWire.IdentityBytes(rawPayloadExact), direction, terminalId, null, null, "cashbox")
+            ? DlogIdempotency.ComputeKey(DlogCashboxWire.IdentityBytes(rawPayloadExact), direction, terminalId, null, null, cashboxContext ?? "cashbox")
             : DlogIdempotency.ComputeKey(rawPayloadExact, direction, terminalId, nccSessionId, sessionCorrelationId, clientIdempotencyExtra, liveVersion);
 
         var existing = await db.DlogTransactions
@@ -132,6 +170,14 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
     public async Task<DlogTransaction?> FindByIdempotencyKeyAsync(string key, CancellationToken ct) =>
         await db.DlogTransactions.AsNoTracking()
             .FirstOrDefaultAsync(t => t.IdempotencyKey == key, ct);
+
+    private static bool HasCashboxLength(byte[] raw, int length) =>
+        raw.Length == length || raw.Length == length + 1 && raw[^1] == 13;
+
+    private static bool SameCashboxStatus(byte[] saved, byte[] incoming) =>
+        HasCashboxLength(saved, DlogCashboxWire.StatusLength) &&
+        DlogCashboxWire.IdentityBytes(saved.AsSpan(0, DlogCashboxWire.StatusLength))
+            .SequenceEqual(DlogCashboxWire.IdentityBytes(incoming));
 
     /// <summary>
     /// Links request/response rows using <see cref="DlogCorrelationRules"/> — forward (response ingested after request)

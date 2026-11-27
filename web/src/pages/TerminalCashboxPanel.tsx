@@ -12,6 +12,7 @@ type Status = {
   unmappedSetBitCount?: number
   percentFull: number
   balanceMinorUnits: number
+  balanceKnown?: boolean
   coinCounts: number[]
 }
 
@@ -47,6 +48,14 @@ type Ledger = {
 
 function amount(minorUnits: number): string {
   return (minorUnits / 100).toFixed(2)
+}
+
+function reportedAmount(minorUnits: number, known = true): string {
+  return known && minorUnits >= 0 ? amount(minorUnits) : 'Unknown (invalid report)'
+}
+
+function validBalance(status: Status): boolean {
+  return status.balanceKnown !== false && status.balanceMinorUnits >= 0
 }
 
 const hostTime = (value: string) => new Date(value).toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC')
@@ -184,8 +193,12 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
       {hasHistory && <p>Amounts use the phone’s currency. The cashbox data is reported by the terminal, not calculated from quoted charges or deposited amounts.</p>}
       {current && <section className="cashbox-summary" aria-label="Current reported cashbox">
         <h3>Current reported cashbox</h3>
+        {!validBalance(current.status) && <p className="cashbox-waiting" role="note">
+          <strong>Current balance unknown.</strong> The terminal reported an invalid negative balance ({current.status.balanceMinorUnits} minor units).
+          The report is retained for investigation; the Manager will not restore this value to the phone. Coin counts are not substituted for the balance.
+        </p>}
         <div className="cashbox-metrics">
-          <div><span>Reported balance</span><strong>{amount(current.status.balanceMinorUnits)}</strong></div>
+          <div><span>Reported balance</span><strong>{reportedAmount(current.status.balanceMinorUnits, validBalance(current.status))}</strong></div>
           <div><span>Capacity</span><strong>{current.status.percentFull}%</strong></div>
           <div><span>Condition</span><strong><Condition status={current.status} /></strong></div>
           <div><span>Box number</span><strong>{current.status.boxNumber}</strong></div>
@@ -210,7 +223,7 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
             <tbody>{ledger.statuses.map(row => (
               <tr key={row.id}>
                 <td><code>{row.status.boxNumber}</code></td><td>{row.isCurrent ? 'Current' : 'Previous'}</td><td><Condition status={row.status} /></td>
-                <td>{amount(row.status.balanceMinorUnits)}</td><td>{row.status.percentFull}%</td>
+                <td>{reportedAmount(row.status.balanceMinorUnits, validBalance(row.status))}</td><td>{row.status.percentFull}%</td>
                 <td><CoinCounts counts={row.status.coinCounts} reference={ledger.coinConfigurations?.[row.id]} /></td><td>{phoneTime(row.status.terminalTime)}</td><td>{hostTime(row.receivedAtUtc)}</td>
               </tr>
             ))}</tbody>
@@ -225,8 +238,8 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
             <tbody>{ledger.collections.map(row => (
               <tr key={row.id}>
                 <td><code>{row.boxNumber}</code></td><td><code>{row.newBoxNumber}</code></td>
-                <td>{amount(row.totalMinorUnits)}{row.isSummed && ' (combined)'}</td>
-                <td>{amount(row.removedBoxBalanceMinorUnits)}</td><td><CoinCounts counts={row.coinCounts} reference={ledger.coinConfigurations?.[row.id]} /></td>
+                <td>{reportedAmount(row.totalMinorUnits)}{row.isSummed && ' (combined)'}</td>
+                <td>{reportedAmount(row.removedBoxBalanceMinorUnits)}</td><td><CoinCounts counts={row.coinCounts} reference={ledger.coinConfigurations?.[row.id]} /></td>
                 <td>{phoneTime(row.terminalTime)}</td><td>{hostTime(row.receivedAtUtc)}</td>
               </tr>
             ))}</tbody>
