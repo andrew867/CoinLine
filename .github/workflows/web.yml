@@ -73,6 +73,10 @@ jobs:
 
       - name: Verify console workflow fixtures
         run: npm run e2e -- e2e/failed-download.spec.ts e2e/quick-access-customers.spec.ts e2e/advertising-editor.spec.ts e2e/native-spare-fields.spec.ts e2e/call-setup-spares.spec.ts e2e/rating-coin-spares.spec.ts e2e/graphical-spare-fields.spec.ts e2e/carrier-scheduler-spares.spec.ts e2e/card-terminal-routing.spec.ts e2e/numbering-profile.spec.ts e2e/per-phone-access-rollout.spec.ts e2e/display-feature-preservation.spec.ts e2e/download-preparation.spec.ts
+      - name: Verify portable terminal configuration package workflow
+        run: npm run e2e -- e2e/portable-terminal-configuration.spec.ts --output test-results/portable-terminal-configuration
+        env:
+          CI: "true"
       - name: Verify phone registration group membership workflow
         run: npm run e2e -- e2e/phone-registration-groups.spec.ts
         env:
