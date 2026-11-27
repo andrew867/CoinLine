@@ -2117,6 +2117,134 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("FirmwareCompatibilityRules");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.FirmwareConfigurationTransition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("ActivatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("CancelledAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CodeRecordSha256Hex")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("CodeRecordVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("CodeScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("SourceAssignmentId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("SourceAssignmentRevision")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("SourceControllerRom")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<string>("SourceControllerSoftware")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<Guid>("SourceFirmwareVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("SourceObservationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("SourceSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("SourceTableSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TargetBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TargetControllerRom")
+                        .IsRequired()
+                        .HasMaxLength(7)
+                        .HasColumnType("character varying(7)");
+
+                    b.Property<string>("TargetControllerSoftware")
+                        .IsRequired()
+                        .HasMaxLength(4)
+                        .HasColumnType("character varying(4)");
+
+                    b.Property<Guid>("TargetFirmwareVersionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("TargetObservationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("TargetSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("TargetTableSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CodeRecordVersionId");
+
+                    b.HasIndex("CodeScheduleId");
+
+                    b.HasIndex("SourceFirmwareVersionId");
+
+                    b.HasIndex("SourceObservationId");
+
+                    b.HasIndex("SourceTableSetId");
+
+                    b.HasIndex("TargetBatchId");
+
+                    b.HasIndex("TargetFirmwareVersionId");
+
+                    b.HasIndex("TargetObservationId");
+
+                    b.HasIndex("TargetTableSetId");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique()
+                        .HasFilter("\"ActivatedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
+
+                    b.ToTable("FirmwareConfigurationTransitions");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.FirmwarePackage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5023,6 +5151,67 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("FirmwarePackage");
 
                     b.Navigation("RequiredTerminalFirmwareVersion");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.FirmwareConfigurationTransition", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.TableVersion", null)
+                        .WithMany()
+                        .HasForeignKey("CodeRecordVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.ScheduledTableDownload", null)
+                        .WithMany()
+                        .HasForeignKey("CodeScheduleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.FirmwareVersion", null)
+                        .WithMany()
+                        .HasForeignKey("SourceFirmwareVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.DlogTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("SourceObservationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.TableSet", null)
+                        .WithMany()
+                        .HasForeignKey("SourceTableSetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.DownloadBatch", null)
+                        .WithMany()
+                        .HasForeignKey("TargetBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.FirmwareVersion", null)
+                        .WithMany()
+                        .HasForeignKey("TargetFirmwareVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.DlogTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("TargetObservationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.TableSet", null)
+                        .WithMany()
+                        .HasForeignKey("TargetTableSetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.FirmwarePackage", b =>

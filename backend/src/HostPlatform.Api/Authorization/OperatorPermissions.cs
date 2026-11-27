@@ -134,7 +134,8 @@ public static class OperatorPermissions
             ("Firmware", U, "PreviewFirmwareTableProfile SetFirmwareTableProfile"));
         Screen("firmware-jobs", "Firmware jobs",
             ("Firmware", R, "ExecutionPolicy ListJobs Job TransitionReview PreviewAccessStaging PreviewScreeningStaging"), ("Terminals", A, "StartFirmwareJob"),
-            ("Firmware", U, "SimulateJob ExecuteLiveJob ApproveJob CancelJob"), ("Tables", U, "QueueFirmwareCancellation"));
+            ("Firmware", U, "SimulateJob ExecuteLiveJob ApproveJob CancelJob"), ("Tables", U, "QueueFirmwareCancellation"),
+            ("FirmwareConfigurationTransitions", R, "Options List Preview"), ("FirmwareConfigurationTransitions", U, "Stage Activate Cancel"));
         Screen("hardware-validation", "Hardware validation",
             ("HardwareValidation", R, "Checklists EvidenceGuide ListCapturedSessions GetCapturedSession"),
             ("HardwareValidation", A, "ImportCapturedSession"), ("HardwareValidation", U, "ReplayCapturedSession"));

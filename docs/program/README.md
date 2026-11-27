@@ -6,6 +6,7 @@
 - [Firmware lab results](phase-5-gate-status.md)
 - [Latest reported terminal status](current-terminal-status.md)
 - [Observed controller versions and firmware selection](ncc-live-version-evidence.md)
+- [Staged configuration activation](firmware-configuration-activation.md)
 - [Terminal table catalogue and parity audit](table-catalog-and-parity-audit.md)
 - [Cross-configuration call-screening slots](screening-bulk-slots.md)
 - [Manually selected phone download preparation](manual-download-preparation.md)

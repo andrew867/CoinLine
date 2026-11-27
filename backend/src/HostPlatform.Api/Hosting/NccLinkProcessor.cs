@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Sockets;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Security;
+using HostPlatform.Api.Services;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
@@ -1397,6 +1398,13 @@ internal sealed class NccLinkProcessor(
         {
             if (callIn && !HasPendingInstall)
                 await SendInstallEndAsync(stream, terminalId);
+            return;
+        }
+        if (await FirmwareConfigurationTransitionService.HoldSourceTables(db, terminal.Id, stoppingToken, _session.Id))
+        {
+            Audit("firmware_transition_holds_source_tables", new { reason = "running controller version requires transition review" }, terminal.Id);
+            await db.SaveChangesAsync(stoppingToken);
+            await SendInstallEndAsync(stream, terminalId, cashboxStatus);
             return;
         }
         if (await db.DownloadBatches.AnyAsync(batch => batch.TerminalId == terminal.Id &&

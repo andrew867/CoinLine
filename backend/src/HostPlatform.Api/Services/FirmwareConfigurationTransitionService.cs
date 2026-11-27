@@ -1,0 +1,188 @@
+using System.Security.Cryptography;
+using System.Text.Json;
+using HostPlatform.Domain;
+using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Infrastructure.Tables;
+using HostPlatform.Protocols.Dlog;
+using HostPlatform.Protocols.Ncc;
+using HostPlatform.Protocols.Tables;
+using Microsoft.EntityFrameworkCore;
+
+namespace HostPlatform.Api.Services;
+
+internal static class FirmwareConfigurationTransitionService
+{
+    internal sealed record Configuration(Terminal Phone, TerminalTableAssignment Assignment, TableSet Source, TableSet Target);
+    internal sealed record CodeSchedule(ScheduledTableDownload Schedule, TableVersion Record, string Rom, string Application);
+
+    public static async Task<DlogTransaction?> LatestObservation(HostPlatformDbContext db, Guid terminalId, CancellationToken ct) =>
+        await db.DlogTransactions.AsNoTracking().Where(row => row.TerminalId == terminalId && row.NccSessionId != null &&
+            row.NccSession!.TerminalId == terminalId && row.NccVersionObservation != null && row.Direction == (int)DlogDirection.TerminalToHost &&
+            row.MessageType == FieldEventCatalog.SoftwareVersionMessageType && row.RawPayload.Length == FieldEventCatalog.SoftwareVersionRecordLength)
+            .OrderByDescending(row => row.CapturedAtUtc).ThenByDescending(row => row.Id).FirstOrDefaultAsync(ct);
+
+    public static async Task<bool> HoldSourceTables(HostPlatformDbContext db, Guid terminalId, CancellationToken ct, Guid? currentSessionId = null)
+    {
+        var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().SingleOrDefaultAsync(row => row.TerminalId == terminalId &&
+            row.ActivatedAtUtc == null && row.CancelledAtUtc == null, ct);
+        if (plan == null) return false;
+        var latest = await LatestObservation(db, terminalId, ct);
+        var deliveredAt = await db.ScheduledTableDownloads.AsNoTracking().Where(row => row.Id == plan.CodeScheduleId)
+            .Select(row => row.CompletedAtUtc).SingleOrDefaultAsync(ct);
+        // After delivery, a pre-schedule source report is no longer enough to
+        // select a profile for a new request. Wait for fresh version evidence.
+        if (deliveredAt != null && (latest == null || latest.CapturedAtUtc <= deliveredAt ||
+            currentSessionId != null && latest.NccSessionId != currentSessionId)) return true;
+        if (latest == null || latest.CapturedAtUtc <= plan.CreatedAtUtc) return false;
+        var version = FieldEventCatalog.ReadControllerVersion(latest.RawPayload);
+        // Once a different running version is observed, neither the old assignment
+        // nor unrelated queued source records may be assumed compatible.
+        return version != (plan.SourceControllerRom, plan.SourceControllerSoftware);
+    }
+
+    public static async Task<Configuration> ReadConfiguration(HostPlatformDbContext db, Guid terminalId, Guid targetSetId, CancellationToken ct)
+    {
+        var phone = await db.Terminals.Include(row => row.FirmwareVersion).Include(row => row.Site)
+            .SingleOrDefaultAsync(row => row.Id == terminalId, ct) ?? throw new InvalidOperationException("Phone not found.");
+        if (phone.DeactivatedAtUtc != null || phone.Site == null || phone.FirmwareVersion == null ||
+            FirmwareTableProfiles.Find(phone.FirmwareVersion.TableProfileId) == null)
+            throw new InvalidOperationException("The active phone needs a registered source firmware and table profile.");
+        var assignment = await db.TerminalTableAssignments.SingleOrDefaultAsync(row => row.TerminalId == terminalId, ct)
+            ?? throw new InvalidOperationException("The phone needs a published source assignment.");
+        var source = await ReadSet(db, assignment.TableSetId, ct);
+        var target = await ReadSet(db, targetSetId, ct);
+        if (source.Status != TableSetStatus.Published || target.Status != TableSetStatus.Published || source.Id == target.Id ||
+            source.TargetFirmwareVersionId is { } installed && installed != phone.FirmwareVersionId ||
+            target.TargetFirmwareVersion == null || target.TargetFirmwareVersionId == phone.FirmwareVersionId)
+            throw new InvalidOperationException("Choose separate published source and target sets correctly associated with their firmware versions.");
+        if (new[] { source, target }.Any(set => set.CustomerId != null && set.CustomerId != phone.Site.CustomerId))
+            throw new InvalidOperationException("Both configurations must be in the phone's customer scope or unscoped.");
+        var profile = FirmwareTableProfiles.Find(target.TargetFirmwareVersion.TableProfileId)
+            ?? throw new InvalidOperationException("The target firmware needs a registered table profile.");
+        if (!TableDistributionService.HasCompleteDlogRecords(target.Versions) || target.Versions.Any(row => !row.ValidationPassed ||
+            row.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
+            throw new InvalidOperationException("The target must contain complete, validated configuration records, not a code schedule.");
+        if (TableSetFirmwareCompatibility.SelectionIssue(profile, TableSetFirmwareCompatibility.Shapes(target.Versions)) is { } issue)
+            throw new InvalidOperationException(issue);
+        if (TableSetFirmwareCompatibility.Review(target).FirstOrDefault(row => row.Blocking) is { } finding)
+            throw new InvalidOperationException(finding.Message);
+        var access = target.Versions.Where(row => row.TableDefinition!.TableNumber == 21).ToArray();
+        if (access.Length != 1 || TableDistributionService.AccessRecordIssue(access, phone.TerminalIdHex) != null)
+            throw new InvalidOperationException("The target needs the phone's own complete MT21 management access record.");
+        var family = TerminalFamilies.Find(phone.TerminalFamilyId) ?? throw new InvalidOperationException("Register the phone's terminal family before staging.");
+        var checklist = LegacyTerminalTableRequirements.Review(family, target.Versions.Select(row =>
+            (row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(row), row.ScreeningLayoutProfile)), profile);
+        if (!checklist.Documented || checklist.Tables.Any(row => row.Required && row.Status != "present"))
+            throw new InvalidOperationException("Resolve the target's documented mandatory table families in configuration review before staging.");
+        _ = TableDistributionService.OrderVersionsForDownload(target.Versions.ToArray());
+        return new(phone, assignment, source, target);
+    }
+
+    public static async Task<CodeSchedule> ReadSchedule(HostPlatformDbContext db, Guid terminalId, Guid scheduleId, CancellationToken ct)
+    {
+        var schedule = await db.ScheduledTableDownloads.AsNoTracking().Include(row => row.LastBatch).ThenInclude(row => row!.Items)
+            .SingleOrDefaultAsync(row => row.Id == scheduleId && row.TerminalId == terminalId && row.CancelledAtUtc == null, ct)
+            ?? throw new InvalidOperationException("Choose an existing noncancelled code schedule for this phone.");
+        var set = await ReadSet(db, schedule.TableSetId, ct);
+        var code = TableDistributionService.CodeOnlyVersion(set.Versions);
+        if (set.Status != TableSetStatus.Published || code == null || !code.ValidationPassed)
+            throw new InvalidOperationException("Choose a published code-only schedule.");
+        var raw = TableDistributionService.GetEffectivePayload(code);
+        var requested = CodeDownloadWire.RequestedVersion(raw);
+        if (!CodeDownloadWire.IsEnabled(raw) || CodeDownloadWire.StartAt(raw) == null || !Label(requested.Rom, 7) || !Label(requested.Application, 4))
+            throw new InvalidOperationException("The code schedule must have enabled, complete requested version metadata.");
+        return new(schedule, code, requested.Rom!, requested.Application!);
+    }
+
+    public static async Task EnsureIdle(HostPlatformDbContext db, Guid terminalId, Guid codeScheduleId, CancellationToken ct)
+    {
+        if (await db.NccSessions.AnyAsync(row => row.TerminalId == terminalId && row.Status == NccSessionStatus.Active, ct) ||
+            await db.DownloadBatches.AnyAsync(row => row.TerminalId == terminalId && row.ScheduleId != codeScheduleId &&
+                (row.Status == DownloadBatchStatus.Pending || row.Status == DownloadBatchStatus.Preparing || row.Status == DownloadBatchStatus.Running), ct) ||
+            await db.ScheduledTableDownloads.AnyAsync(row => row.TerminalId == terminalId && row.Id != codeScheduleId && row.CancelledAtUtc == null && row.CompletedAtUtc == null, ct) ||
+            await db.TerminalIdentityCutoverItems.AnyAsync(row => row.TerminalId == terminalId && row.FinishedAtUtc == null, ct))
+            throw new InvalidOperationException("Resolve other management work or active connections before changing the configuration transition.");
+    }
+
+    public static async Task<FirmwareConfigurationTransition> Prepare(HostPlatformDbContext db, Guid terminalId, Guid targetSetId,
+        Guid codeScheduleId, string? software, CancellationToken ct)
+    {
+        software = software?.Trim();
+        if (!Label(software, 4)) throw new InvalidOperationException("Enter the expected controller software label, up to four printable ASCII characters.");
+        if (await db.FirmwareConfigurationTransitions.AnyAsync(row => row.TerminalId == terminalId && row.ActivatedAtUtc == null && row.CancelledAtUtc == null, ct))
+            throw new InvalidOperationException("This phone already has an open configuration transition.");
+        var config = await ReadConfiguration(db, terminalId, targetSetId, ct);
+        var code = await ReadSchedule(db, terminalId, codeScheduleId, ct);
+        await EnsureIdle(db, terminalId, codeScheduleId, ct);
+        var observed = await LatestObservation(db, terminalId, ct) ?? throw new InvalidOperationException("Wait for a live source controller version report before staging.");
+        var source = FieldEventCatalog.ReadControllerVersion(observed.RawPayload);
+        if (!Label(source.Rom, 7) || !Label(source.Software, 4) || (source.Rom == code.Rom && source.Software == software))
+            throw new InvalidOperationException("The live source version must be known and differ from the expected target version.");
+        return new FirmwareConfigurationTransition
+        {
+            TerminalId = terminalId, CodeScheduleId = codeScheduleId, CodeRecordVersionId = code.Record.Id,
+            CodeRecordSha256Hex = TableDistributionService.ComputePayloadSha256Hex(code.Record),
+            SourceFirmwareVersionId = config.Phone.FirmwareVersionId!.Value, TargetFirmwareVersionId = config.Target.TargetFirmwareVersionId!.Value,
+            SourceAssignmentId = config.Assignment.Id, SourceAssignmentRevision = config.Assignment.Version,
+            SourceTableSetId = config.Source.Id, TargetTableSetId = config.Target.Id,
+            SourceSnapshot = SourceSnapshot(config), TargetSnapshot = TargetSnapshot(config), SourceObservationId = observed.Id,
+            SourceControllerRom = source.Rom!, SourceControllerSoftware = source.Software!, TargetControllerRom = code.Rom, TargetControllerSoftware = software!
+        };
+    }
+
+    public static async Task<(Configuration Configuration, DlogTransaction Observation)> VerifyActivation(HostPlatformDbContext db,
+        FirmwareConfigurationTransition plan, CancellationToken ct)
+    {
+        if (plan.ActivatedAtUtc != null || plan.CancelledAtUtc != null) throw new InvalidOperationException("This transition is no longer awaiting activation.");
+        var config = await ReadConfiguration(db, plan.TerminalId, plan.TargetTableSetId, ct);
+        if (plan.SourceSnapshot != SourceSnapshot(config) || plan.TargetSnapshot != TargetSnapshot(config))
+            throw new InvalidOperationException("The source assignment or target configuration changed since staging. Review again.");
+        var code = await ReadSchedule(db, plan.TerminalId, plan.CodeScheduleId, ct);
+        if (code.Record.Id != plan.CodeRecordVersionId || TableDistributionService.ComputePayloadSha256Hex(code.Record) != plan.CodeRecordSha256Hex)
+            throw new InvalidOperationException("The scheduled code record changed since staging.");
+        await EnsureIdle(db, plan.TerminalId, plan.CodeScheduleId, ct);
+        var schedule = code.Schedule; var batch = schedule.LastBatch;
+        // The schedule's active session pointer is cleared on completion; the
+        // completed batch retains the durable NCC session and exact schedule ID.
+        if (schedule.CompletedAtUtc == null || batch == null || batch.NccSessionId == null ||
+            batch.ScheduleId != schedule.Id || batch.Status != DownloadBatchStatus.Completed || batch.CompletedAtUtc != schedule.CompletedAtUtc ||
+            batch.Items.Count != 1 || batch.Items.Single().TableVersionId != code.Record.Id || !batch.Items.Single().Succeeded ||
+            batch.Items.Single().ItemStatus != DownloadBatchItemStatus.Succeeded)
+            throw new InvalidOperationException("Wait for the scheduled MT94 application's acknowledgement on a matched NCC connection.");
+        if (!await db.NccSessions.AnyAsync(row => row.Id == batch.NccSessionId && row.TerminalId == plan.TerminalId && row.Status == NccSessionStatus.Closed, ct))
+            throw new InvalidOperationException("The code schedule's matched NCC connection has not closed.");
+        var frames = await db.NccSessionFrames.AsNoTracking().Where(row => row.NccSessionId == batch.NccSessionId && !row.SentByHost && row.TerminalMatched &&
+            row.TerminalIdHex == config.Phone.TerminalIdHex).Select(row => row.RawBytes).ToListAsync(ct);
+        if (!frames.Any(raw => NccFrameCodec.TryDecode(raw, NccParseMode.Strict) is { Success: true, Packet.Data: [14, 94] }))
+            throw new InvalidOperationException("The scheduled download has no retained terminal MT14/94 observation.");
+        var observation = await LatestObservation(db, plan.TerminalId, ct);
+        if (observation == null || observation.NccSessionId == batch.NccSessionId || observation.CapturedAtUtc <= schedule.CompletedAtUtc ||
+            observation.CapturedAtUtc <= plan.CreatedAtUtc || observation.Id == plan.SourceObservationId ||
+            FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != (plan.TargetControllerRom, plan.TargetControllerSoftware))
+            throw new InvalidOperationException("Wait for a fresh matched NCC report of the expected target controller version after the schedule acknowledgement.");
+        if (!await db.NccSessions.AnyAsync(row => row.Id == observation.NccSessionId && row.TerminalId == plan.TerminalId &&
+            row.StartedAtUtc > schedule.CompletedAtUtc && row.Status == NccSessionStatus.Closed, ct))
+            throw new InvalidOperationException("Wait for a separate matched NCC connection opened after the code schedule acknowledgement.");
+        return (config, observation);
+    }
+
+    private static Task<TableSet> ReadSet(HostPlatformDbContext db, Guid id, CancellationToken ct) =>
+        db.TableSets.AsNoTracking().Include(row => row.TargetFirmwareVersion).Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+            .Include(row => row.Versions).ThenInclude(row => row.TablePayload).SingleAsync(row => row.Id == id, ct);
+
+    private static object SetSnapshot(TableSet set) => new
+    {
+        set.Id, set.Version, set.PublishGeneration, set.Status, set.CustomerId, set.TargetFirmwareVersionId,
+        firmware = set.TargetFirmwareVersion == null ? null : new { set.TargetFirmwareVersion.Id, set.TargetFirmwareVersion.Version, set.TargetFirmwareVersion.TableProfileId },
+        records = set.Versions.OrderBy(row => row.Id).Select(row => new { row.Id, row.Version, row.TableRevision, row.TableDefinitionId,
+            row.SortOrder, row.DependsOnTableDefinitionId, row.ValidationPassed, row.ScreeningLayoutProfile,
+            hash = TableDistributionService.ComputePayloadSha256Hex(row) }).ToArray()
+    };
+
+    private static string SourceSnapshot(Configuration c) => Hash(new { c.Phone.Id, c.Phone.TerminalIdHex, c.Phone.SiteId, c.Phone.TerminalFamilyId,
+        c.Phone.FirmwareVersionId, firmwareRevision = c.Phone.FirmwareVersion!.Version, c.Phone.FirmwareVersion.TableProfileId,
+        assignment = new { c.Assignment.Id, c.Assignment.Version, c.Assignment.TableSetId, c.Assignment.SiteId, c.Assignment.CustomerId }, set = SetSnapshot(c.Source) });
+    private static string TargetSnapshot(Configuration c) => Hash(SetSnapshot(c.Target));
+    private static string Hash(object value) => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value))).ToLowerInvariant();
+    private static bool Label(string? value, int limit) => !string.IsNullOrWhiteSpace(value) && value.Length <= limit && value.All(character => character is >= ' ' and <= '~');
+}
