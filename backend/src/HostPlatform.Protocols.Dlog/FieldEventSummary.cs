@@ -156,9 +156,9 @@ public static class FieldEventSummary
         if (TryInt(fields["percentFull"], out var pct))
             parts.Add($"{pct}% full");
         if (TryInt(fields["currencyValue"], out var cur))
-            parts.Add($"value {cur}");
+            parts.Add(cur < 0 ? $"balance unknown (invalid reported value {cur})" : $"value {cur}");
         if (TryInt(fields["totalCurrencyValue"], out var total))
-            parts.Add($"total {total}");
+            parts.Add(total < 0 ? $"collection total unknown (invalid reported value {total})" : $"total {total}");
         return parts.Count == 0 ? null : string.Join(", ", parts);
     }
 

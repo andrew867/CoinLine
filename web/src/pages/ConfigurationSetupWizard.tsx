@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { apiPostRaw } from '../api/client'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 import { FamilyOperatingModeNotice, type FamilyOperatingMode } from './FamilyOperatingModeNotice'
+import { CollectionConfigurationPanel, type CollectionConfiguration } from './CollectionConfigurationPanel'
 
 type Source = { id: string; name: string; status: number; isDefault?: boolean; targetFirmwareVersionId?: string | null; targetFirmware: string | null }
 type Choices = { name: string; familyId: string; paymentMode: number; pricing: string; tariffIndex: string;
@@ -11,6 +12,7 @@ type Preview = { previewToken: string; canCreate: boolean; sourceIsStarterDraft?
   family: { familyLabel: string; documented: boolean; tables: { name: string; required: boolean; status: string }[]; operatingMode?: FamilyOperatingMode | null };
   provisioning: { operatingType: string | null; acceptedCoinSlots: number | null; configuredCardRanges: number | null;
     visibleOnHookTextMessages?: number | null; onHookAdvertising?: boolean | null; graphicalOnHookAdvertising?: boolean | null;
+    collectionConfiguration?: CollectionConfiguration | null;
     findings: { tableNumber: number; message: string }[] };
   findings: { tableNumber: number; blocking: boolean; message: string }[] }
 
@@ -129,6 +131,7 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
         <FamilyOperatingModeNotice mode={review.family.operatingMode} />
         {!review.family.documented && <p>The selected terminal family has no complete documented checklist.</p>}
         {review.family.tables.filter(row => row.required && row.status !== 'present').map(row => <p key={row.name}>{row.name}: {row.status}</p>)}
+        {review.provisioning.collectionConfiguration && <CollectionConfigurationPanel review={review.provisioning.collectionConfiguration} />}
         {[...review.provisioning.findings, ...review.findings].map((finding, i) => <p key={i}>MT{finding.tableNumber}: {finding.message}</p>)}
         <p>Review the terminal's own management access, local route and its pricing index, card/coin acceptance and all required families before publishing. The draft is not an installation certificate.</p>
         <button type="button" className="quiet" disabled={busy} onClick={() => setStep(1)}>Back</button>{' '}

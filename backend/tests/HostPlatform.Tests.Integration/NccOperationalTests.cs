@@ -865,6 +865,15 @@ public class NccOperationalTests(NccListenFixture fx) : IClassFixture<NccListenF
             await statusUpload.Stream.WriteAsync(Message(wire, [.. replacement, 13]));
             AssertAck(await ReadFrameAsync(statusUpload.Stream, TimeSpan.FromSeconds(5)));
         }
+        // Even after a replacement report, delayed data for the removed box
+        // must not re-establish it as the current cashbox.
+        Assert.Equal(new byte[] { 5, 0x46, 0x02 }, await ExchangeAsync(callAndStatus));
+        var staleStatus = status.ToArray();
+        BinaryPrimitives.WriteInt32LittleEndian(staleStatus.AsSpan(13), 100);
+        Assert.Equal(new byte[] { 5, 0x46, 0x02 }, await ExchangeAsync([.. cdr, .. staleStatus, 13]));
+        var replacementLedger = await fx.Client.GetFromJsonAsync<JsonElement>(cashboxPath, Json);
+        var replacementCurrent = Assert.Single(replacementLedger.GetProperty("statuses").EnumerateArray(), row => row.GetProperty("isCurrent").GetBoolean());
+        Assert.Equal("00001002", replacementCurrent.GetProperty("status").GetProperty("boxNumber").GetString());
         await using var combined = await OpenAsync();
         await combined.Stream.WriteAsync(Message(wire, [44, 0x81]));
         AssertAck(await ReadFrameAsync(combined.Stream, TimeSpan.FromSeconds(5)));
