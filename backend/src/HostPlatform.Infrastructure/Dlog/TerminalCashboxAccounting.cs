@@ -38,7 +38,7 @@ public static class TerminalCashboxAccounting
     public static async Task<Ledger> ReadAsync(HostPlatformDbContext db, Guid terminalId, CancellationToken ct)
     {
         var reports = await ReadReportsAsync(db, terminalId, ct);
-        var current = FindCurrentStatus(reports);
+        var current = FindLatestStatus(reports);
         var initializations = await ReadInitializationsAsync(db, terminalId, ct);
         var initialized = FindCurrentInitialization(reports, initializations);
         var byBox = new Dictionary<string, StatusReport>();
@@ -46,7 +46,7 @@ public static class TerminalCashboxAccounting
         foreach (var report in reports)
         {
             if (DlogCashboxWire.TryReadStatus(report.Bytes, out var status))
-                byBox[status.BoxNumber] = new StatusReport(report.Id, report.ReceivedAtUtc, status, current?.Id == report.Id);
+                byBox[status.BoxNumber] = new StatusReport(report.Id, report.ReceivedAtUtc, status, current?.Id == report.Id && initialized == null);
             else if (DlogCashboxWire.TryReadCollection(report.Bytes, out var collection))
                 collections.Add((collection, new CollectionReport(report.Id, report.ReceivedAtUtc, collection.RemovedBox.TerminalTime,
                     collection.RemovedBox.BoxNumber, collection.NewBoxNumber, collection.Sequence, (collection.Flags & 1) != 0,
@@ -62,7 +62,7 @@ public static class TerminalCashboxAccounting
             .OrderByDescending(row => row.ReceivedAtUtc).ToArray();
         return new Ledger(byBox.Values.OrderByDescending(row => row.ReceivedAtUtc).ToArray(), collectionHistory,
             initializations.OrderByDescending(row => row.RecordedAtUtc).Select(row => View(row, initialized?.Id == row.Id)).ToArray(),
-            current == null && (initialized == null || initialized.Source == DefaultSource), ExpectedNewBox(reports),
+            FindCurrentStatus(reports) == null && (initialized == null || initialized.Source == DefaultSource), ExpectedNewBox(reports),
             reports.Count == 0 && initialized == null && await HasConfiguredCoinsAsync(db, terminalId, ct));
     }
 
@@ -184,8 +184,11 @@ public static class TerminalCashboxAccounting
         return result;
     }
 
-    private static Reading? FindCurrentStatus(List<Reading> reports) =>
+    private static Reading? FindLatestStatus(List<Reading> reports) =>
         reports.LastOrDefault() is { } last && last.Bytes[0] == DlogCashboxWire.StatusType ? last : null;
+
+    private static Reading? FindCurrentStatus(List<Reading> reports) =>
+        FindLatestStatus(reports) is { } last && DlogCashboxWire.TryReadStatus(last.Bytes, out var status) && status.BalanceKnown ? last : null;
 
     private static async Task<List<Reading>> ReadReportsAsync(HostPlatformDbContext db, Guid terminalId, CancellationToken ct)
     {
@@ -207,8 +210,12 @@ public static class TerminalCashboxAccounting
             if (length == 0 || (raw.Length != length && !(raw.Length == length + 1 && raw[^1] == 13)))
                 continue;
             var record = raw.Length == length ? raw : raw[..length];
-            if (seen.Add(Convert.ToHexString(DlogCashboxWire.IdentityBytes(record))))
-                reports.Add(row with { Bytes = record });
+            var identity = DlogCashboxWire.IdentityBytes(record);
+            // Status snapshots are ordered evidence, not additive values.
+            // Preserve newer status rows even when their bytes match an earlier
+            // report; observed initialization or a changed report may intervene.
+            if (record[0] == DlogCashboxWire.CollectionType && !seen.Add(Convert.ToHexString(identity))) continue;
+            reports.Add(row with { Bytes = record });
         }
         return reports;
     }

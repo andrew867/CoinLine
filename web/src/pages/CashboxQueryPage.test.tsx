@@ -104,6 +104,19 @@ it('locks query from a selected phone and refreshes only that phone', async () =
   ])
 })
 
+it('never displays an invalid signed cashbox amount as an actual negative balance', async () => {
+  vi.mocked(apiGet).mockResolvedValue({ statuses: [{ id: 'invalid', receivedAtUtc, isCurrent: true,
+    status: { ...status, balanceMinorUnits: -65536, balanceKnown: false, coinCounts: Array(16).fill(0) } }],
+    collections: [], canInitializeEmpty: false })
+  render(<MemoryRouter><TerminalCashboxPanel terminalId="fixture-0" /></MemoryRouter>)
+  const summary = await screen.findByRole('region', { name: 'Current reported cashbox' })
+  expect(within(summary).getByText('Unknown (invalid report)')).toBeVisible()
+  expect(within(summary).getByRole('note')).toHaveTextContent('invalid negative balance (-65536 minor units)')
+  expect(within(summary).getByRole('note')).toHaveTextContent('will not restore this value')
+  expect(screen.queryByText('-655.36')).not.toBeInTheDocument()
+  expect(within(screen.getByRole('table', { name: 'Latest status by box' })).getByText('Unknown (invalid report)')).toBeVisible()
+})
+
 it('keeps the selected-phone shortcut and screen tied to cashbox read permission', () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'phone-status': 1 })
   const { rerender } = render(<MemoryRouter><CashboxQueryLink terminalId="fixture-0" /></MemoryRouter>)

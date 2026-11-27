@@ -41,8 +41,32 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
             rawPayloadExact[0] == FieldEventCatalog.SoftwareVersionMessageType &&
             await db.NccSessions.AnyAsync(session => session.Id == nccSessionId && session.TerminalId == terminalId, ct);
         var cap = capturedAtUtc ?? DateTime.UtcNow;
+        // MT38 is a snapshot, not an additive collection. An identical snapshot
+        // after an intervening report can be genuine new evidence of recovery.
+        // Scope retry deduplication to the immediately previous matched report;
+        // MT51 retains its existing cross-session collection identity.
+        string? cashboxContext = null;
+        if (deduplicateCashbox && rawPayloadExact[0] == DlogCashboxWire.StatusType)
+        {
+            var previous = await db.DlogTransactions.AsNoTracking()
+                .Where(t => t.TerminalId == terminalId && t.Direction == (int)DlogDirection.TerminalToHost &&
+                    t.NccSessionId != null && t.NccSession!.TerminalId == terminalId &&
+                    (t.MessageType == DlogCashboxWire.StatusType || t.MessageType == DlogCashboxWire.CollectionType))
+                .OrderByDescending(t => t.CapturedAtUtc).ThenByDescending(t => t.Id).FirstOrDefaultAsync(ct);
+            var initialization = previous == null ? null : await db.AuditEvents.AsNoTracking()
+                .Where(a => a.TerminalId == terminalId && a.Category == "cashbox" &&
+                    (a.Action == "initialize_empty_box" || a.Action == "initialize_default_box") &&
+                    a.CreatedAtUtc > previous.CapturedAtUtc)
+                .OrderByDescending(a => a.CreatedAtUtc).ThenByDescending(a => a.Id).FirstOrDefaultAsync(ct);
+            if (initialization == null && previous is { MessageType: DlogCashboxWire.StatusType } &&
+                previous.RawPayload.Length >= DlogCashboxWire.StatusLength &&
+                DlogCashboxWire.IdentityBytes(previous.RawPayload.AsSpan(0, DlogCashboxWire.StatusLength))
+                    .SequenceEqual(DlogCashboxWire.IdentityBytes(rawPayloadExact)))
+                return previous;
+            cashboxContext = $"cashbox-status-after:{previous?.Id:N}:{initialization?.Id:N}";
+        }
         var idem = deduplicateCashbox
-            ? DlogIdempotency.ComputeKey(DlogCashboxWire.IdentityBytes(rawPayloadExact), direction, terminalId, null, null, "cashbox")
+            ? DlogIdempotency.ComputeKey(DlogCashboxWire.IdentityBytes(rawPayloadExact), direction, terminalId, null, null, cashboxContext ?? "cashbox")
             : DlogIdempotency.ComputeKey(rawPayloadExact, direction, terminalId, nccSessionId, sessionCorrelationId, clientIdempotencyExtra, liveVersion);
 
         var existing = await db.DlogTransactions
