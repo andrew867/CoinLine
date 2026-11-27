@@ -10,6 +10,8 @@
 .preparation-time label { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .preparation-record-picker { flex: 1 1 100%; }
 .preparation-record-picker select { max-width: 100%; }
+.preparation-preferences { border-top: 1px solid var(--border, #d5ded9); margin-top: 12px; padding-top: 10px; }
+.preparation-preferences h3 { font-size: 1rem; margin: 0 0 6px; }
 .preparation-review { margin-top: 16px; border-top: 1px solid var(--border, #d5ded9); padding-top: 12px; }
 .preparation-table { overflow-x: auto; margin-bottom: 12px; }
 .preparation-table table { width: 100%; border-collapse: collapse; text-align: left; }

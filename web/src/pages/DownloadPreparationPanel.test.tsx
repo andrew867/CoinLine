@@ -3,11 +3,12 @@ import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiFetch, apiGet, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
+import { saveDownloadSelectionPreference } from '../api/downloadSelectionPreferences'
 import { DownloadsPage } from './DownloadsPage'
 import { DownloadPreparationPanel } from './DownloadPreparationPanel'
 
 vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiGet: vi.fn(), apiPostRaw: vi.fn(), apiPostBare: vi.fn() }))
-afterEach(() => { cleanup(); vi.resetAllMocks(); consoleSession.clear() })
+afterEach(() => { cleanup(); vi.resetAllMocks(); consoleSession.clear(); localStorage.removeItem('coinline.downloadSelectionPreferences.v1') })
 
 const first = { id: 'phone-one', terminalIdHex: '0102030401', displayName: 'Lobby phone', active: true }
 const second = { id: 'phone-two', terminalIdHex: '0102030402', displayName: 'Shop phone', active: true }
@@ -115,6 +116,69 @@ it('prepares only selected record types across distinct sets, includes dependenc
   expect(await screen.findByText('2 download schedules created')).toBeVisible()
   expect(apiPostRaw).toHaveBeenLastCalledWith('/api/downloads/preparation', { terminalIds: [first.id, second.id], availableAtUtc: null, recordNumbers: [29], previewToken: 'partial' })
   expect(onPrepared).toHaveBeenCalledOnce()
+})
+
+it('saves separate workstation preferences and explicitly loads them without scheduling or changing phones', async () => {
+  vi.mocked(apiGet).mockResolvedValue({ phones: [first], more: false, maximumPhones: 40,
+    recordOptions: [{ tableNumber: 29, name: 'Text advertising' }, { tableNumber: 50, name: 'Coin validation' }] })
+  vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json({ phones: [reviewRow(first, 'Lobby configuration', [29])],
+    eligibleCount: 1, preparationAtUtc: null, previewToken: 'first-selection' }))
+  const ui = () => <MemoryRouter><DownloadPreparationPanel onPrepared={vi.fn()} /></MemoryRouter>
+  const rendered = render(ui())
+  fireEvent.click(await screen.findByRole('button', { name: /Add Lobby phone/ }))
+  fireEvent.click(screen.getByRole('radio', { name: 'Selected records only' }))
+  fireEvent.change(screen.getByLabelText('Record to add'), { target: { value: '29' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add record' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save current selection' }))
+  expect(screen.getByText('Standard saved records: MT29')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Review selected phones' }))
+  expect(await screen.findByRole('button', { name: 'Confirm preparation for 1 phone' })).toBeEnabled()
+  fireEvent.change(screen.getByLabelText('Preference'), { target: { value: 'inmate' } })
+  expect(screen.getByRole('button', { name: 'Confirm preparation for 1 phone' })).toBeEnabled()
+  fireEvent.change(screen.getByLabelText('Preference'), { target: { value: 'standard' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Load preference' }))
+  expect(screen.queryByRole('button', { name: 'Confirm preparation for 1 phone' })).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Preference'), { target: { value: 'inmate' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Remove MT29' }))
+  fireEvent.change(screen.getByLabelText('Record to add'), { target: { value: '50' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add record' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Save current selection' }))
+  expect(screen.getByText('Inmate saved records: MT50')).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Preference'), { target: { value: 'standard' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Load preference' }))
+  expect(within(screen.getByRole('list', { name: 'Selected records' })).getByText('MT29 · Text advertising')).toBeVisible()
+  expect(within(screen.getByRole('list', { name: 'Selected phones' })).getAllByRole('listitem')).toHaveLength(1)
+  expect(apiPostRaw).toHaveBeenCalledTimes(1)
+  rendered.unmount()
+  render(ui())
+  await screen.findByRole('button', { name: /Add Lobby phone/ })
+  expect(screen.getByRole('radio', { name: 'Full assigned configuration' })).toBeChecked()
+  fireEvent.click(screen.getByRole('radio', { name: 'Selected records only' }))
+  expect(screen.getByText('No records selected.')).toBeVisible()
+  expect(screen.getByText('Standard saved records: MT29')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Clear saved preference' }))
+  expect(screen.getByText('No standard preference saved.')).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Preference'), { target: { value: 'inmate' } })
+  expect(screen.getByText('Inmate saved records: MT50')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Load preference' }))
+  expect(within(screen.getByRole('list', { name: 'Selected records' })).getByText('MT50 · Coin validation')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Review selected phones' })).toBeDisabled()
+  expect(apiPostRaw).toHaveBeenCalledTimes(1)
+})
+
+it('does not silently drop an unavailable record from a saved preference', async () => {
+  saveDownloadSelectionPreference('standard', [29, 73])
+  vi.mocked(apiGet).mockResolvedValue({ phones: [first], more: false, maximumPhones: 40,
+    recordOptions: [{ tableNumber: 29, name: 'Text advertising' }, { tableNumber: 50, name: 'Coin validation' }] })
+  render(<MemoryRouter><DownloadPreparationPanel onPrepared={vi.fn()} /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole('button', { name: /Add Lobby phone/ }))
+  fireEvent.click(screen.getByRole('radio', { name: 'Selected records only' }))
+  fireEvent.change(screen.getByLabelText('Record to add'), { target: { value: '50' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add record' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Load preference' }))
+  expect(screen.getByText(/saved selection includes unavailable records: MT73/)).toBeVisible()
+  expect(within(screen.getByRole('list', { name: 'Selected records' })).getByText('MT50 · Coin validation')).toBeVisible()
+  expect(apiPostRaw).not.toHaveBeenCalled()
 })
 
 

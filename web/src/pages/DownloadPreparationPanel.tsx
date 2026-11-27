@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
+import { readDownloadSelectionPreferences, saveDownloadSelectionPreference, type SelectionProfile } from '../api/downloadSelectionPreferences'
 import './DownloadPreparationPanel.css'
 
 const endpoint = '/api/downloads/preparation'
@@ -28,6 +29,9 @@ export function DownloadPreparationPanel({ onPrepared, showBatchLinks = true }: 
   const [scope, setScope] = useState<'full' | 'selected'>('full')
   const [selectedRecords, setSelectedRecords] = useState<RecordOption[]>([])
   const [nextRecord, setNextRecord] = useState('')
+  const [selectionProfile, setSelectionProfile] = useState<SelectionProfile>('standard')
+  const [preferences, setPreferences] = useState(readDownloadSelectionPreferences)
+  const [preferenceMessage, setPreferenceMessage] = useState('')
   const [timing, setTiming] = useState<'now' | 'later'>('now')
   const [dateTime, setDateTime] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -68,6 +72,37 @@ export function DownloadPreparationPanel({ onPrepared, showBatchLinks = true }: 
   }
 
   const availableRecords = (options?.recordOptions ?? []).filter(record => !selectedRecords.some(chosen => chosen.tableNumber === record.tableNumber))
+  const preferenceLabel = selectionProfile === 'standard' ? 'Standard' : 'Inmate'
+  const savedSelection = preferences[selectionProfile]
+
+  function savePreference(clear = false) {
+    try {
+      setPreferences(saveDownloadSelectionPreference(selectionProfile, clear ? null : selectedRecords.map(record => record.tableNumber)))
+      setPreferenceMessage(clear ? `${preferenceLabel} preference cleared.` : `${preferenceLabel} preference saved on this workstation.`)
+    } catch {
+      setPreferenceMessage('Could not save the preference on this workstation. The current record selection is unchanged.')
+    }
+  }
+
+  function loadPreference() {
+    const current = readDownloadSelectionPreferences()
+    setPreferences(current)
+    const numbers = current[selectionProfile]
+    if (!numbers || !options?.recordOptions) {
+      setPreferenceMessage('No available saved selection. The current record selection is unchanged.')
+      return
+    }
+    const choices = new Map(options.recordOptions.map(record => [record.tableNumber, record]))
+    const missing = numbers.filter(number => !choices.has(number))
+    if (missing.length) {
+      setPreferenceMessage(`The saved selection includes unavailable records: ${missing.map(number => `MT${number}`).join(', ')}. The current selection is unchanged.`)
+      return
+    }
+    setSelectedRecords(numbers.map(number => choices.get(number)!))
+    setNextRecord('')
+    invalidate()
+    setPreferenceMessage(`${preferenceLabel} selection loaded. Review the phones before preparing anything.`)
+  }
 
   async function review() {
     setBusy(true)
@@ -160,6 +195,20 @@ export function DownloadPreparationPanel({ onPrepared, showBatchLinks = true }: 
           </li>)}
         </ul>
         {!selectedRecords.length && <p>No records selected.</p>}
+        <div className="preparation-preferences" aria-labelledby="preparation-preferences-heading">
+          <h3 id="preparation-preferences-heading">Workstation record preferences</h3>
+          <p>Save separate standard and inmate selections in this browser. Loading a preference changes only the record list; it never assigns a configuration or schedules a download.</p>
+          <div className="row-actions">
+            <label>Preference<select aria-label="Preference" value={selectionProfile} onChange={event => {
+              setSelectionProfile(event.target.value as SelectionProfile); setPreferences(readDownloadSelectionPreferences()); setPreferenceMessage('')
+            }}><option value="standard">Standard</option><option value="inmate">Inmate</option></select></label>
+            <button type="button" disabled={!savedSelection || !options?.recordOptions} onClick={loadPreference}>Load preference</button>
+            <button type="button" disabled={!selectedRecords.length} onClick={() => savePreference()}>Save current selection</button>
+            <button type="button" disabled={!savedSelection} onClick={() => savePreference(true)}>Clear saved preference</button>
+          </div>
+          <p>{savedSelection ? `${preferenceLabel} saved records: ${savedSelection.map(number => `MT${number}`).join(', ')}` : `No ${preferenceLabel.toLowerCase()} preference saved.`}</p>
+          {preferenceMessage && <p role="status">{preferenceMessage}</p>}
+        </div>
       </div>}
     </fieldset>
     <fieldset className="preparation-time" disabled={busy}>
