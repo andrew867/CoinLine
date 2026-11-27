@@ -1,4 +1,5 @@
 import { FirmwareTariffStagingPanel } from './FirmwareTariffStagingPanel'
+import { FirmwareSetupStagingPanel } from './FirmwareSetupStagingPanel'
 import { useState } from 'react'
 import { FirmwareLocalDialingStagingPanel } from './FirmwareLocalDialingStagingPanel'
 import { Link } from 'react-router-dom'
@@ -121,10 +122,18 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
         {review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
           laterTariffProfiles.has(review.targetProfileId ?? '') && review.records.some(record => record.tableNumber === 73 &&
           record.sourceBytes === 1192 && record.targetExpectedBytes === 1192 && record.candidateBytes === 1192) &&
-          <FirmwareTariffStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+          <FirmwareTariffStagingPanel key={`tariff:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
             parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
               setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }])
               setCandidateId(id); setReview(null); resetStage()
+            }} />}
+        {review.sourceSetId && review.candidateSetId &&
+          [[26,72,72],[31,37,37],[92,3401,3061]].every(([number,sourceBytes,targetBytes]) => review.records.some(record =>
+            record.tableNumber === number && record.sourceBytes === sourceBytes && record.targetExpectedBytes === targetBytes && record.candidateBytes === targetBytes)) &&
+          <FirmwareSetupStagingPanel key={`setup:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            graphical={review.targetProfileId === 'mtr2x-multipay-graphical-180-double-compressed'} parentBusy={busy} onBusyChange={setBusy}
+            canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
             }} />}
         {review.sourceSetId && review.candidateSetId && canPerform('table-sets', op.add) && review.records.some(record =>
           record.tableNumber === 21 && record.targetExpectedBytes === record.candidateBytes &&
@@ -143,7 +152,7 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
           </section>}
         {review.sourceSetId && review.candidateSetId && canPerform('table-sets', op.add) && review.records.some(record =>
           record.tableNumber === 92 && record.sourceBytes === 3401 && record.targetExpectedBytes === 3061 && record.candidateBytes === 3061) &&
-          <FirmwareScreeningStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId}
+          <FirmwareScreeningStagingPanel key={`screening:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId}
             candidateId={candidateId} parentBusy={busy} onBusyChange={setBusy} onDraftCreated={(id, name) => {
               setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }])
               setCandidateId(id); setReview(null); resetStage()
@@ -152,7 +161,7 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
       {review && review.sourceSetId && review.candidateSetId && review.records.some(record => record.tableNumber >= 101 && record.tableNumber <= 115 && record.sourceBytes === 403) &&
           review.records.some(record => ((record.tableNumber >= 136 && record.tableNumber <= 149) || [154, 155].includes(record.tableNumber)) && record.targetExpectedBytes === 203) &&
           review.records.some(record => record.tableNumber === 73 && record.sourceBytes === 1192 && record.candidateBytes === 1192) &&
-          <FirmwareLocalDialingStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+          <FirmwareLocalDialingStagingPanel key={`local:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
             parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
               setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
             }} />}
