@@ -7,7 +7,8 @@ const endpoint = '/api/downloads/preparation'
 const maximumPhones = 40
 
 type Phone = { id: string; terminalIdHex: string; displayName: string; active: boolean }
-type Options = { phones: Phone[]; more: boolean; maximumPhones: number }
+type RecordOption = { tableNumber: number; name: string }
+type Options = { phones: Phone[]; more: boolean; maximumPhones: number; recordOptions?: RecordOption[] }
 type Review = { terminalId: string; terminalIdHex: string | null; displayName: string | null; tableSetId: string | null;
   tableSetName: string | null; records: { tableNumber: number; versionId: string; payloadSha256Hex: string }[]; eligible: boolean; reason: string | null }
 type Preview = { phones: Review[]; preparationAtUtc: string | null; previewToken: string; eligibleCount: number }
@@ -24,6 +25,9 @@ export function DownloadPreparationPanel({ onPrepared, showBatchLinks = true }: 
   const [searchError, setSearchError] = useState('')
   const [searchVersion, setSearchVersion] = useState(0)
   const [selected, setSelected] = useState<Phone[]>([])
+  const [scope, setScope] = useState<'full' | 'selected'>('full')
+  const [selectedRecords, setSelectedRecords] = useState<RecordOption[]>([])
+  const [nextRecord, setNextRecord] = useState('')
   const [timing, setTiming] = useState<'now' | 'later'>('now')
   const [dateTime, setDateTime] = useState('')
   const [preview, setPreview] = useState<Preview | null>(null)
@@ -59,8 +63,11 @@ export function DownloadPreparationPanel({ onPrepared, showBatchLinks = true }: 
 
   function requestBody() {
     const availableAtUtc = timing === 'later' ? new Date(`${dateTime}Z`).toISOString() : null
-    return { terminalIds: selected.map(phone => phone.id), availableAtUtc }
+    return { terminalIds: selected.map(phone => phone.id), availableAtUtc,
+      ...(scope === 'selected' ? { recordNumbers: selectedRecords.map(record => record.tableNumber).sort((a, b) => a - b) } : {}) }
   }
+
+  const availableRecords = (options?.recordOptions ?? []).filter(record => !selectedRecords.some(chosen => chosen.tableNumber === record.tableNumber))
 
   async function review() {
     setBusy(true)
@@ -94,7 +101,7 @@ export function DownloadPreparationPanel({ onPrepared, showBatchLinks = true }: 
 
   return <section className="download-preparation" aria-labelledby="prepare-assigned-heading">
     <h2 id="prepare-assigned-heading">Prepare assigned configurations</h2>
-    <p className="page-intro">Select up to 40 phones. Each receives its own current published configuration, not a shared replacement set. Preparation does not mean the phone has picked up the download.</p>
+    <p className="page-intro">Select up to 40 phones. Each receives records from its own current published configuration, not a shared replacement set. Preparation does not mean the phone has picked up the download.</p>
     <div className="preparation-panes">
       <div className="preparation-pane">
         <h3>Find phones</h3>
@@ -131,17 +138,43 @@ export function DownloadPreparationPanel({ onPrepared, showBatchLinks = true }: 
       </div>
     </div>
     <fieldset className="preparation-time" disabled={busy}>
+      <legend>Configuration records</legend>
+      <label><input type="radio" name="preparation-scope" checked={scope === 'full'} onChange={() => { setScope('full'); invalidate() }} /> Full assigned configuration</label>
+      <label><input type="radio" name="preparation-scope" checked={scope === 'selected'} onChange={() => { setScope('selected'); invalidate() }} /> Selected records only</label>
+      {scope === 'selected' && <div className="preparation-record-picker">
+        <p>Select the same record types for every phone. Required dependencies are included from each phone's own set. Missing or incompatible records block confirmation. Selected schedules are picked up during routine phone contact; a manual Craft refresh is a separate workflow.</p>
+        <div className="row-actions">
+          <label>Record to add<select value={nextRecord} onChange={event => setNextRecord(event.target.value)}>
+            <option value="">Choose a configuration record</option>
+            {availableRecords.map(record => <option key={record.tableNumber} value={record.tableNumber}>MT{record.tableNumber} · {record.name}</option>)}
+          </select></label>
+          <button type="button" disabled={!availableRecords.some(record => String(record.tableNumber) === nextRecord)} onClick={() => {
+            const record = availableRecords.find(row => String(row.tableNumber) === nextRecord)
+            if (record) { setSelectedRecords(current => [...current, record]); setNextRecord(''); invalidate() }
+          }}>Add record</button>
+        </div>
+        <ul className="preparation-phone-list" aria-label="Selected records">
+          {selectedRecords.map(record => <li key={record.tableNumber}>
+            <span>MT{record.tableNumber} · {record.name}</span>
+            <button type="button" aria-label={`Remove MT${record.tableNumber}`} onClick={() => { setSelectedRecords(current => current.filter(row => row.tableNumber !== record.tableNumber)); invalidate() }}>Remove</button>
+          </li>)}
+        </ul>
+        {!selectedRecords.length && <p>No records selected.</p>}
+      </div>}
+    </fieldset>
+    <fieldset className="preparation-time" disabled={busy}>
       <legend>Host preparation time</legend>
       <label><input type="radio" name="preparation-time" checked={timing === 'now'} onChange={() => { setTiming('now'); invalidate() }} /> Prepare now</label>
       <label><input type="radio" name="preparation-time" checked={timing === 'later'} onChange={() => { setTiming('later'); invalidate() }} /> Prepare later</label>
       {timing === 'later' && <label>Preparation time (UTC)<input type="datetime-local" value={dateTime} onChange={event => { setDateTime(event.target.value); invalidate() }} required /></label>}
     </fieldset>
-    <p>Once confirmed, each schedule retains the reviewed published set. Changing a phone assignment later does not change that already scheduled set.</p>
-    <button type="button" disabled={busy || !selected.length || (timing === 'later' && !dateTime)} onClick={() => void review()}>Review selected phones</button>
+    <p>Once confirmed, each schedule retains the reviewed published set and record selection. Changing a phone assignment later does not change that already scheduled set.</p>
+    <button type="button" disabled={busy || !selected.length || (scope === 'selected' && !selectedRecords.length) || (timing === 'later' && !dateTime)} onClick={() => void review()}>Review selected phones</button>
     {error && <p role="alert">{error}</p>}
     {preview && <section className="preparation-review" aria-labelledby="preparation-review-heading">
       <h3 id="preparation-review-heading">Download review</h3>
       <p>{preview.eligibleCount} of {preview.phones.length} phones eligible. {preview.preparationAtUtc ? `Prepare at ${utcLabel(preview.preparationAtUtc)}.` : 'Pack the reviewed configurations now.'}</p>
+      {scope === 'selected' && <p>Requested records: {selectedRecords.map(record => `MT${record.tableNumber}`).join(', ')}. Additional records in the review are required dependencies.</p>}
       <div className="preparation-table"><table>
         <thead><tr><th>Phone</th><th>Assigned configuration</th><th>Records</th><th>Review result</th></tr></thead>
         <tbody>{preview.phones.map(phone => <tr key={phone.terminalId}>
