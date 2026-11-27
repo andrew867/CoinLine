@@ -22,6 +22,131 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresCallUploadCompletionTests
 {
     [PostgresIntegrationFact]
+    public async Task Operator_confirmed_empty_box_is_a_distinct_baseline_and_real_reports_supersede_it()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint!).Port; probe.Stop();
+        var key = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
+            .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()).UseSetting("Ncc:LoopbackOnly", "true"));
+        using var api = TestOperatorAuthentication.CreateAuthenticatedClient(factory); api.DefaultRequestHeaders.Add("X-API-Key", key);
+        var (phone, _) = await Seed(factory.Services);
+        var endpoint = $"/api/terminals/{phone.Id}/cashbox";
+        var action = endpoint + "/initialize-empty";
+        var observed = new { boxNumber = "012345AB", openingClock = "2028-02-29T10:11:12", confirmEmpty = true };
+        var ledger = await api.GetFromJsonAsync<JsonElement>(endpoint);
+        Assert.True(ledger.GetProperty("canInitializeEmpty").GetBoolean());
+        Assert.Empty(ledger.GetProperty("statuses").EnumerateArray());
+        using (var invalid = await api.PostAsJsonAsync(action, new { observed.boxNumber, observed.openingClock, confirmEmpty = false }))
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        using (var invalid = await api.PostAsJsonAsync(action, new { boxNumber = "AB", observed.openingClock, confirmEmpty = true }))
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+
+        var reader = TestOperatorAuthentication.EnsureAccount(factory, "cashbox-reader-" + Guid.NewGuid().ToString("N"), "Operator");
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var account = await db.OperatorAccounts.SingleAsync(row => row.Id == reader.Id); account.PermissionProfileJson = "{\"cashbox\":1}";
+            await db.SaveChangesAsync();
+        }
+        using var restricted = TestOperatorAuthentication.CreateAuthenticatedClient(factory, reader.Username, "Operator");
+        restricted.DefaultRequestHeaders.Add("X-API-Key", key);
+        Assert.Equal(HttpStatusCode.OK, (await restricted.GetAsync(endpoint)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await restricted.PostAsJsonAsync(action, observed)).StatusCode);
+
+        var status = new byte[11]; status[0] = 10; var version = new byte[28]; version[0] = 60;
+        byte[] attention = [42, 0x82, .. status, .. version];
+        using (var socket = await Connect())
+        {
+            var stream = socket.GetStream(); await Send(stream, 0, attention); AssertAck(await Read(stream));
+            var none = await Read(stream); Assert.Equal(new byte[] { 17 }, none.Data);
+            Assert.Equal(HttpStatusCode.Conflict, (await api.PostAsJsonAsync(action, observed)).StatusCode);
+            await Send(stream, (byte)(NccControl.Ack | NccControl.Clr | none.Control));
+        }
+        await Idle();
+        var results = await Task.WhenAll(api.PostAsJsonAsync(action, observed), api.PostAsJsonAsync(action, observed));
+        Assert.All(results, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+        var initialized1 = await results[0].Content.ReadFromJsonAsync<JsonElement>();
+        var initialized2 = await results[1].Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal(initialized1.GetProperty("id").GetGuid(), initialized2.GetProperty("id").GetGuid());
+        Assert.Equal(HttpStatusCode.Conflict, (await api.PostAsJsonAsync(action, new { boxNumber = "012345AC", observed.openingClock, confirmEmpty = true })).StatusCode);
+        ledger = await api.GetFromJsonAsync<JsonElement>(endpoint);
+        Assert.Empty(ledger.GetProperty("statuses").EnumerateArray()); Assert.Empty(ledger.GetProperty("collections").EnumerateArray());
+        var init = Assert.Single(ledger.GetProperty("initializations").EnumerateArray()); Assert.True(init.GetProperty("isCurrent").GetBoolean());
+        Assert.False(ledger.GetProperty("canInitializeEmpty").GetBoolean());
+        byte[] empty = DlogCashboxWire.EncodeEmptyStatus(new DateTime(2028, 2, 29, 10, 11, 12), observed.boxNumber);
+        var actual = empty.ToArray(); BinaryPrimitives.WriteInt32LittleEndian(actual.AsSpan(13), 25); actual[12] = 5;
+        BinaryPrimitives.WriteUInt16LittleEndian(actual.AsSpan(17), 1);
+        using (var socket = await Connect())
+        {
+            var stream = socket.GetStream(); await Send(stream, 0, attention); AssertAck(await Read(stream));
+            var restore = await Read(stream); Assert.Equal([..empty,17], restore.Data);
+            await Send(stream, (byte)(NccControl.Ack | restore.Control));
+            await Send(stream, 1, [..actual,13]); AssertAck(await Read(stream));
+            var end = await Read(stream); Assert.Equal(new byte[] { 13 }, end.Data);
+            await Send(stream, (byte)(NccControl.Ack | NccControl.Clr | end.Control));
+        }
+        await Idle();
+        ledger = await api.GetFromJsonAsync<JsonElement>(endpoint);
+        Assert.False(Assert.Single(ledger.GetProperty("initializations").EnumerateArray()).GetProperty("isCurrent").GetBoolean());
+        Assert.True(Assert.Single(ledger.GetProperty("statuses").EnumerateArray()).GetProperty("isCurrent").GetBoolean());
+        Assert.Equal(HttpStatusCode.Conflict, (await api.PostAsJsonAsync(action, observed)).StatusCode);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.Single(await db.AuditEvents.Where(row => row.TerminalId == phone.Id && row.Action == "initialize_empty_box").ToListAsync());
+            Assert.Equal(actual, Assert.Single(await db.DlogTransactions.Where(row => row.TerminalId == phone.Id && row.MessageType == 38).ToListAsync()).RawPayload);
+            var restorations = await db.AuditEvents.Where(row => row.TerminalId == phone.Id && row.Action == "call_upload_cashbox_restore").ToListAsync();
+            var restored = Assert.Single(restorations.Where(row => row.DetailJson.Contains("operator_initialized")));
+            var details = await api.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{restored.TerminalSessionId}/upload-observations");
+            Assert.Equal("operator_initialized", Assert.Single(details.GetProperty("cashboxRestores").EnumerateArray()).GetProperty("source").GetString());
+        }
+
+        var collection = new byte[DlogCashboxWire.CollectionLength]; collection[0] = 51;
+        Convert.FromHexString("012345AC").CopyTo(collection, 5);
+        BinaryPrimitives.WriteUInt16LittleEndian(collection.AsSpan(9), 1);
+        BinaryPrimitives.WriteInt32LittleEndian(collection.AsSpan(11), 25);
+        actual.AsSpan(1).CopyTo(collection.AsSpan(15));
+        using (var socket = await Connect())
+        {
+            var stream = socket.GetStream(); await Send(stream, 0, attention); AssertAck(await Read(stream));
+            var restore = await Read(stream); Assert.Equal([..actual,17], restore.Data);
+            await Send(stream, (byte)(NccControl.Ack | restore.Control));
+            await Send(stream, 1, [..collection,13]); AssertAck(await Read(stream));
+            var end = await Read(stream); Assert.Equal(new byte[] { 13 }, end.Data);
+            await Send(stream, (byte)(NccControl.Ack | NccControl.Clr | end.Control));
+        }
+        await Idle();
+        ledger = await api.GetFromJsonAsync<JsonElement>(endpoint);
+        Assert.True(ledger.GetProperty("canInitializeEmpty").GetBoolean());
+        Assert.Equal("012345AC", ledger.GetProperty("expectedNewBoxNumber").GetString());
+        Assert.Single(ledger.GetProperty("collections").EnumerateArray());
+        Assert.Equal(HttpStatusCode.Conflict, (await api.PostAsJsonAsync(action, observed)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await api.PostAsJsonAsync(action,
+            new { boxNumber = "012345AC", openingClock = "2028-03-01T10:11:12", confirmEmpty = true })).StatusCode);
+        ledger = await api.GetFromJsonAsync<JsonElement>(endpoint);
+        Assert.Equal(2, ledger.GetProperty("initializations").GetArrayLength());
+        Assert.Equal("012345AC", Assert.Single(ledger.GetProperty("initializations").EnumerateArray().Where(row => row.GetProperty("isCurrent").GetBoolean())).GetProperty("boxNumber").GetString());
+
+        async Task<TcpClient> Connect() { var socket = new TcpClient(); await socket.ConnectAsync(IPAddress.Loopback, port); return socket; }
+        Task Send(NetworkStream stream, byte control, byte[]? data = null) => stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket
+            { Control = control, TerminalId = Convert.FromHexString(phone.TerminalIdHex), Data = data ?? [] })).AsTask();
+        async Task Idle()
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (true)
+            {
+                await using var scope = factory.Services.CreateAsyncScope();
+                if (!await scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>().NccSessions.AnyAsync(row => row.TerminalId == phone.Id && row.Status == NccSessionStatus.Active, deadline.Token)) return;
+                await Task.Delay(50, deadline.Token);
+            }
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Combined_cashbox_and_call_upload_attention_restores_only_known_current_status_before_transmit_request()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
@@ -93,7 +218,9 @@ public sealed class PostgresCallUploadCompletionTests
             Assert.True(data.GetProperty("sent").GetBoolean()); Assert.Equal(row.TerminalId == known.Id ? 58 : 1, data.GetProperty("responseBytes").GetInt32());
             var detail = await api.GetFromJsonAsync<JsonElement>($"/api/ncc/sessions/{row.TerminalSessionId}/upload-observations");
             var restore = Assert.Single(detail.GetProperty("cashboxRestores").EnumerateArray());
-            Assert.Equal(new[] { "available", "observedAtUtc", "responseBytes", "sent" }, restore.EnumerateObject().Select(field => field.Name).Order());
+            Assert.Equal(row.TerminalId == known.Id ? new[] { "available", "observedAtUtc", "responseBytes", "sent", "source" } :
+                new[] { "available", "observedAtUtc", "responseBytes", "sent" }, restore.EnumerateObject().Select(field => field.Name).Order());
+            if (row.TerminalId == known.Id) Assert.Equal("terminal_report", restore.GetProperty("source").GetString());
             Assert.Equal(row.TerminalId == known.Id, restore.GetProperty("available").GetBoolean());
         }
         var batch = Assert.Single(await db.DownloadBatches.Where(row => row.TerminalId == known.Id).ToListAsync());

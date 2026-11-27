@@ -5,6 +5,20 @@ namespace HostPlatform.Tests.Protocol;
 
 public sealed class CashboxStatusConditionTests
 {
+    [Fact]
+    public void Observed_empty_initialization_has_exact_clock_identifier_and_zero_values()
+    {
+        var clock = new DateTime(2028, 2, 29, 10, 11, 12, DateTimeKind.Unspecified);
+        var raw = DlogCashboxWire.EncodeEmptyStatus(clock, "012345AB");
+        Assert.Equal(DlogCashboxWire.StatusLength, raw.Length);
+        Assert.Equal(new byte[] { 38, 128, 2, 29, 10, 11, 12, 0, 1, 0x23, 0x45, 0xAB }, raw[..12]);
+        Assert.All(raw[12..], b => Assert.Equal(0, b));
+        Assert.True(DlogCashboxWire.TryReadStatus(raw, out var status));
+        Assert.Equal(clock, status.TerminalTime); Assert.Equal("012345AB", status.BoxNumber);
+        Assert.Throws<ArgumentException>(() => DlogCashboxWire.EncodeEmptyStatus(DateTime.SpecifyKind(clock, DateTimeKind.Utc), "012345AB"));
+        Assert.Throws<ArgumentException>(() => DlogCashboxWire.EncodeEmptyStatus(clock, "1234"));
+    }
+
     [Theory]
     [InlineData(0, "Normal state", 0)]
     [InlineData(1, "Value threshold exceeded", 0)]

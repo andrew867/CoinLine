@@ -106,7 +106,7 @@ public static class OperatorPermissions
             ("CallRecords", U, "Reconcile"));
         Screen("uploads", "Uploads", ("Uploads", R, "List Get"), ("Uploads", A, "Create Ingest"),
             ("Uploads", U, "Reprocess OperatorReview"), ("Terminals", A, "RequestCdrUpload"));
-        Screen("cashbox", "Cashbox accounting", ("TerminalCashbox", R, "Get Options"));
+        Screen("cashbox", "Cashbox accounting", ("TerminalCashbox", R, "Get Options"), ("TerminalCashbox", A, "InitializeEmpty"));
         Screen("ncc-sessions", "Phone sessions", ("NccSessions", R, "List Get Capture UploadObservations"), ("NccSessions", U, "Close Archive"));
         Screen("message-log", "Message log", ("Dlog", R, "MessageTypes CorrelationPairs MessagesLegacy Transactions TransactionById TransactionPayload Decode"),
             ("Dlog", A, "Ingest"), ("Dlog", U, "Replay"), ("Terminals", R, "DlogForTerminal"));

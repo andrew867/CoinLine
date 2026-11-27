@@ -1,4 +1,8 @@
+using System.Globalization;
+using HostPlatform.Domain;
+using HostPlatform.Infrastructure;
 using HostPlatform.Infrastructure.Dlog;
+using HostPlatform.Protocols.Dlog;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Services;
@@ -49,6 +53,27 @@ public sealed class TerminalCashboxController(HostPlatformDbContext db) : Contro
         return Ok(new CashboxLedgerView(ledger.Statuses, ledger.Collections,
             ledger.Statuses.Select(row => (row.Id, row.ReceivedAtUtc))
                 .Concat(ledger.Collections.Select(row => (row.Id, row.ReceivedAtUtc)))
-                .ToDictionary(row => row.Id, row => references[row.ReceivedAtUtc])));
+                .ToDictionary(row => row.Id, row => references[row.ReceivedAtUtc]), ledger.Initializations,
+            ledger.CanInitializeEmpty, ledger.ExpectedNewBoxNumber));
+    }
+
+    public sealed record EmptyBoxInput(string BoxNumber, string OpeningClock, bool ConfirmEmpty);
+
+    [HttpPost("initialize-empty")]
+    public async Task<ActionResult<TerminalCashboxAccounting.EmptyBoxInitialization>> InitializeEmpty(Guid terminalId,
+        [FromBody] EmptyBoxInput input, CancellationToken ct)
+    {
+        if (!await db.Terminals.AnyAsync(terminal => terminal.Id == terminalId && terminal.DeactivatedAtUtc == null, ct)) return NotFound();
+        if (!input.ConfirmEmpty || !DateTime.TryParseExact(input.OpeningClock, "yyyy-MM-dd'T'HH:mm:ss",
+            CultureInfo.InvariantCulture, DateTimeStyles.None, out var time))
+            return BadRequest(new { error = "Confirm an actually empty new box and enter the observed phone opening clock, including seconds." });
+        try { _ = DlogCashboxWire.EncodeEmptyStatus(time, input.BoxNumber); }
+        catch (ArgumentException) { return BadRequest(new { error = "Enter a valid observed opening clock and eight hexadecimal box identifier digits." }); }
+        if (await db.NccSessions.AnyAsync(session => session.TerminalId == terminalId && session.Status == NccSessionStatus.Active, ct))
+            return Conflict(new { error = "Wait until the phone's active NCC session closes before recording a new cashbox initialization." });
+        var result = await TerminalCashboxAccounting.InitializeEmptyAsync(db, terminalId, input.BoxNumber, time,
+            OperatorContext.Current?.OperatorId ?? "operator", ct);
+        if (result.Conflict != null) return Conflict(new { error = result.Conflict });
+        return Ok(result.Initialization);
     }
 }

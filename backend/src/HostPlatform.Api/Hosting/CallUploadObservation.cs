@@ -50,7 +50,8 @@ internal sealed record CallUploadObservation(int Sequence, bool Parsed, bool? En
             Math.Max(DlogCashboxWire.RecordLength(type), DlogTerminalStatisticsWire.StatusRecordLength(type))));
 }
 
-internal sealed record CallUploadCashboxRestoreObservation(DateTime ObservedAtUtc, bool Available, bool Sent, int ResponseBytes)
+internal sealed record CallUploadCashboxRestoreObservation(DateTime ObservedAtUtc, bool Available, bool Sent, int ResponseBytes,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Source = null)
 {
     internal static CallUploadCashboxRestoreObservation? Read(DateTime time, string detail)
     {
@@ -62,7 +63,9 @@ internal sealed record CallUploadCashboxRestoreObservation(DateTime ObservedAtUt
                 !root.TryGetProperty("sent", out var sent) || sent.ValueKind is not (JsonValueKind.True or JsonValueKind.False) ||
                 !root.TryGetProperty("responseBytes", out var count) || count.ValueKind != JsonValueKind.Number || !count.TryGetInt32(out var bytes) ||
                 bytes != (available.GetBoolean() ? DlogCashboxWire.StatusLength + 1 : 1)) return null;
-            return new(time, available.GetBoolean(), sent.GetBoolean(), bytes);
+            var source = available.GetBoolean() && root.TryGetProperty("source", out var sourceValue) && sourceValue.ValueKind == JsonValueKind.String &&
+                sourceValue.GetString() is "terminal_report" or "operator_initialized" ? sourceValue.GetString() : null;
+            return new(time, available.GetBoolean(), sent.GetBoolean(), bytes, source);
         }
         catch (JsonException) { return null; }
     }

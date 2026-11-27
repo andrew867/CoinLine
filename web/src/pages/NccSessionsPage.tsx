@@ -20,7 +20,7 @@ type UploadFrame = {
   endsDialogue: boolean | null
   records: { messageType: number; byteCount: number }[] | null
 }
-type CashboxRestore = { observedAtUtc: string; available: boolean; sent: boolean; responseBytes: number }
+type CashboxRestore = { observedAtUtc: string; available: boolean; sent: boolean; responseBytes: number; source?: 'terminal_report' | 'operator_initialized' }
 
 const recordNames: Record<number, string> = {
   4: 'Card call detail', 10: 'Terminal status', 13: 'End of data', 37: 'Communications statistics',
@@ -48,7 +48,9 @@ function UploadRecordObservation({ id }: { id: string }) {
     {frames?.length === 0 && <p>No explicit call-upload frame metadata was retained for this session. This does not establish that the phone sent no call or cashbox records.</p>}
     {restores.length > 0 && <><h3>Requested cashbox status</h3><ul>{restores.map((restore, index) => <li key={index}>
       {formatUtc(restore.observedAtUtc)}: {restore.sent ? restore.available
-        ? 'Last known cashbox status sent before the upload request. Terminal application is not confirmed.'
+        ? restore.source === 'operator_initialized'
+          ? 'Operator-confirmed empty-box initialization sent before the upload request. It is not a terminal report; terminal application is not confirmed.'
+          : 'Last known cashbox status sent before the upload request. Terminal application is not confirmed.'
         : 'No current cashbox status was known; call upload requested without a fabricated status.'
         : 'The combined upload response was not sent.'}</li>)}</ul></>}
     {!!frames?.length && frames.every(frame => frame.parsed && frame.records != null) && frames.some(frame => frame.endsDialogue === true) &&

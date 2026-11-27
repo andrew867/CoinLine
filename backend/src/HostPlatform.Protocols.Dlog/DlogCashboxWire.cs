@@ -57,6 +57,19 @@ public static class DlogCashboxWire
         return true;
     }
 
+    /// <summary>Encode a specifically observed empty new box; callers must supply its actual identifier and opening clock.</summary>
+    public static byte[] EncodeEmptyStatus(DateTime openingTime, string boxNumber)
+    {
+        if (openingTime.Kind != DateTimeKind.Unspecified || openingTime.Year is < 1901 or > 2155 || openingTime.Ticks % TimeSpan.TicksPerSecond != 0 ||
+            boxNumber is not { Length: 8 } || !boxNumber.All(Uri.IsHexDigit))
+            throw new ArgumentException("Supply an eight-digit hexadecimal box identifier and exact observed phone opening clock.");
+        var record = new byte[StatusLength];
+        record[0] = StatusType;
+        DlogTimeSyncWire.EncodeResponse(openingTime).AsSpan(1, 6).CopyTo(record.AsSpan(1));
+        Convert.FromHexString(boxNumber).CopyTo(record, 8);
+        return record;
+    }
+
     public static bool TryReadCollection(ReadOnlySpan<byte> raw, out Collection collection)
     {
         collection = null!;

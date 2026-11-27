@@ -12,7 +12,8 @@ public sealed record CashboxCoinReference(string Status, int? TableRevision = nu
     bool LaterUncertainAttempt = false, Guid? DownloadBatchId = null, IReadOnlyList<CoinValidationWire.Slot>? Slots = null);
 
 public sealed record CashboxLedgerView(IReadOnlyList<TerminalCashboxAccounting.StatusReport> Statuses,
-    IReadOnlyList<TerminalCashboxAccounting.CollectionReport> Collections, IReadOnlyDictionary<Guid, CashboxCoinReference> CoinConfigurations);
+    IReadOnlyList<TerminalCashboxAccounting.CollectionReport> Collections, IReadOnlyDictionary<Guid, CashboxCoinReference> CoinConfigurations,
+    IReadOnlyList<TerminalCashboxAccounting.EmptyBoxInitialization> Initializations, bool CanInitializeEmpty, string? ExpectedNewBoxNumber);
 
 internal static class CashboxCoinReferences
 {
