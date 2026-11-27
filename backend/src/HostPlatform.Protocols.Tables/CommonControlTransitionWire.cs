@@ -22,10 +22,11 @@ public static class CommonControlTransitionWire
         new("routine-call-in", 35, "Routine call-in and upload threshold", "Carries time of day, interval, retries and threshold. Candidate start date and one-time clock adjustment are retained."),
         new("coin-denominations", 50, "Coin values and acceptance", "The candidate's validator window enablement and volume calibration are retained unless separately selected."),
         new("coin-hardware", 50, "Validator windows and physical capacities", "Select only after checking the physical validator, coin volumes, cashbox and escrow hardware."),
-        new("coin-collection", 50, "Cashbox and escrow reporting thresholds", "Review these thresholds against the prepared target capacities. Existing cashbox status and collection history are not configuration fields.")
+        new("coin-collection", 50, "Cashbox and escrow reporting thresholds", "Review these thresholds against the prepared target capacities. Existing cashbox status and collection history are not configuration fields."),
+        new("daily-service-restriction", 58, "Daily service restriction", "Carry the earlier restriction level and daily local-time window. Candidate-only configurable route permissions and reserved bytes are retained, and must be reviewed independently.")
     ];
 
-    public static int? LengthFor(int number) => number switch { 29 => AdvertisingTableWire.RecordLength, 30 => 68, 32 => 33, 34 => 19, 35 => 21, 50 => 105, _ => null };
+    public static int? LengthFor(int number) => number switch { 29 => AdvertisingTableWire.RecordLength, 30 => 68, 32 => 33, 34 => 19, 35 => 21, 50 => 105, 58 => ServiceRestrictionWire.RecordLength, _ => null };
 
     public static CommonControlProjection Project(int number, byte[] source, byte[] target, IReadOnlyCollection<string> selections)
     {
@@ -44,7 +45,7 @@ public static class CommonControlTransitionWire
         else
         {
             var earlier = NativeTableLayouts.Find(number, source, NativeTableLayouts.MultiPay)!;
-            var later = NativeTableLayouts.Find(number, target, number == 34 ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay)!;
+            var later = NativeTableLayouts.Find(number, target, number is 34 or 58 ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay)!;
             var targetFields = later.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key, StringComparer.Ordinal);
             foreach (var group in groups)
             {
@@ -83,6 +84,15 @@ public static class CommonControlTransitionWire
         }
         if (selections.Count != 0)
         {
+            if (number == 58)
+            {
+                if (ServiceRestrictionWire.ConfigurationIssue(source, later: false) is { } sourceIssue)
+                    findings.Add(new(true, number, $"Earlier service restriction: {sourceIssue}"));
+                if (ServiceRestrictionWire.ConfigurationIssue(output, later: true) is { } targetIssue)
+                    findings.Add(new(true, number, $"Prepared target service restriction: {targetIssue}"));
+                if (target[1] == ServiceRestrictionWire.ConfigurableAccess && output[1] != target[1])
+                    findings.Add(new(false, number, "The candidate's configurable restricted-access level will be replaced. Its separately configured screening, quick-access and graphical permissions remain unchanged; review the resulting service policy."));
+            }
             if (number is 32 or 34)
                 findings.AddRange(CollectionPolicyWire.Review(output, later: true).Select(finding => new CommonControlFinding(finding.Blocking, number, finding.Message)));
             if (number == 50 && selections.Any(id => id is "coin-denominations" or "coin-hardware"))
@@ -118,6 +128,7 @@ public static class CommonControlTransitionWire
                 "coin-denominations" => field.Key.StartsWith("coin-", StringComparison.Ordinal) && (field.Key.EndsWith(".value", StringComparison.Ordinal) || field.Key.EndsWith(".accepted", StringComparison.Ordinal)),
                 "coin-hardware" => (field.Key.StartsWith("coin-", StringComparison.Ordinal) && (field.Key.EndsWith(".volume", StringComparison.Ordinal) || field.Key.EndsWith(".window", StringComparison.Ordinal))) || field.Key is "cashBoxVolume" or "escrowVolume",
                 "coin-collection" => field.Key is "cashBoxThreshold" or "cashBoxValue" or "escrowVolumeThreshold" or "escrowValue",
+                "daily-service-restriction" => section.Key == "restriction",
                 _ => false
             };
             if (include) yield return field;
