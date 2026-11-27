@@ -62,6 +62,7 @@ public static class OperatorPermissions
             ("TerminalGroups", U, "Rename UpdateDetails"), ("TerminalGroups", D, "Delete"));
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
+            ("PortableTerminalConfigurations", R, "Export Preview"), ("PortableTerminalConfigurations", A, "Create"),
             ("FirmwareLocalDialingStaging", A, "Create"),
             ("FirmwareCommonControlStaging", A, "Create"),
             ("FirmwareQuickAccessStaging", A, "Create"),
@@ -130,9 +131,11 @@ public static class OperatorPermissions
             ("NccFrameCaptures", A, "Upload"), ("NccFrameCaptures", D, "Delete"));
         Screen("audit", "Audit", ("Audit", R, "Events"));
         Screen("rate-plans", "Rate plans", ("RatePlans", R, "List Get GetVersion"),
+            ("RatePlanPackages", R, "RegionalStarter Export Preview"), ("RatePlanPackages", A, "Import"),
             ("RatePlans", A, "Create CreateVersion AddRule AddTariff AddDestinationPrefix AddTimeBand"),
             ("RatePlans", U, "Publish"), ("RateRules", U, "Update"), ("Tariffs", U, "Update"),
             ("DestinationPrefixes", U, "Update"), ("TimeBands", U, "Update"),
+            ("HostRatePlanSelections", R, "Customer Terminal"), ("HostRatePlanSelections", U, "SetCustomer SetTerminal"),
             ("Tariffs", D, "Delete"), ("DestinationPrefixes", D, "Delete"), ("TimeBands", D, "Delete"));
         Screen("number-classes", "Number classes", ("NumberClasses", R, "List"), ("NumberClasses", A, "Create"));
         Screen("rating", "Rating", ("RatingOperations", R, "Quote"), ("RatingOperations", A, "Authorize"));

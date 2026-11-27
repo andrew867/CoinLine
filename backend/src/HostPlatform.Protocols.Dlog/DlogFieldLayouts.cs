@@ -236,6 +236,7 @@ internal static class DlogFieldLayouts
         fields["boxNumberBcd"] = status.BoxNumber;
         fields["percentFull"] = status.PercentFull;
         fields["currencyValue"] = status.BalanceMinorUnits;
+        fields["cashBoxBalanceKnown"] = status.BalanceKnown;
         fields["coinCounts"] = new JsonArray(status.CoinCounts.Select(count => (JsonNode?)JsonValue.Create(count)).ToArray());
     }
 

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiFetch, apiDelete, apiGet, apiPost, apiPut } from '../api/client'
+import { apiFetch, apiDelete, apiDownload, apiGet, apiPost, apiPut } from '../api/client'
 import { RatePlanPricing, describeRatePricing, type RatePricing } from './RatePlanPricing'
 
 type VerSummary = { id: string; versionNumber: number; status: number; publishedAtUtc: string | null }
@@ -62,6 +62,8 @@ export function RatePlanDetail() {
 
   const [np, setNp] = useState(100)
   const [pat, setPat] = useState('888')
+  const [matchKind, setMatchKind] = useState(0)
+  const [overrideFreeClass, setOverrideFreeClass] = useState(false)
   const [out, setOut] = useState(0)
   const [rulePricing, setRulePricing] = useState<RatePricing>({ pricingMode: 2, initialChargeUsd: 0, ratePerMinuteUsd: 0.05 })
 
@@ -153,11 +155,12 @@ export function RatePlanDetail() {
     try {
       await apiPost(`/api/rate-plans/${id}/versions/${selVer}/rules`, {
         priority: np,
-        matchKind: 0,
+        matchKind,
         pattern: pat,
         outcome: out,
         ...(out === 0 ? rulePricing : { pricingMode: 0, initialChargeUsd: 0, ratePerMinuteUsd: 0 }),
-        expression: '{}',
+        expression: out === 0 && matchKind === 2 && overrideFreeClass
+          ? '{"coinLinePolicy":"explicit-paid-exact-over-free-class-v1"}' : '{}',
       })
       await refreshVersion()
     } catch (ex) {
@@ -355,6 +358,8 @@ export function RatePlanDetail() {
       {selVer && versionLoading && <p role="status">Loading version…</p>}
       {selVer && verDetail && (
         <div>
+          <button type="button" onClick={() => { if (id) void apiDownload(`/api/rate-plans/packages/${id}/${selVer}`,
+            'coinline-rate-plan.json').catch(e => setErr(e instanceof Error ? e.message : 'Unable to export rate plan.')) }}>Export selected version as JSON</button>
           <h3>Rules (version {verDetail.versionNumber})</h3>
           {!draft && <p style={{ color: '#666' }}>Published — rules are read-only.</p>}
           <table cellPadding={6} style={{ borderCollapse: 'collapse' }}>
@@ -377,7 +382,9 @@ export function RatePlanDetail() {
                 verDetail.rules.map((r) => (
                   <tr key={r.id}>
                     <td>{r.priority}</td>
-                    <td>{r.pattern}</td>
+                    <td><strong>{r.matchKind === 2 ? 'Exact' : r.matchKind === 1 ? 'Regular expression' : 'Prefix'}</strong><br />
+                      <span style={{ overflowWrap: 'anywhere' }}>{r.pattern}</span>
+                      {r.expression === '{"coinLinePolicy":"explicit-paid-exact-over-free-class-v1"}' && <small><br />Explicit paid-service override of free class only</small>}</td>
                     <td>{r.outcome}</td>
                     <td>{r.outcome === 0 ? draft ? <>
                       <RatePlanPricing value={r} onChange={pricing => setVerDetail(vd => vd ? { ...vd,
@@ -399,11 +406,18 @@ export function RatePlanDetail() {
                 Pattern{' '}
                 <input value={pat} onChange={(e) => setPat(e.target.value)} />
               </label>{' '}
+              <label>Match kind{' '}
+                <select value={matchKind} onChange={e => { setMatchKind(+e.target.value); setOverrideFreeClass(false) }}>
+                  <option value={0}>Prefix</option><option value={2}>Exact digits</option><option value={1}>Regular expression</option>
+                </select>
+              </label>{' '}
               <label>
                 Outcome (0=rated,1=block,2=free,3=emergency){' '}
                 <input type="number" value={out} onChange={(e) => setOut(+e.target.value)} />
               </label>{' '}
               {out === 0 && <RatePlanPricing value={rulePricing} onChange={setRulePricing} />}
+              {out === 0 && matchKind === 2 && <label><input type="checkbox" checked={overrideFreeClass}
+                onChange={e => setOverrideFreeClass(e.target.checked)} /> Explicitly price this exact number despite a free number class (never overrides emergency or blocked classes)</label>}
               <button type="submit">Add rule</button>
             </form>
           )}

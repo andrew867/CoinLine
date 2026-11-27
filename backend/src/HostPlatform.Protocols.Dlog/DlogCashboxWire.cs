@@ -18,6 +18,9 @@ public static class DlogCashboxWire
     public sealed record Status(DateTime? TerminalTime, string BoxNumber, byte Flags, byte PercentFull,
         int BalanceMinorUnits, ushort[] CoinCounts)
     {
+        // Preserve the signed wire value, but a physical coin balance cannot be negative.
+        // No particular negative value has been qualified as a recoverable protocol sentinel.
+        public bool BalanceKnown => BalanceMinorUnits >= 0;
         // These three independent conditions have the same bit assignments in the verified older and later profiles.
         public bool ValueThresholdExceeded => (Flags & 0x01) != 0;
         public bool CapacityThresholdExceeded => (Flags & 0x02) != 0;

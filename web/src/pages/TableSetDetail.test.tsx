@@ -54,6 +54,25 @@ it('links a nonblocking provisioning finding to the matching carrier editor', as
   expect(await screen.findByRole('heading', { name: 'Configuration editor MT135' })).toBeVisible()
 })
 
+it('shows saved collection policy and opens the appropriate configuration editor', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 3, 'table-records': 3 })
+  vi.mocked(apiGet).mockResolvedValue([])
+  vi.mocked(apiFetch).mockImplementation(async () => Response.json({ id:'set-fixture',name:'Fixture set',status:0,
+    revision:1,optionalRecordRemovals:[],firmwareFindings:[],provisioning:{ operatingType:null,acceptedCoinSlots:null,configuredCardRanges:null,
+      onHookAdvertising:null,findings:[],collectionConfiguration:{ statisticsRecordStatus:'configured',callInRecordStatus:'missing',
+        statisticsIntervalDays:1,statisticsUploadThreshold:2,carrierStatisticsEnabled:true,optionalCdrMode:'Completed calls only',
+        optionalCdrModeMask:4,optionalCdrUploadThreshold:1,optionalWindowStart:'00:00',optionalWindowDays:1,optionalWindowHours:0,
+        normalCdrUploadThreshold:null,findings:[{tableNumber:35,message:'MT35 is not included.'}] } },
+    versions:[{id:'record-34',tableNumber:34,tableRevision:1,definitionName:'Collection controls',payloadLengthBytes:19,
+      payloadSha256Hex:'fixture-hash',validationPassed:true,configurationId:null,warnings:[]}] }))
+  render(<MemoryRouter initialEntries={['/table-sets/set-fixture']}><Routes><Route path="/table-sets/:id" element={<TableSetDetail/>}/></Routes></MemoryRouter>)
+  const panel=await screen.findByRole('region',{name:'Collection configuration review'})
+  expect(within(panel).getByText('Completed calls only')).toBeVisible()
+  expect(within(panel).queryByRole('link',{name:'Review MT35 normal call-in'})).toBeNull()
+  fireEvent.click(within(panel).getByRole('link',{name:'Review MT34 collection policy'}))
+  expect(await screen.findByRole('heading',{name:'Configuration editor MT34'})).toBeVisible()
+})
+
 it('does not expose the old set editor while the replacement set is loading', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 3, 'table-records': 3 })
   vi.mocked(apiGet).mockResolvedValue([])
