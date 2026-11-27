@@ -8,17 +8,17 @@ namespace HostPlatform.Api.Services;
 
 internal sealed record TransitionFinding(bool Blocking, int? TableNumber, string Message);
 internal sealed record TransitionRecord(int TableNumber, int? SourceBytes, int? TargetExpectedBytes, int? CandidateBytes,
-    string Action, string Detail, bool TargetAcknowledged, bool RequiresLayoutReview);
+    string Action, string Detail, bool TargetAcknowledged, bool RequiresLayoutReview, int[] ReplacementRecords);
 internal sealed record TransitionReview(Guid TerminalId, Guid? SourceFirmwareVersionId, string? SourceFirmwareLabel,
     string? SourceProfileId, Guid TargetFirmwareVersionId, string TargetFirmwareLabel, string? TargetProfileId,
     Guid? SourceSetId, string? SourceSetName, Guid? CandidateSetId, string? CandidateSetName, bool CandidatePublished, int ActiveSessions, int OutstandingDownloads,
     bool ConfigurationReadyForReview, bool UpgradeQualified, IReadOnlyList<TransitionRecord> Records,
-    IReadOnlyList<TransitionFinding> Findings);
+    IReadOnlyList<TransitionFinding> Findings, string? RegisteredFamilyId, TerminalFamilyTableReview? TargetFamilyReview);
 
 internal static class FirmwareTransitionReview
 {
     public static async Task<TransitionReview?> BuildAsync(HostPlatformDbContext db, Guid terminalId,
-        Guid targetFirmwareVersionId, Guid? candidateSetId, CancellationToken ct)
+        Guid targetFirmwareVersionId, Guid? candidateSetId, CancellationToken ct, string? targetFamilyId = null)
     {
         var terminal = await db.Terminals.AsNoTracking().Include(row => row.FirmwareVersion)
             .SingleOrDefaultAsync(row => row.Id == terminalId, ct);
@@ -58,6 +58,17 @@ internal static class FirmwareTransitionReview
 
         var sourceRecords = Map(source, "source");
         var targetRecords = Map(candidate, "candidate");
+        var replacements = ReviewReplacements(sourceProfile, targetProfile, sourceRecords, targetRecords);
+        // The legacy family checklist and packed target profile are independent evidence.
+        var family = TerminalFamilies.Find(targetFamilyId ?? terminal.TerminalFamilyId);
+        var familyReview = family == null ? null : LegacyTerminalTableRequirements.Review(family,
+            (candidate?.Versions ?? []).Where(row => row.TableDefinition != null).Select(row =>
+                (row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(row), row.ScreeningLayoutProfile)), targetProfile);
+        if (familyReview?.Documented != true)
+            Add(true, null, "Choose a documented terminal family to review the target configuration requirements.");
+        else
+            foreach (var requirement in familyReview.Tables.Where(row => row.Required && row.Status != "present"))
+                Add(true, null, $"Documented mandatory family needs review: {requirement.Name} ({requirement.Status}). Confirm applicability against the target profile before staging.");
         var numbers = sourceRecords.Keys.Concat(targetRecords.Keys).Concat(targetProfile?.VerifiedLengths.Keys ?? []).Distinct().Order().ToArray();
         var records = new List<TransitionRecord>();
         foreach (var number in numbers)
@@ -77,6 +88,7 @@ internal static class FirmwareTransitionReview
             else if (old != null && TableSetFirmwareCompatibility.RecordIssue(sourceProfile, number, oldBytes!.Length) is { } sourceIssue)
                 Add(true, number, $"Installed profile contradicts the assigned source: {sourceIssue}");
             string action, detail;
+            int[] replacementRecords = [];
             if (next != null && (newBytes!.Length <= 2 || newBytes[0] != number || !next.ValidationPassed))
             {
                 action = "invalid-candidate"; detail = "Candidate is not a complete validated record of its declared type.";
@@ -84,7 +96,12 @@ internal static class FirmwareTransitionReview
             }
             else if (expected == null)
             {
-                if (targetProfile?.CompleteCatalogue == true)
+                if (old != null && next == null && replacements.TryGetValue(number, out var replacement))
+                {
+                    action = replacement.Action; detail = replacement.Detail; replacementRecords = replacement.Records;
+                    Add(replacement.Blocking, number, detail);
+                }
+                else if (targetProfile?.CompleteCatalogue == true)
                 {
                     action = next == null ? "retire-from-target" : "unsupported-candidate";
                     detail = next == null ? "The source type is absent from the known target catalogue; review its replacement feature before retiring it." : "The selected record type is absent from the complete target catalogue.";
@@ -134,11 +151,12 @@ internal static class FirmwareTransitionReview
             }
             if (next != null && next.ScreeningLayoutProfile != null && targetProfile?.LayoutFor(number) is { } declared &&
                 next.ScreeningLayoutProfile != declared) Add(true, number, "The candidate's confirmed native layout conflicts with the declared target layout.");
-            records.Add(new(number, oldBytes?.Length, expected, newBytes?.Length, action, detail, acknowledged, layoutReview));
+            records.Add(new(number, oldBytes?.Length, expected, newBytes?.Length, action, detail, acknowledged, layoutReview, replacementRecords));
         }
         return new(terminalId, terminal.FirmwareVersionId, terminal.FirmwareVersion?.Label, sourceProfile?.Id,
             target.Id, target.Label, targetProfile?.Id, source?.Id, source?.Name, candidate?.Id, candidate?.Name, candidate?.Status == TableSetStatus.Published,
-            active, outstanding, !findings.Any(row => row.Blocking), false, records, findings.Distinct().ToArray());
+            active, outstanding, !findings.Any(row => row.Blocking), false, records, findings.Distinct().ToArray(),
+            terminal.TerminalFamilyId, familyReview);
 
         Task<TableSet?> Set(Guid id) => db.TableSets.AsNoTracking().Include(row => row.TargetFirmwareVersion)
             .Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
@@ -154,5 +172,67 @@ internal static class FirmwareTransitionReview
             return result;
         }
         void Add(bool blocking, int? number, string message) => findings.Add(new(blocking, number, message));
+    }
+
+    private sealed record Replacement(string Action, string Detail, bool Blocking, int[] Records);
+
+    private static Dictionary<int, Replacement> ReviewReplacements(FirmwareTableProfile? sourceProfile, FirmwareTableProfile? targetProfile,
+        Dictionary<int, TableVersion> source, Dictionary<int, TableVersion> target)
+    {
+        var result = new Dictionary<int, Replacement>();
+        if (sourceProfile == null || targetProfile == null) return result;
+
+        // These are explicitly identified configuration families, not interchangeable bytes.
+        foreach (var (oldType, newType, oldLength, newLength) in new[] { (22, 134, 661, 1153), (23, 135, 678, 1109),
+            (27, 85, 2801, 8001), (28, 86, 2801, 8001) })
+        {
+            if (!Known(sourceProfile, source, oldType, oldLength, NativeTableLayouts.MultiPay) || targetProfile.VerifiedLengths.ContainsKey(oldType) ||
+                targetProfile.VerifiedLengths.GetValueOrDefault(newType) != newLength) continue;
+            var included = Known(targetProfile, target, newType, newLength, NativeTableLayouts.Later);
+            result.Add(oldType, new(included ? "candidate-family-replacement" : "family-replacement-needed",
+                included ? $"MT{newType} is the identified target configuration family. Review the translated settings and references; the record numbers and sizes are not equivalent."
+                    : $"An identified target family requires a complete MT{newType} candidate. Prepare it before staging; do not send the old record type.",
+                !included, included ? [newType] : []));
+        }
+
+        var from = source.Where(row => LocalDialingTransitionWire.IsSourceRecord(row.Key) &&
+            Known(sourceProfile, source, row.Key, LocalDialingTransitionWire.SourceLength, NativeTableLayouts.MultiPay) && !targetProfile.VerifiedLengths.ContainsKey(row.Key))
+            .ToDictionary(row => row.Key, row => TableDistributionService.GetEffectivePayload(row.Value));
+        var to = target.Where(row => LocalDialingTransitionWire.IsTargetRecord(row.Key) &&
+            Known(targetProfile, target, row.Key, LocalDialingTransitionWire.TargetLength, NativeTableLayouts.Later))
+            .ToDictionary(row => row.Key, row => TableDistributionService.GetEffectivePayload(row.Value));
+        if (from.Count == 0 || !targetProfile.VerifiedLengths.Any(row => LocalDialingTransitionWire.IsTargetRecord(row.Key) &&
+            row.Value == LocalDialingTransitionWire.TargetLength)) return result;
+
+        LocalDialingTransitionProjection? projection = null;
+        if (to.Count > 0 && Known(sourceProfile, source, 73, 1192, NativeTableLayouts.MultiPay) && Known(targetProfile, target, 73, 1192, NativeTableLayouts.Later))
+            projection = LocalDialingTransitionWire.Project(TableDistributionService.GetEffectivePayload(source[73]),
+                TableDistributionService.GetEffectivePayload(target[73]), from, to);
+        foreach (var (number, data) in from)
+        {
+            if (data.AsSpan(1).IndexOfAnyExcept((byte)0) < 0)
+            {
+                result.Add(number, new("inactive-source-segment", "The source local dialing segment is canonically disabled and contains no retained settings. Review the target local dialing family separately.", false, []));
+                continue;
+            }
+            var area = projection?.Areas.SingleOrDefault(row => row.SourceRecord == number);
+            var exact = projection != null && !projection.Findings.Any(row => row.Blocking) && area is
+                { TargetRecord: not null, ReplacesExistingArea: true, RatesMatched: true, ChangedRateTuples: 0 };
+            result.Add(number, new(exact ? "candidate-local-equivalent" : "family-replacement-needed", exact
+                ? "The saved target area has the same tariff tuple for every source exchange. Wire indexes may differ; native lookup behavior remains unqualified."
+                : "The earlier local dialing segment needs a reviewed later-format area with matching tariff tuples. Use the local dialing carry-forward or independently prepare the target.",
+                !exact, exact ? [area!.TargetRecord!.Value] : []));
+        }
+        return result;
+
+        static bool Known(FirmwareTableProfile profile, Dictionary<int, TableVersion> records, int number, int length, string layout)
+        {
+            if (profile.VerifiedLengths.GetValueOrDefault(number) != length || !records.TryGetValue(number, out var row) || !row.ValidationPassed)
+                return false;
+            var bytes = TableDistributionService.GetEffectivePayload(row);
+            return bytes.Length == length && bytes[0] == number &&
+                (profile.LayoutFor(number) == null || profile.LayoutFor(number) == layout) &&
+                (row.ScreeningLayoutProfile == null || row.ScreeningLayoutProfile == layout);
+        }
     }
 }
