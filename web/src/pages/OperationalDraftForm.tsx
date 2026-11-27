@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
 import { apiFetch, apiPostRaw } from '../api/client'
 
-type Field = { key: string; label: string; editor: 'number' | 'select' | 'checkbox'; min: number; max: number;
-  choices: { value: number; label: string }[] | null; help: string | null }
+type Field = { key: string; label: string; editor: 'number' | 'select' | 'checkbox' | 'text' | 'password'; min: number; max: number;
+  choices: { value: number; label: string }[] | null; help: string | null; maxLength?: number | null }
 export type OperationalSpec = { number: number; name: string; profile: string; length: number;
   sections: { key: string; label: string; fields: Field[] }[] }
-type CreateRequest = { profile: string; length: number; fields: Record<string, string> }
+type CreateRequest = { profile: string; length: number; fields: Record<string, string>; credentials?: Record<string, string> }
 type Values = Record<string, string>
 
 function validValue(field: Field, value?: string) {
+  if (field.editor === 'text') return value != null && value.length <= (field.maxLength ?? 0) && /^[0-9*#]*$/.test(value)
+  if (field.editor === 'password') return value != null && value.length === field.maxLength && /^[0-9]+$/.test(value)
   if (value == null || value === '') return false
   if (field.editor === 'checkbox') return value === 'true' || value === 'false'
   if (!/^-?\d+$/.test(value)) return false
@@ -37,7 +39,7 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
   function update(next: Values) {
     const all = { ...byProfile, [profile]: next }
     setByProfile(all); setReview(null); setError('')
-    onDirty(Object.values(all).some(row => Object.values(row).some(Boolean)) || !!json.trim())
+    onDirty(Object.values(all).some(row => Object.keys(row).length > 0) || !!json.trim())
   }
 
   function reviewValues() {
@@ -49,7 +51,12 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
       const next: Values = {}
       for (const [key, raw] of Object.entries(parsed)) {
         const field = fields.find(item => item.key === key)
-        if (!field) throw new Error(`Unknown setting: ${key}.`)
+        if (!field) throw new Error('Unknown setting in named settings JSON.')
+        if (field.editor === 'password') {
+          setJson('')
+          throw new Error('Protected configuration values must be entered in their separate fields. The pasted JSON has been cleared.')
+        }
+        if (field.editor === 'text' && typeof raw !== 'string') throw new Error(`Use a quoted digit string for ${field.label}.`)
         const value = typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean' ? String(raw) : ''
         if (!validValue(field, value)) throw new Error(`Invalid value for ${field.label}.`)
         next[key] = value
@@ -61,7 +68,10 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
 
   return <form className="native-table-editor" aria-label="Create operational record" onSubmit={event => {
     event.preventDefault(); if (!spec || !canCreate || busy) return
-    onCreate({ profile: spec.profile, length: spec.length, fields: Object.fromEntries(fields.map(field => [field.key, values[field.key]])) })
+    const credentials = fields.filter(field => field.editor === 'password')
+    onCreate({ profile: spec.profile, length: spec.length,
+      fields: Object.fromEntries(fields.filter(field => field.editor !== 'password').map(field => [field.key, values[field.key]])),
+      ...(credentials.length ? { credentials: Object.fromEntries(credentials.map(field => [field.key, values[field.key]])) } : {}) })
   }}>
     <h3>Author {spec ? `MT${spec.number} ${spec.name}` : 'operational settings'}</h3>
     <p>You can author this record directly instead of importing a binary. Enter the known settings for the actual target.
@@ -84,25 +94,37 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
       </div>
       <fieldset className="native-table-fields" disabled={busy}>
         <legend>{section.label}</legend>
-        {section.fields.map(field => <label className="native-table-field" key={field.key}>
+        {section.fields.map(field => field.editor === 'text' ? <div className="native-table-field" key={field.key}>
+          <label>{field.label}<input type="text" maxLength={field.maxLength ?? undefined} value={values[field.key] ?? ''}
+            aria-invalid={values[field.key] !== undefined && !validValue(field, values[field.key])}
+            onChange={event => update({ ...values, [field.key]: event.target.value })} /></label>
+          <button type="button" className="quiet" aria-label={`Use no digits for ${field.label}`}
+            onClick={() => update({ ...values, [field.key]: '' })}>Use no digits</button>
+          <small>{field.key}{values[field.key] === '' ? ' · Explicitly blank' : values[field.key] === undefined ? ' · Not yet selected' : ''}{field.help ? ` · ${field.help}` : ''}</small>
+        </div> : <label className="native-table-field" key={field.key}>
           <span>{field.label}</span>
           {field.editor === 'checkbox' || field.choices ? <select value={values[field.key] ?? ''}
             onChange={event => update({ ...values, [field.key]: event.target.value })}>
             <option value="">Choose a value</option>
             {field.editor === 'checkbox' ? <><option value="false">Off</option><option value="true">On</option></>
               : field.choices?.map(choice => <option key={choice.value} value={choice.value}>{choice.label}</option>)}
-          </select> : <input type="number" step={1} min={field.min} max={field.max} value={values[field.key] ?? ''}
+          </select> : field.editor === 'password' ? <input type="password" inputMode="numeric" autoComplete="new-password"
+            maxLength={field.maxLength ?? undefined} value={values[field.key] ?? ''}
+            aria-invalid={!!values[field.key] && !validValue(field, values[field.key])}
+            onChange={event => update({ ...values, [field.key]: event.target.value })} />
+          : <input type="number" step={1} min={field.min} max={field.max} value={values[field.key] ?? ''}
             aria-invalid={!!values[field.key] && !validValue(field, values[field.key])}
             onChange={event => update({ ...values, [field.key]: event.target.value })} />}
           <small>{field.key}{field.help ? ` · ${field.help}` : ''}</small>
         </label>)}
       </fieldset>
       <details><summary>Import reviewed named settings</summary>
-        <p>Paste a JSON object using the field names shown above. Boolean switches accept true or false, and numeric entries accept whole numbers.
-          Review the supplied values before applying them; unspecified settings stay as entered.</p>
+        <p>Paste a JSON object using the field names shown above. Boolean switches accept true or false, numeric entries accept whole numbers,
+          and digit strings must be quoted, including an explicitly empty string. Review the supplied values before applying them; unspecified settings stay as entered.
+          {fields.some(field => field.editor === 'password') && ' Enter protected configuration values only in their separate password fields, never in this JSON.'}</p>
         <label>Named settings JSON<textarea rows={5} value={json} disabled={busy} onChange={event => {
           const next = event.target.value; setJson(next); setReview(null); setError('');
-          onDirty(Object.values(byProfile).some(row => Object.values(row).some(Boolean)) || !!next.trim())
+          onDirty(Object.values(byProfile).some(row => Object.keys(row).length > 0) || !!next.trim())
         }} /></label>
         <button type="button" className="quiet" disabled={busy || !json.trim()} onClick={reviewValues}>Review named settings</button>
         {error && <p role="alert">{error}</p>}

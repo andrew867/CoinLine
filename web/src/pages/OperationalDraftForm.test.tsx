@@ -94,3 +94,53 @@ it('explains that an observed-length-only target still needs an independently re
   expect(await screen.findByText(/No confirmed authoring layout is available/)).toBeVisible()
   expect(screen.queryByRole('button', { name: 'Create operational record' })).toBeNull()
 })
+
+it('creates MT31 with explicit blank predial choices and separately entered protected values', async () => {
+  consoleSession.save('fixture-token', '', 'Fixture administrator', 'Admin')
+  const credential = (key: string, label: string, maxLength: number) => ({ ...numeric(key, label), editor: 'password' as const, maxLength })
+  const digits = (key: string, label: string) => ({ ...numeric(key, label), editor: 'text' as const, maxLength: 8 })
+  const spec: OperationalSpec = { number: 31, name: 'Installation and servicing', profile: 'MTR 1.9 packed', length: 37,
+    sections: [{ key: 'predial', label: 'Predial strings', fields: [digits('predial', 'Primary predial digits'),
+      digits('alternatePredial', 'Alternate predial digits'), flag('usePredial', 'Enable predial')] },
+    { key: 'craft', label: 'Craft credentials', fields: [credential('craftAccessCode', 'Craft access code', 7), credential('keyCardNumber', 'Desk terminal key card number', 10)] }] }
+  const access = '2'.repeat(7), card = '3'.repeat(10)
+  const saved = vi.fn(), dirty = vi.fn(); let created = false
+  vi.mocked(apiFetch).mockImplementation(async url => Response.json(String(url).includes('operational-authoring') ? { templates: [spec] } : created ? {
+    supported: true, editable: true, profile: spec.profile, length: spec.length, revision: 1, sha256: 'fixture-hash',
+    sections: [{ key: 'craft', label: 'Craft credentials', fields: spec.sections[1].fields.map(field => ({ ...field, value: null })) }],
+  } : { supported: false, reason: 'Import a complete record to open its editor.', templates: [] }))
+  vi.mocked(apiPostRaw).mockImplementation(async () => { created = true; return new Response(null, { status: 204 }) })
+  render(<NativeTableEditor setId="fixture" number={31} revision={0} exchangeFile={null} onExchangeFile={vi.fn()} onSaved={saved} onDirty={dirty} />)
+  const submit = await screen.findByRole('button', { name: 'Create operational record' })
+  fireEvent.click(screen.getByRole('button', { name: 'Use no digits for Primary predial digits' }))
+  expect(dirty).toHaveBeenLastCalledWith(true)
+  expect(screen.getByText(/predial · Explicitly blank/)).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Alternate predial digits'), { target: { value: '*0#' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Set unentered switches to Off' }))
+  expect(submit).toBeDisabled()
+  screen.getByText('Import reviewed named settings').closest('details')!.open = true
+  const json = screen.getByLabelText('Named settings JSON')
+  fireEvent.change(json, { target: { value: JSON.stringify({ craftAccessCode: access }) } })
+  fireEvent.click(screen.getByRole('button', { name: 'Review named settings' }))
+  expect(screen.getByRole('alert')).toHaveTextContent('Protected configuration values')
+  expect(json).toHaveValue('')
+  expect(screen.queryByRole('region', { name: 'Named settings review' })).toBeNull()
+  fireEvent.change(screen.getByLabelText('Settings section'), { target: { value: 'craft' } })
+  const accessInput = screen.getByLabelText(/Craft access code/), cardInput = screen.getByLabelText(/Desk terminal key card number/)
+  expect(accessInput).toHaveAttribute('type', 'password')
+  expect(cardInput).toHaveAttribute('type', 'password')
+  fireEvent.change(accessInput, { target: { value: access.slice(1) } })
+  fireEvent.change(cardInput, { target: { value: card } })
+  expect(submit).toBeDisabled()
+  fireEvent.change(accessInput, { target: { value: access } })
+  expect(submit).toBeEnabled()
+  expect(screen.queryByText(access)).toBeNull()
+  expect(screen.queryByText(card)).toBeNull()
+  fireEvent.click(submit)
+  await waitFor(() => expect(saved).toHaveBeenCalledTimes(1))
+  expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/fixture/records/31/operational-authoring', {
+    profile: spec.profile, length: 37, fields: { predial: '', alternatePredial: '*0#', usePredial: 'false' },
+    credentials: { craftAccessCode: access, keyCardNumber: card },
+  })
+  await waitFor(() => expect(screen.queryByRole('form', { name: 'Create operational record' })).toBeNull())
+})
