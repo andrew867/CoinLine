@@ -33,6 +33,10 @@ public sealed class PostgresConfigurationSetupTests
         ads[0] = new("Fixture text", 50, 0, false, false);
         var records = GraphicalStarterWire.Create().ToDictionary(row => row.Key, row => row.Value);
         records.Add(26, features); records.Add(29, AdvertisingTableWire.Encode(ads));
+        var collection = new byte[19]; collection[0]=34; collection[3]=1; collection[4]=2; collection[13]=6;
+        collection[14]=1; collection[15]=8; collection[16]=30; collection[17]=1;
+        var routine = new byte[21]; routine[0]=35; routine[12]=7;
+        records.Add(34,collection); records.Add(35,routine);
         var source = new TableSet { Name = "Graphical fixture starter", TargetFirmwareVersion = firmware, IsDefault = true };
         foreach (var (number, bytes) in records)
             source.Versions.Add(CarrierSchedulerSpareFixture.Version(new TableDefinition { TableNumber = number, Name = $"Fixture MT{number}" }, bytes, number));
@@ -49,6 +53,13 @@ public sealed class PostgresConfigurationSetupTests
         Assert.Equal(2, matchingMode.GetProperty("configuredCode").GetInt32());
         Assert.Contains(keep.GetProperty("provisioning").GetProperty("findings").EnumerateArray(), f => f.GetProperty("message").GetString()!.Contains("Both idle rotations"));
         var graph = await Preview("graphical");
+        var collectionReview = graph.GetProperty("provisioning").GetProperty("collectionConfiguration");
+        Assert.Equal("configured",collectionReview.GetProperty("statisticsRecordStatus").GetString());
+        Assert.Equal("configured",collectionReview.GetProperty("callInRecordStatus").GetString());
+        Assert.Equal("Completed calls only",collectionReview.GetProperty("optionalCdrMode").GetString());
+        Assert.Equal(1,collectionReview.GetProperty("optionalCdrUploadThreshold").GetInt32());
+        Assert.Equal(7,collectionReview.GetProperty("normalCdrUploadThreshold").GetInt32());
+        Assert.Equal("08:30",collectionReview.GetProperty("optionalWindowStart").GetString());
         Assert.Equal(new[] { 26 }, graph.GetProperty("changedNumbers").EnumerateArray().Select(n => n.GetInt32()));
         Assert.False(graph.GetProperty("provisioning").GetProperty("onHookAdvertising").GetBoolean());
         Assert.True(graph.GetProperty("provisioning").GetProperty("graphicalOnHookAdvertising").GetBoolean());
@@ -60,6 +71,8 @@ public sealed class PostgresConfigurationSetupTests
         using var created = await client.PostAsJsonAsync(endpoint, Request("graphical", graph.GetProperty("previewToken").GetString()));
         Assert.Equal(HttpStatusCode.Created, created.StatusCode);
         var draftId = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var saved = await client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{draftId}");
+        Assert.Equal(collectionReview.GetRawText(),saved.GetProperty("provisioning").GetProperty("collectionConfiguration").GetRawText());
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();

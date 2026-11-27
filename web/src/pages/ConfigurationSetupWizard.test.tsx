@@ -76,7 +76,12 @@ it('defaults a graphical family to graphical idle rotation and exposes text and 
   vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ previewToken: 'graphical', canCreate: true, targetFirmware: 'Graphical', changedNumbers: [26], recordCount: 35,
     family: { familyLabel: 'Graphical Multi-pay', documented: true, tables: [] },
     provisioning: { operatingType: 'Multi-pay', acceptedCoinSlots: 2, configuredCardRanges: 1, onHookAdvertising: false, graphicalOnHookAdvertising: true,
-      visibleOnHookTextMessages: 2, findings: [] }, findings: [] }))
+      visibleOnHookTextMessages: 2, findings: [], collectionConfiguration: {
+        statisticsRecordStatus:'missing', callInRecordStatus:'configured', statisticsIntervalDays:null, statisticsUploadThreshold:null,
+        carrierStatisticsEnabled:null, optionalCdrMode:null, optionalCdrModeMask:null, optionalCdrUploadThreshold:null,
+        optionalWindowStart:null, optionalWindowDays:null, optionalWindowHours:null, normalCdrUploadThreshold:7,
+        findings:[{tableNumber:34,message:'MT34 is not included.'}],
+      } }, findings: [] }))
   render(<MemoryRouter><ConfigurationSetupWizard onCreated={vi.fn()} sources={[
     { id: 'graphical', name: 'Graphical starter', status: 0, isDefault: true, targetFirmwareVersionId: 'version', targetFirmware: 'Graphical' },
   ]} /></MemoryRouter>)
@@ -91,5 +96,8 @@ it('defaults a graphical family to graphical idle rotation and exposes text and 
   fireEvent.click(screen.getByRole('button', { name: 'Review draft' }))
   expect(await screen.findByText('Idle graphical rotation (MT131)')).toBeVisible()
   expect(screen.getByText('Idle text rotation (MT26)')).toBeVisible()
+  expect(screen.getByRole('region',{name:'Collection configuration review'})).toBeVisible()
+  expect(screen.getByText(/MT34 is not included/)).toBeVisible()
+  expect(screen.getByText('Normal CDR count threshold (outside optional window)').nextElementSibling).toHaveTextContent('7')
   expect(apiPostRaw).toHaveBeenCalledWith('/api/tables/sets/graphical/setup/preview', expect.objectContaining({ idleAdvertisingMode: 'graphical' }))
 })
