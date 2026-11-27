@@ -80,7 +80,7 @@ public static class OperatorPermissions
             ("ConfigurationLibrary", R, "List Options"),
             ("FirmwareSetupStaging", R, "Preview"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
-            ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
+            ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize AuthorPrompts"), ("NativeTableConfiguration", U, "Save"),
             ("NativeTableConfiguration", R, "PreviewNumberingOverlay"), ("NativeTableConfiguration", U, "ApplyNumberingOverlay"),
             ("CraftAccessConfiguration", R, "Reveal"),
             ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
