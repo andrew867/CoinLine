@@ -14,6 +14,7 @@ const period = (seconds: number) => seconds === -1 ? 'unlimited' : `${seconds} s
 
 export function DialedNumberReview({ setId, recordRevision }: { setId: string; recordRevision: string }) {
   const [digits, setDigits] = useState('')
+  const [internationalDigits, setInternationalDigits] = useState('')
   const [result, setResult] = useState<Result | null>(null)
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
@@ -31,7 +32,7 @@ export function DialedNumberReview({ setId, recordRevision }: { setId: string; r
     setBusy(true)
     try {
       const response = await apiFetch(`/api/tables/sets/${setId}/dialed-number-review`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ digits }), signal: controller.signal,
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ digits, internationalDigits: internationalDigits || undefined }), signal: controller.signal,
       })
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? `Configuration review failed (HTTP ${response.status}).`)
       const saved = await response.json() as Result
@@ -46,10 +47,13 @@ export function DialedNumberReview({ setId, recordRevision }: { setId: string; r
   return <details className="dialed-number-review">
     <summary>Review a dialed number across saved tables</summary>
     <p>Check exact supplied digits against ordinary screening patterns, local exchange and area-code settings, referenced terminal tariffs and rate-response payment configuration. Review ten- and eleven-digit forms separately.</p>
+    <p>For international set-based rating, optionally enter the destination digits after the access prefix. The review lists all matching MT151 prefixes and the configured fallback without guessing prefix removal or precedence.</p>
     <p>This is a saved-configuration inspection, not a host rating quote or a prediction of terminal behavior. It does not evaluate the linked dialing graph, translation, screening precedence, service restrictions or payment eligibility. Unsaved edits are not included.</p>
     <form onSubmit={event => { event.preventDefault(); void run() }} className="row-actions">
       <label>Test dialed digits <input value={digits} onChange={event => { clear(); setDigits(event.target.value) }} inputMode="numeric" maxLength={16} pattern="[0-9]{1,16}" required autoComplete="off" /></label>
-      <button type="submit" disabled={busy || !/^[0-9]{1,16}$/.test(digits)}>{busy ? 'Reviewing…' : 'Review saved configuration'}</button>
+      <label>International destination after access prefix (optional)<input value={internationalDigits} onChange={event => { clear(); setInternationalDigits(event.target.value) }}
+        inputMode="numeric" maxLength={16} pattern="[0-9]{1,16}" autoComplete="off" /></label>
+      <button type="submit" disabled={busy || !/^[0-9]{1,16}$/.test(digits) || !!internationalDigits && !/^[0-9]{1,16}$/.test(internationalDigits)}>{busy ? 'Reviewing…' : 'Review saved configuration'}</button>
     </form>
     {error && <p role="alert">{error}</p>}
     {result && <div aria-live="polite">

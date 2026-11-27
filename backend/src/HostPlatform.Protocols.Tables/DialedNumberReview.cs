@@ -13,12 +13,14 @@ public static class DialedNumberReview
     public static bool ValidDigits(string? digits) => digits is { Length: >= 1 and <= 16 } && digits.All(char.IsAsciiDigit);
 
     public static int[] RelevantRecordNumbers(FirmwareTableProfile profile) => profile.VerifiedLengths.Keys.Where(number =>
-        number is 26 or 62 or 73 or 92 or 150 || NativeTableLayouts.IsLocalDialingRecord(number)).Order().ToArray();
+        number is 26 or 62 or 73 or 92 or 150 or 151 || NativeTableLayouts.IsLocalDialingRecord(number)).Order().ToArray();
 
     public static DialedNumberReviewResult Review(FirmwareTableProfile? profile, string digits,
-        IReadOnlyDictionary<int, byte[]> records, IReadOnlyCollection<int>? invalidRecords = null)
+        IReadOnlyDictionary<int, byte[]> records, IReadOnlyCollection<int>? invalidRecords = null, string? internationalDigits = null)
     {
         if (!ValidDigits(digits)) throw new ArgumentException("Enter 1 to 16 decimal digits.", nameof(digits));
+        if (internationalDigits != null && !ValidDigits(internationalDigits))
+            throw new ArgumentException("Enter 1 to 16 destination digits after the international access prefix.", nameof(internationalDigits));
         if (profile == null || profile.ObservedLengthsOnly)
             return new(false, "Select a registered, verified native firmware profile to review configured dialing records.", [], [], [], [], [], []);
 
@@ -45,6 +47,8 @@ public static class DialedNumberReview
         }
         if (later && Value(26, "npaSetRating") is { } areaRating)
             found.Add(new(26, "Area-code set rating", areaRating == "true" ? "Enabled" : "Disabled"));
+        if (later && Value(26, "internationalSetRating") is { } internationalRating)
+            found.Add(new(26, "International set rating", internationalRating == "true" ? "Enabled" : "Disabled"));
 
         if (usable.TryGetValue(62, out var plan))
         {
@@ -85,13 +89,28 @@ public static class DialedNumberReview
                 var kind = Parse(classification.Read(screening.Raw)); var method = Parse(payment.Read(screening.Raw));
                 var rate = Parse(Field(section, "rate").Read(screening.Raw));
                 var free = Flag(section, "free", screening.Raw); var carrier = Flag(section, "carrier", screening.Raw);
+                var fallbackOnly = Flag(section, "fallback", screening.Raw); var featureGroupB = Flag(section, "featureGroupB", screening.Raw);
                 var detail = $"{Choice(classification, kind)} / {Choice(payment, method)}; {(free ? "Free flag set" : "Free flag clear")}; rate field {rate}";
                 if (carrier) detail += "; carrier reference";
-                if (Flag(section, "fallback", screening.Raw)) detail += "; fallback only";
-                if (Flag(section, "featureGroupB", screening.Raw)) detail += "; Feature Group B";
+                if (fallbackOnly) detail += "; fallback only";
+                if (featureGroupB) detail += "; Feature Group B";
                 if (Flag(section, "coinException", screening.Raw)) detail += "; coin restriction";
-                found.Add(new(92, $"{section.Label}: {pattern} (+{(wildcards == 15 ? "unlimited" : wildcards.ToString())} wildcard digits)", detail,
-                    !free && !carrier && kind != 11 && rate is >= 0 and <= 127 ? rate : null));
+                int? rateIndex = null;
+                if (!carrier && kind != 11 && rate is >= 0 and <= 127)
+                {
+                    if (!free && method is { } paymentCode && (later ? paymentCode is >= 3 and <= 11 : (paymentCode & 7) >= 3))
+                        rateIndex = rate;
+                    else if (!free)
+                        detail += "; payment classification does not establish an ordinary paid tariff reference";
+                    else if (later && kind == 9 && !featureGroupB && !Flag(section, "denyDataPort", screening.Raw) && Value(26, "dataPortEnabled") != "false")
+                    {
+                        rateIndex = rate;
+                        detail += "; free voice, conditional data-port tariff reference";
+                    }
+                }
+                if (!later && free && !carrier && !fallbackOnly && !featureGroupB && kind != 11 && rate != 255)
+                    warnings.Add($"MT92 {section.Label} is marked free but does not use rate field 255. Review the intended earlier-profile unrated branch.");
+                found.Add(new(92, $"{section.Label}: {pattern} (+{(wildcards == 15 ? "unlimited" : wildcards.ToString())} wildcard digits)", detail, rateIndex));
             }
             if (matches == 0) warnings.Add("No ordinary numeric screening pattern matched these exact supplied digits. The terminal may normalize digits or use another rule path.");
             if (matches > 1) warnings.Add("Multiple screening candidates match. Wire order is shown, not the effective winner.");
@@ -125,6 +144,59 @@ public static class DialedNumberReview
             }
         }
         else warnings.Add("Area/exchange inspection requires a ten-digit NANP number or the same number with a leading 1.");
+
+        if (internationalDigits != null)
+        {
+            if (!later || !profile.VerifiedLengths.ContainsKey(151))
+                warnings.Add("This target has no verified MT151 international rating layout.");
+            else if (!usable.TryGetValue(151, out var international))
+                warnings.Add("No valid compatible MT151 is available for this international destination review.");
+            else
+            {
+                if (Value(26, "internationalSetRating") != "true")
+                    warnings.Add("MT26 international set-based rating is disabled or not established. These MT151 rows are saved settings, not proof that the phone will use them.");
+                var defaults = international.Layout.Sections[0];
+                var actionField = defaults.Fields.Single(field => field.Key == "noMatch");
+                var fallbackField = defaults.Fields.Single(field => field.Key == "fallback");
+                var action = Parse(actionField.Read(international.Raw));
+                var defaultCode = Parse(fallbackField.Read(international.Raw));
+                var offset = fallbackField.TariffIndexOffset!.Value;
+                var matching = 0;
+                foreach (var section in international.Layout.Sections.Skip(1))
+                {
+                    var country = Parse(Field(section, "country").Read(international.Raw));
+                    if (country is not > 0) continue;
+                    var prefix = country.Value.ToString(CultureInfo.InvariantCulture);
+                    if (!internationalDigits.StartsWith(prefix, StringComparison.Ordinal)) continue;
+                    matching++;
+                    var code = Parse(Field(section, "rate").Read(international.Raw));
+                    var (interpretation, index) = code >= 100 ? Fallback(viaDestination: true) : Direct(code);
+                    found.Add(new(151, $"{section.Label}: prefix {prefix}", code >= 100 ? $"Code {code}: use fallback; {interpretation}" : interpretation, index));
+                }
+                if (matching > 1)
+                    warnings.Add("Multiple international destination prefixes match. Wire order is shown; the actual selected prefix has not been established.");
+                var (fallback, fallbackIndex) = Fallback(viaDestination: false);
+                found.Add(new(151, matching == 0 ? "No matching destination prefix: configured fallback" : "Unmatched-destination fallback (separate setting)",
+                    fallback, matching == 0 ? fallbackIndex : null));
+
+                (string Interpretation, int? Index) Direct(int? code) => code switch
+                {
+                    0 => ("Code 0: ask host", null), 1 => ("Code 1: reject", null),
+                    >= 2 and <= 99 => ($"Code {code}: MT73 index {offset + code}", offset + code),
+                    _ => ("Unrecognized rate code", null)
+                };
+                (string Interpretation, int? Index) Fallback(bool viaDestination) => action switch
+                {
+                    0 => ("Fallback action: ask host", null),
+                    2 or 3 => ("Fallback action: reject", null),
+                    1 when defaultCode >= 100 => ($"Fallback action: invalid default code {defaultCode}; review before delivery", null),
+                    // The saved destination-fallback path uses the indexed default even for 0 and 1.
+                    1 when viaDestination && defaultCode is 0 or 1 => ($"Fallback default code {defaultCode}: MT73 index {offset + defaultCode} for a destination using fallback", offset + defaultCode),
+                    1 => Direct(defaultCode),
+                    _ => ("Unrecognized fallback action", null)
+                };
+            }
+        }
 
         foreach (var index in found.Select(row => row.RateIndex).OfType<int>().Distinct().Order())
         {
