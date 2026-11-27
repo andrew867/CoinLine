@@ -1,0 +1,120 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using HostPlatform.Domain;
+using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Infrastructure.Tables;
+using HostPlatform.Protocols.Tables;
+using Microsoft.EntityFrameworkCore;
+
+namespace HostPlatform.Api.Services;
+
+internal sealed record FirmwareNumberingPreview(Guid SourceSetId, Guid CandidateSetId, int RecordCount, bool CanCreate,
+    NumberingTransitionField[] Fields, NumberingGraphReview[] Graphs, int ChangedBytes, NumberingPlanFinding[] Findings, string PreviewToken);
+
+internal sealed record FirmwareNumberingPlan(FirmwareNumberingPreview Preview, TableSet Candidate, TableVersion Numbering,
+    byte[] Updated, Guid CustomerId, Guid TargetFirmwareId, string Name)
+{
+    public TableSet CreateDraft()
+    {
+        if (!Preview.CanCreate) throw new InvalidOperationException("Resolve the blocking numbering-plan findings before creating a target draft.");
+        var draft = new TableSet { Name = Name, CustomerId = CustomerId, TargetFirmwareVersionId = TargetFirmwareId };
+        foreach (var original in Candidate.Versions)
+        {
+            var copy = TableDistributionService.CopyVersion(original);
+            if (original.Id == Numbering.Id && Preview.ChangedBytes > 0)
+            {
+                var hash = TablePayloadHasher.Sha256Hex(Updated);
+                copy.TablePayloadId = null; copy.TablePayload = new TablePayload { RawContent = Updated, Sha256Hex = hash, LengthBytes = Updated.Length };
+                copy.EmbeddedPayload = null; copy.PayloadSha256Hex = hash; copy.Checksum = SHA256.HashData(Updated);
+                copy.TableRevision = checked(copy.TableRevision + 1);
+                (copy.ValidationPassed, copy.ValidationDiagnosticsJson) = TableDistributionService.ValidatePayload(original.TableDefinition!, Updated);
+            }
+            draft.Versions.Add(copy);
+        }
+        return draft;
+    }
+}
+
+internal static class FirmwareNumberingStaging
+{
+    public static async Task<FirmwareNumberingPlan?> BuildAsync(HostPlatformDbContext db, Guid phoneId, Guid targetFirmwareId,
+        Guid candidateSetId, string? name, bool carryHeader, bool carryDial, bool carryFormat, bool carryDeskCredential,
+        bool reviewedDifferences, string signingKey, CancellationToken ct)
+    {
+        name = name?.Trim();
+        if (string.IsNullOrWhiteSpace(name) || name.Length > 120) throw new InvalidOperationException("Enter a new draft name of up to 120 characters.");
+        var phone = await db.Terminals.AsNoTracking().Include(row => row.Site).Include(row => row.FirmwareVersion).SingleOrDefaultAsync(row => row.Id == phoneId, ct);
+        var target = await db.FirmwareVersions.AsNoTracking().SingleOrDefaultAsync(row => row.Id == targetFirmwareId, ct);
+        var candidate = await ReadSet(candidateSetId);
+        if (phone == null || target == null || candidate == null) return null;
+        if (phone.DeactivatedAtUtc != null || phone.FirmwareVersionId == targetFirmwareId || phone.Site == null)
+            throw new InvalidOperationException("Choose an active phone and a different registered target firmware version.");
+        var assignment = await db.TerminalTableAssignments.AsNoTracking().SingleOrDefaultAsync(row => row.TerminalId == phoneId, ct);
+        var source = assignment == null ? null : await ReadSet(assignment.TableSetId);
+        if (source == null || source.Status != TableSetStatus.Published || source.Id == candidate.Id ||
+            (source.TargetFirmwareVersionId is { } registeredSource && registeredSource != phone.FirmwareVersionId))
+            throw new InvalidOperationException("The phone needs a published source assignment for the installed version, separate from the target candidate.");
+        if (candidate.TargetFirmwareVersionId != target.Id) throw new InvalidOperationException("Choose a candidate explicitly targeted to the selected firmware version.");
+        var customer = phone.Site.CustomerId;
+        if ((source.CustomerId != null && source.CustomerId != customer) || (candidate.CustomerId != null && candidate.CustomerId != customer))
+            throw new InvalidOperationException("Source and candidate configurations must belong to the phone's customer or be unscoped.");
+        var sourceProfile = FirmwareTableProfiles.Find(phone.FirmwareVersion?.TableProfileId); var targetProfile = FirmwareTableProfiles.Find(target.TableProfileId);
+        if (sourceProfile == null || targetProfile == null || !Matches(sourceProfile,NativeTableLayouts.MultiPay,3401) || !Matches(targetProfile,NativeTableLayouts.Later,3061))
+            throw new InvalidOperationException("Choose registered earlier and later numbering-plan profiles. Equal MT62 lengths alone do not establish the field layout.");
+        var from = ReadRecords(source,sourceProfile); var to = ReadRecords(candidate,targetProfile);
+        if (!from.TryGetValue(62,out var prior) || !to.TryGetValue(62,out var prepared))
+            throw new InvalidOperationException("Both configurations must contain one complete validated MT62 record.");
+        var projection = NumberingTransitionWire.Project(TableDistributionService.GetEffectivePayload(prior),TableDistributionService.GetEffectivePayload(prepared),
+            carryHeader,carryDial,carryFormat,carryDeskCredential);
+        var findings = projection.Findings.ToList();
+        if (sourceProfile.ObservedLengthsOnly || targetProfile.ObservedLengthsOnly)
+            findings.Add(new(false,"At least one registered profile establishes record lengths only. Confirm the actual field layout and target behavior independently."));
+        if (targetProfile.Id == FirmwareTableProfiles.GraphicalMultiPay180 && carryFormat)
+            findings.Add(new(false,"The earlier display-format graph is being carried to a graphical target. Review its intended terminal presentation."));
+        if (!reviewedDifferences) findings.Add(new(true,"Review the graph changes and earlier-only and retained site settings before saving a draft."));
+        if (projection.ChangedBytes > 0 && prepared.TableRevision == int.MaxValue)
+            findings.Add(new(true,"The candidate numbering-plan record has reached its maximum revision."));
+        var reviewKey = HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey),"CoinLine numbering transition preview v1"u8);
+        var token = Convert.ToHexString(HMACSHA256.HashData(reviewKey,JsonSerializer.SerializeToUtf8Bytes(new
+        {
+            phoneId = phone.Id, phone.Version, phone.SiteId, siteRevision = phone.Site.Version, customer,
+            sourceFirmware = phone.FirmwareVersionId, sourceFirmwareRevision = phone.FirmwareVersion!.Version, sourceProfile = sourceProfile.Id,
+            targetFirmwareId = target.Id, targetVersion = target.Version, targetProfile = targetProfile.Id,
+            assignmentId = assignment!.Id, assignmentRevision = assignment.Version, sourceId = source.Id, sourceRevision = source.Version,
+            sourceRecords = Snapshot(from.Values), candidateId = candidate.Id, candidateRevision = candidate.Version, candidateRecords = Snapshot(to.Values), name,
+            carryHeader,carryDial,carryFormat,carryDeskCredential,reviewedDifferences, result = TablePayloadHasher.Sha256Hex(projection.Payload)
+        }))).ToLowerInvariant();
+        return new(new(source.Id,candidate.Id,to.Count,!findings.Any(row => row.Blocking),projection.Fields,projection.Graphs,
+            projection.ChangedBytes,findings.Distinct().ToArray(),token),candidate,prepared,projection.Payload,customer,target.Id,name);
+
+        Task<TableSet?> ReadSet(Guid id) => db.TableSets.AsNoTracking().Include(set => set.Versions).ThenInclude(row => row.TableDefinition)
+            .Include(set => set.Versions).ThenInclude(row => row.TablePayload).SingleOrDefaultAsync(set => set.Id == id,ct);
+    }
+
+    private static bool Matches(FirmwareTableProfile profile,string layout,int screeningLength) =>
+        profile.VerifiedLengths.GetValueOrDefault(62) == NumberingPlanWire.RecordLength && profile.VerifiedLengths.GetValueOrDefault(92) == screeningLength &&
+        (profile.LayoutFor(62) is not { } known || known == layout);
+    private static Dictionary<int,TableVersion> ReadRecords(TableSet set,FirmwareTableProfile profile)
+    {
+        var rows = set.Versions.ToArray();
+        if (rows.Any(row => row.TableDefinition == null) || rows.Select(row => row.TableDefinition!.TableNumber).Distinct().Count() != rows.Length ||
+            rows.Any(row => row.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
+            throw new InvalidOperationException("Resolve duplicate or unidentified records and keep firmware schedules separate.");
+        if (TableSetFirmwareCompatibility.SelectionIssue(profile,TableSetFirmwareCompatibility.Shapes(rows)) is { } issue)
+            throw new InvalidOperationException(issue);
+        foreach (var row in rows)
+        {
+            var raw = TableDistributionService.GetEffectivePayload(row);
+            if (!row.ValidationPassed || raw.Length <= 2 || raw[0] != row.TableDefinition!.TableNumber)
+                throw new InvalidOperationException("Both configurations must contain complete validated records.");
+        }
+        return rows.ToDictionary(row => row.TableDefinition!.TableNumber);
+    }
+    private static object Snapshot(IEnumerable<TableVersion> records) => records.OrderBy(row => row.Id).Select(row => new
+    {
+        row.Id, row.Version, row.TableRevision, row.TableDefinitionId, row.SortOrder, row.DependsOnTableDefinitionId,
+        row.ScreeningLayoutProfile, row.ConfigurationId, row.ScreeningDescriptionsJson, row.CardMasterLinksJson,
+        hash = TableDistributionService.ComputePayloadSha256Hex(row)
+    }).ToArray();
+}

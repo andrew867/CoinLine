@@ -5,6 +5,9 @@ public sealed record NumberingRule(string Id, string? NoMatch, string? Match, in
 
 public sealed record NumberingPlanChanges(NumberingRule[]? Dial, NumberingRule[]? Format);
 public sealed record NumberingPlanFinding(bool Blocking, string Message);
+public sealed record NumberingGraphReview(string Section, int SourceCapacity, int TargetCapacity, int? SourceRules, int? CandidateRules,
+    int? ProposedRules, int? SourceUnassignedBytes, int? TargetUnassignedBytes, string Action, int ChangedBytes);
+public sealed record NumberingGraphTransition(byte[] Payload, NumberingGraphReview[] Graphs, NumberingPlanFinding[] Findings);
 
 public static class NumberingPlanWire
 {
@@ -63,6 +66,87 @@ public static class NumberingPlanWire
 
         static bool IsBroadNoPayment(NumberingRule rule) => (rule.Tag >> 4) == 3 && (rule.CallType & 15) is >= 3 and <= 6
             && ((rule.CallType >> 4) & 7) == 2 && rule.Digits.Length >= 7 && rule.Digits.Any(digit => (digit & 31) >= 16);
+    }
+
+    /// <summary>Carry recognized earlier rule nodes at their original relative offsets, not the earlier currency tail or unknown gap bytes.</summary>
+    public static NumberingGraphTransition CarryForwardGraphs(byte[] source, byte[] target, bool carryDial = true, bool carryFormat = true)
+    {
+        if (!Supports(source) || !Supports(target)) throw new InvalidOperationException("Choose two complete numbering-plan records.");
+        var output = target.ToArray(); var findings = new List<NumberingPlanFinding>();
+        var dial = ProjectSection(source.AsSpan(DialStart,DialLength), target.AsSpan(DialStart,DialLength), output.AsSpan(DialStart,DialLength),
+            dial:true, carryDial, findings);
+        var format = ProjectSection(source.AsSpan(FormatStart,FormatCapacity()), target.AsSpan(FormatStart,FormatCapacity(true)),
+            output.AsSpan(FormatStart,FormatCapacity(true)), dial:false, carryFormat, findings);
+        return new(output,[dial,format],findings.Distinct().ToArray());
+    }
+
+    private static NumberingGraphReview ProjectSection(ReadOnlySpan<byte> source, ReadOnlySpan<byte> target, Span<byte> output,
+        bool dial, bool carry, List<NumberingPlanFinding> findings)
+    {
+        var name = dial ? "Dialing rules" : "Display formatting";
+        var section = dial ? "dial" : "format";
+        var old = Parse(source,dial); var candidate = Parse(target,dial);
+        var sourceUnknown = CountUnassigned(source,old); var targetUnknown = CountUnassigned(target,candidate);
+        var sourceCapacity = source.Length; var targetCapacity = target.Length;
+        if (!carry)
+        {
+            if (old == null) findings.Add(new(false,$"The earlier {name.ToLowerInvariant()} layout is unrecognized; it is retained only in the source record."));
+            if (candidate == null) findings.Add(new(true,$"The candidate {name.ToLowerInvariant()} layout is unrecognized. Prepare a reviewed target graph."));
+            else ReviewSection(target,dial,findings);
+            return Result(candidate?.Count,"retained-target",0);
+        }
+        if (old == null || candidate == null)
+        {
+            findings.Add(new(true,$"The {name.ToLowerInvariant()} graph in the {(old == null ? "source" : "candidate")} is not fully recognized. No graph bytes are copied."));
+            return Result(candidate?.Count,"unresolved",0);
+        }
+        var sourceChecks = new List<NumberingPlanFinding>(); ReviewSection(source,dial,sourceChecks); findings.AddRange(sourceChecks);
+        if (sourceChecks.Any(row => row.Blocking)) return Result(candidate.Count,"unresolved",0);
+        if (dial && old.Count == 0 && candidate.Count > 0)
+        {
+            findings.Add(new(true,"The source has no dialing rules. Retain the prepared target rules or review the earlier configuration before replacing them."));
+            return Result(candidate.Count,"unresolved",0);
+        }
+        var occupied = Occupied(target.Length,candidate);
+        foreach (var node in old)
+        {
+            if (node.Offset + node.Length > target.Length)
+            { findings.Add(new(true,$"{name} exceed the target graph area.")); return Result(candidate.Count,"unresolved",0); }
+            for (var index = node.Offset; index < node.Offset + node.Length; index++)
+                if (!occupied[index] && target[index] != 0)
+                { findings.Add(new(true,$"{name} would overwrite unassigned candidate bytes near relative offset {index}. Review the target graph first.")); return Result(candidate.Count,"unresolved",0); }
+        }
+        var proposed = target.ToArray();
+        foreach (var node in candidate) proposed.AsSpan(node.Offset,node.Length).Clear();
+        foreach (var node in old) source.Slice(node.Offset,node.Length).CopyTo(proposed.AsSpan(node.Offset));
+        var revised = Parse(proposed,dial);
+        if (revised == null || revised.Count != old.Count || !revised.Select(node => (node.Offset,node.Length)).SequenceEqual(old.Select(node => (node.Offset,node.Length))))
+        {
+            findings.Add(new(true,$"The proposed {name.ToLowerInvariant()} graph cannot be verified with the preserved candidate bytes. No graph bytes are copied."));
+            return Result(candidate.Count,"unresolved",0);
+        }
+        var targetChecks = new List<NumberingPlanFinding>(); ReviewSection(proposed,dial,targetChecks); findings.AddRange(targetChecks);
+        if (targetChecks.Any(row => row.Blocking)) return Result(candidate.Count,"unresolved",0);
+        if (sourceUnknown > 0) findings.Add(new(false,$"{name} contain {sourceUnknown} nonzero source bytes outside recognized nodes. These remain only in the source; candidate unassigned bytes are retained."));
+        if (targetUnknown > 0) findings.Add(new(false,$"{name} retain {targetUnknown} nonzero unassigned candidate bytes."));
+        var changed = 0; for (var index = 0; index < proposed.Length; index++) if (proposed[index] != target[index]) changed++;
+        proposed.CopyTo(output);
+        return Result(revised.Count, changed > 0 ? "carried" : "unchanged",changed);
+
+        NumberingGraphReview Result(int? proposedCount,string action,int changedBytes) => new(section,sourceCapacity,targetCapacity,old?.Count,candidate?.Count,
+            proposedCount,sourceUnknown,targetUnknown,action,changedBytes);
+    }
+
+    private static bool[] Occupied(int length, IReadOnlyList<Node> nodes)
+    {
+        var occupied = new bool[length]; foreach(var node in nodes) occupied.AsSpan(node.Offset,node.Length).Fill(true); return occupied;
+    }
+    private static int? CountUnassigned(ReadOnlySpan<byte> data, IReadOnlyList<Node>? nodes)
+    {
+        if (nodes == null) return null;
+        var occupied = Occupied(data.Length,nodes); var count = 0;
+        for (var index = 0; index < data.Length; index++) if (!occupied[index] && data[index] != 0) count++;
+        return count;
     }
 
     private static void ReviewSection(ReadOnlySpan<byte> data, bool dial, List<NumberingPlanFinding> findings)

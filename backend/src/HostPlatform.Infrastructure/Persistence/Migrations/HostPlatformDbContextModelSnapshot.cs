@@ -2653,6 +2653,16 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("NccSessionFrames");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.NccVersionObservation", b =>
+                {
+                    b.Property<Guid>("TransactionId")
+                        .HasColumnType("uuid");
+
+                    b.HasKey("TransactionId");
+
+                    b.ToTable("NccVersionObservations");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.OperatorAccount", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5115,6 +5125,17 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Navigation("NccSession");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.NccVersionObservation", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.DlogTransaction", "Transaction")
+                        .WithOne("NccVersionObservation")
+                        .HasForeignKey("HostPlatform.Domain.NccVersionObservation", "TransactionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Transaction");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.PaymentTransaction", b =>
                 {
                     b.HasOne("HostPlatform.Domain.CardAccount", "CardAccount")
@@ -5754,6 +5775,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HostPlatform.Domain.DlogTransaction", b =>
                 {
+                    b.Navigation("NccVersionObservation");
+
                     b.Navigation("ParseDiagnostics");
                 });
 

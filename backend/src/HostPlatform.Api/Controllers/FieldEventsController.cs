@@ -72,8 +72,26 @@ public sealed class FieldEventsController(HostPlatformDbContext db, INccSessionO
         {
             alarms = Catalogue("alarm", FieldEventSummary.AlarmReference(), settings),
             maintenance = Catalogue("maintenance", FieldEventSummary.MaintenanceReference(), settings),
+            maintenanceExamples = FieldEventSummary.MaintenanceExamples().Select(row => new
+            {
+                row.Code, row.Description, configured = settings.Any(setting => setting.Kind == "maintenance" && setting.Code == row.Code)
+            }),
             canEdit = OperatorPermissions.Allows(HttpContext, "field-event-catalogue", PermissionOperation.Update)
         });
+    }
+
+    [HttpPost("reference/maintenance/examples")]
+    public async Task<ActionResult<object>> ImportMaintenanceExamples(CancellationToken ct)
+    {
+        var added = await MaintenanceExampleCatalogue.StageMissingAsync(db, ct);
+        if (added > 0)
+        {
+            ApiAudit.Write(db, HttpContext, "field_event_catalogue", "import_maintenance_examples", "maintenance", new { added });
+            try { await db.SaveChangesAsync(ct); }
+            catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.UniqueViolation })
+            { return Conflict(new { error = "The maintenance catalogue changed during import. Reload the reference and retry." }); }
+        }
+        return Ok(new { added, retained = FieldEventSummary.MaintenanceExamples().Count - added });
     }
 
     public sealed record ReferenceInput(string? OperatorDescription, int? Severity, int Revision);

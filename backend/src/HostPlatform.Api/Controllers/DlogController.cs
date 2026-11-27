@@ -77,6 +77,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
                 x.Id,
                 x.TerminalId,
                 x.NccSessionId,
+                LiveVersionObservation = x.NccVersionObservation != null,
                 x.Direction,
                 x.MessageType,
                 x.MessageTypeName,
@@ -96,7 +97,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
     public async Task<ActionResult<object>> TransactionById(Guid id, CancellationToken ct)
     {
         var x = await db.DlogTransactions.AsNoTracking()
-            .Include(t => t.ParseDiagnostics)
+            .Include(t => t.ParseDiagnostics).Include(t => t.NccVersionObservation)
             .FirstOrDefaultAsync(t => t.Id == id, ct);
         if (x == null) return NotFound();
         string? terminalName = null;
@@ -140,6 +141,7 @@ public sealed class DlogController(HostPlatformDbContext db, DlogTransactionEngi
             x.TerminalId,
             terminalName,
             x.NccSessionId,
+            LiveVersionObservation = x.NccVersionObservation != null,
             x.Direction,
             x.MessageType,
             x.MessageTypeName,
