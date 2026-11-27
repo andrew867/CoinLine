@@ -100,6 +100,7 @@ public static class OperatorPermissions
         Screen("quick-access-customer-lookup", "Quick Access Key customer reference lookup",
             ("QuickAccessCustomers", R, "Lookup"));
         Screen("table-assignments", "Table assignments",
+            ("TerminalConfigurationWorksheet", R, "InitialSources InitialSource"),
             ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
             ("TerminalConfigurationWorksheet", R, "Get Options Preview"), ("TerminalConfigurationWorksheet", U, "Apply"),
             ("TerminalDeliveryReview", R, "Get"),
