@@ -35,7 +35,8 @@ public static class OperatorPermissions
         Screen("phones", "Phones",
             ("Terminals", R, "GetAll GetById Families Regions TimeAreas Identity FirmwareOptions"), ("TerminalIdCutover", R, "Preview Jobs Job Recovery"), ("TerminalIdCutover", U, "Schedule Cancel Reconcile"),
             ("Terminals", A, "Create CreateOptions"), ("Terminals", U, "SetFamily SetFirmware Update SetWireId"));
-        Screen("inventory", "Phone inventory", ("TerminalInventory", R, "Get"), ("TerminalInventory", U, "Save"));
+        Screen("inventory", "Phone inventory", ("TerminalInventory", R, "Get"), ("TerminalInventory", U, "Save"),
+            ("TerminalModuleInventory", R, "Get"), ("TerminalModuleInventory", U, "Save"));
         Screen("memberships", "Phone group membership",
             ("Terminals", R, "Groups"), ("TerminalGroups", R, "Phones MembershipOptions"),
             ("Terminals", A | D, "AssignGroup AssignGroups"), ("TerminalGroups", A | D, "EditPhones"));

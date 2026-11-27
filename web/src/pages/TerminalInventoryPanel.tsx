@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { apiFetch, apiGet } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import './TerminalInventoryPanel.css'
+import { TerminalModuleInventoryPanel } from './TerminalModuleInventoryPanel'
 
 type Value = string | number | boolean | null
 type Profile = Record<string, Value>
@@ -217,5 +218,6 @@ export function TerminalInventoryPanel({ terminalId, onSaved }: { terminalId: st
     </>}
     {error && <p role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
+    <TerminalModuleInventoryPanel terminalId={terminalId} />
   </section>
 }
