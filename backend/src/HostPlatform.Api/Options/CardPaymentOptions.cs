@@ -30,6 +30,8 @@ public sealed class ShadyBankInstrumentBinding
 {
     public Guid TerminalId { get; set; }
     public string Destination { get; set; } = "";
+    /// <summary>Explicit legacy MT2 lab route where authorization can precede a separate rate request.</summary>
+    public bool AllowAuthorizationOnlyRate { get; set; }
     // Opaque bank-issued instrument token, not a PAN or a card credential.
     public string InstrumentToken { get; set; } = "";
 }

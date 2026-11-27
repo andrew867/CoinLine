@@ -165,6 +165,123 @@ public sealed class PostgresShadyBankAuthorizationTests
         }
     }
 
+    [PostgresIntegrationFact]
+    public async Task Legacy_mt2_without_native_quote_uses_explicit_published_rate_and_one_durable_reservation()
+    {
+        const string route = "3335550123";
+        var key = Guid.NewGuid().ToString("N");
+        var serviceKey = new string('K', 43);
+        var instrument = new string('T', 43);
+        var bank = new BankFixture(serviceKey, instrument);
+        var customer = new Customer { Name = "Legacy merchant fixture", Code = Guid.NewGuid().ToString("N")[..12] };
+        var site = new Site { CustomerId = customer.Id, Name = "Isolated test site", Code = "LAB" };
+        var wireId = Guid.NewGuid().ToByteArray()[..5];
+        var terminal = new Terminal { SiteId = site.Id, TerminalIdHex = Convert.ToHexString(wireId), DisplayName = "Legacy lab phone" };
+        var plan = new RatePlan { CustomerId = customer.Id, Name = "Local default", Mode = RatingMode.RealTimeRated };
+        var version = new RatePlanVersion { RatePlanId = plan.Id, VersionNumber = 1, Status = RatePlanVersionStatus.Published, PublishedAtUtc = DateTime.UtcNow };
+        var rule = new RateRule { RatePlanVersionId = version.Id, Priority = 1, MatchKind = RateRuleMatchKind.Exact,
+            Pattern = route, Outcome = RateRuleOutcome.Rated, RatePerMinuteUsd = 0.05m };
+        var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint!).Port; probe.Stop();
+        await using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
+            .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:LoopbackOnly", "true").UseSetting("Ncc:Port", port.ToString())
+            .UseSetting("CardPayments:ShadyBankAuthorization:Enabled", "true")
+            .UseSetting("CardPayments:ShadyBankAuthorization:ServiceUrl", "http://127.0.0.1:8022/api/merchant/authorize")
+            .UseSetting("CardPayments:ShadyBankAuthorization:AllowLoopbackHttp", "true")
+            .UseSetting("CardPayments:ShadyBankAuthorization:ServiceKey", serviceKey)
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:TerminalId", terminal.Id.ToString())
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:Destination", route)
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:InstrumentToken", instrument)
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:AllowAuthorizationOnlyRate", "true")
+            .ConfigureServices(services => services.AddHttpClient("shadybank-authorization").ConfigurePrimaryHttpMessageHandler(() => bank)));
+        using var admin = TestOperatorAuthentication.CreateAuthenticatedClient(host, "legacy-bank-fixture", "Admin");
+        admin.DefaultRequestHeaders.Add("X-API-Key", key);
+        int beforePayments;
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.Contains("Npgsql", db.Database.ProviderName!);
+            db.AddRange(customer, site, terminal, plan, version, rule);
+            await db.SaveChangesAsync(); plan.PublishedVersionId = version.Id; await db.SaveChangesAsync();
+            beforePayments = await db.PaymentTransactions.CountAsync();
+        }
+
+        var request = ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 101);
+        var wrongCard = request.ToArray(); wrongCard[13] ^= 1;
+        Assert.Equal(1, (await Exchange(wrongCard))[1]);
+        Assert.Equal(1, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest("3335550124", 2, 101)))[1]);
+        Assert.Equal(1, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 1, 101)))[1]);
+        Assert.Empty(bank.RequestIds);
+
+        var approved = await Exchange(request, retransmit: true);
+        Assert.Equal(0, approved[1]); Assert.Equal("SB123456"u8.ToArray(), approved[2..10]);
+        Assert.Single(bank.RequestIds);
+        Assert.Equal(approved, await Exchange(request));
+        var retries = await Task.WhenAll(Exchange(request), Exchange(request));
+        Assert.All(retries, retry => Assert.Equal(approved, retry));
+        Assert.Single(bank.RequestIds.Distinct()); Assert.Single(bank.Reservations);
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.False(await db.CallRecords.AnyAsync(row => row.TerminalId == terminal.Id));
+            Assert.Equal(beforePayments, await db.PaymentTransactions.CountAsync());
+            var claim = await db.AuditEvents.SingleAsync(row => row.TerminalId == terminal.Id && row.Action == "merchant_authorization_sequence_claim");
+            using var detail = JsonDocument.Parse(claim.DetailJson);
+            Assert.Equal(JsonValueKind.Null, detail.RootElement.GetProperty("nativeQuoteId").ValueKind);
+            Assert.Equal(version.Id, detail.RootElement.GetProperty("ratePlanVersionId").GetGuid());
+            Assert.Equal(0.05m, detail.RootElement.GetProperty("amount").GetDecimal());
+            Assert.DoesNotContain(instrument, claim.DetailJson); Assert.DoesNotContain(serviceKey, claim.DetailJson);
+            // A blocked published route must not create another reservation in the absence of a native quote.
+            var persistedRule = await db.RateRules.SingleAsync(row => row.Id == rule.Id);
+            persistedRule.Outcome = RateRuleOutcome.Block; await db.SaveChangesAsync();
+        }
+        Assert.Equal(1, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 102)))[1]);
+        Assert.Equal(4, bank.RequestIds.Count);
+
+        // A subsequent real MT63 is saved normally, but cannot replace the earlier sequence's bank UUID.
+        var response = await Exchange(DlogRateWire.EncodeRequest(route, false));
+        Assert.Equal(64, response[0]);
+        Assert.Equal(approved, await Exchange(request));
+        Assert.Single(bank.RequestIds.Distinct()); Assert.Single(bank.Reservations);
+        Assert.Equal(1, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 103)))[1]);
+        var history = await admin.GetFromJsonAsync<JsonElement>("/api/cards/authorization-attempts?terminalId=" + terminal.Id);
+        Assert.Contains(history.EnumerateArray(), row => row.GetProperty("outcome").GetString() == "approved" &&
+            row.GetProperty("rateSource").GetString() == "authorization_only" &&
+            row.GetProperty("ratePlanVersionId").GetGuid() == version.Id && row.GetProperty("quoteId").ValueKind == JsonValueKind.Null);
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.Equal(1, await db.CallRecords.CountAsync(row => row.TerminalId == terminal.Id));
+            Assert.Equal(beforePayments, await db.PaymentTransactions.CountAsync());
+            var attempts = await db.AuditEvents.Where(row => row.TerminalId == terminal.Id && row.Action == "card_authorization_decision").ToListAsync();
+            Assert.Contains(attempts, row => row.DetailJson.Contains("\"rateSource\":\"authorization_only\"") && row.DetailJson.Contains("\"outcome\":\"approved\""));
+            Assert.All(attempts, row => { Assert.DoesNotContain(serviceKey, row.DetailJson); Assert.DoesNotContain(instrument, row.DetailJson); Assert.DoesNotContain("SB123456", row.DetailJson); });
+        }
+
+        async Task<byte[]> Exchange(byte[] payload, bool retransmit = false)
+        {
+            using var tcp = new TcpClient(); using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            await tcp.ConnectAsync(IPAddress.Loopback, port, deadline.Token);
+            var stream = tcp.GetStream();
+            byte[] Encode(byte control, byte[] data) => NccFrameCodec.Encode(new NccWirePacket { Control = control, TerminalId = wireId, Data = data });
+            await stream.WriteAsync(Encode(0, payload), deadline.Token);
+            Assert.NotEqual(0, (await ReadFrame(stream, deadline.Token)).Control & NccControl.Ack);
+            var reply = await ReadFrame(stream, deadline.Token);
+            if (retransmit)
+            {
+                await stream.WriteAsync(Encode(NccControl.ReTrans, payload), deadline.Token);
+                Assert.NotEqual(0, (await ReadFrame(stream, deadline.Token)).Control & NccControl.Ack);
+                Assert.Equal(reply.Data, (await ReadFrame(stream, deadline.Token)).Data);
+            }
+            await stream.WriteAsync(Encode((byte)(NccControl.Ack | (reply.Control & 3)), []), deadline.Token);
+            await stream.WriteAsync(Encode(NccControl.Clr, []), deadline.Token);
+            return reply.Data;
+        }
+    }
+
     [ManualShadyBankFact]
     public async Task Isolated_real_bank_reservation_replays_the_same_ncc_authorization()
     {
