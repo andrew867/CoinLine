@@ -13,6 +13,7 @@ type Attempt = {
   createdAtUtc: string; messageType: number; outcome: string; provider: string; reason: string | null
   cardAccountId: string | null; quoteId: string | null; quotedAmountUsd: number | null; callSequence: number | null
   requestBytes?: number | null; bundledCallRecords?: number | null; suffixCdrTypes?: number[] | null
+  rateSource?: 'native_quote' | 'authorization_only' | null; ratePlanVersionId?: string | null
 }
 
 const outcomes: Record<string, string> = {
@@ -100,6 +101,8 @@ export function PaymentTransactionsPage() {
             <td>{row.cardAccountId ? canReadAccounts
               ? <Link to={`/card-accounts/${row.cardAccountId}`}>{row.cardAccountId}</Link> : row.cardAccountId : 'Not matched'}</td>
             <td>{row.quotedAmountUsd == null ? 'Not recorded' : `USD ${row.quotedAmountUsd.toFixed(2)}`}
+              {row.rateSource === 'authorization_only' && <div><small>Host rate at authorization, no terminal quote</small></div>}
+              {row.ratePlanVersionId && <div><small>Rate plan version {row.ratePlanVersionId}</small></div>}
               {row.quoteId && <div><small>Quote {row.quoteId}</small></div>}</td>
           </tr>)}</tbody>
         </table>

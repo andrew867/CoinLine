@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Options;
@@ -454,16 +455,21 @@ public sealed class CardsController(
         var ids = latest.Select(entry => entry.Row.TerminalId).OfType<Guid>().Distinct().ToArray();
         var phones = await db.Terminals.AsNoTracking().Where(row => ids.Contains(row.Id))
             .Select(row => new { row.Id, row.DisplayName }).ToDictionaryAsync(row => row.Id, row => row.DisplayName, ct);
-        return Ok(latest.Select(entry => new
-        {
+        return Ok(latest.Select(entry => new AuthorizationAttemptDto(
             entry.Row.Id, entry.Row.TerminalId,
-            terminalDisplayName = entry.Row.TerminalId is { } id ? phones.GetValueOrDefault(id) : null,
-            nccSessionId = Guid.TryParse(entry.Row.TerminalSessionId, out var parsed) ? (Guid?)parsed : null,
+            entry.Row.TerminalId is { } id ? phones.GetValueOrDefault(id) : null,
+            Guid.TryParse(entry.Row.TerminalSessionId, out var parsed) ? (Guid?)parsed : null,
             entry.Row.CreatedAtUtc, entry.Detail.MessageType, entry.Detail.Outcome, entry.Detail.Provider,
             entry.Detail.Reason, entry.Detail.CardAccountId, entry.Detail.QuoteId, entry.Detail.QuotedAmountUsd, entry.Detail.CallSequence,
-            entry.Detail.RequestBytes, entry.Detail.BundledCallRecords, entry.Detail.SuffixCdrTypes
-        }));
+            entry.Detail.RequestBytes, entry.Detail.BundledCallRecords, entry.Detail.SuffixCdrTypes,
+            entry.Detail.RateSource, entry.Detail.RatePlanVersionId)));
     }
+
+    private sealed record AuthorizationAttemptDto(Guid Id, Guid? TerminalId, string? TerminalDisplayName, Guid? NccSessionId,
+        DateTime CreatedAtUtc, byte MessageType, string Outcome, string Provider, string? Reason, Guid? CardAccountId,
+        Guid? QuoteId, decimal? QuotedAmountUsd, ushort? CallSequence, int? RequestBytes, int? BundledCallRecords, int[]? SuffixCdrTypes,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RateSource,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RatePlanVersionId);
 
     [HttpGet("reconciliation-pending")]
     public async Task<ActionResult<object>> ReconciliationPending(CancellationToken ct)

@@ -41,12 +41,15 @@ it('shows ShadyBank authorization evidence separately from posted payments', asy
   vi.mocked(apiGet).mockImplementation(async path => path.endsWith('authorization-attempts') ? [{
     id: 'bank-reservation', terminalId: 'fixture-phone', terminalDisplayName: 'Synthetic phone', nccSessionId: 'fixture-session',
     createdAtUtc: '2026-01-01T12:00:00Z', messageType: 2, provider: 'shadybank', reason: 'bank_approved', outcome: 'approved',
-    cardAccountId: null, quoteId: 'fixture-quote', quotedAmountUsd: 0.05, callSequence: 1
+    cardAccountId: null, quoteId: null, quotedAmountUsd: 0.05, callSequence: 1,
+    rateSource: 'authorization_only', ratePlanVersionId: 'fixture-version'
   }] as never : [] as never)
   render(<MemoryRouter><PaymentTransactionsPage /></MemoryRouter>)
   const history = await screen.findByRole('region', { name: 'Authorization history' })
   expect(within(history).getByText('ShadyBank')).toBeVisible()
   expect(within(history).getByText('Bank approved a reservation')).toBeVisible()
   expect(within(history).getByText('USD 0.05')).toBeVisible()
+  expect(within(history).getByText('Host rate at authorization, no terminal quote')).toBeVisible()
+  expect(within(history).getByText('Rate plan version fixture-version')).toBeVisible()
   expect(screen.getByText('No payment transactions recorded.')).toBeVisible()
 })
