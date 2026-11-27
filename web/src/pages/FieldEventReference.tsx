@@ -4,7 +4,8 @@ import { alarmSeverities, alarmSeverityLabel } from './fieldEventLabels'
 
 type Kind = 'alarm' | 'maintenance'
 type Code = { code: number; description: string | null; operatorDescription: string | null; severity: number | null; revision: number }
-type Reference = { alarms: Code[]; maintenance: Code[]; canEdit: boolean }
+type MaintenanceExample = { code: number; description: string; configured: boolean }
+type Reference = { alarms: Code[]; maintenance: Code[]; maintenanceExamples?: MaintenanceExample[]; canEdit: boolean }
 type Edit = { kind: Kind; row: Code; description: string; severity: string }
 
 export function FieldEventReference() {
@@ -95,6 +96,22 @@ export function FieldEventReference() {
     }
   }
 
+  async function importMaintenanceExamples() {
+    if (!reference?.canEdit || saving || !reference.maintenanceExamples?.some(row => !row.configured)) return
+    setSaving(true); setSaveError(''); setNotice('')
+    try {
+      const response = await apiFetch('/api/field-events/reference/maintenance/examples', { method: 'POST' })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.error ?? `Could not import examples (HTTP ${response.status}).`)
+      }
+      const result = await response.json() as { added: number; retained: number }
+      setNotice(`Imported ${result.added} example descriptions; ${result.retained} existing settings retained.`)
+      setEdit(null); setAttempt(value => value + 1)
+    } catch (failure) { setSaveError(failure instanceof Error ? failure.message : 'Could not import examples.') }
+    finally { setSaving(false) }
+  }
+
   return (
     <section className="terminal-status-panel" aria-labelledby="field-event-reference-title">
       <header className="terminal-status-panel-heading">
@@ -140,6 +157,18 @@ export function FieldEventReference() {
               </div>
             </section>
           )}
+          {!!reference?.maintenanceExamples?.length && <section aria-label="Historical maintenance examples">
+            <h3>Historical maintenance examples</h3>
+            <p>These are example field-service descriptions, not reserved system codes or remote commands. Review or customize them for your operation. Import adds only missing descriptions and retains any existing or intentionally cleared settings.</p>
+            <details><summary>Review {reference.maintenanceExamples.length} example codes</summary>
+              <table><thead><tr><th>Code</th><th>Example description</th><th>Catalogue</th></tr></thead>
+                <tbody>{reference.maintenanceExamples.map(row => <tr key={row.code}><td>{row.code}</td><td>{row.description}</td><td>{row.configured ? 'Existing setting retained' : 'Not imported'}</td></tr>)}</tbody>
+              </table>
+            </details>
+            {reference.canEdit && <button type="button" disabled={saving || !reference.maintenanceExamples.some(row => !row.configured)} onClick={() => void importMaintenanceExamples()}>
+              Import {reference.maintenanceExamples.filter(row => !row.configured).length} missing example descriptions
+            </button>}
+          </section>}
           {groups.map(group => (
             <section key={group.title} aria-label={group.title}>
               <h3>{group.title}</h3>
