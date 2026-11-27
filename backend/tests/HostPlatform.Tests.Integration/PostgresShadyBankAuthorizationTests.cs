@@ -223,12 +223,18 @@ public sealed class PostgresShadyBankAuthorizationTests
         var retries = await Task.WhenAll(Exchange(request), Exchange(request));
         Assert.All(retries, retry => Assert.Equal(approved, retry));
         Assert.Single(bank.RequestIds.Distinct()); Assert.Single(bank.Reservations);
+        var newSequence = ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 104);
+        var simultaneous = await Task.WhenAll(Exchange(newSequence), Exchange(newSequence));
+        Assert.All(simultaneous, reply => Assert.Equal(approved, reply));
+        Assert.Equal(2, bank.RequestIds.Distinct().Count()); Assert.Equal(2, bank.Reservations.Count);
         await using (var scope = host.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             Assert.False(await db.CallRecords.AnyAsync(row => row.TerminalId == terminal.Id));
             Assert.Equal(beforePayments, await db.PaymentTransactions.CountAsync());
-            var claim = await db.AuditEvents.SingleAsync(row => row.TerminalId == terminal.Id && row.Action == "merchant_authorization_sequence_claim");
+            var claims = await db.AuditEvents.Where(row => row.TerminalId == terminal.Id && row.Action == "merchant_authorization_sequence_claim").ToListAsync();
+            Assert.Equal(2, claims.Count);
+            var claim = Assert.Single(claims, row => row.DetailJson.Contains("\"callSequence\":101"));
             using var detail = JsonDocument.Parse(claim.DetailJson);
             Assert.Equal(JsonValueKind.Null, detail.RootElement.GetProperty("nativeQuoteId").ValueKind);
             Assert.Equal(version.Id, detail.RootElement.GetProperty("ratePlanVersionId").GetGuid());
@@ -239,13 +245,13 @@ public sealed class PostgresShadyBankAuthorizationTests
             persistedRule.Outcome = RateRuleOutcome.Block; await db.SaveChangesAsync();
         }
         Assert.Equal(1, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 102)))[1]);
-        Assert.Equal(4, bank.RequestIds.Count);
+        Assert.Equal(6, bank.RequestIds.Count);
 
         // A subsequent real MT63 is saved normally, but cannot replace the earlier sequence's bank UUID.
         var response = await Exchange(DlogRateWire.EncodeRequest(route, false));
         Assert.Equal(64, response[0]);
         Assert.Equal(approved, await Exchange(request));
-        Assert.Single(bank.RequestIds.Distinct()); Assert.Single(bank.Reservations);
+        Assert.Equal(2, bank.RequestIds.Distinct().Count()); Assert.Equal(2, bank.Reservations.Count);
         Assert.Equal(1, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 103)))[1]);
         var history = await admin.GetFromJsonAsync<JsonElement>("/api/cards/authorization-attempts?terminalId=" + terminal.Id);
         Assert.Contains(history.EnumerateArray(), row => row.GetProperty("outcome").GetString() == "approved" &&
@@ -259,7 +265,15 @@ public sealed class PostgresShadyBankAuthorizationTests
             var attempts = await db.AuditEvents.Where(row => row.TerminalId == terminal.Id && row.Action == "card_authorization_decision").ToListAsync();
             Assert.Contains(attempts, row => row.DetailJson.Contains("\"rateSource\":\"authorization_only\"") && row.DetailJson.Contains("\"outcome\":\"approved\""));
             Assert.All(attempts, row => { Assert.DoesNotContain(serviceKey, row.DetailJson); Assert.DoesNotContain(instrument, row.DetailJson); Assert.DoesNotContain("SB123456", row.DetailJson); });
+            var expiring = await db.AuditEvents.SingleAsync(row => row.TerminalId == terminal.Id && row.Action == "merchant_authorization_sequence_claim" &&
+                row.DetailJson.Contains("\"callSequence\":101"));
+            var metadata = System.Text.Json.Nodes.JsonNode.Parse(expiring.DetailJson)!;
+            metadata["quotedAtUtc"] = DateTime.UtcNow.AddMinutes(-6);
+            expiring.DetailJson = metadata.ToJsonString(); await db.SaveChangesAsync();
         }
+        var countBeforeExpiredRetry = bank.RequestIds.Count;
+        Assert.Equal(1, (await Exchange(request))[1]);
+        Assert.Equal(countBeforeExpiredRetry, bank.RequestIds.Count);
 
         async Task<byte[]> Exchange(byte[] payload, bool retransmit = false)
         {
