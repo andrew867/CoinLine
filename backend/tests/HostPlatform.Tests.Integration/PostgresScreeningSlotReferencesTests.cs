@@ -29,6 +29,8 @@ public sealed class PostgresScreeningSlotReferencesTests
         var owner = new Customer { Name = "Fixture screening customer", Code = Guid.NewGuid().ToString("N")[..8] };
         var target = new FirmwareVersion { Label = "Fixture screening target", TableProfileId = profile.Id };
         var set = new TableSet { Name = "Fixture screening set", Customer = owner, TargetFirmwareVersion = target };
+        var fallbackOwner = new Customer { Name = "Fixture reload customer", Code = Guid.NewGuid().ToString("N")[..8] };
+        var fallbackSet = new TableSet { Name = "Fixture reload fallback set", Customer = fallbackOwner, TargetFirmwareVersion = target };
         var other = new TableSet { Name = "Other fixture screening set", TargetFirmwareVersion = target };
         var unknown = new TableSet { Name = "Untargeted fixture set" };
         var screening = Record(92, 3061);
@@ -40,6 +42,7 @@ public sealed class PostgresScreeningSlotReferencesTests
         cards.AsSpan(10, 8).Fill(0xA5);
         var spare = Record(72, 1001); spare[345] = 1;
         Add(set, screening); Add(set, features); Add(set, cards); Add(set, spare); Add(set, spare);
+        Add(fallbackSet, screening); Add(fallbackSet, cards);
         Add(other, screening); Add(other, otherFeatures); Add(unknown, screening);
 
         var reader = TestOperatorAuthentication.EnsureAccount(factory, $"fixture-screen-reader-{Guid.NewGuid():N}", "Operator");
@@ -47,7 +50,7 @@ public sealed class PostgresScreeningSlotReferencesTests
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
-            db.AddRange(set, other, unknown);
+            db.AddRange(set, other, unknown, fallbackSet);
             (await db.OperatorAccounts.SingleAsync(row => row.Id == reader.Id)).PermissionProfileJson = "{\"table-records\":1}";
             (await db.OperatorAccounts.SingleAsync(row => row.Id == unrelated.Id)).PermissionProfileJson = "{\"phones\":1}";
             await db.SaveChangesAsync();
@@ -71,30 +74,30 @@ public sealed class PostgresScreeningSlotReferencesTests
         Assert.DoesNotContain("A5A5A5A5", json, StringComparison.OrdinalIgnoreCase);
         Assert.False((await admin.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{unknown.Id}/screening-slots/1/references")).GetProperty("review").GetProperty("supported").GetBoolean());
         Assert.False((await admin.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{set.Id}/screening-slots/181/references")).GetProperty("review").GetProperty("supported").GetBoolean());
-        // Remove only the operator dependency. The later reload default must independently block bulk deletion.
-        var featureVersionId = set.Versions.Single(v => v.TableDefinition!.TableNumber == 26).Id;
-        await using (var scope = factory.Services.CreateAsyncScope())
-        {
-            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
-            var version = await db.TableVersions.SingleAsync(row => row.Id == featureVersionId);
-            version.EmbeddedPayload = Record(26, 72); version.PayloadSha256Hex = TablePayloadHasher.Sha256Hex(version.EmbeddedPayload);
-            await db.SaveChangesAsync();
-        }
-        var screeningVersion = set.Versions.Single(row => row.TableDefinition!.TableNumber == 92);
-        using var response = await admin.PostAsJsonAsync($"/api/tables/sets/{set.Id}/records/92/screening-bulk/preview", new
+        // Independently scoped configuration with only the reload dependency.
+        var screeningVersion = fallbackSet.Versions.Single(row => row.TableDefinition!.TableNumber == 92);
+        using var response = await admin.PostAsJsonAsync($"/api/tables/sets/{fallbackSet.Id}/records/92/screening-bulk/preview", new
         {
             revision = screeningVersion.TableRevision, sha256 = screeningVersion.PayloadSha256Hex, profile = layout.Profile,
             slot = 1, action = "delete", includePublished = true, customerScope = "source"
         });
         response.EnsureSuccessStatusCode(); var preview = await response.Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(preview.GetProperty("canApply").GetBoolean());
-        Assert.Contains("MT134", preview.GetRawText());
+        var blocked = Assert.Single(preview.GetProperty("targets").EnumerateArray());
+        Assert.Equal("blocked", blocked.GetProperty("status").GetString());
+        var reason = blocked.GetProperty("reason").GetString() ?? "Missing reason";
+        Assert.True(reason.Contains("MT134", StringComparison.Ordinal), reason);
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             var saved = await db.TableVersions.Include(row => row.TablePayload).SingleAsync(row => row.Id == screeningVersion.Id);
             Assert.Equal(screening, TableDistributionService.GetEffectivePayload(saved));
             Assert.Equal(screeningVersion.TableRevision, saved.TableRevision);
+            var original = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                .Include(row => row.Versions).ThenInclude(row => row.TablePayload).SingleAsync(row => row.Id == set.Id);
+            Assert.Equal(set.Version, original.Version);
+            Assert.Equal(features, TableDistributionService.GetEffectivePayload(Assert.Single(original.Versions, row => row.TableDefinition!.TableNumber == 26)));
+            Assert.Equal(cards, TableDistributionService.GetEffectivePayload(Assert.Single(original.Versions, row => row.TableDefinition!.TableNumber == 134)));
             Assert.Empty(await db.TerminalTableAssignments.Where(row => row.TableSetId == set.Id).ToListAsync());
             Assert.Empty(await db.DownloadBatches.Where(row => row.TableSetId == set.Id).ToListAsync());
         }

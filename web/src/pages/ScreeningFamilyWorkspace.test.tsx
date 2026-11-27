@@ -74,3 +74,26 @@ it('uses the selected family context without hiding a shorter packed list or ena
   expect(screen.getByLabelText('Require answer supervision')).toBeDisabled()
   expect(screen.queryByRole('button', { name: 'Save record' })).toBeNull()
 })
+
+it('reviews the selected saved MT92 slot even in a published configuration', async () => {
+  consoleSession.save('fixture-token', '', 'Fixture administrator', 'Admin')
+  vi.mocked(apiFetch).mockImplementation(async url => {
+    if (String(url).includes('/screening-slots/180/references')) return Response.json({ slot: 180, setRevision: 2, profile: 'Later profile', review: {
+      supported: true, capacity: 180, references: [{ recordNumber: 72, label: 'IOPR access', use: 'conditional', savedEntry: 180 }],
+      reviewedRecords: [72, 92], missingRecords: [26, 134, 135], unreviewedRecords: [],
+    } })
+    return Response.json({ ...layout('mtr19-multipay', false, 180), profile: 'Later packed profile', length: 3061 })
+  })
+  render(<MemoryRouter><NativeTableEditor setId="fixture" number={92} revision={2} familyId="mtr19-multipay"
+    exchangeFile={null} onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} /></MemoryRouter>)
+  expect(await screen.findByText('What uses screening entry 1?')).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Section or entry'), { target: { value: 'rule-179' } })
+  expect(screen.getByText('What uses screening entry 180?')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Review screening references' }))
+  const result = await screen.findByRole('region', { name: 'Saved screening reference review' })
+  expect(result).toHaveTextContent('IOPR access: Conditional service reference (saved entry 180)')
+  expect(screen.queryByRole('button', { name: 'Save record' })).toBeNull()
+  expect(vi.mocked(apiFetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
+  fireEvent.change(screen.getByLabelText('Section or entry'), { target: { value: 'rule-0' } })
+  expect(screen.queryByRole('region', { name: 'Saved screening reference review' })).toBeNull()
+})
