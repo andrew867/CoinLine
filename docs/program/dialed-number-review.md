@@ -1,0 +1,18 @@
+# Review a dialed number
+
+In a terminal configuration set, open the **Dialing, screening and service** or **Rates and local dialing** panel and expand **Review a dialed number across saved tables**. This is available to operators with table-record read permission, including on published sets. Enter the digits exactly as the terminal receives them. Review the ten-digit and leading-1 forms separately if the terminal may use either.
+
+The review lists independent saved settings rather than declaring the call free, paid or rejected:
+
+| Record | What the review shows |
+| --- | --- |
+| MT26 | Default rate-request payment classification and, on the later profile, area-code set rating enablement. |
+| MT62 | Configured rate-response call/payment classifications and dialing nodes marked No payment. The review does not traverse the rules. |
+| MT92 | Numeric screening patterns matching the exact digits, including the declared single-position and trailing wildcard lengths. All candidates are listed in wire order, with payment, free, carrier and restriction indicators. |
+| Local dialing segments | Matching area-code and exchange entries for ten-digit NANP numbers, optionally with a leading 1. More than one matching segment is flagged for review. |
+| MT150 | The configured area-code set rating code, including host and reject actions, separately from local exchange indices. |
+| MT73 | The configured classification, initial and additional periods and integer-cent amounts for referenced tariff rows. An unlimited period is shown separately from a per-minute charge. |
+
+For instance, an exact toll-free screening entry can coexist with a fixed-price local exchange and a regional reject action. Those are separate inputs, not interchangeable indices. Review the applicable dialing rule and actual device result before changing any broad payment default. A missing or unreadable record is not evidence that a destination is free or unrestricted.
+
+The review is deliberately limited to registered, verified native record profiles. It does not evaluate graph traversal, special screening translations, precedence, carrier/service eligibility, discounts, international classification, host rating, or the terminal's currently downloaded revision. It neither changes nor publishes a configuration, does not start a download or dial a call, and uses only saved records, not unsaved edits. Test terminal behavior separately on an appropriate bench target.
