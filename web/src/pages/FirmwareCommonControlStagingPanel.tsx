@@ -47,7 +47,7 @@ export function FirmwareCommonControlStagingPanel({ phoneId, targetId, candidate
 
   return <section aria-label="Carry forward common configuration controls" style={{ marginTop: 18 }}>
     <h3>Prepare common configuration controls</h3>
-    <p>Review shared text advertising, interface timing, reporting, routine call-in, coin settings, daily service restrictions and individual stored-value unit limits. Choose only the groups intended for the target. Candidate-specific spare bytes, one-time clock adjustment, unselected hardware settings, separate restricted-route permissions, card validation data and discounts are retained; nothing is assigned or downloaded.</p>
+    <p>Review shared text advertising, interface and modem timing, line detection, reporting, routine call-in, coin settings, daily service restrictions and individual stored-value unit limits. Choose only the groups intended for the target. Candidate-specific spare bytes, the later answer-tone removal timer, one-time clock adjustment, unselected hardware settings, separate restricted-route permissions, card validation data and discounts are retained; nothing is assigned or downloaded.</p>
     <label>New common configuration draft name <input value={name} maxLength={120} disabled={disabled} onChange={event => { setName(event.target.value); invalidate() }} /></label>{' '}
     <button type="button" disabled={disabled || !name.trim()} onClick={() => void request(false)}>{busy ? 'Working…' : 'Preview common configuration carry-forward'}</button>
     {error && <p role="alert">{error}</p>}

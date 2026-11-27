@@ -46,13 +46,20 @@ public sealed class PostgresFirmwareCommonControlStagingTests
         slots[0] = new("Fixture target ad",10,0,false,false,0xA5,0xB0); targetBytes[29] = AdvertisingTableWire.Encode(slots);
         expected[29] = targetBytes[29].ToArray(); oldBytes[29].AsSpan(1,2).CopyTo(expected[29].AsSpan(1,2)); expected[29][3] = 0xB0 | 0x42;
         oldBytes[29].AsSpan(5,20).CopyTo(expected[29].AsSpan(5,20));
-        foreach(var (number,length) in new[]{(30,68),(32,33),(34,19),(35,21),(50,105),(58,26),(93,225),(26,72)})
+        foreach(var (number,length) in new[]{(30,68),(32,33),(33,36),(34,19),(35,21),(50,105),(58,26),(93,225),(26,72)})
         { oldBytes[number] = Bytes(number,length); targetBytes[number] = Bytes(number,length); }
         Word(oldBytes[30],1,123); Word(oldBytes[30],62,999); Word(targetBytes[30],62,44);
         expected[30] = targetBytes[30].ToArray(); Word(expected[30],1,123);
         Word(oldBytes[32],1,5); Word(oldBytes[32],3,10); oldBytes[32][21] = 4; oldBytes[32][22] = 1; oldBytes[32][24] = 1;
         oldBytes[32].AsSpan(9,4).Fill(0x11); targetBytes[32].AsSpan(9,4).Fill(0xA5);
         expected[32] = oldBytes[32].ToArray(); targetBytes[32].AsSpan(9,4).CopyTo(expected[32].AsSpan(9,4));
+        oldBytes[33][1]=1; Word(oldBytes[33],12,789); Word(targetBytes[33],12,456);
+        new byte[]{1,25,10,1,10,10,1,3,20}.CopyTo(oldBytes[33],24);
+        new byte[]{1,5,10,1,5,5,1,5,5}.CopyTo(targetBytes[33],24);
+        oldBytes[33][33]=0x57; oldBytes[33][34]=0x52;
+        targetBytes[33][33]=0xA4; targetBytes[33][34]=0xA1;
+        expected[33]=targetBytes[33].ToArray(); oldBytes[33].AsSpan(24,9).CopyTo(expected[33].AsSpan(24,9));
+        expected[33][33]=0xA6; expected[33][34]=0xA3;
         oldBytes[34][1] = 1; oldBytes[34][3] = 1; oldBytes[34][13] = 0xA3; oldBytes[34][17] = 1; targetBytes[34][13] = 0xE2;
         expected[34] = oldBytes[34].ToArray(); expected[34][13] = 0xE3;
         oldBytes[35][4] = 12; oldBytes[35][5] = 30; oldBytes[35][7] = 2; oldBytes[35][10] = 5; oldBytes[35][12] = 7;
@@ -89,9 +96,11 @@ public sealed class PostgresFirmwareCommonControlStagingTests
             await db.SaveChangesAsync();
         }
         const string endpoint = "/api/firmware/transition-common-controls";
-        string[] selected = ["text-advertising","ui-prompts","communications","call-collection","routine-call-in","coin-denominations","coin-collection","daily-service-restriction","stored-value-unit-2"];
+        string[] selected = ["text-advertising","ui-prompts","communications","modem-answer-detection","modem-carrier-detection","call-collection","routine-call-in","coin-denominations","coin-collection","daily-service-restriction","stored-value-unit-2"];
         var initial = await Preview(admin,[],false); Assert.False(initial.GetProperty("canCreate").GetBoolean());
-        Assert.Equal(8,initial.GetProperty("records").GetArrayLength()); Assert.Equal(0,initial.GetProperty("changedBytes").GetInt32());
+        Assert.Equal(9,initial.GetProperty("records").GetArrayLength()); Assert.Equal(0,initial.GetProperty("changedBytes").GetInt32());
+        var modem=initial.GetProperty("records").EnumerateArray().Single(row=>row.GetProperty("number").GetInt32()==33).GetProperty("groups");
+        Assert.Equal(5,modem.GetArrayLength()); Assert.DoesNotContain("answerRemovalDelay",modem.GetRawText()); Assert.DoesNotContain("spare.timer",modem.GetRawText());
         var units=initial.GetProperty("records").EnumerateArray().Single(row=>row.GetProperty("number").GetInt32()==93).GetProperty("groups");
         Assert.Equal(15,units.GetArrayLength());
         Assert.All(units.EnumerateArray(),row=>Assert.Equal(2,row.GetProperty("fields").GetArrayLength()));
@@ -121,7 +130,7 @@ public sealed class PostgresFirmwareCommonControlStagingTests
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             var draft = await db.TableSets.Include(set => set.Versions).ThenInclude(row => row.TablePayload).SingleAsync(set => set.Id==draftId);
-            Assert.Equal(TableSetStatus.Draft,draft.Status); Assert.Equal(later.Id,draft.TargetFirmwareVersionId); Assert.Equal(9,draft.Versions.Count);
+            Assert.Equal(TableSetStatus.Draft,draft.Status); Assert.Equal(later.Id,draft.TargetFirmwareVersionId); Assert.Equal(10,draft.Versions.Count);
             foreach(var (number,bytes) in expected)
             {
                 var copy = draft.Versions.Single(row => row.TableDefinitionId==newRecords[number].TableDefinitionId);
@@ -142,7 +151,7 @@ public sealed class PostgresFirmwareCommonControlStagingTests
         await using (var scope = factory.Services.CreateAsyncScope())
         { var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>(); db.Terminals.Add(receiver); await db.SaveChangesAsync(); }
         using (var published = await admin.PostAsync($"/api/tables/sets/{draftId}/publish?confirm=true",null)) published.EnsureSuccessStatusCode();
-        var types = new[]{29,30,32,34,35,50,58,93};
+        var types = new[]{29,30,32,33,34,35,50,58,93};
         using var queued = await admin.PostAsJsonAsync($"/api/terminals/{receiver.Id}/downloads",new
             { tableSetId=draftId,scope="Partial",partialTableDefinitionIds=types.Select(number=>newRecords[number].TableDefinitionId).ToArray() });
         queued.EnsureSuccessStatusCode(); var batchId = (await queued.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -153,7 +162,7 @@ public sealed class PostgresFirmwareCommonControlStagingTests
             var batch = await db.DownloadBatches.AsNoTracking().Include(row=>row.Items).SingleAsync(row=>row.Id==batchId);
             if(batch.Status==DownloadBatchStatus.Completed)
             {
-                Assert.Equal(DownloadScope.Partial,batch.Scope); Assert.Equal(8,batch.Items.Count);
+                Assert.Equal(DownloadScope.Partial,batch.Scope); Assert.Equal(9,batch.Items.Count);
                 Assert.All(batch.Items,item=>{Assert.True(item.Succeeded);Assert.Equal("ack",item.LastAckStatus);});
                 Assert.Equal(1,await db.DownloadBatches.CountAsync(row=>row.TerminalId==receiver.Id));
                 Assert.False(await db.DownloadBatches.AnyAsync(row=>row.TerminalId==phone.Id)); break;
