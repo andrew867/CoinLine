@@ -20,7 +20,7 @@ The retained configuration evidence establishes these differences between the ea
 | MT62 numbering plan | 353 | 353 | Earlier display formatting occupies 132 bytes and the last eight bytes are currency settings. Later display formatting occupies 140 bytes. Do not copy equal-length records wholesale. |
 | MT22 and MT23 earlier card and carrier data | 661 and 678 | Unknown for this target profile | Review the target card and carrier records and preserve intended acceptance and routing. |
 | MT134 and MT135 later card and carrier data | Unknown for the earlier profile | 1,153 and 1,109 | Prepare target data; a length match does not prove card or route behavior. |
-| MT85 and MT86 later visual prompts | Unknown for the earlier profile | 8,001 each | Confirm whether applicable and prepare target records. |
+| MT85 and MT86 later visual prompts | Unknown for the earlier profile | 8,001 each | Confirm whether applicable and [review selected messages from MT27/28](firmware-visual-prompt-transition.md) into prepared target records. |
 | Local dialing segments, MT101 to MT115 versus MT136 to MT149, MT154 and MT155 | 403 per segment | 203 per segment | Both layouts cover 800 exchanges; the later record has only four tariff indexes. Convert each active area using exact target MT73 local tuples, never by truncating source indexes. |
 
 Source and target configuration should remain separate. Do not activate target records against the installed source profile, or edit the phone's registered firmware simply to enable a download.

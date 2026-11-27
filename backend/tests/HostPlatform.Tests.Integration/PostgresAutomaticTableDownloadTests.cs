@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Text.Json;
 using HostPlatform.Domain;
@@ -29,6 +30,7 @@ public sealed class PostgresAutomaticTableDownloadTests
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
             .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()).UseSetting("Ncc:LoopbackOnly", "true"));
         using var api = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
+        api.DefaultRequestHeaders.Add("X-API-Key", key);
         var wire = Convert.FromHexString(Guid.NewGuid().ToString("N")[..10]);
         var firmware = new FirmwareVersion { Label = "Synthetic later model", TableProfileId = FirmwareTableProfiles.LaterMultiPay180 };
         var phone = new Terminal { DisplayName = "Synthetic refresh receiver", TerminalIdHex = Convert.ToHexString(wire), FirmwareVersion = firmware };
@@ -72,10 +74,25 @@ public sealed class PostgresAutomaticTableDownloadTests
             await db.SaveChangesAsync();
         }
 
+        var limited = TestOperatorAuthentication.EnsureAccount(factory, $"fixture-delivery-reader-{Guid.NewGuid():N}", "Operator");
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            (await db.OperatorAccounts.SingleAsync(row => row.Id == limited.Id)).PermissionProfileJson = "{\"table-assignments\":1,\"table-records\":1}";
+            await db.SaveChangesAsync();
+        }
+        using var limitedApi = TestOperatorAuthentication.CreateAuthenticatedClient(factory, limited.Username, "Operator");
+        limitedApi.DefaultRequestHeaders.Add("X-API-Key", key);
+        using var anonymous = factory.CreateClient(); anonymous.DefaultRequestHeaders.Add("X-API-Key", key);
+        Assert.Equal(HttpStatusCode.Forbidden, (await limitedApi.GetAsync($"/api/terminals/{phone.Id}/configuration-delivery-review")).StatusCode);
+        Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.GetAsync($"/api/terminals/{phone.Id}/configuration-delivery-review")).StatusCode);
+
         // Establish actual full acknowledgement evidence via NCC.
+        await Review("no_acknowledged_full_batch", "full", [26, 30, 50], ["uncertain", "uncertain", "uncertain"]);
         await RoundTrip(1, original, DownloadScope.Full, auditReason: "no_acknowledged_full_batch");
         var baseline = await RoundTrip(0x86, original, DownloadScope.Full);
         await Assign(sets[1]);
+        await Review("changed_records", "partial", [26, 30], ["same", "different", "same"], baseline);
         // Only MT30 differs; MT26 is its declared dependency. MT50 must not go out.
         var callback = new TerminalCallbackRequest { TerminalId = phone.Id, RequestedAtUtc = DateTime.UtcNow,
             DueAtUtc = DateTime.UtcNow.AddHours(1) };
@@ -94,13 +111,16 @@ public sealed class PostgresAutomaticTableDownloadTests
         }
         await Assign(sets[2]);
         // The previous partial already applied MT30. Only the newly changed MT50 is needed.
+        await Review("changed_records", "partial", [50], ["same", "same", "different"], baseline);
         await RoundTrip(1, [next[2]], DownloadScope.Partial, auditReason: "changed_records", baselineId: baseline);
         // No changes is deliberately the existing full resend, not an empty response.
+        await Review("no_changed_records", "full", [26, 30, 50], ["same", "same", "same"], baseline);
         var refreshed = await RoundTrip(1, next, DownloadScope.Full, auditReason: "no_changed_records", baselineId: baseline);
         await Assign(sets[3]);
         // A partial that did not receive the final MT13 ACK is not a trusted baseline.
         await RoundTrip(1, [interrupted[2]], DownloadScope.Partial, finalAck: false,
             auditReason: "changed_records", baselineId: refreshed);
+        await Review("uncertain_delivery_history", "full", [26, 30, 50], ["uncertain", "uncertain", "uncertain"], refreshed);
         var recovered = await RoundTrip(1, interrupted, DownloadScope.Full,
             auditReason: "uncertain_delivery_history", baselineId: refreshed);
         await Assign(sets[4]);
@@ -109,6 +129,24 @@ public sealed class PostgresAutomaticTableDownloadTests
         await Assign(sets[2]);
         await RoundTrip(0x82, next, DownloadScope.Full);
         Assert.NotEqual(Guid.Empty, recovered);
+
+        async Task Review(string reason, string scope, int[] selectedNumbers, string[] comparisons, Guid? baselineId = null)
+        {
+            var before = await Batches();
+            var path = $"/api/terminals/{phone.Id}/configuration-delivery-review";
+            using var response = await api.GetAsync(path); response.EnsureSuccessStatusCode();
+            Assert.True(response.Headers.CacheControl?.NoStore);
+            var view = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.True(view.GetProperty("available").GetBoolean()); Assert.Equal(reason, view.GetProperty("reason").GetString());
+            Assert.Equal(scope, view.GetProperty("scope").GetString());
+            if (baselineId is { } expected) Assert.Equal(expected, view.GetProperty("baselineId").GetGuid());
+            else Assert.Equal(JsonValueKind.Null, view.GetProperty("baselineId").ValueKind);
+            var rows = view.GetProperty("records").EnumerateArray().ToArray();
+            Assert.Equal(comparisons, rows.Select(row => row.GetProperty("comparison").GetString()).ToArray());
+            Assert.Equal(selectedNumbers, rows.Where(row => row.GetProperty("selectedForRefresh").GetBoolean()).Select(row => row.GetProperty("number").GetInt32()).ToArray());
+            Assert.Equal(before.Select(batch => (batch.Id, batch.Status)).OrderBy(row => row.Id),
+                (await Batches()).Select(batch => (batch.Id, batch.Status)).OrderBy(row => row.Id));
+        }
 
         async Task Assign(TableSet set)
         {

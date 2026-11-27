@@ -1,11 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
-import { apiGet, apiPostRaw } from '../api/client'
+import { apiGet, apiGetRaw, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { TerminalConfigurationWorksheet } from './TerminalConfigurationWorksheet'
 
-vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiPostRaw: vi.fn() }))
+vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiGetRaw: vi.fn(), apiPostRaw: vi.fn() }))
 afterEach(() => { cleanup(); vi.resetAllMocks(); consoleSession.clear() })
 const endpoint = '/api/terminals/fixture-phone/configuration-worksheet'
 const assigned = (configurationId: string, number: number) => ({ id: `base-${number}`, setId: 'base', setName: 'Current configuration',
@@ -19,14 +19,20 @@ const records = [
   { number: 32, name: 'Communications statistics', family: 'Reporting', familyRequired: false, canChoose: true, canClear: true, ambiguous: false, assigned: assigned('STAT01', 32) },
   { number: 31, name: 'Servicing', family: 'Service', familyRequired: true, canChoose: true, canClear: false, ambiguous: false, assigned: assigned('SERV01', 31) },
 ]
-const family = { familyLabel: 'Fixture family', documented: true, tables: [{ name: 'Dialing', required: true, status: 'missing' }] }
+const family = { familyLabel: 'Fixture family', documented: true, tables: [{ name: 'Dialing', required: true, status: 'missing' }],
+  operatingMode: { expectedCode: 2, expectedLabel: 'Multi-pay', configuredCode: 1, configuredLabel: 'Card only', status: 'differs',
+    message: 'Review whether the payment-mode difference is intentional for this phone.' } }
 const receipt = { tableSetId: 'result-set', tableSetName: 'Updated configuration', changedNumbers: [29, 50], removedNumbers: [32] }
 function setup(canUpdate = true, initial = false, onApplied = vi.fn()) {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-assignments': canUpdate ? 3 : 1 })
   vi.mocked(apiGet).mockImplementation(async path => {
     const url = new URL(String(path), 'http://localhost')
     if (url.pathname === endpoint) return { id: 'fixture-phone', displayName: 'Phone', terminalIdHex: '0000000001', firmware: 'Fixture target',
-      baseSetId: initial ? null : 'base', baseSetName: initial ? null : 'Current configuration', assignmentRevision: initial ? null : 7, canUpdate, family, records } as never
+      baseSetId: initial ? null : 'base', baseSetName: initial ? null : 'Current configuration', assignmentRevision: initial ? null : 7, canUpdate, family,
+      records: initial ? records.map(row => ({ ...row, assigned: null, canClear: false })) : records } as never
+    if (url.pathname === endpoint + '/initial-sources') return { available: true, total: 2, page: Number(url.searchParams.get('page')), pageSize: 50,
+      sources: [{ id: 'starter', name: 'Preferred starter', recordCount: 3, isDefault: true, hasAccess: true },
+        { id: 'wrong', name: 'Invalid starter', recordCount: 1, isDefault: false, hasAccess: false }] } as never
     if (url.pathname === endpoint + '/options') {
       const number = Number(url.searchParams.get('number')), page = Number(url.searchParams.get('page'))
       const choices = number === 29 ? [option(29, 'ADV002'), { ...option(29, 'WRONG1', 'Requires another firmware'), id: 'other' }]
@@ -57,6 +63,7 @@ it('looks up records from two sources, stages an explicit clear, and handles sta
   fireEvent.click(screen.getByText('Individual configuration assignments'))
   const table = await screen.findByRole('table', { name: 'Assigned configuration records' })
   expect(within(table).getByText('ADV001 · revision 1')).toBeVisible()
+  expect(screen.getByText('Multi-pay (code 2)')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Look up MT29' }))
   const lookup = await screen.findByRole('region', { name: 'Configuration lookup for MT29' })
   expect(await within(lookup).findByRole('button', { name: 'Choose ADV002' })).toBeEnabled()
@@ -76,6 +83,7 @@ it('looks up records from two sources, stages an explicit clear, and handles sta
   fireEvent.click(screen.getByRole('button', { name: 'Preview configuration assignment' }))
   const preview = await screen.findByRole('region', { name: 'Configuration assignment preview' })
   expect(within(preview).getByText('Required dependency')).toBeVisible()
+  expect(within(preview).getByText('Card only (code 1)')).toBeVisible()
   expect(within(preview).getByRole('button', { name: 'Apply configuration assignment' })).toBeDisabled()
   fireEvent.click(within(preview).getByLabelText('I reviewed the resulting host assignment.'))
   fireEvent.click(within(preview).getByRole('button', { name: 'Apply configuration assignment' }))
@@ -119,4 +127,54 @@ it('starts an initial assignment and makes MT21 personalization an explicit choi
   fireEvent.click(screen.getByRole('button', { name: 'Preview configuration assignment' }))
   expect(await screen.findByText('Registered wire ID applied')).toBeVisible()
   expect(apiPostRaw).toHaveBeenCalledWith(`${endpoint}/preview`, expect.objectContaining({ baseSetId: null, assignmentRevision: null, personalizeAccessIdentity: true }))
+})
+
+it('stages a whole matching starter, retains individual edits and requires explicit identity and assignment review', async () => {
+  const onApplied = setup(true, true)
+  const starterRecords = [21, 29, 50].map(number => ({ ...option(number, `START${number}`), number, tableSetId: 'starter', setName: 'Preferred starter' }))
+  vi.mocked(apiGetRaw).mockImplementation(async path => path.endsWith('/wrong') ? Response.json({ error: 'MT29 has an incompatible length.' }, { status: 400 })
+    : Response.json({ id: 'starter', name: 'Preferred starter', records: starterRecords, requiresAccessPersonalization: true, family }))
+  vi.mocked(apiPostRaw).mockImplementation(async (path, body) => path.endsWith('/preview')
+    ? Response.json({ previewToken: 'starter-preview', canApply: true, initialAssignment: true, family,
+      changes: starterRecords.filter(record => (body as { choices: { number: number }[] }).choices.some(choice => choice.number === record.number))
+        .map(record => ({ tableNumber: record.number, action: 'add', required: false, personalized: record.number === 21, current: null, result: record })) })
+    : Response.json(receipt))
+  fireEvent.click(screen.getByText('Individual configuration assignments'))
+  fireEvent.click(await screen.findByRole('button', { name: 'Choose a matching starter' }))
+  const chooser = await screen.findByRole('region', { name: 'Initial configuration starter' })
+  const select = await within(chooser).findByLabelText('Published starter')
+  fireEvent.change(select, { target: { value: 'wrong' } })
+  expect(await within(chooser).findByText('MT29 has an incompatible length.')).toBeVisible()
+  expect(within(chooser).queryByRole('button', { name: /Stage .*starter records/ })).not.toBeInTheDocument()
+  fireEvent.change(select, { target: { value: 'starter' } })
+  expect(await within(chooser).findByText(/MT21 record belongs to a different line/)).toBeVisible()
+  expect(within(chooser).getByText(/Required families needing review/)).toBeVisible()
+  fireEvent.click(within(chooser).getByRole('button', { name: 'Stage 3 starter records' }))
+  expect(await screen.findByText('3 staged changes')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Choose a matching starter' })).toBeDisabled()
+  expect(apiPostRaw).not.toHaveBeenCalled()
+  const identity = screen.getByLabelText(/Use this phone’s registered wire ID/)
+  expect(identity).not.toBeChecked()
+  fireEvent.click(identity)
+  fireEvent.click(screen.getByRole('button', { name: 'Keep MT50' }))
+  expect(screen.getByText('2 staged changes')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Preview configuration assignment' }))
+  const preview = await screen.findByRole('region', { name: 'Configuration assignment preview' })
+  expect(within(preview).getByRole('button', { name: 'Apply configuration assignment' })).toBeDisabled()
+  fireEvent.click(within(preview).getByLabelText('I reviewed the resulting host assignment.'))
+  fireEvent.click(within(preview).getByRole('button', { name: 'Apply configuration assignment' }))
+  await waitFor(() => expect(onApplied).toHaveBeenCalledWith(receipt))
+  expect(apiPostRaw).toHaveBeenLastCalledWith(endpoint, expect.objectContaining({ baseSetId: null, assignmentRevision: null,
+    personalizeAccessIdentity: true, previewToken: 'starter-preview', choices: [
+      { number: 21, action: 'copy', sourceSetId: 'starter', sourceVersionId: 'source-21' },
+      { number: 29, action: 'copy', sourceSetId: 'starter', sourceVersionId: 'source-29' },
+    ] }))
+})
+
+it('does not offer a starter to an assignment read-only operator', async () => {
+  setup(false, true)
+  fireEvent.click(screen.getByText('Individual configuration assignments'))
+  await screen.findByText(/No configuration is assigned/)
+  expect(screen.queryByRole('region', { name: 'Initial configuration starter' })).not.toBeInTheDocument()
+  expect(apiGetRaw).not.toHaveBeenCalled()
 })

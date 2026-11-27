@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
 import { FirmwareTransitionReviewPanel } from './FirmwareTransitionReviewPanel'
+import { FirmwareConfigurationTransitionPanel } from './FirmwareConfigurationTransitionPanel'
 
 type Row = {
   id: string
@@ -74,6 +75,7 @@ export function FirmwareJobsPage() {
         Simulation-first orchestration — use job detail to run simulation and operator approval (rollback notes).
       </p>
       <FirmwareTransitionReviewPanel phones={terms} />
+      <FirmwareConfigurationTransitionPanel phones={terms} />
       {!loading && !err && terms.length === 0 && (
         <p role="status" style={{ color: '#a50', maxWidth: 720 }}>
           No terminals available — create a terminal before queueing jobs.

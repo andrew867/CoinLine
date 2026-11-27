@@ -55,7 +55,10 @@ BEGIN
     SELECT array_agg("MigrationId"::text ORDER BY "MigrationId") INTO observed FROM "__EFMigrationsHistory";
     IF observed = known || ARRAY[baseline] OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures']
        OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures', '20261126142250_AddCraftTechnicianAttribution']
-       OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures', '20261126142250_AddCraftTechnicianAttribution', '20261127030044_AddNccVersionObservation'] THEN
+       OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures', '20261126142250_AddCraftTechnicianAttribution', '20261127030044_AddNccVersionObservation']
+       OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures', '20261126142250_AddCraftTechnicianAttribution', '20261127030044_AddNccVersionObservation', '20261127034240_AddFirmwareConfigurationTransition']
+       OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures', '20261126142250_AddCraftTechnicianAttribution', '20261127030044_AddNccVersionObservation', '20261127034240_AddFirmwareConfigurationTransition', '20261127040855_AddAutomaticFirmwareConfigurationTransition']
+       OR observed = known || ARRAY[baseline, '20261126132338_AddCallPricingStructures', '20261126142250_AddCraftTechnicianAttribution', '20261127030044_AddNccVersionObservation', '20261127034240_AddFirmwareConfigurationTransition', '20261127040855_AddAutomaticFirmwareConfigurationTransition', '20261127093551_AddFirmwareConfigurationRecovery'] THEN
         RETURN;
     END IF;
     IF observed IS NULL OR cardinality(observed) > cardinality(known)

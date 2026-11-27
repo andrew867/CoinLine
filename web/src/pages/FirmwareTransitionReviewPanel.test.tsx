@@ -17,7 +17,9 @@ it('reviews the target family requirements without changing the registered phone
       configurationReadyForReview: false, upgradeQualified: false, findings: [], registeredFamilyId: 'mtr20-multipay', records: [
         { tableNumber: 101, sourceBytes: 403, targetExpectedBytes: null, candidateBytes: null, action: 'candidate-local-equivalent',
           detail: 'All local tariff tuples match.', targetAcknowledged: false, requiresLayoutReview: false, replacementRecords: [136] }],
-      targetFamilyReview: { familyId: 'mtr20-desk', familyLabel: 'MTR 2.0 Desk', documented: true, screeningEntries: 200, note: null, tables: [
+      targetFamilyReview: { familyId: 'mtr20-desk', familyLabel: 'MTR 2.0 Desk', documented: true, screeningEntries: 200, note: null,
+        operatingMode: { expectedCode: 1, expectedLabel: 'Card only', configuredCode: 2, configuredLabel: 'Multi-pay', status: 'differs',
+          message: 'Review whether the payment-mode difference is intentional for this phone.' }, tables: [
         { name: 'Dialing rules', required: true, candidates: [62], records: [], status: 'missing' },
         { name: 'Call screening', required: true, candidates: [92], status: 'present', records: [{ number: 92, length: 3061, format: 'verifiedLength', screeningNote: '180 packed slots' }] },
         { name: 'Text advertising', required: false, candidates: [29], records: [], status: 'missing' },
@@ -32,6 +34,8 @@ it('reviews the target family requirements without changing the registered phone
   fireEvent.click(screen.getByRole('button', { name: 'Compare configurations' }))
   const family = await screen.findByRole('region', { name: 'Target terminal family checklist' })
   expect(within(family).getByText('1 / 2')).toBeVisible()
+  expect(within(family).getByText('Card only (code 1)')).toBeVisible()
+  expect(within(family).getByText('Multi-pay (code 2)')).toBeVisible()
   const dialing = within(family).getByRole('row', { name: /Dialing rules/ })
   expect(dialing).toHaveTextContent('Mandatory')
   expect(dialing).toHaveTextContent('Missing from set')
