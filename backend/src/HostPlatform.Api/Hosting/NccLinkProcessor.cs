@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Data;
 using System.Net.Sockets;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Security;
+using HostPlatform.Api.Services;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Dlog;
 using HostPlatform.Infrastructure.Persistence;
@@ -948,6 +950,7 @@ internal sealed class NccLinkProcessor(
         {
             var capturedAt = DateTime.UtcNow;
             var i = 0;
+            var observedVersion = false;
             foreach (var record in records)
             {
                 // Cashbox observations were committed before the link acknowledgement.
@@ -966,13 +969,45 @@ internal sealed class NccLinkProcessor(
                     capturedAt,
                     _session.CorrelationId,
                     stoppingToken, craftMatch: match, observedOnNccLink: terminal != null && _session.TerminalId == terminal.Id);
+                observedVersion |= record[0] == FieldEventCatalog.SoftwareVersionMessageType && record.Length == FieldEventCatalog.SoftwareVersionRecordLength;
             }
+            if (observedVersion && terminal != null && _session.TerminalId == terminal.Id)
+                await TryActivateFirmwareConfigurationAsync(terminal.Id);
             return true;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Field event was not stored.");
             return false;
+        }
+    }
+
+    private async Task TryActivateFirmwareConfigurationAsync(Guid terminalId)
+    {
+        try
+        {
+            if (!await db.FirmwareConfigurationTransitions.AsNoTracking().AnyAsync(row => row.TerminalId == terminalId && row.AutoActivateOnContact &&
+                row.ActivatedAtUtc == null && row.CancelledAtUtc == null, stoppingToken)) return;
+
+            // A separate context isolates rolled-back activation changes from the
+            // active NCC session's tracking state and normal acknowledgement path.
+            await using var scope = scopes.CreateAsyncScope();
+            var transitionDb = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var distribution = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
+            if (!transitionDb.Database.IsRelational()) return;
+            await using var transaction = await transitionDb.Database.BeginTransactionAsync(IsolationLevel.Serializable, stoppingToken);
+            var plan = await transitionDb.FirmwareConfigurationTransitions.SingleOrDefaultAsync(row => row.TerminalId == terminalId && row.AutoActivateOnContact &&
+                row.ActivatedAtUtc == null && row.CancelledAtUtc == null, stoppingToken);
+            if (plan == null) return;
+            await FirmwareConfigurationTransitionService.Activate(transitionDb, distribution, plan, clock.GetUtcNow().UtcDateTime, stoppingToken,
+                currentSessionId: _session.Id);
+            await transaction.CommitAsync(stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A missing prerequisite leaves the plan staged and never suppresses
+            // ordinary alarm, maintenance or upload acknowledgements.
+            logger.LogDebug("Automatic configuration activation not applied ({ErrorType}).", ex.GetType().Name);
         }
     }
 
@@ -1399,12 +1434,22 @@ internal sealed class NccLinkProcessor(
                 await SendInstallEndAsync(stream, terminalId);
             return;
         }
+        if (await FirmwareConfigurationTransitionService.HoldSourceTables(db, terminal.Id, stoppingToken, _session.Id))
+        {
+            Audit("firmware_transition_holds_source_tables", new { reason = "running controller version requires transition review" }, terminal.Id);
+            await db.SaveChangesAsync(stoppingToken);
+            await SendInstallEndAsync(stream, terminalId, cashboxStatus);
+            return;
+        }
         if (await db.DownloadBatches.AnyAsync(batch => batch.TerminalId == terminal.Id &&
             batch.Status == DownloadBatchStatus.Running && batch.NccSessionId != null, stoppingToken))
         {
             await SendInstallEndAsync(stream, terminalId);
             return;
         }
+
+        if (await TryStartTransitionConfigurationAsync(stream, terminalId, terminal.Id, cashboxStatus))
+            return;
 
         if (await TryStartIdentityCutoverAsync(stream, terminalId, terminal, allowCutover, mandatoryFull, cashboxStatus))
             return;
@@ -1605,6 +1650,38 @@ internal sealed class NccLinkProcessor(
         }
         _batch = queued;
         await SendBatchAsync(stream, terminalId, terminal, queued, cashboxStatus, queuedByOperator: true);
+    }
+
+    private async Task<bool> TryStartTransitionConfigurationAsync(NetworkStream stream, byte[] terminalId, Guid phoneId, byte[]? cashboxStatus)
+    {
+        var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().Where(row => row.TerminalId == phoneId && row.ActivatedAtUtc != null &&
+            db.DownloadBatches.Any(batch => batch.Id == (row.RecoveredAtUtc == null ? row.TargetBatchId : row.RecoveryBatchId) && batch.Status == DownloadBatchStatus.Pending))
+            .OrderByDescending(row => row.ActivatedAtUtc).FirstOrDefaultAsync(stoppingToken);
+        if (plan == null) return false;
+        var recovery = plan.RecoveredAtUtc != null;
+        var batchId = recovery ? plan.RecoveryBatchId : plan.TargetBatchId;
+        var setId = recovery ? plan.SourceTableSetId : plan.TargetTableSetId;
+        var firmwareId = recovery ? plan.SourceFirmwareVersionId : plan.TargetFirmwareVersionId;
+        var expectedVersion = recovery ? (plan.SourceControllerRom, plan.SourceControllerSoftware) : (plan.TargetControllerRom, plan.TargetControllerSoftware);
+        var queued = await db.DownloadBatches.Include(batch => batch.TableSet).SingleOrDefaultAsync(batch => batch.Id == batchId &&
+            batch.Status == DownloadBatchStatus.Pending, stoppingToken);
+        var current = await db.Terminals.AsNoTracking().SingleOrDefaultAsync(row => row.Id == phoneId, stoppingToken);
+        var observation = await FirmwareConfigurationTransitionService.LatestObservation(db, phoneId, stoppingToken);
+        var matchingAssignment = await db.TerminalTableAssignments.AsNoTracking().AnyAsync(row => row.TerminalId == phoneId &&
+            row.TableSetId == setId, stoppingToken);
+        if (queued == null || current == null || current.FirmwareVersionId != firmwareId || !matchingAssignment ||
+            queued.TerminalId != phoneId || queued.TableSetId != setId || queued.Scope != DownloadScope.Full || queued.ScheduleId != null ||
+            observation == null || FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != expectedVersion)
+        {
+            Audit("firmware_transition_holds_target_tables", new { recovery, reason = "reviewed assignment or observed version needs review" }, phoneId);
+            await db.SaveChangesAsync(stoppingToken);
+            await SendInstallEndAsync(stream, terminalId, cashboxStatus);
+            return true;
+        }
+        // Claim the exact full batch even for a mandatory INSTALL request. It is
+        // not an older partial delivery, and must not be replaced by a fresh batch.
+        await StartQueuedBatchAsync(stream, terminalId, current, queued, cashboxStatus);
+        return true;
     }
 
     private async Task SendBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch batch,

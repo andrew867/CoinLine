@@ -92,6 +92,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<FirmwareBlockManifest> FirmwareBlockManifests => Set<FirmwareBlockManifest>();
     public DbSet<FirmwareTarget> FirmwareTargets => Set<FirmwareTarget>();
     public DbSet<FirmwareUpdateJob> FirmwareUpdateJobs => Set<FirmwareUpdateJob>();
+    public DbSet<FirmwareConfigurationTransition> FirmwareConfigurationTransitions => Set<FirmwareConfigurationTransition>();
     public DbSet<FirmwareRollBackPlan> FirmwareRollBackPlans => Set<FirmwareRollBackPlan>();
     public DbSet<FirmwareUpdateSafetyCheck> FirmwareUpdateSafetyChecks => Set<FirmwareUpdateSafetyCheck>();
     public DbSet<FirmwareUpdateStep> FirmwareUpdateSteps => Set<FirmwareUpdateStep>();
@@ -109,6 +110,30 @@ public class HostPlatformDbContext : DbContext
             b.Property(t => t.TerminalFamilyId).HasMaxLength(48);
             b.HasOne(t => t.TransportEndpoint).WithMany().HasForeignKey(t => t.TransportEndpointId);
             b.HasOne(t => t.FirmwareVersion).WithMany().HasForeignKey(t => t.FirmwareVersionId);
+        });
+        modelBuilder.Entity<FirmwareConfigurationTransition>(b =>
+        {
+            b.HasOne<Terminal>().WithMany().HasForeignKey(row => row.TerminalId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ScheduledTableDownload>().WithMany().HasForeignKey(row => row.CodeScheduleId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TableVersion>().WithMany().HasForeignKey(row => row.CodeRecordVersionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<FirmwareVersion>().WithMany().HasForeignKey(row => row.SourceFirmwareVersionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<FirmwareVersion>().WithMany().HasForeignKey(row => row.TargetFirmwareVersionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TableSet>().WithMany().HasForeignKey(row => row.SourceTableSetId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<TableSet>().WithMany().HasForeignKey(row => row.TargetTableSetId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DlogTransaction>().WithMany().HasForeignKey(row => row.SourceObservationId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DlogTransaction>().WithMany().HasForeignKey(row => row.TargetObservationId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DownloadBatch>().WithMany().HasForeignKey(row => row.TargetBatchId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DlogTransaction>().WithMany().HasForeignKey(row => row.RecoveryObservationId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DownloadBatch>().WithMany().HasForeignKey(row => row.RecoveryBatchId).OnDelete(DeleteBehavior.Restrict);
+            b.Property(row => row.Version).IsConcurrencyToken();
+            b.Property(row => row.CodeRecordSha256Hex).HasMaxLength(64);
+            b.Property(row => row.SourceSnapshot).HasMaxLength(64);
+            b.Property(row => row.TargetSnapshot).HasMaxLength(64);
+            b.Property(row => row.SourceControllerRom).HasMaxLength(7);
+            b.Property(row => row.TargetControllerRom).HasMaxLength(7);
+            b.Property(row => row.SourceControllerSoftware).HasMaxLength(4);
+            b.Property(row => row.TargetControllerSoftware).HasMaxLength(4);
+            b.HasIndex(row => row.TerminalId).IsUnique().HasFilter("\"ActivatedAtUtc\" IS NULL AND \"CancelledAtUtc\" IS NULL");
         });
         modelBuilder.Entity<TerminalIdentityCutoverItem>(b =>
         {

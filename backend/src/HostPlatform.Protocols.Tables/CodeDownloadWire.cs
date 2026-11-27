@@ -25,6 +25,9 @@ public static class CodeDownloadWire
     public static string? ServerRoute(ReadOnlySpan<byte> record) =>
         record.Length == RecordLength && record[0] == MessageType ? CodeServer.Read(record) : null;
 
+    public static (string? Rom, string? Application) RequestedVersion(ReadOnlySpan<byte> record) =>
+        record.Length == RecordLength && record[0] == MessageType ? (TargetRom.Read(record), TargetApp.Read(record)) : (null, null);
+
     public static int SelectedBlockCount(ReadOnlySpan<byte> record)
     {
         if (record.Length != RecordLength || record[0] != MessageType)
