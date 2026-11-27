@@ -155,7 +155,8 @@ public static class TerminalCashboxAccounting
     private static EmptyBoxInitialization View(InitializationRow row, bool current) =>
         new(row.Id, row.RecordedAtUtc, row.Detail.BoxNumber, row.OpeningTime, current, row.Source);
 
-    private static string? ExpectedNewBox(List<Reading> reports) => reports.LastOrDefault() is { } last &&
+    private static string? ExpectedNewBox(List<Reading> reports) => FindCurrentStatus(reports) == null &&
+        reports.LastOrDefault(row => row.Bytes[0] == DlogCashboxWire.CollectionType) is { } last &&
         DlogCashboxWire.TryReadCollection(last.Bytes, out var collection) ? collection.NewBoxNumber : null;
 
     private static InitializationRow? FindCurrentInitialization(List<Reading> reports, List<InitializationRow> initializations) =>
@@ -184,8 +185,20 @@ public static class TerminalCashboxAccounting
         return result;
     }
 
-    private static Reading? FindLatestStatus(List<Reading> reports) =>
-        reports.LastOrDefault() is { } last && last.Bytes[0] == DlogCashboxWire.StatusType ? last : null;
+    private static Reading? FindLatestStatus(List<Reading> reports)
+    {
+        var previousCollectionIndex = reports.FindLastIndex(row => row.Bytes[0] == DlogCashboxWire.CollectionType);
+        var collection = previousCollectionIndex >= 0 && DlogCashboxWire.TryReadCollection(reports[previousCollectionIndex].Bytes, out var value)
+            ? value : null;
+        for (var i = reports.Count - 1; i > previousCollectionIndex; i--)
+        {
+            var row = reports[i];
+            if (!DlogCashboxWire.TryReadStatus(row.Bytes, out var status)) continue;
+            if (collection != null && collection.RemovedBox.BoxNumber == status.BoxNumber && collection.NewBoxNumber != status.BoxNumber) continue;
+            return row;
+        }
+        return null;
+    }
 
     private static Reading? FindCurrentStatus(List<Reading> reports) =>
         FindLatestStatus(reports) is { } last && DlogCashboxWire.TryReadStatus(last.Bytes, out var status) && status.BalanceKnown ? last : null;
