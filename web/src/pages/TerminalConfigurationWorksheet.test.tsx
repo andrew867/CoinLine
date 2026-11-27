@@ -19,7 +19,9 @@ const records = [
   { number: 32, name: 'Communications statistics', family: 'Reporting', familyRequired: false, canChoose: true, canClear: true, ambiguous: false, assigned: assigned('STAT01', 32) },
   { number: 31, name: 'Servicing', family: 'Service', familyRequired: true, canChoose: true, canClear: false, ambiguous: false, assigned: assigned('SERV01', 31) },
 ]
-const family = { familyLabel: 'Fixture family', documented: true, tables: [{ name: 'Dialing', required: true, status: 'missing' }] }
+const family = { familyLabel: 'Fixture family', documented: true, tables: [{ name: 'Dialing', required: true, status: 'missing' }],
+  operatingMode: { expectedCode: 2, expectedLabel: 'Multi-pay', configuredCode: 1, configuredLabel: 'Card only', status: 'differs',
+    message: 'Review whether the payment-mode difference is intentional for this phone.' } }
 const receipt = { tableSetId: 'result-set', tableSetName: 'Updated configuration', changedNumbers: [29, 50], removedNumbers: [32] }
 function setup(canUpdate = true, initial = false, onApplied = vi.fn()) {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-assignments': canUpdate ? 3 : 1 })
@@ -61,6 +63,7 @@ it('looks up records from two sources, stages an explicit clear, and handles sta
   fireEvent.click(screen.getByText('Individual configuration assignments'))
   const table = await screen.findByRole('table', { name: 'Assigned configuration records' })
   expect(within(table).getByText('ADV001 · revision 1')).toBeVisible()
+  expect(screen.getByText('Multi-pay (code 2)')).toBeVisible()
   fireEvent.click(screen.getByRole('button', { name: 'Look up MT29' }))
   const lookup = await screen.findByRole('region', { name: 'Configuration lookup for MT29' })
   expect(await within(lookup).findByRole('button', { name: 'Choose ADV002' })).toBeEnabled()
@@ -80,6 +83,7 @@ it('looks up records from two sources, stages an explicit clear, and handles sta
   fireEvent.click(screen.getByRole('button', { name: 'Preview configuration assignment' }))
   const preview = await screen.findByRole('region', { name: 'Configuration assignment preview' })
   expect(within(preview).getByText('Required dependency')).toBeVisible()
+  expect(within(preview).getByText('Card only (code 1)')).toBeVisible()
   expect(within(preview).getByRole('button', { name: 'Apply configuration assignment' })).toBeDisabled()
   fireEvent.click(within(preview).getByLabelText('I reviewed the resulting host assignment.'))
   fireEvent.click(within(preview).getByRole('button', { name: 'Apply configuration assignment' }))

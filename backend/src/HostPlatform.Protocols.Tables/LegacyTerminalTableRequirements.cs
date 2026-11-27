@@ -6,8 +6,10 @@ public sealed record FamilyRecordEvidence(int Number, int Length, string Format,
     string? ScreeningFit = null, string? ScreeningNote = null);
 public sealed record FamilyTableRequirement(string Name, bool Required, int[] Candidates, FamilyRecordEvidence[] Records,
     string Status, string? Note = null);
+public sealed record FamilyOperatingModeReview(int ExpectedCode, string ExpectedLabel, int? ConfiguredCode,
+    string? ConfiguredLabel, string Status, string Message);
 public sealed record TerminalFamilyTableReview(string FamilyId, string FamilyLabel, bool Documented, int? ScreeningEntries,
-    string? Note, FamilyTableRequirement[] Tables);
+    string? Note, FamilyTableRequirement[] Tables, FamilyOperatingModeReview? OperatingMode = null);
 public sealed record ScreeningFamilyGuidance(string FamilyId, string FamilyLabel, int DocumentedEntries,
     int? InstitutionalFirst, int? InstitutionalLast);
 
@@ -110,15 +112,16 @@ public static class LegacyTerminalTableRequirements
     public static TerminalFamilyTableReview Review(TerminalFamily family, IEnumerable<(int Number, byte[] Payload, string? LayoutProfile)> records,
         FirmwareTableProfile? firmware)
     {
+        var byNumber = records.ToLookup(record => record.Number);
+        var operatingMode = ReviewOperatingMode(family, byNumber[26].ToArray(), firmware);
         var reference = Find(family.Id);
         if (reference == null)
             return new(family.Id, family.Label, false, null,
-                "No separate mandatory and optional table list was identified for this family.", []);
+                "No separate mandatory and optional table list was identified for this family.", [], operatingMode);
 
-        var byNumber = records.ToLookup(record => record.Number);
         var tables = reference.Required.Select(group => Evaluate(group, true))
             .Concat(reference.Optional.Except(reference.Required).Select(group => Evaluate(group, false))).ToArray();
-        return new(family.Id, family.Label, true, reference.ScreeningEntries, reference.Note, tables);
+        return new(family.Id, family.Label, true, reference.ScreeningEntries, reference.Note, tables, operatingMode);
 
         FamilyTableRequirement Evaluate(Group group, bool required)
         {
@@ -176,6 +179,42 @@ public static class LegacyTerminalTableRequirements
             }
             return new(name, required, candidates, present, status, note);
         }
+    }
+
+    private static FamilyOperatingModeReview? ReviewOperatingMode(TerminalFamily family,
+        (int Number, byte[] Payload, string? LayoutProfile)[] features, FirmwareTableProfile? firmware)
+    {
+        // The inventory type numbers identify a release and hardware family,
+        // not the three values in the feature record's operating-mode byte.
+        var expected = family.Variant switch
+        {
+            "Card" or "Generic Card" or "Graphical Card" or "Desk" or "Generic 2 Desk" or "Inmate" => 1,
+            "Multi-pay" or "Multi-pay with data jack" or "Generic 2 Multi-pay" or "Generic 2 Multi-pay with data jack" or
+                "Multi-pay Audio-Gram" or "Graphical Multi-pay" or "Visa" or "Mondex" or "SmartCity" or "Proton" => 2,
+            "Coin Basic" => 3,
+            _ => 0
+        };
+        if (expected == 0) return null;
+        var expectedLabel = ModeLabel(expected)!;
+        FamilyOperatingModeReview Result(string status, string message, int? code = null) =>
+            new(expected, expectedLabel, code, code.HasValue ? ModeLabel(code.Value) : null, status, message);
+        if (features.Length == 0)
+            return Result("missing", "MT26 is absent from this set. A partial download may retain an installed feature record.");
+        if (features.Length != 1 || features[0].Payload.Length != 72 || features[0].Payload[0] != 26)
+            return Result("invalid", "The assigned MT26 is incomplete, duplicated or has an unrecognized length. Review the feature record before comparing operating modes.");
+        var data = features[0].Payload;
+        var layout = firmware?.LayoutFor(26);
+        if (firmware is not { ObservedLengthsOnly: false } || !firmware.VerifiedLengths.TryGetValue(26, out var length) || length != data.Length ||
+            layout == null || (features[0].LayoutProfile is { } confirmed && confirmed != layout) || NativeTableLayouts.Find(26, data, layout) == null)
+            return Result("unverified", "The registered target does not establish this MT26 field layout. A matching length alone is not an operating-mode qualification.");
+        var actual = data[1];
+        if (ModeLabel(actual) == null)
+            return Result("invalid", $"Stored MT26 operating-mode code {actual} is not a recognized choice for this layout.", actual);
+        return actual == expected
+            ? Result("matches", "The saved MT26 operating mode matches the documented family expectation. Device payment behavior still requires verification.", actual)
+            : Result("differs", $"The registered family normally expects {expectedLabel}, but this saved MT26 selects {ModeLabel(actual)}. Review whether the payment-mode difference is intentional for this phone.", actual);
+
+        static string? ModeLabel(int code) => code switch { 1 => "Card only", 2 => "Multi-pay", 3 => "Coin only", _ => null };
     }
 
     private static (string Fit, string Note) ScreeningFit(int[] slots, string format, int logical)
