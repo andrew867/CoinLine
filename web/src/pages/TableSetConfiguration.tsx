@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { apiFetch, apiGet, apiPost, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { AdvertisingSimulator } from './AdvertisingSimulator'
+import { DialedNumberReview } from './DialedNumberReview'
 import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback'
 import { advertisingPage } from './advertisingPlayback'
 import { authorableAdvertisingText, glyphPalettes, normalizedAdvertisingText, advertisingDisplayWidth } from './advertisingGlyphs'
@@ -90,6 +91,8 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
         </label>
       </div>
       <p className="page-intro">{panel.fields}</p>
+      {(panel.name === 'Dialing, screening and service' || panel.name === 'Rates and local dialing') &&
+        canPerform('table-records', op.read) && <DialedNumberReview setId={setId} recordRevision={versions.map(item => `${item.tableNumber}:${item.tableRevision}`).sort().join(',')} />}
       {draft && !recordDirty && tableNumber >= 131 && tableNumber <= 133 && canPerform('table-records', op.add) &&
         <GraphicalStarterPanel setId={setId} onSaved={onImported} />}
       {tableNumber === 29 ? (

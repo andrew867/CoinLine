@@ -73,6 +73,7 @@ public static class OperatorPermissions
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("TerminalTariffReferences", R, "Get"),
+            ("DialedNumberReview", R, "Review"),
             ("FirmwareTariffStaging", R, "Preview"),
             ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
