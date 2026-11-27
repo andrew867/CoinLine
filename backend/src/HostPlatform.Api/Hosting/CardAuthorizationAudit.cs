@@ -11,7 +11,7 @@ namespace HostPlatform.Api.Hosting;
 internal sealed record CardAuthorizationAuditDetail(byte MessageType, string Outcome, string Provider,
     string? Reason = null, Guid? CardAccountId = null, Guid? QuoteId = null, decimal? QuotedAmountUsd = null,
     ushort? CallSequence = null, Guid? OriginalDecisionId = null, int? RequestBytes = null, int? BundledCallRecords = null,
-    int[]? SuffixCdrTypes = null);
+    int[]? SuffixCdrTypes = null, string? RateSource = null, Guid? RatePlanVersionId = null);
 
 internal static class CardAuthorizationAudit
 {
@@ -27,6 +27,7 @@ internal static class CardAuthorizationAudit
         "audit_failed", "malformed_request", "unknown"
     ];
     private static readonly HashSet<string> Providers = [LabProvider, ShadyBankProvider, "trusted_provider", "none", "unrecorded"];
+    private static readonly HashSet<string> BankRateSources = ["native_quote", "authorization_only"];
     private static readonly HashSet<string> Reasons =
     [
         "fixture_not_recognized", "binding_not_found", "account_not_eligible", "quote_missing",
@@ -63,7 +64,9 @@ internal static class CardAuthorizationAudit
                 && value.TryGetUInt16(out var seq) ? (ushort?)seq : null;
             return new(messageType, outcome, provider, SafeString(root, "reason", Reasons),
                 provider == LabProvider ? SafeGuid(root, "cardAccountId") : null, SafeGuid(root, "quoteId"), amount, sequence,
-                provider == LabProvider ? SafeGuid(root, "originalDecisionId") : null, requestBytes, bundledRecords, suffix);
+                provider == LabProvider ? SafeGuid(root, "originalDecisionId") : null, requestBytes, bundledRecords, suffix,
+                provider == ShadyBankProvider ? SafeString(root, "rateSource", BankRateSources) : null,
+                provider == ShadyBankProvider ? SafeGuid(root, "ratePlanVersionId") : null);
         }
         catch (JsonException) { return null; }
     }

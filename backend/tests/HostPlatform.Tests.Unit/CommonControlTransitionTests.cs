@@ -96,6 +96,25 @@ public sealed class CommonControlTransitionTests
         Assert.Equal(all.Payload,CommonControlTransitionWire.Project(50,source,all.Payload,["coin-denominations","coin-hardware","coin-collection"]).Payload);
     }
 
+    [Fact]
+    public void Service_restriction_carries_only_common_daily_window_and_reviews_later_access()
+    {
+        byte[] source=[58,2,20,30,6,15,..Enumerable.Repeat((byte)0x11,20)];
+        byte[] target=[58,4,9,0,3,0,..Enumerable.Repeat((byte)0xA5,20)];
+        var retained=CommonControlTransitionWire.Project(58,source,target,[]);
+        Assert.Equal(target,retained.Payload); Assert.Empty(retained.Findings);
+        var selected=CommonControlTransitionWire.Project(58,source,target,["daily-service-restriction"]);
+        Assert.Equal(source[..6],selected.Payload[..6]); Assert.Equal(target[6..],selected.Payload[6..]);
+        Assert.DoesNotContain(selected.Findings,row=>row.Blocking);
+        Assert.Contains(selected.Findings,row=>!row.Blocking&&row.Message.Contains("configurable restricted-access"));
+        Assert.Equal("Configurable restricted access",Assert.Single(Assert.Single(selected.Groups).Fields,row=>row.Key=="restriction").Target);
+        Assert.Equal(selected.Payload,CommonControlTransitionWire.Project(58,source,selected.Payload,["daily-service-restriction"]).Payload);
+        source[1]=4;
+        Assert.Contains(CommonControlTransitionWire.Project(58,source,target,["daily-service-restriction"]).Findings,row=>row.Blocking);
+        source[1]=2; source[4]=0; source[5]=0;
+        Assert.Contains(CommonControlTransitionWire.Project(58,source,target,["daily-service-restriction"]).Findings,row=>row.Blocking);
+    }
+
     [Theory]
     [InlineData(29,481)][InlineData(30,68)][InlineData(32,33)][InlineData(34,19)][InlineData(35,21)][InlineData(50,105)]
     public void Preview_is_read_only_and_rejects_wrong_shape_or_group(int number,int length)
