@@ -33,3 +33,21 @@ The versioned package includes rating mode, rules and pricing structures, tariff
 The host quote tool can distinguish ten-digit 709 from 1+709 when both are supplied verbatim. Actual phones may normalize their dialed digits before a real-time rating request. A compatible terminal requires separately reviewed MT62 dialing rules, MT92 screening, local and regional pricing records and MT73 tariff tuples to preserve the intended dialing form and collect the correct charge. The template itself makes no terminal table, plan assignment, provider or routing change. Explicit service and emergency routing must be qualified independently in a local-only bench, not by placing real emergency calls. The listed prices are the operator's demonstration tariff choices, not a claim of regulated pricing.
 
 The five focused backend unit cases exercise every included area, both connected-minute and whole-call rates, exact service numbers, unknown and shortened dialing forms, retained local free exceptions and package references. An isolated real PostgreSQL test verifies authorized preview/import/export, read-only permission, invalid input, independent identities, preserved relationships and actual host quote output. Four focused Vitest cases, production Web build and the local Chromium draft import/export workflow also passed. No native terminal behavior is inferred from these results.
+
+## Independent terminal qualification
+
+An isolated Manager combining the regional plan and explicit per-phone published-plan selection passed 21 host quote and rejection controls. The earlier two-line Multi-Pay terminal received and acknowledged all eleven assigned configuration records, reached service and successfully restarted. A separate physical-input emulator run from that retained installation passed fifteen controlled cases using only a local CO, with no external calls.
+
+| Native earlier-profile behavior | Observed result |
+| --- | --- |
+| Ten-digit 709 local | Requested $0.25, accepted one synthetic quarter, outpulsed all ten digits without rewriting, received local answer and returned on-hook. |
+| 1+709 | Displayed $0.50 before payment or outpulse. |
+| 1+US geographic area | Actual real-time request received $1.50, displayed $1.50 before payment or outpulse. |
+| 1+other Canadian geographic area | Actual real-time request received $1.00, displayed $1.00 before payment or outpulse. |
+| Nonlocal ten-digit and seven-digit destinations | Denied without outpulse. |
+| 411 and 711 | Displayed $1.00 and $0.25 respectively before payment or outpulse. |
+| 211, 311, 511, 611, 811, one toll-free number and one exact information-service extension | Outpulsed without requesting payment. |
+
+Both national real-time decisions used the selected published plan and restored the national prefix from normalized terminal requests. Fixed and measured prices over additional minutes were verified by the host quote controls; extended paid-call duration and subsequent-charge collection were not exercised on the terminal. Emergency classification was checked in the host only, and no emergency call was placed.
+
+The later graphical profile is not qualified for general paid calling with this regional candidate. Its installed tariff and screening records matched the intended bytes, but ordinary paid controls outpulsed without requesting payment. A read-only device observation showed the intended inter-area rate selection being replaced before tariff lookup, while the directory-assistance control displayed the expected charge. Continue the later-profile diagnosis independently. Do not publish the graphical candidate as a verified paid-call configuration. These observations are emulator evidence, not physical bench acceptance.
