@@ -1,6 +1,7 @@
 import { FirmwareTariffStagingPanel } from './FirmwareTariffStagingPanel'
 import { FirmwareSetupStagingPanel } from './FirmwareSetupStagingPanel'
 import { useState } from 'react'
+import { FirmwareNumberingStagingPanel } from './FirmwareNumberingStagingPanel'
 import { FirmwareLocalDialingStagingPanel } from './FirmwareLocalDialingStagingPanel'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
@@ -120,6 +121,14 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
             <td>{record.targetAcknowledged ? 'Previously acknowledged' : 'Not acknowledged in catalogue'}{record.requiresLayoutReview && <><br />Field layout needs review</>}</td>
           </tr>)}</tbody>
         </table></div>
+        {review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
+          laterTariffProfiles.has(review.targetProfileId ?? '') && review.records.some(record => record.tableNumber === 62 &&
+            record.sourceBytes === 353 && record.targetExpectedBytes === 353 && record.candidateBytes === 353) &&
+          <FirmwareNumberingStagingPanel key={`numbering:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            graphical={review.targetProfileId === 'mtr2x-multipay-graphical-180-double-compressed'} parentBusy={busy} onBusyChange={setBusy}
+            canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
+            }} />}
         {review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
           laterTariffProfiles.has(review.targetProfileId ?? '') && review.records.some(record => record.tableNumber === 73 &&
           record.sourceBytes === 1192 && record.targetExpectedBytes === 1192 && record.candidateBytes === 1192) &&
