@@ -73,6 +73,8 @@ The [family-aware screening workspace](terminal-family-checklist-coverage.md) di
 
 ## Acceptance rule for future edits
 
+The [carrier reference review](carrier-reference-review.md) identifies default selections, selected card ranges and free Feature Group B references in the earlier and later carrier editors. It distinguishes the carrier identifier from the row position, keeps card-acceptance bitmaps separate, and reports duplicate or unavailable records. The review is not a test of actual carrier selection on a call.
+
 The [operational-record authoring workflow](operational-record-authoring.md) creates missing MT26, MT30, MT31, MT33 and MT62 through explicit named settings. Both confirmed profiles passed exact-record PostgreSQL creation, unchanged saves and one-byte modem timer, installation retry and numbering response-payment edits. MT31 and MT62 separate protected values from ordinary settings; MT62 requires a complete dialing graph and explicit formatting choice, with profile-specific capacities. Broad ordinary no-payment rules are advisory review findings, not automatic changes. The existing native editors retain spare-field review. These authoring checks do not establish new terminal acknowledgement or actual feature, timing, servicing, routing or modem behavior.
 
 The download detail view now reports retained record acknowledgements, terminal clear and transport-release observations separately from terminal service. PostgreSQL and browser fixtures verify that a completed batch cannot by itself produce a service confirmation, and that a failed batch identifies the exact missing record. Actual INSTALL and service behavior remain independent acceptance steps.

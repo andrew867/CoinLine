@@ -79,6 +79,7 @@ public static class OperatorPermissions
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("TerminalTariffReferences", R, "Get"),
             ("DialedNumberReview", R, "Review"),
+            ("TerminalCarrierReferences", R, "Get"),
             ("FirmwareTariffStaging", R, "Preview"),
             ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
