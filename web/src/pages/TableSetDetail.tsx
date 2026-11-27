@@ -9,6 +9,7 @@ import { TableRecordCopy } from './TableRecordCopy'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilyReview } from './TerminalFamilyReview'
+import { PortableTerminalConfigurationPanel } from './PortableTerminalConfigurationPanel'
 import './TableSetConfiguration.css'
 
 
@@ -247,6 +248,9 @@ export function TableSetDetail() {
           </li>
         ))}</ul>}
       </section>
+      {canReadRecords && <PortableTerminalConfigurationPanel key={`portable:${d.id}`} setId={d.id}
+        supported={!!d.tableProfileEvidence && !d.tableProfileEvidence.observedLengthsOnly}
+        disabled={recordDirty || targetChanged} onCreated={created => navigate(`/table-sets/${created}`)} />}
       <TerminalFamilyReview key={`${id}:${initialFamily}`} setId={id} initialFamily={initialFamily}
         dataKey={`${d.revision}:${d.targetFirmwareVersionId}:${d.versions.map(version => `${version.tableNumber}:${version.payloadSha256Hex}`).join(',')}`}
         recordDirty={recordDirty} onFamilyChange={setReviewFamily} />

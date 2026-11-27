@@ -62,6 +62,7 @@ public static class OperatorPermissions
             ("TerminalGroups", U, "Rename UpdateDetails"), ("TerminalGroups", D, "Delete"));
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
+            ("PortableTerminalConfigurations", R, "Export Preview"), ("PortableTerminalConfigurations", A, "Create"),
             ("FirmwareLocalDialingStaging", A, "Create"),
             ("FirmwareCommonControlStaging", A, "Create"),
             ("FirmwareNumberingStaging", A, "Create"),
