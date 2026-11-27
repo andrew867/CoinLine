@@ -13,3 +13,4 @@
 - [Manually selected phone download preparation](manual-download-preparation.md)
 - [Cashbox status query](cashbox-status-query.md)
 - [Explicit call upload completion](call-upload-completion.md)
+- [Editor catalogue byte-preservation regression](editor-catalogue-preservation.md)
