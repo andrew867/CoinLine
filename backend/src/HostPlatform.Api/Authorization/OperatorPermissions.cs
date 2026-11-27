@@ -79,6 +79,7 @@ public static class OperatorPermissions
             ("FirmwareLocalDialingStaging", R, "Preview"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
             ("NativeTableConfiguration", R, "PreviewNumberingOverlay"), ("NativeTableConfiguration", U, "ApplyNumberingOverlay"),
+            ("CraftAccessConfiguration", R, "Reveal"),
             ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
             ("CardSequence", R, "Get"), ("CardSequence", U, "Move Add Remove Refresh Link"),
             ("GraphicalStarter", A, "Create"),

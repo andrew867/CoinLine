@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { apiFetch, apiPostRaw } from '../api/client'
-import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { canPerform, consoleSession, permissionOperation as op } from '../api/consoleSession'
+import { CraftAccessReveal } from './CraftAccessReveal'
 import { NativeBitmapField } from './NativeBitmapField'
 import { CarrierLibraryPanel } from './CarrierLibraryPanel'
 import { CarrierBrandingPreview } from './CarrierLibraryPage'
@@ -570,6 +571,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         }} />}
       {showingSettings && current && number === 73 && /^rate-\d+$/.test(current.key) &&
         <TerminalTariffReferencePanel key={`${setId}:${current.key}:${layout.revision}`} setId={setId} rateIndex={Number(current.key.slice(5))} />}
+      {showingSettings && current?.key === 'craft' && number === 31 && consoleSession.role() === 'Admin' && !busy &&
+        <CraftAccessReveal key={`${endpoint}:${layout.revision}:${layout.sha256}:${layout.profile}:${reload}`} endpoint={endpoint}
+          revision={layout.revision} sha256={layout.sha256} profile={layout.profile} />}
       {showingSettings && current && (
         <fieldset className="native-table-fields" disabled={!canEdit || busy}>
           <legend>{current.label}</legend>
