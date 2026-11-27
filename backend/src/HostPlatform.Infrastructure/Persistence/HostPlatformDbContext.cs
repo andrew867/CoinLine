@@ -56,6 +56,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<DownloadBatchItem> DownloadBatchItems => Set<DownloadBatchItem>();
     public DbSet<RatePlan> RatePlans => Set<RatePlan>();
     public DbSet<RatePlanVersion> RatePlanVersions => Set<RatePlanVersion>();
+    public DbSet<HostRatePlanSelection> HostRatePlanSelections => Set<HostRatePlanSelection>();
     public DbSet<RateRule> RateRules => Set<RateRule>();
     public DbSet<DestinationPrefix> DestinationPrefixes => Set<DestinationPrefix>();
     public DbSet<TimeBand> TimeBands => Set<TimeBand>();
@@ -390,6 +391,17 @@ public class HostPlatformDbContext : DbContext
                 .WithMany()
                 .HasForeignKey(r => r.PublishedVersionId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<HostRatePlanSelection>(b =>
+        {
+            b.HasOne<Customer>().WithMany().HasForeignKey(row => row.CustomerId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<Terminal>().WithMany().HasForeignKey(row => row.TerminalId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne(row => row.RatePlan).WithMany().HasForeignKey(row => row.RatePlanId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(row => row.CustomerId).IsUnique();
+            b.HasIndex(row => row.TerminalId).IsUnique();
+            b.Property(row => row.Version).IsConcurrencyToken();
+            b.ToTable(t => t.HasCheckConstraint("CK_HostRatePlanSelections_ExactlyOneScope", "(\"CustomerId\" IS NULL) <> (\"TerminalId\" IS NULL)"));
         });
 
         modelBuilder.Entity<RatePlanVersion>(b =>
