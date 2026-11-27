@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { CollectionConfigurationPanel, type CollectionConfiguration } from './CollectionConfigurationPanel'
 import { apiFetch, apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { TableSetAssignment } from './TableSetAssignment'
@@ -9,6 +10,7 @@ import { TableRecordCopy } from './TableRecordCopy'
 import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilyReview } from './TerminalFamilyReview'
+import { PortableTerminalConfigurationPanel } from './PortableTerminalConfigurationPanel'
 import './TableSetConfiguration.css'
 
 
@@ -53,6 +55,7 @@ type Detail = {
     onHookAdvertising: boolean | null
     graphicalOnHookAdvertising?: boolean | null
     visibleOnHookTextMessages?: number | null
+    collectionConfiguration?: CollectionConfiguration | null
     findings: { tableNumber: number; message: string }[]
   }
 }
@@ -247,6 +250,9 @@ export function TableSetDetail() {
           </li>
         ))}</ul>}
       </section>
+      {canReadRecords && <PortableTerminalConfigurationPanel key={`portable:${d.id}`} setId={d.id}
+        supported={!!d.tableProfileEvidence && !d.tableProfileEvidence.observedLengthsOnly}
+        disabled={recordDirty || targetChanged} onCreated={created => navigate(`/table-sets/${created}`)} />}
       <TerminalFamilyReview key={`${id}:${initialFamily}`} setId={id} initialFamily={initialFamily}
         dataKey={`${d.revision}:${d.targetFirmwareVersionId}:${d.versions.map(version => `${version.tableNumber}:${version.payloadSha256Hex}`).join(',')}`}
         recordDirty={recordDirty} onFamilyChange={setReviewFamily} />
@@ -270,6 +276,8 @@ export function TableSetDetail() {
           ))}</ul>}
         </section>
       )}
+      {d.provisioning?.collectionConfiguration && <CollectionConfigurationPanel review={d.provisioning.collectionConfiguration}
+        setId={d.id} allowLinks={canReadRecords && !recordDirty} />}
       {draft && canUpdate && <TableRecordCopy key={d.id} setId={d.id} revision={d.revision} customerId={d.customerId}
         disabled={recordDirty || targetChanged} onSaved={load} />}
       {canReadRecords && <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}

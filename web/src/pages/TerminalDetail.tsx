@@ -8,6 +8,7 @@ import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 import { InmateAssignmentPanel } from './InmateAssignmentPanel'
 import { TerminalLifecyclePanel } from './TerminalLifecyclePanel'
 import { TerminalConfigurationWorksheet } from './TerminalConfigurationWorksheet'
+import { HostRatePlanSelectionPanel } from './HostRatePlanSelectionPanel'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiFetch, apiGet, apiPost, apiPostBare, apiPostRaw, apiPut } from '../api/client'
@@ -673,6 +674,7 @@ export function TerminalDetail() {
         )}
       </div>
       </>}
+      {terminalActive && <HostRatePlanSelectionPanel key={`host-plan-${id}`} scope="terminals" id={id} />}
 
       {canPerform('cashbox', op.read) && <TerminalCashboxPanel key={`cashbox-${id}`} terminalId={id} />}
 

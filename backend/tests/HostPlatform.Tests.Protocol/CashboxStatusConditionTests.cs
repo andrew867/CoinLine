@@ -14,6 +14,25 @@ public sealed class CashboxStatusConditionTests
         Assert.All(raw[4..], value => Assert.Equal(0, value));
     }
 
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(25, true)]
+    [InlineData(65536, true)]
+    [InlineData(-65536, false)]
+    [InlineData(-1, false)]
+    public void Invalid_signed_values_are_preserved_but_not_known_balances(int value, bool known)
+    {
+        var raw = DlogCashboxWire.EncodeInitialStatusDefault();
+        System.Buffers.Binary.BinaryPrimitives.WriteInt32LittleEndian(raw.AsSpan(13), value);
+        Assert.True(DlogCashboxWire.TryReadStatus(raw, out var status));
+        Assert.Equal(value, status.BalanceMinorUnits);
+        Assert.Equal(known, status.BalanceKnown);
+        var summary = FieldEventSummary.TryBuild(38, raw);
+        Assert.Contains(known ? $"value {value}" : $"balance unknown (invalid reported value {value})", summary);
+        using var decoded = JsonDocument.Parse(DlogPayloadClassifier.ToDecodedJson(DlogPayloadClassifier.Classify(raw, null, true)));
+        Assert.Equal(known, decoded.RootElement.GetProperty("Fields").GetProperty("cashBoxBalanceKnown").GetBoolean());
+    }
+
     [Fact]
     public void Observed_empty_initialization_has_exact_clock_identifier_and_zero_values()
     {

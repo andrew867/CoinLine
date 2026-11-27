@@ -589,7 +589,7 @@ public sealed class TerminalsController(
     private ConflictObjectResult DuplicateWireId() => Conflict(new { error = "Another phone already uses this terminal ID or it is reserved by an unresolved cutover." });
     private ConflictObjectResult ChangedTerminal() => Conflict(new { error = "The phone record changed. Reload and try again." });
     private static bool TerminalWriteConflict(Exception ex) => ex is DbUpdateConcurrencyException ||
-        (ex as PostgresException ?? ex.InnerException as PostgresException)?.SqlState == PostgresErrorCodes.SerializationFailure;
+        ex.GetBaseException() is PostgresException { SqlState: PostgresErrorCodes.SerializationFailure };
 
     private sealed record IdentityChange(string? PreviousValue, string? CurrentValue);
 
