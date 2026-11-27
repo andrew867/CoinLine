@@ -1,10 +1,10 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
-import { apiFetch, apiGet, apiPost, apiPut } from '../api/client'
+import { apiDownload, apiFetch, apiGet, apiPost, apiPut } from '../api/client'
 import { RatePlanDetail } from './RatePlanDetail'
 
-vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn() }))
+vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn(), apiPut: vi.fn(), apiDelete: vi.fn(), apiDownload: vi.fn() }))
 
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
@@ -19,6 +19,9 @@ it('authors flat host rules and separate first and following minute tariff price
   render(<MemoryRouter initialEntries={['/rate-plans/plan']}><Routes><Route path="/rate-plans/:id" element={<RatePlanDetail />} /></Routes></MemoryRouter>)
   fireEvent.click(await screen.findByRole('button', { name: 'v1' }))
   await screen.findByRole('heading', { name: /Rules \(version/ })
+  vi.mocked(apiDownload).mockResolvedValue(undefined)
+  fireEvent.click(screen.getByRole('button', { name: 'Export selected version as JSON' }))
+  expect(apiDownload).toHaveBeenCalledWith('/api/rate-plans/packages/plan/version', 'coinline-rate-plan.json')
   const pricing = screen.getAllByLabelText('Pricing structure')
   expect(pricing[0]).toHaveValue('0')
   fireEvent.change(pricing[0], { target: { value: '1' } })
