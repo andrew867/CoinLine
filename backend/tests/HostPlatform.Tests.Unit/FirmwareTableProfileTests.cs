@@ -104,7 +104,8 @@ public sealed class FirmwareTableProfileTests
         var graphical = FirmwareTableProfiles.Find(FirmwareTableProfiles.GraphicalMultiPay180)!;
         Assert.Equal(45, graphical.VerifiedLengths.Count);
         Assert.True(graphical.CompleteCatalogue);
-        Assert.Equal(18, graphical.TerminalAcknowledgedRecords.Count);
+        Assert.Equal(43, graphical.TerminalAcknowledgedRecords.Count);
+        Assert.Equal(new[] { 58, 94 }, graphical.VerifiedLengths.Keys.Except(graphical.TerminalAcknowledgedRecords).Order().ToArray());
         Assert.All(new[] { 131, 132, 133 }, number => Assert.Contains(number, graphical.TerminalAcknowledgedRecords));
         foreach (var (number, length) in standard.VerifiedLengths)
         {

@@ -33,6 +33,10 @@ public static partial class NativeTableLayouts
         var layouts = Layouts.Values.SelectMany(group => group).ToArray();
         var explicitAuthoring = layouts.Select(layout => (int)layout.Number).Distinct().SelectMany(OperationalDraftWire.Specs)
             .Select(spec => (spec.Number, spec.Length, spec.Profile)).ToHashSet();
+        explicitAuthoring.UnionWith(ManagementAccessDraftWire.Specs.Select(spec => (ManagementAccessDraftWire.MessageType, spec.Length, spec.Profile)));
+        foreach (var number in new[] { 27, 28, 85, 86, 98, 99 })
+            if (VisualPromptDraftWire.Spec(number) is { } spec)
+                explicitAuthoring.Add((spec.Number, spec.Length, spec.Profile));
         return layouts
             .Select(layout => new NativeLayoutReference(layout.Number, layout.Length, layout.Profile,
                 DraftTemplates(layout.Number).Any(template => template.Length == layout.Length && template.Profile == layout.Profile),

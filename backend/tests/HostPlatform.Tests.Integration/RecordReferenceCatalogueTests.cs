@@ -20,9 +20,27 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
         Assert.All(FirmwareTableProfiles.Catalog, profile =>
         {
             foreach (var (number, length) in profile.VerifiedLengths)
-                Assert.Contains(rows[number].GetProperty("firmware").EnumerateArray(), item =>
+            {
+                var evidence = Assert.Single(rows[number].GetProperty("firmware").EnumerateArray(), item =>
                     item.GetProperty("profileId").GetString() == profile.Id && item.GetProperty("length").GetInt32() == length
                     && item.GetProperty("terminalAcknowledged").GetBoolean() == profile.TerminalAcknowledgedRecords.Contains(number));
+                Assert.Equal(profile.CompleteCatalogue, evidence.GetProperty("completeCatalogue").GetBoolean());
+                Assert.Equal(profile.ObservedLengthsOnly, evidence.GetProperty("observedLengthsOnly").GetBoolean());
+                if (profile.ObservedLengthsOnly)
+                {
+                    Assert.Equal("length-only", evidence.GetProperty("editorStatus").GetString());
+                    Assert.Equal(JsonValueKind.Null, evidence.GetProperty("editorProfile").ValueKind);
+                }
+                else
+                {
+                    var matches = rows[number].GetProperty("layouts").EnumerateArray().Where(layout => layout.GetProperty("length").GetInt32() == length &&
+                        (number == AdvertisingTableWire.MessageType || layout.GetProperty("profile").GetString() == profile.LayoutFor(number))).ToArray();
+                    var chosen = Assert.Single(matches);
+                    Assert.Equal(chosen.GetProperty("profile").GetString(), evidence.GetProperty("editorProfile").GetString());
+                    Assert.Equal(chosen.GetProperty("draftTemplateAvailable").GetBoolean() ? "template" : chosen.GetProperty("explicitAuthoringAvailable").GetBoolean() ? "explicit" : "import-only",
+                        evidence.GetProperty("editorStatus").GetString());
+                }
+            }
         });
 
         Assert.All(LegacyTerminalTableRequirements.ReferencedRecordNumbers(), number => Assert.True(rows.ContainsKey(number)));
@@ -53,6 +71,25 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
         Assert.Equal(AdvertisingTableWire.RecordLength, advertising.GetProperty("length").GetInt32());
         Assert.True(advertising.GetProperty("explicitAuthoringAvailable").GetBoolean());
         Assert.False(advertising.GetProperty("draftTemplateAvailable").GetBoolean());
+        var access = rows[21].GetProperty("layouts").EnumerateArray().ToArray();
+        Assert.Equal(new[] { 18, 48 }, access.Where(layout => layout.GetProperty("explicitAuthoringAvailable").GetBoolean())
+            .Select(layout => layout.GetProperty("length").GetInt32()).Order().ToArray());
+        Assert.All(access, layout => Assert.False(layout.GetProperty("draftTemplateAvailable").GetBoolean()));
+        foreach (var number in new[] { 27, 28, 85, 86, 98, 99 })
+        {
+            var prompt = Assert.Single(rows[number].GetProperty("layouts").EnumerateArray());
+            Assert.True(prompt.GetProperty("explicitAuthoringAvailable").GetBoolean());
+            Assert.False(prompt.GetProperty("draftTemplateAvailable").GetBoolean());
+            Assert.Equal(number < 80 ? 2801 : 8001, prompt.GetProperty("length").GetInt32());
+        }
+        var graphical = FirmwareTableProfiles.Find(FirmwareTableProfiles.GraphicalMultiPay180)!;
+        Assert.Equal(43, rows.Values.Count(record => record.GetProperty("firmware").EnumerateArray().Any(profile =>
+            profile.GetProperty("profileId").GetString() == graphical.Id && profile.GetProperty("terminalAcknowledged").GetBoolean())));
+        var importOnly = rows.Values.SelectMany(record => record.GetProperty("layouts").EnumerateArray()
+            .Where(layout => !layout.GetProperty("draftTemplateAvailable").GetBoolean() && !layout.GetProperty("explicitAuthoringAvailable").GetBoolean())
+            .Select(layout => (record.GetProperty("number").GetInt32(), layout.GetProperty("length").GetInt32())))
+            .OrderBy(pair => pair.Item1).ThenBy(pair => pair.Item2).ToArray();
+        Assert.Equal(new[] { (21, 40), (49, 199) }, importOnly);
 
         var definitions = await _client.GetFromJsonAsync<JsonElement>("/api/tables/definitions");
         foreach (var definition in definitions.EnumerateArray())
