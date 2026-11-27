@@ -69,6 +69,8 @@ The entries below describe the supported layouts and observed acceptance, not an
 
 ## Acceptance rule for future edits
 
+The [operational-record authoring workflow](operational-record-authoring.md) creates missing MT26, MT30 and MT33 through explicit named settings. Both confirmed profiles passed exact-record PostgreSQL creation, unchanged saves and a one-byte modem timer edit. The existing native editors retain spare-field review. These authoring checks do not establish new terminal acknowledgement or actual feature, timing or modem behavior.
+
 The download detail view now reports retained record acknowledgements, terminal clear and transport-release observations separately from terminal service. PostgreSQL and browser fixtures verify that a completed batch cannot by itself produce a service confirmation, and that a failed batch identifies the exact missing record. Actual INSTALL and service behavior remain independent acceptance steps.
 
 For each applicable profile, retain a known-good payload, save it unchanged, compare its digest, edit one documented field, confirm only the intended bytes or bits change, deliver the correct selected record, and observe the application acknowledgement. Finally, demonstrate the corresponding device behavior and repeat where appropriate on physical equipment. If a step cannot be performed, record it as pending rather than inferring a pass from a different test.
