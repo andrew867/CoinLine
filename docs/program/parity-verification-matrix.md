@@ -72,3 +72,9 @@ The entries below describe the supported layouts and observed acceptance, not an
 The download detail view now reports retained record acknowledgements, terminal clear and transport-release observations separately from terminal service. PostgreSQL and browser fixtures verify that a completed batch cannot by itself produce a service confirmation, and that a failed batch identifies the exact missing record. Actual INSTALL and service behavior remain independent acceptance steps.
 
 For each applicable profile, retain a known-good payload, save it unchanged, compare its digest, edit one documented field, confirm only the intended bytes or bits change, deliver the correct selected record, and observe the application acknowledgement. Finally, demonstrate the corresponding device behavior and repeat where appropriate on physical equipment. If a step cannot be performed, record it as pending rather than inferring a pass from a different test.
+
+## Configuration activation staging evidence
+
+The staged activation milestone in the firmware transition workflow is now implemented and tested in real PostgreSQL with a loopback NCC fixture. An administrator stages the published target against the exact enabled MT94 schedule and live source report. The fixture verified the matched MT14/94, separate fresh target MT60, rejection of imported and mismatched reports, holding the old assignment without current version evidence, atomic activation, and all 12 target MT14s on the original queued full batch. [Activation workflow](firmware-configuration-activation.md).
+
+Automatic activation during the first post-upgrade contact, actual native code transfer, compatible image and terminal pair, native reboot and target configuration acknowledgement, service and rollback remain unqualified. The fixture does not establish native upgrade behavior.
