@@ -26,6 +26,14 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         var versions = await ReadVersions(id, number, ct);
         if (versions.Count == 0)
         {
+            if (number == ManagementAccessDraftWire.MessageType)
+            {
+                var accessTemplates = ManagementAccessSpecs(set);
+                return Ok(new { supported = false, managementAccessTemplates = accessTemplates,
+                    observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
+                    reason = accessTemplates.Length == 0 ? "Import a complete matching management-access record to open its editor."
+                        : "Create the management-access record using the terminal's actual wire identity and manager access numbers." });
+            }
             var templates = set.Status == TableSetStatus.Draft
                 ? NativeTableLayouts.DraftTemplates(number)
                     .Where(layout => firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expectedLength)
@@ -122,12 +130,24 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         if (set.Status != TableSetStatus.Draft || (await ReadVersions(id, number, ct)).Count > 0)
             return Conflict(new { error = "The record already exists or the set is published." });
 
-        var template = NativeTableLayouts.DraftTemplates(number)
-            .SingleOrDefault(layout => layout.Profile == body.Profile && layout.Length == body.Length);
-        if (template == null)
-            return BadRequest(new { error = "There is no default template for that wire profile." });
-
-        var bytes = NativeTableLayouts.CreateDraftTemplate(template);
+        byte[] bytes;
+        if (number == ManagementAccessDraftWire.MessageType)
+        {
+            var spec = ManagementAccessSpecs(set).SingleOrDefault(candidate => candidate.Profile == body.Profile && candidate.Length == body.Length);
+            if (spec == null || body.ManagementAccess == null)
+                return BadRequest(new { error = "Choose a confirmed management-access layout and enter the required site values." });
+            try { bytes = ManagementAccessDraftWire.Create(spec, body.ManagementAccess); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+        else
+        {
+            if (body.ManagementAccess != null) return BadRequest(new { error = "Management-access inputs belong only to MT21." });
+            var template = NativeTableLayouts.DraftTemplates(number)
+                .SingleOrDefault(layout => layout.Profile == body.Profile && layout.Length == body.Length);
+            if (template == null)
+                return BadRequest(new { error = "There is no default template for that wire profile." });
+            bytes = NativeTableLayouts.CreateDraftTemplate(template);
+        }
         var (_, error) = ResolveLayout(set, number, bytes, body.Profile);
         if (error != null)
             return BadRequest(new { error });
@@ -143,7 +163,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         try
         {
             await tables.UpsertVersionAsync(id, definition.Id, 1, bytes, sortOrder + 1, null, ct, createOnly: true,
-                screeningLayoutProfile: CallScreeningWire.NeedsLayoutChoice(number) ? template.Profile : null);
+                screeningLayoutProfile: CallScreeningWire.NeedsLayoutChoice(number) ? body.Profile : null);
             return NoContent();
         }
         catch (DbUpdateConcurrencyException)
@@ -388,10 +408,20 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     public sealed record NativeFieldEdits(int Revision, string Sha256, Dictionary<string, string> Changes, string? Profile,
         NumberingPlanChanges? NumberingPlan = null, SpareBytePatch[]? SpareBytes = null, int[]? ClearQuickAccessKeys = null,
         ScreeningEdits? Screening = null);
-    public sealed record NativeTemplate(string Profile, int Length);
+    public sealed record NativeTemplate(string Profile, int Length, ManagementAccessDraftInput? ManagementAccess = null);
+
+    private static ManagementAccessDraftSpec[] ManagementAccessSpecs(TableSet set)
+    {
+        if (set.Status != TableSetStatus.Draft) return [];
+        if (set.TargetFirmwareVersionId == null) return ManagementAccessDraftWire.Specs.ToArray();
+        var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
+        if (firmware == null || firmware.ObservedLengthsOnly || !firmware.VerifiedLengths.TryGetValue(ManagementAccessDraftWire.MessageType, out var length)) return [];
+        return ManagementAccessDraftWire.Specs.Where(spec => spec.Length == length && spec.Profile == firmware.LayoutFor(ManagementAccessDraftWire.MessageType)).ToArray();
+    }
 
     private static string TemplateName(int number) => number switch
     {
+        ManagementAccessDraftWire.MessageType => "NCC terminal access",
         22 or 134 => "Card acceptance",
         23 or 135 => "Carrier screens",
         CollectionPolicyWire.CommunicationsType => "Communications statistics settings",

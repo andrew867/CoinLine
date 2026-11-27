@@ -33,6 +33,7 @@ import { LanguageOrderPanel } from './LanguageOrderPanel'
 import { languageOrderKeys } from './languageOrderPlan'
 import { TerminalTariffPricing } from './TerminalTariffPricing'
 import { TerminalTariffReferencePanel } from './TerminalTariffReferencePanel'
+import { ManagementAccessDraftForm, type ManagementAccessInput, type ManagementAccessSpec } from './ManagementAccessDraftForm'
 
 type Field = {
   key: string
@@ -73,7 +74,8 @@ type Layout = {
   screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean } | null
   restrictedRoutes?: RestrictedRouteRecord[] | null
 } | { supported: false; reason: string; profiles?: string[]; observedLengthsOnly?: boolean;
-  templates?: { profile: string; length: number; screeningSlots?: number | null }[] }
+  templates?: { profile: string; length: number; screeningSlots?: number | null }[];
+  managementAccessTemplates?: ManagementAccessSpec[] }
 
 type Props = {
   setId: string
@@ -243,7 +245,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     }
   }
 
-  async function initialize(template: { profile: string; length: number }) {
+  async function initialize(template: { profile: string; length: number; managementAccess?: ManagementAccessInput }) {
     if (!canInitialize) return
     setBusy(true)
     setMessage('')
@@ -252,6 +254,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not create this record.')
       setProfile(template.profile)
       setReload((count) => count + 1)
+      onDirty(false)
       onSaved()
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not create this record.')
@@ -285,6 +288,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       <p className="page-intro">{layout.reason}</p>
       {layout.observedLengthsOnly && <p className="page-intro">This target has an observed record-length catalogue, not confirmed native field meanings.
         Confirm the selected editor or template against the actual firmware before authoring.</p>}
+      {number === 21 && canInitialize && !!layout.managementAccessTemplates?.length &&
+        <ManagementAccessDraftForm templates={layout.managementAccessTemplates} busy={busy} onDirty={onDirty}
+          onCreate={request => void initialize(request)} />}
       {layout.profiles && layout.profiles.length > 1 && <label>Firmware profile
         <select value={profile} onChange={(event) => changeProfile(event.target.value)}>
           <option value="">Select firmware profile</option>
