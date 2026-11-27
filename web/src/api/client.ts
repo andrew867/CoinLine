@@ -24,8 +24,11 @@ async function request(path: string, init: RequestInit, token: string | null, ap
   return fetch(url.href, { ...init, headers, redirect: 'error', mode: 'same-origin', credentials: 'omit' })
 }
 
-export function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
-  return request(path, init, consoleSession.token(), consoleSession.apiKey())
+export async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const sent = consoleSession.credentials()
+  const response = await request(path, init, sent.token, sent.apiKey)
+  if (response.status === 401) consoleSession.expireIfCurrent(sent)
+  return response
 }
 
 export function apiGetRaw(path: string): Promise<Response> {

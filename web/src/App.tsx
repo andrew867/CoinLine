@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom'
+import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import { Layout } from './components/Layout'
 import { LoginPage } from './pages/LoginPage'
 import { AuditEventsPage } from './pages/AuditEventsPage'
@@ -60,7 +60,7 @@ import { NotFoundPage } from './pages/NotFoundPage'
 import { StatusPage } from './pages/StatusPage'
 import { UploadDetail } from './pages/UploadDetail'
 import { UploadsPage } from './pages/UploadsPage'
-import { consoleSession } from './api/consoleSession'
+import { RequireSignIn } from './components/RequireSignIn'
 
 export default function App() {
   return (
@@ -133,9 +133,4 @@ export default function App() {
       </Routes>
     </BrowserRouter>
   )
-}
-
-function RequireSignIn() {
-  if (!consoleSession.token()) return <Navigate to="/login" replace />
-  return <Outlet />
 }
