@@ -60,6 +60,21 @@ public sealed class TableRateReferenceTests
     }
 
     [Fact]
+    public void Later_unrated_carrier_policy_warns_about_direct_toll_free_carrier_selection_without_changing_intentional_routes()
+    {
+        var screen = Record(92, 3061); var features = Record(26, 72); features[8] = 32;
+        new byte[] { 5, 9, 255, 7, 0x18 }.CopyTo(screen, 1);
+        new byte[] { 133, 9, 255, 7, 0x18 }.CopyTo(screen, 18); // Feature Group B is independently configured.
+        var findings = Review(FirmwareTableProfiles.GraphicalMultiPay180, screen, features);
+        var warning = Assert.Single(findings, item => item.Message.Contains("blocks unrated carrier calls"));
+        Assert.Equal(92, warning.TableNumber); Assert.False(warning.Blocking); Assert.Contains("rule 1", warning.Message);
+        screen[1] = 3;
+        Assert.DoesNotContain(Review(FirmwareTableProfiles.GraphicalMultiPay180, screen, features), item => item.Message.Contains("blocks unrated carrier calls"));
+        screen[1] = 5; features[8] = 0;
+        Assert.DoesNotContain(Review(FirmwareTableProfiles.GraphicalMultiPay180, screen, features), item => item.Message.Contains("blocks unrated carrier calls"));
+    }
+
+    [Fact]
     public void Duplicate_and_unrecognized_local_dialing_headers_are_advisory()
     {
         var first = Record(136, 203);

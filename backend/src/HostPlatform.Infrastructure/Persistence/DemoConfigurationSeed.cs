@@ -18,7 +18,8 @@ public static class DemoConfigurationSeed
     private static readonly int[] Earlier = [26, 27, 28, 29, 30, 32, 33, 34, 35, 50, 58, 73];
     private static readonly int[] Later = [26, 30, 32, 33, 34, 35, 50, 73, 150, 151, 152, .. Enumerable.Range(136, 14), 154, 155];
 
-    public sealed record Starter(string Name, string? ProfileId, IReadOnlyDictionary<int, byte[]> Records, bool IsDefault = true);
+    public sealed record Starter(string Name, string? ProfileId, IReadOnlyDictionary<int, byte[]> Records, bool IsDefault = true,
+        string? PreviousSuffix = null, string? ReplacementSuffix = null);
     internal sealed record Bundle(Starter[] Starters, Starter[] Superseded);
     internal sealed record Manifest([property: JsonPropertyName("schema_version")] int SchemaVersion,
         [property: JsonPropertyName("entries")] Entry[]? Entries,
@@ -117,22 +118,35 @@ public static class DemoConfigurationSeed
         foreach (var starter in starters)
         {
             var name = starter.Name;
+            var priorVersions = bundle.Superseded.Where(row => row.Name == name).ToArray();
+            var replacementNames = priorVersions.Select(ReplacementName).Distinct().ToArray();
+            if (existing.Any(row => (row.Name == name || replacementNames.Contains(row.Name)) && HasExactRecords(row, starter))) continue;
             var collisions = existing.Where(row => row.Name == name).ToArray();
             if (collisions.Length > 0)
             {
-                var old = bundle.Superseded.SingleOrDefault(row => row.Name == name);
                 // Never overwrite operator edits. Only an exact, unpublished prior
                 // default is retired as a non-default reference.
-                if (old == null || collisions.Length != 1 || !HasShape(collisions[0], old)) continue;
+                if (collisions.Length != 1) continue;
                 var prior = collisions[0];
-                if (HasExactRecords(prior, starter)) continue;
-                if (prior.Status == TableSetStatus.Draft && prior.IsDefault && HasExactRecords(prior, old)
-                    && !existing.Any(row => row.Name == PreviousName(old)))
+                var old = priorVersions.FirstOrDefault(row => HasExactRecords(prior, row)) ?? priorVersions.FirstOrDefault(row => HasShape(prior, row));
+                if (old == null) continue;
+                if (!Retire(prior, old))
                 {
-                    prior.Name = PreviousName(old); prior.IsDefault = false; prior.Version++;
+                    // An earlier operator-edited canonical name can coexist with
+                    // an exact replacement from a previous import. Retire only
+                    // an exact known default, else preserve it and use a distinct
+                    // recorded replacement name.
+                    var available = new[] { ReplacementName(old) }.Concat(replacementNames.Reverse()).Distinct().FirstOrDefault(candidateName =>
+                    {
+                        var occupants = existing.Where(row => row.Name == candidateName).ToArray();
+                        if (occupants.Length == 0) return true;
+                        if (occupants.Length != 1) return false;
+                        var priorReplacement = priorVersions.FirstOrDefault(row => HasExactRecords(occupants[0], row));
+                        return priorReplacement != null && Retire(occupants[0], priorReplacement);
+                    });
+                    if (available == null) continue;
+                    name = available;
                 }
-                else name = ReplacementName(old);
-                if (existing.Any(row => row.Name == name)) continue;
             }
             var targetIds = starter.ProfileId == null ? [] : await db.FirmwareVersions.AsNoTracking().Where(row => row.TableProfileId == starter.ProfileId)
                 .Select(row => row.Id).Take(2).ToArrayAsync(ct);
@@ -155,13 +169,20 @@ public static class DemoConfigurationSeed
             db.TableSets.Add(set); existing.Add(set);
         }
         await db.SaveChangesAsync(ct);
+
+        bool Retire(TableSet prior, Starter old)
+        {
+            if (prior.Status != TableSetStatus.Draft || !prior.IsDefault || !HasExactRecords(prior, old) || existing.Any(row => row.Name == PreviousName(old))) return false;
+            prior.Name = PreviousName(old); prior.IsDefault = false; prior.Version++;
+            return true;
+        }
     }
 
-    private static string PreviousName(Starter starter) => starter.Name + (starter.Name == GraphicalName
-        ? " (text-enabled reference)" : " (initial export)");
+    private static string PreviousName(Starter starter) => starter.Name + (starter.PreviousSuffix ?? (starter.Name == GraphicalName
+        ? " (text-enabled reference)" : " (initial export)"));
 
-    private static string ReplacementName(Starter starter) => starter.Name + (starter.Name == GraphicalName
-        ? " (graphical idle default)" : " (complete)");
+    private static string ReplacementName(Starter starter) => starter.Name + (starter.ReplacementSuffix ?? (starter.Name == GraphicalName
+        ? " (graphical idle default)" : " (complete)"));
 
     private static bool HasShape(TableSet set, Starter starter) => set.Versions.Count == starter.Records.Count &&
         set.Versions.Select(row => row.TableDefinition?.TableNumber ?? 0).ToHashSet().SetEquals(starter.Records.Keys);

@@ -339,6 +339,9 @@ public static class TableSetFirmwareCompatibility
                 {
                     if (!later && rate != byte.MaxValue)
                         yield return new(screeningType, true, $"Screening rule {row} is marked free. Set its rate index to 255 for an unrated call.");
+                    else if (later && call == 9 && rate == byte.MaxValue && (flags & carrierRoute) != 0 &&
+                             features != null && (features[8] & 32) != 0)
+                        yield return new(screeningType, false, $"Screening rule {row} is marked toll-free but applies carrier selection while MT26 blocks unrated carrier calls. For an ordinary direct free call, disable carrier selection and retain rate index 255.");
                     else if (later && call == 9 && rate != byte.MaxValue && (flags & carrierRoute) == 0 && (screening[offset + 13] & 2) == 0 &&
                              (features == null || (features[54] & 1) != 0))
                         yield return new(screeningType, false, $"Screening rule {row} is free for voice calls, but a toll-free data-port call may be rated. Use index 255 if it should also be free.");
