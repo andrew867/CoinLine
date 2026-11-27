@@ -27,7 +27,8 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
         string? httpCorrelationId,
         CancellationToken ct,
         bool deduplicateCashbox = false,
-        CraftReportedMatch? craftMatch = null)
+        CraftReportedMatch? craftMatch = null,
+        bool observedOnNccLink = false)
     {
         if (DlogMaintenanceWire.TryRedactRecord(rawPayloadExact, explicitMessageType, firstByteIsMessageType, out var maintenance))
         {
@@ -35,10 +36,14 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
             explicitMessageType = DlogMaintenanceWire.RequestMessageType;
             firstByteIsMessageType = true;
         }
+        var liveVersion = observedOnNccLink && direction == DlogDirection.TerminalToHost &&
+            terminalId != null && nccSessionId != null && rawPayloadExact.Length == FieldEventCatalog.SoftwareVersionRecordLength &&
+            rawPayloadExact[0] == FieldEventCatalog.SoftwareVersionMessageType &&
+            await db.NccSessions.AnyAsync(session => session.Id == nccSessionId && session.TerminalId == terminalId, ct);
         var cap = capturedAtUtc ?? DateTime.UtcNow;
         var idem = deduplicateCashbox
             ? DlogIdempotency.ComputeKey(DlogCashboxWire.IdentityBytes(rawPayloadExact), direction, terminalId, null, null, "cashbox")
-            : DlogIdempotency.ComputeKey(rawPayloadExact, direction, terminalId, nccSessionId, sessionCorrelationId, clientIdempotencyExtra);
+            : DlogIdempotency.ComputeKey(rawPayloadExact, direction, terminalId, nccSessionId, sessionCorrelationId, clientIdempotencyExtra, liveVersion);
 
         var existing = await db.DlogTransactions
             .AsNoTracking()
@@ -71,6 +76,8 @@ public sealed class DlogTransactionEngine(HostPlatformDbContext db)
         };
 
         db.DlogTransactions.Add(tx);
+        if (liveVersion)
+            db.NccVersionObservations.Add(new NccVersionObservation { TransactionId = tx.Id });
         if (direction == DlogDirection.TerminalToHost && meta.MessageType == DlogMaintenanceWire.RequestMessageType &&
             terminalId != null && nccSessionId != null && craftMatch != null)
         {

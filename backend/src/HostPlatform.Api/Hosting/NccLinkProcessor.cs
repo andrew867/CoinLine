@@ -965,7 +965,7 @@ internal sealed class NccLinkProcessor(
                     $"{_lastReceivedSequence}:{i++}",
                     capturedAt,
                     _session.CorrelationId,
-                    stoppingToken, craftMatch: match);
+                    stoppingToken, craftMatch: match, observedOnNccLink: terminal != null && _session.TerminalId == terminal.Id);
             }
             return true;
         }
