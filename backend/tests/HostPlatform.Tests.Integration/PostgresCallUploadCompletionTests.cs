@@ -346,6 +346,75 @@ public sealed class PostgresCallUploadCompletionTests
         var batch = Assert.Single(await db.DownloadBatches.Where(row => row.TerminalId == known.Id).ToListAsync());
         Assert.Equal(queued.GetProperty("id").GetGuid(), batch.Id); Assert.Equal(DownloadBatchStatus.Pending, batch.Status);
 
+        // An abnormal signed amount must not be returned to the phone, or
+        // mistaken for a valid older status. A new identical valid snapshot
+        // after the anomaly is fresh evidence, not a duplicate collection.
+        var (invalid, _) = await Seed(factory.Services);
+        var emptySnapshot = DlogCashboxWire.EncodeInitialStatusDefault();
+        var invalidSnapshot = (byte[])emptySnapshot.Clone();
+        new byte[] { 0, 0, 0xFF, 0xFF }.CopyTo(invalidSnapshot, 13);
+        await ReportBox(invalid, emptySnapshot);
+        await ReportBox(invalid, invalidSnapshot);
+        await ReportBox(invalid, invalidSnapshot); // Reconnect retry, no duplicate.
+        var ledger = await api.GetFromJsonAsync<JsonElement>($"/api/terminals/{invalid.Id}/cashbox");
+        var latest = Assert.Single(ledger.GetProperty("statuses").EnumerateArray());
+        Assert.True(latest.GetProperty("isCurrent").GetBoolean());
+        Assert.Equal(-65536, latest.GetProperty("status").GetProperty("balanceMinorUnits").GetInt32());
+        Assert.False(latest.GetProperty("status").GetProperty("balanceKnown").GetBoolean());
+        Assert.False(ledger.GetProperty("canInitializeDefault").GetBoolean());
+        Assert.True(ledger.GetProperty("canInitializeEmpty").GetBoolean());
+        await VerifyOffer(invalid, [17]);
+        await ReportBox(invalid, emptySnapshot);
+        await ReportBox(invalid, emptySnapshot);
+        await VerifyOffer(invalid, [.. emptySnapshot, 17]);
+        ledger = await api.GetFromJsonAsync<JsonElement>($"/api/terminals/{invalid.Id}/cashbox");
+        latest = Assert.Single(ledger.GetProperty("statuses").EnumerateArray());
+        Assert.True(latest.GetProperty("status").GetProperty("balanceKnown").GetBoolean());
+        Assert.Equal(0, latest.GetProperty("status").GetProperty("balanceMinorUnits").GetInt32());
+        var history = await db.DlogTransactions.AsNoTracking().Where(row => row.TerminalId == invalid.Id && row.MessageType == 38)
+            .OrderBy(row => row.CapturedAtUtc).ToListAsync();
+        Assert.Equal(3, history.Count);
+        Assert.Equal(emptySnapshot, history[0].RawPayload);
+        Assert.Equal(invalidSnapshot, history[1].RawPayload);
+        Assert.Equal(emptySnapshot, history[2].RawPayload);
+        await ReportBox(invalid, invalidSnapshot);
+        await using (var waitScope = factory.Services.CreateAsyncScope())
+        {
+            var waitDb = waitScope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (await waitDb.NccSessions.AnyAsync(row => row.TerminalId == invalid.Id && row.Status == NccSessionStatus.Active, deadline.Token))
+                await Task.Delay(50, deadline.Token);
+        }
+        var observedClock = new DateTime(2028, 2, 29, 10, 11, 12);
+        var observedSnapshot = DlogCashboxWire.EncodeEmptyStatus(observedClock, "012345AB");
+        using (var observed = await api.PostAsJsonAsync($"/api/terminals/{invalid.Id}/cashbox/initialize-empty",
+            new { boxNumber = "012345AB", openingClock = "2028-02-29T10:11:12", confirmEmpty = true }))
+            observed.EnsureSuccessStatusCode();
+        await VerifyOffer(invalid, [.. observedSnapshot, 17]);
+        // An identical invalid report after the operator assertion is new
+        // evidence. Do not indefinitely restore even the observed starting value.
+        await ReportBox(invalid, invalidSnapshot);
+        await VerifyOffer(invalid, [17]);
+        ledger = await api.GetFromJsonAsync<JsonElement>($"/api/terminals/{invalid.Id}/cashbox");
+        Assert.False(Assert.Single(ledger.GetProperty("initializations").EnumerateArray()).GetProperty("isCurrent").GetBoolean());
+
+        async Task ReportBox(Terminal phone, byte[] report)
+        {
+            using var socket = await Connect(); var stream = socket.GetStream();
+            await Send(stream, phone, 0, report); AssertAck(await Read(stream));
+            await Send(stream, phone, NccControl.Clr);
+        }
+        async Task VerifyOffer(Terminal phone, byte[] expected)
+        {
+            using var socket = await Connect(); var stream = socket.GetStream();
+            await Send(stream, phone, 0, attention); AssertAck(await Read(stream));
+            var response = await Read(stream); Assert.Equal(expected, response.Data);
+            await Send(stream, phone, (byte)(NccControl.Ack | response.Control));
+            await Send(stream, phone, 1, [.. status, .. version, 13]); AssertAck(await Read(stream));
+            var done = await Read(stream); Assert.Equal(new byte[] { 13 }, done.Data);
+            await Send(stream, phone, (byte)(NccControl.Ack | NccControl.Clr | done.Control));
+        }
+
         async Task<TcpClient> Connect() { var socket = new TcpClient(); await socket.ConnectAsync(IPAddress.Loopback, port); return socket; }
         static Task Send(NetworkStream stream, Terminal phone, byte control, byte[]? data = null) => stream.WriteAsync(NccFrameCodec.Encode(
             new NccWirePacket { Control = control, TerminalId = Convert.FromHexString(phone.TerminalIdHex), Data = data ?? [] })).AsTask();

@@ -62,8 +62,10 @@ public static class OperatorPermissions
             ("TerminalGroups", U, "Rename UpdateDetails"), ("TerminalGroups", D, "Delete"));
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
+            ("PortableTerminalConfigurations", R, "Export Preview"), ("PortableTerminalConfigurations", A, "Create"),
             ("FirmwareLocalDialingStaging", A, "Create"),
             ("FirmwareCommonControlStaging", A, "Create"),
+            ("FirmwareQuickAccessStaging", A, "Create"),
             ("FirmwareNumberingStaging", A, "Create"),
             ("FirmwareVisualPromptStaging", A, "Create"),
             ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
@@ -86,6 +88,7 @@ public static class OperatorPermissions
             ("FirmwareSetupStaging", R, "Preview"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
             ("FirmwareCommonControlStaging", R, "Preview"),
+            ("FirmwareQuickAccessStaging", R, "Preview"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize AuthorPrompts"), ("NativeTableConfiguration", U, "Save"),
             ("NativeTableConfiguration", R, "PreviewNumberingOverlay"), ("NativeTableConfiguration", U, "ApplyNumberingOverlay"),
             ("CraftAccessConfiguration", R, "Reveal"),
@@ -128,6 +131,7 @@ public static class OperatorPermissions
             ("NccFrameCaptures", A, "Upload"), ("NccFrameCaptures", D, "Delete"));
         Screen("audit", "Audit", ("Audit", R, "Events"));
         Screen("rate-plans", "Rate plans", ("RatePlans", R, "List Get GetVersion"),
+            ("RatePlanPackages", R, "RegionalStarter Export Preview"), ("RatePlanPackages", A, "Import"),
             ("RatePlans", A, "Create CreateVersion AddRule AddTariff AddDestinationPrefix AddTimeBand"),
             ("RatePlans", U, "Publish"), ("RateRules", U, "Update"), ("Tariffs", U, "Update"),
             ("DestinationPrefixes", U, "Update"), ("TimeBands", U, "Update"),
