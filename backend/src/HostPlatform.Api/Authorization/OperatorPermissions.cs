@@ -43,7 +43,7 @@ public static class OperatorPermissions
             ("Terminals", R, "Events"), ("Terminals", U, "PostStatus"), ("FieldEvents", R, "List Reference PhoneOptions CurrentStatus"),
             ("Operator", R, "TerminalTimeline"));
         Screen("field-event-catalogue", "Alarm and maintenance catalogue",
-            ("FieldEvents", U, "SaveReference"));
+            ("FieldEvents", U, "SaveReference ImportMaintenanceExamples"));
         Screen("technicians", "Technician directory and activity", ("CraftTechnicians", R, "Directory Activity NearbyAlarms"),
             ("CraftTechnicians", A, "Create"), ("CraftTechnicians", U, "Update"));
         Screen("field-event-destinations", "Alarm and maintenance destinations",

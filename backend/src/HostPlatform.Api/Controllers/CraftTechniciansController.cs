@@ -77,11 +77,16 @@ public sealed class CraftTechniciansController(HostPlatformDbContext db, CraftId
                 technicianName = row.match == null ? null : row.match.DisplayNameSnapshot,
                 employeeReference = row.match == null ? null : row.match.EmployeeReferenceSnapshot
             }).ToArrayAsync(ct);
-        return Ok(new { total, items = rows.Select(row => new
+        var decoded = rows.Select(row => new { row, opcode = FieldEventSummary.ReadCode(DlogMaintenanceWire.RequestMessageType, row.RawPayload)?.Code }).ToArray();
+        var codes = decoded.Where(item => item.opcode.HasValue).Select(item => item.opcode!.Value).Distinct().ToArray();
+        var descriptions = await db.FieldEventCodeSettings.AsNoTracking().Where(row => row.Kind == "maintenance" && codes.Contains(row.Code))
+            .ToDictionaryAsync(row => row.Code, row => row.Description, ct);
+        return Ok(new { total, items = decoded.Select(item => new
         {
-            row.Id, row.TerminalId, row.terminalName, row.CapturedAtUtc, row.matchStatus, row.technicianId, row.technicianName, row.employeeReference,
-            opcode = FieldEventSummary.ReadCode(DlogMaintenanceWire.RequestMessageType, row.RawPayload)?.Code,
-            summary = FieldEventSummary.TryBuild(DlogMaintenanceWire.RequestMessageType, row.RawPayload)
+            item.row.Id, item.row.TerminalId, item.row.terminalName, item.row.CapturedAtUtc, item.row.matchStatus,
+            item.row.technicianId, item.row.technicianName, item.row.employeeReference, item.opcode,
+            summary = FieldEventSummary.TryBuild(DlogMaintenanceWire.RequestMessageType, item.row.RawPayload),
+            operatorDescription = item.opcode is { } code ? descriptions.GetValueOrDefault(code) : null
         }) });
     }
 

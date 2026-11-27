@@ -78,3 +78,25 @@ it('shows a failed request instead of an empty reference, and retries', async ()
   expect(await screen.findByText('Memory lost')).toBeVisible()
   expect(screen.queryByRole('alert')).toBeNull()
 })
+
+it('imports only missing example maintenance descriptions and preserves configured choices', async () => {
+  const examples = [{ code: 15, description: 'Contractor cleaned booth', configured: true }, { code: 106, description: 'Booth cleaned', configured: false }]
+  const existing = { code: 15, description: null, operatorDescription: 'Custom cleaning', severity: null, revision: 2 }
+  const before = { ...fixture, canEdit: true, maintenanceExamples: examples, maintenance: [...fixture.maintenance, existing] }
+  const after = { ...before, maintenanceExamples: examples.map(row => ({ ...row, configured: true })), maintenance: [...before.maintenance,
+    { code: 106, description: null, operatorDescription: 'Booth cleaned', severity: null, revision: 1 }] }
+  vi.mocked(apiFetch).mockResolvedValueOnce(json(before)).mockResolvedValueOnce(json({ added: 1, retained: 1 })).mockResolvedValueOnce(json(after))
+  render(<FieldEventReference />)
+  fireEvent.click(screen.getByRole('button', { name: 'Show reference' }))
+  const region = await screen.findByRole('region', { name: 'Historical maintenance examples' })
+  fireEvent.click(within(region).getByText('Review 2 example codes'))
+  expect(within(region).getByText('Existing setting retained')).toBeVisible()
+  expect(within(region).getByText('Not imported')).toBeVisible()
+  fireEvent.click(within(region).getByRole('button', { name: 'Import 1 missing example descriptions' }))
+  expect(await screen.findByText('Imported 1 example descriptions; 1 existing settings retained.')).toBeVisible()
+  expect(apiFetch).toHaveBeenCalledWith('/api/field-events/reference/maintenance/examples', { method: 'POST' })
+  const catalogue = screen.getByRole('region', { name: 'Maintenance opcodes' })
+  expect(await within(catalogue).findByText('Booth cleaned')).toBeVisible()
+  expect(within(catalogue).getByText('Custom cleaning')).toBeVisible()
+  expect(within(region).getByRole('button', { name: 'Import 0 missing example descriptions' })).toBeDisabled()
+})

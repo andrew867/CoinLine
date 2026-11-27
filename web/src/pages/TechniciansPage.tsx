@@ -7,7 +7,7 @@ type Technician = { id: string; displayName: string; employeeReference: string |
   hasIdentifier: boolean; matchingAvailable: boolean }
 type Directory = { identifierMatchingConfigured: boolean; items: Technician[] }
 type Activity = { id: string; terminalId: string | null; terminalName: string | null; capturedAtUtc: string; matchStatus: string;
-  technicianId: string | null; technicianName: string | null; employeeReference: string | null; opcode: number | null; summary: string | null }
+  technicianId: string | null; technicianName: string | null; employeeReference: string | null; opcode: number | null; summary: string | null; operatorDescription?: string | null }
 type Alarm = { id: string; capturedAtUtc: string; alarmNumber: number | null; summary: string | null }
 type Edit = { id: string | null; displayName: string; employeeReference: string; enabled: boolean; revision: number; reportedIdentifier: string; clearIdentifier: boolean }
 const blank = (): Edit => ({ id: null, displayName: '', employeeReference: '', enabled: true, revision: 0, reportedIdentifier: '', clearIdentifier: false })
@@ -118,7 +118,8 @@ export function TechniciansPage() {
         {activities.items.length === 0 ? <p>No matching maintenance reports.</p> : <table><thead><tr><th>Received</th><th>Phone</th><th>Technician association</th><th>Reported operation</th><th>Alarm context</th></tr></thead>
           <tbody>{activities.items.map(row => <tr key={row.id}><td>{new Date(row.capturedAtUtc).toLocaleString()}</td><td>{row.terminalName ?? 'Unknown phone'}</td>
             <td>{row.technicianName && <strong>{row.technicianName} </strong>}{matchLabels[row.matchStatus] ?? 'Unknown status'}</td>
-            <td>{row.summary ?? (row.opcode !== null ? `Operation ${row.opcode}` : 'Unknown operation')}</td>
+            <td>{row.operatorDescription && <><strong>{row.operatorDescription}{row.opcode !== null ? ` (opcode ${row.opcode})` : ''}</strong><br /></>}
+              {row.summary ?? (row.opcode !== null ? `Operation ${row.opcode}` : 'Unknown operation')}{row.operatorDescription && <small> Current operator classification above.</small>}</td>
             <td><button type="button" onClick={() => void related(row)}>Nearby alarms</button></td></tr>)}</tbody></table>}</>}
       {alarms && <section aria-label="Nearby alarm reports"><h3>Nearby alarm reports for {alarms.activity.terminalName ?? 'this phone'}</h3>
         <p>Up to 20 alarms reported by the same phone in the preceding 24 hours. These are possible context, not confirmed responses or resolved faults.</p>
