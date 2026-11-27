@@ -803,7 +803,7 @@ internal sealed class NccLinkProcessor(
         CardAuthorizationAuditDetail Detail(string result, SyntheticAuthorizationEvidence? lab) => new(
             request.Data[0], result, providerKind, lab?.Reason ?? bankEvidence?.Reason, lab?.CardAccountId, lab?.QuoteId ?? bankEvidence?.QuoteId,
             lab?.QuotedAmountUsd ?? bankEvidence?.QuotedAmountUsd, lab?.CallSequence ?? bankEvidence?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null,
-            request.Data.Length, receipts.Length / 3);
+            request.Data.Length, receipts.Length / 3, RateSource: bankEvidence?.RateSource, RatePlanVersionId: bankEvidence?.RatePlanVersionId);
     }
 
     private static async Task ObserveCardInvocationAsync(Task<NccCardAuthorizationDecision> invocation)
