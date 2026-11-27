@@ -40,14 +40,14 @@ An isolated Manager combining the regional plan and explicit per-phone published
 
 | Native earlier-profile behavior | Observed result |
 | --- | --- |
-| Ten-digit 709 local | Requested $0.25, accepted one synthetic quarter, outpulsed all ten digits without rewriting, received local answer and returned on-hook. |
-| 1+709 | Displayed $0.50 before payment or outpulse. |
+| Ten-digit 709 local | Requested $0.25, accepted one synthetic quarter, outpulsed all ten digits without rewriting, received local answer and returned on-hook. A separate duration run stayed locally answered for 130 emulated seconds without an additional payment request. |
+| 1+709 | Displayed $0.50 before payment or outpulse. Two quarters paid the first period; a $0.25 continuation request and a third quarter extended the local answer to 90 emulated seconds. |
 | 1+US geographic area | Actual real-time request received $1.50, displayed $1.50 before payment or outpulse. |
 | 1+other Canadian geographic area | Actual real-time request received $1.00, displayed $1.00 before payment or outpulse. |
 | Nonlocal ten-digit and seven-digit destinations | Denied without outpulse. |
-| 411 and 711 | Displayed $1.00 and $0.25 respectively before payment or outpulse. |
+| 411 and 711 | Displayed $1.00 and $0.25 respectively before payment or outpulse. A separate simulated local 711 call accepted one quarter initially and requested a further $0.25; another quarter extended the local answer to 90 emulated seconds. |
 | 211, 311, 511, 611, 811, one toll-free number and one exact information-service extension | Outpulsed without requesting payment. |
 
-Both national real-time decisions used the selected published plan and restored the national prefix from normalized terminal requests. Fixed and measured prices over additional minutes were verified by the host quote controls; extended paid-call duration and subsequent-charge collection were not exercised on the terminal. Emergency classification was checked in the host only, and no emergency call was placed.
+Both national real-time decisions used the selected published plan and restored the national prefix from normalized terminal requests. The received MT64 bodies had matching CRCs and contained 60-second first and following periods and durations, with charges 150/50 cents for US and 100/25 cents for Canada. The final delimiters were not present in this particular diagnostic capture, so it is not a complete raw-session capture. The actual initial prices were displayed; longer paid-call collection for these two national destinations has not been exercised. Whole-call 411 pricing over a longer assumed duration was verified at the host. Emergency classification was checked in the host only, and no emergency call was placed. All duration controls used isolated local CO audio, not a public relay or directory service.
 
 The later graphical profile is not qualified for general paid calling with this regional candidate. Its installed tariff and screening records matched the intended bytes, but ordinary paid controls outpulsed without requesting payment. A read-only device observation showed the intended inter-area rate selection being replaced before tariff lookup, while the directory-assistance control displayed the expected charge. Continue the later-profile diagnosis independently. Do not publish the graphical candidate as a verified paid-call configuration. These observations are emulator evidence, not physical bench acceptance.
