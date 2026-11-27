@@ -8,7 +8,7 @@ import './TableSetConfiguration.css'
 type Row = { id: string; name: string; tableNumber: number; description: string | null }
 type Layout = { number: number; length: number; profile: string; draftTemplateAvailable: boolean; explicitAuthoringAvailable?: boolean }
 type Firmware = { profileId: string; label: string; length: number; terminalAcknowledged: boolean;
-  completeCatalogue?: boolean; observedLengthsOnly?: boolean; editorStatus?: string; editorProfile?: string | null }
+  completeCatalogue?: boolean; observedLengthsOnly?: boolean; editorStatus?: string; editorProfile?: string | null; behaviorObservation?: string | null }
 type Reference = {
   number: number; name: string; kind: string; layouts: Layout[]; firmware: Firmware[]
   registeredDefinitions: { id: string; name: string }[]; behaviorObservation?: string | null
@@ -66,6 +66,7 @@ export function TableDefinitions() {
   const authorable = profileRecords.filter(profile => profile.editorStatus === 'template' || profile.editorStatus === 'explicit').length
   const editable = authorable + profileRecords.filter(profile => profile.editorStatus === 'import-only').length
   const acknowledged = profileRecords.filter(profile => profile.terminalAcknowledged).length
+  const behaviorObservations = profileRecords.filter(profile => !!profile.behaviorObservation).length
   const visible = catalogue?.filter(record => (filter === 'all' || record.kind === filter)
     && (profileFilter === 'all' || record.firmware.some(profile => profile.profileId === profileFilter))
     && (!query || [
@@ -104,7 +105,7 @@ export function TableDefinitions() {
         {catalogue && <p role="status">{visible.length} of {catalogue.length} reference records</p>}
         {selectedProfile && <section aria-label="Selected profile coverage">
           <h3>{selectedProfile.label}</h3>
-          <p>Recorded message types: {profileRecords.length}; matching native editors: {editable}; authorable: {authorable}; emulator acknowledgements: {acknowledged}.</p>
+          <p>Recorded message types: {profileRecords.length}; matching native editors: {editable}; authorable: {authorable}; emulator acknowledgements: {acknowledged}; recorded behavior observations: {behaviorObservations}.</p>
           <p>{selectedProfile.completeCatalogue ? 'Registered configuration catalogue.' : 'Incomplete catalogue: unlisted types remain unknown.'} {' '}
             {selectedProfile.observedLengthsOnly && 'Only record lengths and acknowledgement evidence are established for this profile. '}
             Counts refer to the profile, not the current search or a mandatory INSTALL list. Behavior and physical qualification are separate.</p>
@@ -112,7 +113,7 @@ export function TableDefinitions() {
         {visible.length > 0 && <div role="region" aria-label="Reference records" tabIndex={0} style={{ overflowX: 'auto' }}>
           <table cellPadding={8} style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr><th scope="col">MT</th><th scope="col">Reference name</th><th scope="col">Category</th>
-              <th scope="col">Packed editor</th><th scope="col">Firmware evidence</th><th scope="col">Observed behavior</th><th scope="col">Registered definitions</th></tr></thead>
+              <th scope="col">Packed editor</th><th scope="col">Wire layout evidence</th><th scope="col">Terminal acknowledgement</th><th scope="col">Observed behavior</th><th scope="col">Registered definitions</th></tr></thead>
             <tbody>{visible.map(record => <tr key={record.number} style={{ borderBottom: '1px solid #eee' }}>
               <td>MT{record.number}</td><td>{record.name}</td>
               <td><StatusBadge label={kinds[record.kind] ?? 'Unknown'} variant={record.kind === 'native_editor' ? 'ok' : record.kind === 'operational' ? 'neutral' : 'info'} />
@@ -123,15 +124,26 @@ export function TableDefinitions() {
                   {layout.draftTemplateAvailable ? ' draft template' : layout.explicitAuthoringAvailable ? ' explicit authoring (no default template)' : ' import/edit only'}</li>)}</ul></details> : 'Not established'}</td>
               <td>{record.firmware.length ? selectedProfile ? <>
                 {record.firmware.filter(profile => profile.profileId === profileFilter).map(profile => <div key={profile.profileId}>
-                  {profile.length.toLocaleString()} bytes; {profile.terminalAcknowledged ? 'emulator MT14 observed' : 'acknowledgement not recorded'}
+                  {profile.length.toLocaleString()} bytes
                   <br /><small>{editorStatuses[profile.editorStatus ?? ''] ?? 'Editor compatibility not recorded'}</small></div>)}
-              </> : <details><summary>{record.firmware.length} profiles; {record.firmware.filter(f => f.terminalAcknowledged).length} acknowledged</summary>
-                <ul>{record.firmware.map(profile => <li key={profile.profileId}>{profile.label}: {profile.length.toLocaleString()} bytes;
-                  {profile.terminalAcknowledged ? ' emulator MT14 observed' : ' acknowledgement not recorded'}<br />
+              </> : <details><summary>{record.firmware.length} profile lengths</summary>
+                <ul>{record.firmware.map(profile => <li key={profile.profileId}>{profile.label}: {profile.length.toLocaleString()} bytes<br />
                   <small>{editorStatuses[profile.editorStatus ?? ''] ?? 'Editor compatibility not recorded'}</small></li>)}</ul>
-                <small>Length and emulator acknowledgement do not establish physical behavior.</small></details> : 'Not recorded'}</td>
-              <td style={{ minWidth: 180, maxWidth: 300 }}>{record.behaviorObservation ?? 'Not recorded in this reference catalogue'}
-                {selectedProfile && record.behaviorObservation && <div><small>Reference observation, not attributed to every target profile.</small></div>}</td>
+                <small>Record length alone does not establish compatible field meanings.</small></details> : 'Not recorded'}</td>
+              <td>{record.firmware.length ? selectedProfile ? <>
+                {record.firmware.filter(profile => profile.profileId === profileFilter).map(profile => <div key={profile.profileId}>
+                  {profile.terminalAcknowledged ? 'emulator MT14 observed' : 'acknowledgement not recorded'}</div>)}
+              </> : <details><summary>{record.firmware.length} profiles; {record.firmware.filter(f => f.terminalAcknowledged).length} acknowledged</summary>
+                <ul>{record.firmware.map(profile => <li key={profile.profileId}>{profile.label}: {profile.terminalAcknowledged ? 'emulator MT14 observed' : 'acknowledgement not recorded'}</li>)}</ul>
+                <small>Application acknowledgement is not physical qualification.</small></details> : 'Not recorded'}</td>
+              <td style={{ minWidth: 180, maxWidth: 300 }}>{selectedProfile ? <>
+                {record.firmware.find(profile => profile.profileId === profileFilter)?.behaviorObservation ?? 'No behavior observation recorded for this target profile.'}
+                {!record.firmware.find(profile => profile.profileId === profileFilter)?.behaviorObservation && record.behaviorObservation &&
+                  <div><small>Other-profile or unscoped reference observations are not evidence for this target.</small></div>}
+              </> : record.firmware.some(profile => profile.behaviorObservation) ? <details><summary>{record.firmware.filter(profile => profile.behaviorObservation).length} profile-specific observation(s)</summary>
+                <ul>{record.firmware.filter(profile => profile.behaviorObservation).map(profile => <li key={profile.profileId}><strong>{profile.label}</strong>: {profile.behaviorObservation}</li>)}</ul>
+                <small>Limited emulated observations; physical acceptance is separate.</small></details>
+                : record.behaviorObservation ? <>{record.behaviorObservation}<div><small>Unscoped reference observation.</small></div></> : 'Not recorded in this reference catalogue'}</td>
               <td>{record.registeredDefinitions.length ? record.registeredDefinitions.map(definition => <div key={definition.id}>
                 <Link to={`/table-definitions/${definition.id}`}>{definition.name}</Link></div>) : 'None'}</td>
             </tr>)}</tbody>
