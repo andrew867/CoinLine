@@ -20,7 +20,7 @@ type UploadFrame = {
   endsDialogue: boolean | null
   records: { messageType: number; byteCount: number }[] | null
 }
-type CashboxRestore = { observedAtUtc: string; available: boolean; sent: boolean; responseBytes: number; source?: 'terminal_report' | 'operator_initialized' }
+type CashboxRestore = { observedAtUtc: string; available: boolean; sent: boolean; responseBytes: number; source?: 'terminal_report' | 'operator_initialized' | 'protocol_default' }
 
 const recordNames: Record<number, string> = {
   4: 'Card call detail', 10: 'Terminal status', 13: 'End of data', 37: 'Communications statistics',
@@ -50,7 +50,9 @@ function UploadRecordObservation({ id }: { id: string }) {
       {formatUtc(restore.observedAtUtc)}: {restore.sent ? restore.available
         ? restore.source === 'operator_initialized'
           ? 'Operator-confirmed empty-box initialization sent before the upload request. It is not a terminal report; terminal application is not confirmed.'
-          : 'Last known cashbox status sent before the upload request. Terminal application is not confirmed.'
+          : restore.source === 'protocol_default'
+            ? 'Initial protocol cashbox default sent before the upload request. No physical box balance or opening time was observed; terminal application is not confirmed.'
+            : 'Last known cashbox status sent before the upload request. Terminal application is not confirmed.'
         : 'No current cashbox status was known; call upload requested without a fabricated status.'
         : 'The combined upload response was not sent.'}</li>)}</ul></>}
     {!!frames?.length && frames.every(frame => frame.parsed && frame.records != null) && frames.some(frame => frame.endsDialogue === true) &&

@@ -13,7 +13,8 @@ public sealed record CashboxCoinReference(string Status, int? TableRevision = nu
 
 public sealed record CashboxLedgerView(IReadOnlyList<TerminalCashboxAccounting.StatusReport> Statuses,
     IReadOnlyList<TerminalCashboxAccounting.CollectionReport> Collections, IReadOnlyDictionary<Guid, CashboxCoinReference> CoinConfigurations,
-    IReadOnlyList<TerminalCashboxAccounting.EmptyBoxInitialization> Initializations, bool CanInitializeEmpty, string? ExpectedNewBoxNumber);
+    IReadOnlyList<TerminalCashboxAccounting.EmptyBoxInitialization> Initializations, bool CanInitializeEmpty, string? ExpectedNewBoxNumber,
+    bool CanInitializeDefault);
 
 internal static class CashboxCoinReferences
 {

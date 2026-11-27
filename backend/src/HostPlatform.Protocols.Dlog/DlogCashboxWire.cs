@@ -70,6 +70,9 @@ public static class DlogCashboxWire
         return record;
     }
 
+    /// <summary>Initial protocol default for a previously unreported box, not an observed opening date or physical balance.</summary>
+    public static byte[] EncodeInitialStatusDefault() => EncodeEmptyStatus(new DateTime(1990, 1, 1), "00000000");
+
     public static bool TryReadCollection(ReadOnlySpan<byte> raw, out Collection collection)
     {
         collection = null!;

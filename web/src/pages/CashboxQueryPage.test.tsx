@@ -165,8 +165,31 @@ it('records only an explicitly verified empty box and keeps it separate from ter
 
 it('does not expose empty-box initialization to a read-only operator', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { cashbox: 1 })
-  vi.mocked(apiGet).mockResolvedValue({ statuses: [], collections: [], initializations: [], canInitializeEmpty: true })
+  vi.mocked(apiGet).mockResolvedValue({ statuses: [], collections: [], initializations: [], canInitializeEmpty: true, canInitializeDefault: true })
   render(<MemoryRouter><TerminalCashboxPanel terminalId="fixture-0" /></MemoryRouter>)
   await screen.findByText('No cashbox reports yet.')
   expect(screen.queryByRole('region', { name: 'Initialize observed empty box' })).not.toBeInTheDocument()
+  expect(screen.queryByRole('region', { name: 'Initialize protocol cashbox default' })).not.toBeInTheDocument()
+})
+
+it('records an explicitly confirmed protocol default and never presents it as an observed physical box', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { cashbox: 5 })
+  vi.mocked(apiGet).mockResolvedValueOnce({ statuses: [], collections: [], initializations: [], canInitializeDefault: true })
+    .mockResolvedValue({ statuses: [], collections: [], canInitializeDefault: false, initializations: [{
+      id: 'default-1', boxNumber: '00000000', openingTime: '1990-01-01T00:00:00', recordedAtUtc: receivedAtUtc,
+      isCurrent: true, source: 'protocol_default',
+    }] })
+  vi.mocked(apiPostRaw).mockResolvedValue(new Response('{}', { status: 200 }))
+  render(<MemoryRouter><TerminalCashboxPanel terminalId="fixture-0" /></MemoryRouter>)
+  const form = await screen.findByRole('region', { name: 'Initialize protocol cashbox default' })
+  const submit = within(form).getByRole('button', { name: 'Record initial protocol default' })
+  expect(submit).toBeDisabled()
+  fireEvent.click(within(form).getByRole('checkbox'))
+  fireEvent.click(submit)
+  await waitFor(() => expect(apiPostRaw).toHaveBeenCalledWith('/api/terminals/fixture-0/cashbox/initialize-default', { confirmInitialDefault: true }))
+  const baseline = await screen.findByRole('region', { name: 'Initial protocol cashbox default' })
+  expect(within(baseline).getByText('Current physical balance unknown.')).toBeVisible()
+  expect(within(baseline).getByText(/not observed cashbox information/)).toBeVisible()
+  expect(screen.getByRole('table', { name: 'Box initializations' })).toHaveTextContent('Not observed')
+  expect(screen.queryByRole('region', { name: 'Current reported cashbox' })).not.toBeInTheDocument()
 })

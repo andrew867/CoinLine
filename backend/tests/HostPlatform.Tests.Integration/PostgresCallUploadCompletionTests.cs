@@ -22,6 +22,125 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresCallUploadCompletionTests
 {
     [PostgresIntegrationFact]
+    public async Task First_coin_install_seeds_protocol_default_and_existing_unreported_phone_requires_operator_initialization()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint!).Port; probe.Stop();
+        var key = Guid.NewGuid().ToString("N");
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
+            .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()).UseSetting("Ncc:LoopbackOnly", "true"));
+        using var api = TestOperatorAuthentication.CreateAuthenticatedClient(factory); api.DefaultRequestHeaders.Add("X-API-Key", key);
+        var (fresh, _) = await Seed(factory.Services, coinEnabled: true);
+        var (existing, oldSet) = await Seed(factory.Services, coinEnabled: true);
+        var (cardOnly, _) = await Seed(factory.Services);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.DownloadBatches.Add(new DownloadBatch { TerminalId = existing.Id, TableSetId = oldSet, Scope = DownloadScope.Full, Status = DownloadBatchStatus.Completed });
+            await db.SaveChangesAsync();
+        }
+        var empty = DlogCashboxWire.EncodeInitialStatusDefault();
+        await Install(fresh, [18, ..empty], complete: true);
+        await Install(existing, [18], complete: false);
+        await Install(cardOnly, [18], complete: false);
+        var initial = await Ledger(fresh);
+        Assert.Empty(initial.GetProperty("statuses").EnumerateArray());
+        Assert.Empty(initial.GetProperty("collections").EnumerateArray());
+        var auto = Assert.Single(initial.GetProperty("initializations").EnumerateArray());
+        Assert.Equal("protocol_default", auto.GetProperty("source").GetString());
+        Assert.True(auto.GetProperty("isCurrent").GetBoolean());
+        Assert.False(initial.GetProperty("canInitializeDefault").GetBoolean());
+        Assert.True(initial.GetProperty("canInitializeEmpty").GetBoolean());
+        Assert.Empty((await Ledger(existing)).GetProperty("initializations").EnumerateArray());
+        Assert.False((await Ledger(cardOnly)).GetProperty("canInitializeDefault").GetBoolean());
+        var confirm = new { confirmInitialDefault = true };
+        Assert.Equal(HttpStatusCode.Conflict, (await api.PostAsJsonAsync(Path(cardOnly) + "/initialize-default", confirm)).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await api.PostAsJsonAsync(Path(existing) + "/initialize-default", new { confirmInitialDefault = false })).StatusCode);
+        var status = new byte[11]; status[0] = 10; var version = new byte[28]; version[0] = 60;
+        byte[] attention = [42, 0x82, ..status, ..version];
+        using (var socket = await Connect())
+        {
+            var stream = socket.GetStream(); await Send(stream, existing, 0, attention); AssertAck(await Read(stream));
+            var response = await Read(stream); Assert.Equal(new byte[] { 17 }, response.Data);
+            Assert.Equal(HttpStatusCode.Conflict, (await api.PostAsJsonAsync(Path(existing) + "/initialize-default", confirm)).StatusCode);
+            await Send(stream, existing, (byte)(NccControl.Ack | NccControl.Clr | response.Control));
+        }
+        await Idle(existing);
+        var manual = await Task.WhenAll(api.PostAsJsonAsync(Path(existing) + "/initialize-default", confirm), api.PostAsJsonAsync(Path(existing) + "/initialize-default", confirm));
+        Assert.All(manual, response => Assert.Equal(HttpStatusCode.OK, response.StatusCode));
+        Assert.Equal((await manual[0].Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid(),
+            (await manual[1].Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid());
+        var actual = DlogCashboxWire.EncodeEmptyStatus(new DateTime(2028, 2, 29, 10, 11, 12), "012345AB");
+        BinaryPrimitives.WriteInt32LittleEndian(actual.AsSpan(13), 25);
+        BinaryPrimitives.WriteUInt16LittleEndian(actual.AsSpan(17), 1);
+        for (var pass = 0; pass < 2; pass++)
+        {
+            using var socket = await Connect(); var stream = socket.GetStream();
+            await Send(stream, existing, 0, attention); AssertAck(await Read(stream));
+            var response = await Read(stream); byte[] expected = pass == 0 ? [..empty,17] : [..actual,17];
+            Assert.Equal(expected, response.Data);
+            await Send(stream, existing, (byte)(NccControl.Ack | response.Control));
+            await Send(stream, existing, 1, [..Call(0x0281), ..actual, 13]); AssertAck(await Read(stream));
+            var end = await Read(stream); Assert.Equal(new byte[] { 5, 0x81, 0x02, 13 }, end.Data);
+            await Send(stream, existing, (byte)(NccControl.Ack | NccControl.Clr | end.Control));
+            await Idle(existing);
+        }
+        var after = await Ledger(existing);
+        Assert.False(Assert.Single(after.GetProperty("initializations").EnumerateArray()).GetProperty("isCurrent").GetBoolean());
+        Assert.Equal(25, Assert.Single(after.GetProperty("statuses").EnumerateArray()).GetProperty("status").GetProperty("balanceMinorUnits").GetInt32());
+        Assert.Equal(HttpStatusCode.Conflict, (await api.PostAsJsonAsync(Path(existing) + "/initialize-default", confirm)).StatusCode);
+        // A real operator observation may supersede the protocol default without inventing a report.
+        var observed = new { boxNumber = "012345AB", openingClock = "2028-02-29T10:11:12", confirmEmpty = true };
+        Assert.Equal(HttpStatusCode.OK, (await api.PostAsJsonAsync(Path(fresh) + "/initialize-empty", observed)).StatusCode);
+        var superseded = await Ledger(fresh);
+        Assert.Empty(superseded.GetProperty("statuses").EnumerateArray());
+        Assert.Equal("operator_initialized", Assert.Single(superseded.GetProperty("initializations").EnumerateArray(), row => row.GetProperty("isCurrent").GetBoolean()).GetProperty("source").GetString());
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.Equal(2, await db.AuditEvents.CountAsync(row => row.Action == "initialize_default_box" && (row.TerminalId == fresh.Id || row.TerminalId == existing.Id)));
+            Assert.Single(await db.DlogTransactions.Where(row => row.TerminalId == existing.Id && row.MessageType == 38).ToListAsync());
+            Assert.Single(await db.UploadBatches.Where(row => row.TerminalId == existing.Id && row.IdempotencyKey.StartsWith("ncc-call-detail")).ToListAsync());
+            Assert.False(await db.DlogTransactions.AnyAsync(row => row.TerminalId == fresh.Id && row.MessageType == 38));
+        }
+
+        string Path(Terminal phone) => $"/api/terminals/{phone.Id}/cashbox";
+        Task<JsonElement> Ledger(Terminal phone) => api.GetFromJsonAsync<JsonElement>(Path(phone));
+        async Task<TcpClient> Connect() { var socket = new TcpClient(); await socket.ConnectAsync(IPAddress.Loopback, port); return socket; }
+        static Task Send(NetworkStream stream, Terminal phone, byte control, byte[]? data = null) => stream.WriteAsync(NccFrameCodec.Encode(
+            new NccWirePacket { Control = control, TerminalId = Convert.FromHexString(phone.TerminalIdHex), Data = data ?? [] })).AsTask();
+        async Task Install(Terminal phone, byte[] expected, bool complete)
+        {
+            using var socket = await Connect(); var stream = socket.GetStream();
+            await Send(stream, phone, 0, [44,0x86]); AssertAck(await Read(stream));
+            var header = await Read(stream); Assert.Equal(expected, header.Data);
+            if (complete)
+            {
+                await Send(stream, phone, (byte)(NccControl.Ack | header.Control));
+                var coin = await Read(stream); Assert.Equal(50, coin.Data[0]);
+                await Send(stream, phone, (byte)(NccControl.Ack | coin.Control));
+                await Send(stream, phone, 1, [14,50]); AssertAck(await Read(stream));
+                header = await Read(stream); Assert.Equal(new byte[] { 13 }, header.Data);
+            }
+            await Send(stream, phone, (byte)(NccControl.Ack | NccControl.Clr | header.Control));
+            await Idle(phone);
+        }
+        async Task Idle(Terminal phone)
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            while (true)
+            {
+                await using var scope = factory.Services.CreateAsyncScope();
+                if (!await scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>().NccSessions.AnyAsync(row => row.TerminalId == phone.Id && row.Status == NccSessionStatus.Active, deadline.Token)) return;
+                await Task.Delay(50, deadline.Token);
+            }
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Operator_confirmed_empty_box_is_a_distinct_baseline_and_real_reports_supersede_it()
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint!).Port; probe.Stop();
@@ -56,6 +175,7 @@ public sealed class PostgresCallUploadCompletionTests
         restricted.DefaultRequestHeaders.Add("X-API-Key", key);
         Assert.Equal(HttpStatusCode.OK, (await restricted.GetAsync(endpoint)).StatusCode);
         Assert.Equal(HttpStatusCode.Forbidden, (await restricted.PostAsJsonAsync(action, observed)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await restricted.PostAsJsonAsync(endpoint + "/initialize-default", new { confirmInitialDefault = true })).StatusCode);
 
         var status = new byte[11]; status[0] = 10; var version = new byte[28]; version[0] = 60;
         byte[] attention = [42, 0x82, .. status, .. version];
@@ -487,7 +607,7 @@ public sealed class PostgresCallUploadCompletionTests
         }
     }
 
-    private static async Task<(Terminal, Guid)> Seed(IServiceProvider services)
+    private static async Task<(Terminal, Guid)> Seed(IServiceProvider services, bool coinEnabled = false)
     {
         await using var scope = services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
@@ -499,6 +619,7 @@ public sealed class PostgresCallUploadCompletionTests
         var definition = new TableDefinition { TableNumber = 50, Name = "Synthetic pending coin record" };
         var set = new TableSet { Name = "Synthetic pending configuration", CustomerId = customer.Id };
         var bytes = NativeTableLayouts.CreateDraftTemplate(NativeTableLayouts.DraftTemplates(50).Single());
+        if (coinEnabled) { BinaryPrimitives.WriteInt16LittleEndian(bytes.AsSpan(1), 25); bytes[65] = 3; }
         set.Versions.Add(CarrierSchedulerSpareFixture.Version(definition, bytes, 1));
         TableDistributionService.MarkPublished(set, DateTime.UtcNow);
         db.AddRange(customer, site, firmware, phone, definition, set);

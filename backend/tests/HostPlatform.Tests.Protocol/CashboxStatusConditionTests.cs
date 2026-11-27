@@ -6,6 +6,15 @@ namespace HostPlatform.Tests.Protocol;
 public sealed class CashboxStatusConditionTests
 {
     [Fact]
+    public void Initial_protocol_default_matches_the_unreported_box_wire_convention()
+    {
+        var raw = DlogCashboxWire.EncodeInitialStatusDefault();
+        Assert.Equal(57, raw.Length);
+        Assert.Equal(new byte[] { 38, 90, 1, 1 }, raw[..4]);
+        Assert.All(raw[4..], value => Assert.Equal(0, value));
+    }
+
+    [Fact]
     public void Observed_empty_initialization_has_exact_clock_identifier_and_zero_values()
     {
         var clock = new DateTime(2028, 2, 29, 10, 11, 12, DateTimeKind.Unspecified);
