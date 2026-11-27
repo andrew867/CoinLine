@@ -71,6 +71,7 @@ internal static class ExpandedDemoConfigurationSeed
         var older = new Dictionary<int, byte[]>(originalOlder) { [29] = received["archived-mtr19-demo"][29], [92] = received[OlderRouting][92] };
         var standard = received["archived-demo"].Where(row => row.Key is not (98 or 99 or 131 or 132 or 133)).ToDictionary(row => row.Key, row => row.Value);
         standard.Add(92, received[LaterRouting][92]);
+        var previousStandard = new Dictionary<int, byte[]>(standard);
         var graphical = new Dictionary<int, byte[]>(standard);
         foreach (var type in Graphics) graphical.Add(type, received["archived-demo"][type]);
         var previousGraphical = new Dictionary<int, byte[]>(graphical);
@@ -78,6 +79,15 @@ internal static class ExpandedDemoConfigurationSeed
         // imported text messages, but do not let their MT26 rotation take priority.
         graphical[26] = NativeTableLayouts.Find(26, standard[26], NativeTableLayouts.Later)!
             .Apply(standard[26], new Dictionary<string, string> { ["onHookAds"] = "false" });
+        var previousGraphicalIdle = new Dictionary<int, byte[]>(graphical);
+        // The standard toll-free prefixes are ordinary direct calls, not
+        // carrier-selection entries. Retain the input verbatim as a reference.
+        standard[92] = DirectTollFree(standard[92]);
+        graphical[92] = standard[92];
+        var previousDirectStandard = new Dictionary<int, byte[]>(standard);
+        var previousDirectGraphical = new Dictionary<int, byte[]>(graphical);
+        standard[92] = NormalizedTollFree(standard[92]);
+        graphical[92] = standard[92];
 
         if (!VisibleIdle(older) || !VisibleIdle(standard))
             throw new InvalidOperationException("A selected default text advertisement has no visible on-hook message.");
@@ -95,6 +105,7 @@ internal static class ExpandedDemoConfigurationSeed
             Reference("Demo reference, later sequential rate comparison", received["archived-demo-sequential"]),
             Reference("Demo reference, later original graphical and key navigation", received["ordinary-routing/mtr212"])
         };
+        starters.Add(Reference("Demo reference, later original ordinary screening", received[LaterRouting]));
         foreach (var group in AdvertisingGroups)
             starters.Add(Reference("Demo advertising, " + group["advertising/".Length..].Replace("/", " - "), received[group]));
         foreach (var group in OlderRoutingGroups.Where(group => group != OlderRouting))
@@ -104,11 +115,85 @@ internal static class ExpandedDemoConfigurationSeed
             throw new InvalidOperationException("The expanded import omitted a validated demo payload.");
         return new(starters.ToArray(), [new(DemoConfigurationSeed.EarlierName, oldProfile.Id, originalOlder),
             new(DemoConfigurationSeed.LaterName, laterProfile.Id, originalLater),
-            new(DemoConfigurationSeed.GraphicalName, graphProfile.Id, previousGraphical)]);
+            new(DemoConfigurationSeed.GraphicalName, graphProfile.Id, previousGraphical),
+            new(DemoConfigurationSeed.LaterName, laterProfile.Id, previousStandard, true, " (carrier-enabled screening reference)", " (direct toll-free default)"),
+            new(DemoConfigurationSeed.GraphicalName, graphProfile.Id, previousGraphicalIdle, true, " (carrier-enabled screening reference)", " (direct toll-free default)"),
+            new(DemoConfigurationSeed.LaterName, laterProfile.Id, previousDirectStandard, true, " (direct flags reference)", " (normalized toll-free default)"),
+            new(DemoConfigurationSeed.GraphicalName, graphProfile.Id, previousDirectGraphical, true, " (direct flags reference)", " (normalized toll-free default)")]);
 
         static Dictionary<int, int> Lengths(FirmwareTableProfile profile, IEnumerable<int> numbers) =>
             numbers.ToDictionary(number => number, number => profile.VerifiedLengths[number]);
         static DemoConfigurationSeed.Starter Reference(string name, IReadOnlyDictionary<int, byte[]> data) => new(name, null, data, false);
+    }
+
+    private static byte[] DirectTollFree(byte[] original)
+    {
+        var layout = NativeTableLayouts.Find(92, original, NativeTableLayouts.Later)!;
+        var prefixes = new HashSet<string>(["1800", "1888", "1877", "1866"], StringComparer.Ordinal);
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var changes = new Dictionary<string, string>();
+        foreach (var section in layout.Sections)
+        {
+            var pattern = section.Fields.Single(field => field.Key == section.Key + ".pattern").Read(original);
+            if (pattern == null || !prefixes.Contains(pattern)) continue;
+            string? Read(string key) => section.Fields.Single(field => field.Key == section.Key + "." + key).Read(original);
+            if (Read("wildcards") != "7" || Read("classification") != "9" || Read("rate") != "255" ||
+                Read("free") != "true" || Read("featureGroupB") != "false" || Read("fallback") != "false")
+                throw new InvalidOperationException("A standard toll-free starter prefix has conflicting routing settings.");
+            if (!seen.Add(pattern)) throw new InvalidOperationException("Duplicate standard toll-free starter prefix.");
+            changes[section.Key + ".carrier"] = "false";
+            changes[section.Key + ".answer"] = "true";
+        }
+        if (!seen.SetEquals(prefixes)) throw new InvalidOperationException("One or more standard direct toll-free prefixes are missing.");
+        return layout.Apply(original, changes);
+    }
+
+    private static byte[] NormalizedTollFree(byte[] direct)
+    {
+        var layout = NativeTableLayouts.Find(92, direct, NativeTableLayouts.Later)!;
+        var prefixes = new[] { "800", "888", "877", "866" };
+        var changes = new Dictionary<string, string>();
+        // These four unused positions were checked in the later demo catalogue.
+        // Do not overwrite a blanked rule, reserved data or an overlapping route.
+        for (var i = 0; i < prefixes.Length; i++)
+        {
+            var prefix = prefixes[i];
+            var aliasSlot = 43 + i;
+            var source = layout.Sections.Single(section => Read(section, "pattern") == "1" + prefix);
+            var alias = layout.Sections[aliasSlot];
+            if (direct.AsSpan(1 + aliasSlot * 17, 17).IndexOfAnyExcept((byte)0) >= 0)
+                throw new InvalidOperationException("A normalized toll-free starter position is not completely unused.");
+            if (Read(source, "payment") is not ("0" or "2") || Read(source, "answer") != "true" || Read(source, "carrier") != "false" ||
+                source.Fields.Where(field => field.Encoding == TableFieldEncoding.Flag && !field.IsSpare &&
+                    field.Key != source.Key + ".free" && field.Key != source.Key + ".answer").Any(field => field.Read(direct) != "false"))
+                throw new InvalidOperationException("A standard toll-free prefix has nonordinary payment or routing settings.");
+            foreach (var other in layout.Sections)
+            {
+                var pattern = Read(other, "pattern");
+                if (pattern == null || !int.TryParse(Read(other, "wildcards"), out var wildcards) || wildcards is < 0 or > 15)
+                    throw new InvalidOperationException("A starter screening pattern is unrecognized; cannot verify normalized toll-free overlap.");
+                if (Overlaps(pattern, wildcards, prefix))
+                    throw new InvalidOperationException("A normalized toll-free prefix overlaps an existing starter screening rule.");
+            }
+            changes[source.Key + ".payment"] = "2";
+            changes[alias.Key + ".pattern"] = prefix;
+            changes[alias.Key + ".wildcards"] = "7";
+            changes[alias.Key + ".classification"] = "9";
+            changes[alias.Key + ".payment"] = "2";
+            changes[alias.Key + ".rate"] = "255";
+            changes[alias.Key + ".free"] = "true";
+            changes[alias.Key + ".answer"] = "true";
+        }
+        return layout.Apply(direct, changes);
+
+        string? Read(NativeTableSection section, string key) => section.Fields.Single(field => field.Key == section.Key + "." + key).Read(direct);
+        static bool Overlaps(string pattern, int trailing, string prefix)
+        {
+            if (pattern.Length == 0 && trailing == 0) return false;
+            if (pattern.Length > 10 || pattern.Length + (trailing == 15 ? 0 : trailing) > 10 ||
+                trailing != 15 && pattern.Length + trailing != 10) return false;
+            return pattern.Zip(prefix).All(pair => pair.First == '?' || pair.First == pair.Second);
+        }
     }
 
     private static bool VisibleIdle(IReadOnlyDictionary<int, byte[]> records)
@@ -188,12 +273,13 @@ internal static class ExpandedDemoConfigurationSeed
                 throw new InvalidOperationException("The older demo has a free screening entry without the unrated rate index.");
         var layout = NativeTableLayouts.Find(92, later, NativeTableLayouts.Later)
             ?? throw new InvalidOperationException("The later ordinary screening layout is unknown.");
-        var expected = new HashSet<string> { "1800", "1888", "1877", "1866" };
+        var expected = new HashSet<string> { "1800", "1888", "1877", "1866", "800", "888", "877", "866" };
         for (var i = 0; i < layout.Sections.Count; i++)
         {
             var offset = 1 + 17 * i;
             var pattern = layout.Sections[i].Fields.Single(field => field.Key.EndsWith(".pattern", StringComparison.Ordinal)).Read(later);
-            if (pattern != null && expected.Contains(pattern) && (later[offset] & 1) != 0 && (later[offset + 1] & 15) == 9 && later[offset + 2] == byte.MaxValue)
+            if (pattern != null && expected.Contains(pattern) && (later[offset] & 7) == 3 && later[offset + 1] == 0x29 &&
+                later[offset + 2] == byte.MaxValue && later[offset + 3] == 7)
                 expected.Remove(pattern);
         }
         if (expected.Count != 0) throw new InvalidOperationException("The later ordinary screening defaults lack one or more unrated standard toll-free prefixes.");

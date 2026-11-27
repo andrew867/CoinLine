@@ -29,7 +29,7 @@ public sealed class DemoConfigurationSeedTests
     {
         var (directory, _, expected) = ExpandedFixture();
         var rows = DemoConfigurationSeed.ReadBundle(directory);
-        Assert.Equal(19, rows.Length);
+        Assert.Equal(20, rows.Length);
         Assert.Equal(new[] { 13, 32, 35 }, rows.Where(row => row.IsDefault).Select(row => row.Records.Count));
         Assert.Equal(new[] { FirmwareTableProfiles.MultiPay200, FirmwareTableProfiles.LaterMultiPay180, FirmwareTableProfiles.GraphicalMultiPay180 },
             rows.Where(row => row.IsDefault).Select(row => row.ProfileId));
@@ -40,6 +40,21 @@ public sealed class DemoConfigurationSeedTests
         var standard = Assert.Single(rows, row => row.Name == DemoConfigurationSeed.LaterName);
         Assert.DoesNotContain(standard.Records.Keys, number => number is 98 or 99 or 131 or 132 or 133);
         var graph = Assert.Single(rows, row => row.Name == DemoConfigurationSeed.GraphicalName);
+        var originalScreening = expected["ordinary-routing/mtr212/180-slot/mt092.bin"];
+        var directScreening = originalScreening.ToArray();
+        byte[][] encodedTenDigitPrefixes = [[0x8A, 0xA0], [0x88, 0x80], [0x87, 0x70], [0x86, 0x60]];
+        for (var index = 0; index < 4; index++)
+        {
+            var offset = 1 + index * 17;
+            directScreening[offset] = (byte)((directScreening[offset] & ~4) | 2);
+            directScreening[offset + 1] = 0x29;
+            var alias = 1 + (43 + index) * 17;
+            directScreening[alias] = 3; directScreening[alias + 1] = 0x29;
+            directScreening[alias + 2] = 255; directScreening[alias + 3] = 7;
+            encodedTenDigitPrefixes[index].CopyTo(directScreening, alias + 4);
+        }
+        Assert.Equal(directScreening, standard.Records[92]); Assert.Equal(directScreening, graph.Records[92]);
+        Assert.Equal(originalScreening, Assert.Single(rows, row => row.Name == "Demo reference, later original ordinary screening").Records[92]);
         foreach (var number in new[] { 131, 132, 133 }) Assert.Equal(expected[$"archived-demo/mt{number:D3}.bin"], graph.Records[number]);
         Assert.Equal(expected["archived-demo/mt029.bin"], graph.Records[29]);
         Assert.Equal(expected["archived-demo/mt026.bin"], standard.Records[26]);
@@ -70,11 +85,20 @@ public sealed class DemoConfigurationSeedTests
         Replace("ordinary-routing/mtr212/180-slot/mt092.bin", route);
         Assert.Throws<InvalidOperationException>(() => DemoConfigurationSeed.ReadBundle(directory));
         Replace("ordinary-routing/mtr212/180-slot/mt092.bin", expected["ordinary-routing/mtr212/180-slot/mt092.bin"]);
+        var conflict = expected["ordinary-routing/mtr212/180-slot/mt092.bin"].ToArray();
+        var screeningLayout = NativeTableLayouts.Find(92, conflict, NativeTableLayouts.Later)!;
+        conflict = screeningLayout.Apply(conflict, new Dictionary<string, string> { ["rule-10.pattern"] = "800", ["rule-10.wildcards"] = "7" });
+        Replace("ordinary-routing/mtr212/180-slot/mt092.bin", conflict);
+        Assert.Throws<InvalidOperationException>(() => DemoConfigurationSeed.ReadBundle(directory));
+        var occupied = expected["ordinary-routing/mtr212/180-slot/mt092.bin"].ToArray(); occupied[1 + 43 * 17 + 14] = 1;
+        Replace("ordinary-routing/mtr212/180-slot/mt092.bin", occupied);
+        Assert.Throws<InvalidOperationException>(() => DemoConfigurationSeed.ReadBundle(directory));
+        Replace("ordinary-routing/mtr212/180-slot/mt092.bin", expected["ordinary-routing/mtr212/180-slot/mt092.bin"]);
         var overlay = Path.Combine(directory, "ordinary-routing", "mtr19", "mt062-overlay.json");
         var restore = File.ReadAllText(overlay); File.WriteAllText(overlay, "{}");
         Assert.Throws<InvalidOperationException>(() => DemoConfigurationSeed.ReadBundle(directory));
         File.WriteAllText(overlay, restore);
-        Assert.Equal(19, DemoConfigurationSeed.ReadBundle(directory).Length);
+        Assert.Equal(20, DemoConfigurationSeed.ReadBundle(directory).Length);
 
         void Replace(string relative, byte[] raw)
         {
@@ -219,7 +243,7 @@ public sealed class DemoConfigurationSeedTests
         {
             var rows = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
                 .Include(row => row.Versions).ThenInclude(row => row.TablePayload).ToArrayAsync();
-            Assert.Equal(21, rows.Length);
+            Assert.Equal(22, rows.Length);
             var retired = Assert.Single(rows, row => row.Id == earlyId); Assert.False(retired.IsDefault);
             Assert.Equal(DemoConfigurationSeed.EarlierName + " (initial export)", retired.Name);
             var retained = Assert.Single(rows, row => row.Id == laterId); Assert.Equal(DemoConfigurationSeed.LaterName, retained.Name);
@@ -236,7 +260,7 @@ public sealed class DemoConfigurationSeedTests
         }
         await using (var db = new HostPlatformDbContext(options))
         {
-            await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(21, await db.TableSets.CountAsync());
+            await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(22, await db.TableSets.CountAsync());
         }
         Guid oldGraphId;
         await using (var db = new HostPlatformDbContext(options))
@@ -247,6 +271,8 @@ public sealed class DemoConfigurationSeedTests
             // Simulate an exact previously imported text-enabled graphical default.
             var feature = Assert.Single(graph.Versions, row => row.TableDefinition!.TableNumber == 26);
             new TableDistributionService(db).StageDraftPayloadReplacement(graph, feature, expected["archived-demo/mt026.bin"]);
+            var screening = Assert.Single(graph.Versions, row => row.TableDefinition!.TableNumber == 92);
+            new TableDistributionService(db).StageDraftPayloadReplacement(graph, screening, expected["ordinary-routing/mtr212/180-slot/mt092.bin"]);
             await db.SaveChangesAsync();
         }
         await using (var db = new HostPlatformDbContext(options)) { await DemoConfigurationSeed.EnsureAsync(db, directory); }
@@ -260,12 +286,80 @@ public sealed class DemoConfigurationSeedTests
             var corrected = Assert.Single(graphs, row => row.Id != oldGraphId); Assert.True(corrected.IsDefault);
             var before = old.Versions.ToDictionary(row => row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload);
             var after = corrected.Versions.ToDictionary(row => row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload);
-            Assert.Equal(new[] { 26 }, before.Keys.Where(number => !before[number].AsSpan().SequenceEqual(after[number])));
+            Assert.Equal(new[] { 26, 92 }, before.Keys.Where(number => !before[number].AsSpan().SequenceEqual(after[number])).Order());
             Assert.False(NativeTableSetReview.Build(after).OnHookAdvertising); Assert.True(NativeTableSetReview.Build(after).GraphicalOnHookAdvertising);
-            Assert.Equal(22, await db.TableSets.CountAsync());
+            Assert.Equal(23, await db.TableSets.CountAsync());
             Assert.Empty(await db.TerminalTableAssignments.ToArrayAsync());
         }
-        await using (var db = new HostPlatformDbContext(options)) { await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(22, await db.TableSets.CountAsync()); }
+        await using (var db = new HostPlatformDbContext(options)) { await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(23, await db.TableSets.CountAsync()); }
+        // A previous expanded default may occupy either the canonical name or
+        // the replacement alias left by an operator-edited initial starter.
+        Guid[] previousIds;
+        await using (var db = new HostPlatformDbContext(options))
+        {
+            var names = new[] { DemoConfigurationSeed.GraphicalName, DemoConfigurationSeed.LaterName + " (complete)" };
+            var previous = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                .Include(row => row.Versions).ThenInclude(row => row.TablePayload).Where(row => names.Contains(row.Name)).ToArrayAsync();
+            previousIds = previous.Select(row => row.Id).ToArray(); Assert.Equal(2, previousIds.Length);
+            foreach (var set in previous)
+                new TableDistributionService(db).StageDraftPayloadReplacement(set, Assert.Single(set.Versions, row => row.TableDefinition!.TableNumber == 92),
+                    expected["ordinary-routing/mtr212/180-slot/mt092.bin"]);
+            await db.SaveChangesAsync();
+        }
+        await using (var db = new HostPlatformDbContext(options)) { await DemoConfigurationSeed.EnsureAsync(db, directory); }
+        await using (var db = new HostPlatformDbContext(options))
+        {
+            var rows = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                .Include(row => row.Versions).ThenInclude(row => row.TablePayload).ToArrayAsync();
+            Assert.Equal(25, rows.Length);
+            foreach (var prior in rows.Where(row => previousIds.Contains(row.Id)))
+            {
+                Assert.False(prior.IsDefault); Assert.EndsWith(" (carrier-enabled screening reference)", prior.Name);
+                Assert.Equal(expected["ordinary-routing/mtr212/180-slot/mt092.bin"], TableDistributionService.GetEffectivePayload(Assert.Single(prior.Versions, row => row.TableDefinition!.TableNumber == 92)));
+            }
+            foreach (var name in new[] { DemoConfigurationSeed.GraphicalName, DemoConfigurationSeed.LaterName + " (complete)" })
+            {
+                var current = Assert.Single(rows, row => row.Name == name); Assert.True(current.IsDefault);
+                var raw = TableDistributionService.GetEffectivePayload(Assert.Single(current.Versions, row => row.TableDefinition!.TableNumber == 92));
+                Assert.All(Enumerable.Range(0, 4), index => Assert.Equal(3, raw[1 + index * 17] & 7));
+                Assert.All(Enumerable.Range(43, 4), index => Assert.Equal(new byte[] { 3, 0x29, 255, 7 }, raw.AsSpan(1 + index * 17, 4).ToArray()));
+            }
+            Assert.Empty(await db.TerminalTableAssignments.ToArrayAsync()); Assert.Empty(await db.DownloadBatches.ToArrayAsync());
+            await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(25, await db.TableSets.CountAsync());
+        }
+        var directOnly = expected["ordinary-routing/mtr212/180-slot/mt092.bin"].ToArray();
+        for (var i = 0; i < 4; i++) directOnly[1 + i * 17] = (byte)((directOnly[1 + i * 17] & ~4) | 2);
+        Guid[] directIds;
+        await using (var db = new HostPlatformDbContext(options))
+        {
+            var names = new[] { DemoConfigurationSeed.GraphicalName, DemoConfigurationSeed.LaterName + " (complete)" };
+            var previous = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                .Include(row => row.Versions).ThenInclude(row => row.TablePayload).Where(row => names.Contains(row.Name)).ToArrayAsync();
+            directIds = previous.Select(row => row.Id).ToArray(); Assert.Equal(2, directIds.Length);
+            foreach (var set in previous)
+                new TableDistributionService(db).StageDraftPayloadReplacement(set, Assert.Single(set.Versions, row => row.TableDefinition!.TableNumber == 92), directOnly);
+            await db.SaveChangesAsync();
+        }
+        await using (var db = new HostPlatformDbContext(options)) { await DemoConfigurationSeed.EnsureAsync(db, directory); }
+        await using (var db = new HostPlatformDbContext(options))
+        {
+            var rows = await db.TableSets.Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
+                .Include(row => row.Versions).ThenInclude(row => row.TablePayload).ToArrayAsync();
+            Assert.Equal(27, rows.Length);
+            foreach (var prior in rows.Where(row => directIds.Contains(row.Id)))
+            {
+                Assert.False(prior.IsDefault); Assert.EndsWith(" (direct flags reference)", prior.Name);
+                Assert.Equal(directOnly, TableDistributionService.GetEffectivePayload(Assert.Single(prior.Versions, row => row.TableDefinition!.TableNumber == 92)));
+            }
+            foreach (var name in new[] { DemoConfigurationSeed.GraphicalName, DemoConfigurationSeed.LaterName + " (complete)" })
+            {
+                var current = Assert.Single(rows, row => row.Name == name); Assert.True(current.IsDefault);
+                var raw = TableDistributionService.GetEffectivePayload(Assert.Single(current.Versions, row => row.TableDefinition!.TableNumber == 92));
+                Assert.All(Enumerable.Range(0, 4), index => Assert.Equal(0x29, raw[2 + index * 17]));
+                Assert.All(Enumerable.Range(43, 4), index => Assert.Equal(new byte[] { 3, 0x29, 255, 7 }, raw.AsSpan(1 + index * 17, 4).ToArray()));
+            }
+            await DemoConfigurationSeed.EnsureAsync(db, directory); Assert.Equal(27, await db.TableSets.CountAsync());
+        }
     }
 
     private static (string Directory, Dictionary<(string Profile, int Number), byte[]> Expected) Fixture()
@@ -360,7 +454,8 @@ public sealed class DemoConfigurationSeedTests
             for (var i = 0; i < prefixes.Length; i++)
             {
                 var key = $"rule-{i}."; changes[key + "pattern"] = prefixes[i]; changes[key + "wildcards"] = "7";
-                changes[key + "classification"] = "9"; changes[key + "payment"] = "2"; changes[key + "rate"] = "255"; changes[key + "free"] = "true";
+                changes[key + "classification"] = "9"; changes[key + "payment"] = profile == NativeTableLayouts.Later ? "0" : "2"; changes[key + "rate"] = "255"; changes[key + "free"] = "true";
+                if (profile == NativeTableLayouts.Later) changes[key + "carrier"] = "true";
             }
             return layout.Apply(raw, changes);
         }
