@@ -43,7 +43,7 @@ public static class OperatorPermissions
             ("Terminals", R, "Events"), ("Terminals", U, "PostStatus"), ("FieldEvents", R, "List Reference PhoneOptions CurrentStatus"),
             ("Operator", R, "TerminalTimeline"));
         Screen("field-event-catalogue", "Alarm and maintenance catalogue",
-            ("FieldEvents", U, "SaveReference"));
+            ("FieldEvents", U, "SaveReference ImportMaintenanceExamples"));
         Screen("technicians", "Technician directory and activity", ("CraftTechnicians", R, "Directory Activity NearbyAlarms"),
             ("CraftTechnicians", A, "Create"), ("CraftTechnicians", U, "Update"));
         Screen("field-event-destinations", "Alarm and maintenance destinations",
@@ -62,26 +62,31 @@ public static class OperatorPermissions
         Screen("table-sets", "Table sets",
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
             ("FirmwareLocalDialingStaging", A, "Create"),
+            ("FirmwareNumberingStaging", A, "Create"),
             ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
             ("FirmwareTariffStaging", A, "Create"),
             ("FirmwareCarrierStaging", A, "Create"),
             ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Firmware", A, "StageAccessConfiguration StageScreeningConfiguration"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
-            ("Tables", A | U, "FirmwareOptions"));
+            ("Tables", A | U, "FirmwareOptions"), ("FirmwareSetupStaging", A, "Create"));
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
             ("TerminalTariffReferences", R, "Get"),
+            ("DialedNumberReview", R, "Review"),
             ("FirmwareTariffStaging", R, "Preview"),
             ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
+            ("FirmwareNumberingStaging", R, "Preview"),
             ("ConfigurationLibrary", R, "List Options"),
+            ("FirmwareSetupStaging", R, "Preview"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
-            ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
+            ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize AuthorPrompts"), ("NativeTableConfiguration", U, "Save"),
             ("NativeTableConfiguration", R, "PreviewNumberingOverlay"), ("NativeTableConfiguration", U, "ApplyNumberingOverlay"),
+            ("CraftAccessConfiguration", R, "Reveal"),
             ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
             ("CardSequence", R, "Get"), ("CardSequence", U, "Move Add Remove Refresh Link"),
-            ("GraphicalStarter", A, "Create"),
+            ("GraphicalStarter", A, "Create"), ("OperationalRecordAuthoring", R, "Get"), ("OperationalRecordAuthoring", A, "Create"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),
             ("Tables", R, "ScopeOptions"), ("Tables", U, "ScopeOptions"));
         Screen("carrier-library", "Carrier library", ("CarrierLibrary", R, "List Get Schema Apply"),

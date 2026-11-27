@@ -12,6 +12,7 @@ type Detail = {
   terminalId: string | null
   terminalName: string | null
   nccSessionId: string | null
+  liveVersionObservation?: boolean
   direction: number
   messageType: number
   messageTypeName: string
@@ -143,6 +144,10 @@ export function DlogTransactionDetail() {
         </dd>
         <dt>Direction</dt>
         <dd>{detail.direction === 1 ? 'From the phone' : detail.direction === 2 ? 'To the phone' : 'Unknown'}</dd>
+        {detail.messageType === 60 && <>
+          <dt>Version evidence</dt>
+          <dd>{detail.liveVersionObservation ? 'Observed on a matched NCC connection' : 'Imported or historical report; not eligible for version-based scheduling'}</dd>
+        </>}
         <dt>Status</dt>
         <dd>{statusWord(detail.processingStatus)}</dd>
         <dt>Session</dt>

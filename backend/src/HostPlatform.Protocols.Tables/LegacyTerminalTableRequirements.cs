@@ -8,6 +8,8 @@ public sealed record FamilyTableRequirement(string Name, bool Required, int[] Ca
     string Status, string? Note = null);
 public sealed record TerminalFamilyTableReview(string FamilyId, string FamilyLabel, bool Documented, int? ScreeningEntries,
     string? Note, FamilyTableRequirement[] Tables);
+public sealed record ScreeningFamilyGuidance(string FamilyId, string FamilyLabel, int DocumentedEntries,
+    int? InstitutionalFirst, int? InstitutionalLast);
 
 /// <summary>Legacy configuration topics, separate from verified packed record profiles.</summary>
 public static class LegacyTerminalTableRequirements
@@ -94,6 +96,16 @@ public static class LegacyTerminalTableRequirements
 
     public static IReadOnlySet<int> ReferencedRecordNumbers() =>
         Enum.GetValues<Group>().SelectMany(group => Describe(group, expandedPrompts: false).Item2).ToHashSet();
+
+    // The desktop workflow's logical ranges are independent of wire capacity.
+    // Inmate entries 16 through 50 were intended for the separate institutional client.
+    public static ScreeningFamilyGuidance? ScreeningGuidance(string? familyId)
+    {
+        var family = TerminalFamilies.Find(familyId);
+        if (family == null || Find(family.Id) is not { } reference) return null;
+        var inmate = family.Id == "msr17-inmate";
+        return new(family.Id, family.Label, reference.ScreeningEntries, inmate ? 16 : null, inmate ? 50 : null);
+    }
 
     public static TerminalFamilyTableReview Review(TerminalFamily family, IEnumerable<(int Number, byte[] Payload, string? LayoutProfile)> records,
         FirmwareTableProfile? firmware)

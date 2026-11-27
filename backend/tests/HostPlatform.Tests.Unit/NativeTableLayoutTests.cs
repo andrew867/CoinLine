@@ -557,6 +557,15 @@ public sealed class NativeTableLayoutTests
             Assert.Equal("password", field.Editor);
             Assert.Null(field.Read(changed));
         });
+        Assert.Equal(changed, later.Apply(changed, new Dictionary<string, string> { ["craftAccessCode"] = "", ["keyCardNumber"] = "" }));
+        Assert.Equal(code, CraftAccessCodeWire.Read(changed, later));
+        Assert.Equal(code, CraftAccessCodeWire.Read(changed, earlier));
+        Assert.Null(CraftAccessCodeWire.Read(record, earlier));
+        var malformed = changed.ToArray(); malformed[4] |= 0xF0;
+        Assert.Null(CraftAccessCodeWire.Read(malformed, later));
+        malformed = changed.ToArray(); malformed[4] &= 0xF0;
+        Assert.Null(CraftAccessCodeWire.Read(malformed, later));
+        Assert.Throws<InvalidOperationException>(() => CraftAccessCodeWire.Read(new byte[18], later));
         Assert.Throws<InvalidOperationException>(() => later.Apply(record, new Dictionary<string, string> { ["craftAccessCode"] = new string('0', 8) }));
         Assert.Throws<InvalidOperationException>(() => earlier.Apply(record, new Dictionary<string, string> { ["analogPrefix"] = "*#" }));
     }

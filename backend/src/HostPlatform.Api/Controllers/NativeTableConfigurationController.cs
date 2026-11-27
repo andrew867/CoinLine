@@ -14,7 +14,7 @@ namespace HostPlatform.Api.Controllers;
 public sealed class NativeTableConfigurationController(HostPlatformDbContext db, TableDistributionService tables) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<object>> Get(Guid id, int number, [FromQuery] string? profile, CancellationToken ct)
+    public async Task<ActionResult<object>> Get(Guid id, int number, [FromQuery] string? profile, [FromQuery] string? familyId, CancellationToken ct)
     {
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
         if (set == null)
@@ -26,6 +26,14 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         var versions = await ReadVersions(id, number, ct);
         if (versions.Count == 0)
         {
+            if (number == ManagementAccessDraftWire.MessageType)
+            {
+                var accessTemplates = ManagementAccessSpecs(set);
+                return Ok(new { supported = false, managementAccessTemplates = accessTemplates,
+                    observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
+                    reason = accessTemplates.Length == 0 ? "Import a complete matching management-access record to open its editor."
+                        : "Create the management-access record using the terminal's actual wire identity and manager access numbers." });
+            }
             var templates = set.Status == TableSetStatus.Draft
                 ? NativeTableLayouts.DraftTemplates(number)
                     .Where(layout => firmware == null || !firmware.VerifiedLengths.TryGetValue(number, out var expectedLength)
@@ -36,8 +44,12 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                         layout.Profile, layout.Length,
                         screeningSlots = CallScreeningWire.IsRecord(number) ? (int?)layout.Sections.Count : null
                     }).ToArray() : [];
-            return Ok(new { supported = false, templates, observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
-                reason = templates.Length == 0 ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
+            var promptAuthoring = PromptAuthoringSpec(set, number);
+            var promptCompanions = promptAuthoring == null ? null : await ReadVisualPromptCompanions(id, number, firmware, ct);
+            return Ok(new { supported = false, templates, promptAuthoring, visualPromptCompanions = promptCompanions,
+                observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
+                reason = promptAuthoring != null ? "Author a new fixed-row visual prompt worksheet, or import a complete record."
+                    : templates.Length == 0 ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
         }
         if (versions.Count != 1)
             return Ok(new { supported = false, reason = "This set has more than one record with the same message type." });
@@ -59,6 +71,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
 
         var restrictedRoutes = number == ServiceRestrictionWire.MessageType && layout.Profile == NativeTableLayouts.Later
             ? await ReadRestrictionRoutes(id, firmware, ct) : null;
+        var screeningFamily = CallScreeningWire.IsRecord(number) ? LegacyTerminalTableRequirements.ScreeningGuidance(familyId) : null;
+        var screeningDescriptions = CallScreeningWire.IsRecord(number) ? ReadScreeningDescriptions(version.ScreeningDescriptionsJson) : null;
 
         return Ok(new
         {
@@ -84,7 +98,11 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             screening = CallScreeningWire.IsRecord(number) ? new
             {
                 supportsSpeedDial = CallScreeningWire.SupportsSpeedDial(layout),
-                descriptions = ReadScreeningDescriptions(version.ScreeningDescriptionsJson)
+                descriptions = screeningDescriptions,
+                family = screeningFamily,
+                savedRetainedSlots = screeningFamily == null ? null : Enumerable.Range(1, layout.Sections.Count)
+                    .Where(slot => !CallScreeningWire.IsVacant(raw, layout, slot) ||
+                        !string.IsNullOrWhiteSpace(screeningDescriptions!.GetValueOrDefault(slot))).ToArray()
             } : null,
             sections = layout.Sections.Select(section => new
             {
@@ -122,12 +140,24 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         if (set.Status != TableSetStatus.Draft || (await ReadVersions(id, number, ct)).Count > 0)
             return Conflict(new { error = "The record already exists or the set is published." });
 
-        var template = NativeTableLayouts.DraftTemplates(number)
-            .SingleOrDefault(layout => layout.Profile == body.Profile && layout.Length == body.Length);
-        if (template == null)
-            return BadRequest(new { error = "There is no default template for that wire profile." });
-
-        var bytes = NativeTableLayouts.CreateDraftTemplate(template);
+        byte[] bytes;
+        if (number == ManagementAccessDraftWire.MessageType)
+        {
+            var spec = ManagementAccessSpecs(set).SingleOrDefault(candidate => candidate.Profile == body.Profile && candidate.Length == body.Length);
+            if (spec == null || body.ManagementAccess == null)
+                return BadRequest(new { error = "Choose a confirmed management-access layout and enter the required site values." });
+            try { bytes = ManagementAccessDraftWire.Create(spec, body.ManagementAccess); }
+            catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        }
+        else
+        {
+            if (body.ManagementAccess != null) return BadRequest(new { error = "Management-access inputs belong only to MT21." });
+            var template = NativeTableLayouts.DraftTemplates(number)
+                .SingleOrDefault(layout => layout.Profile == body.Profile && layout.Length == body.Length);
+            if (template == null)
+                return BadRequest(new { error = "There is no default template for that wire profile." });
+            bytes = NativeTableLayouts.CreateDraftTemplate(template);
+        }
         var (_, error) = ResolveLayout(set, number, bytes, body.Profile);
         if (error != null)
             return BadRequest(new { error });
@@ -143,7 +173,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         try
         {
             await tables.UpsertVersionAsync(id, definition.Id, 1, bytes, sortOrder + 1, null, ct, createOnly: true,
-                screeningLayoutProfile: CallScreeningWire.NeedsLayoutChoice(number) ? template.Profile : null);
+                screeningLayoutProfile: CallScreeningWire.NeedsLayoutChoice(number) ? body.Profile : null);
             return NoContent();
         }
         catch (DbUpdateConcurrencyException)
@@ -154,6 +184,49 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    [HttpPost("prompt-authoring")]
+    public async Task<ActionResult> AuthorPrompts(Guid id, int number, [FromBody] PromptAuthoringRequest body, CancellationToken ct)
+    {
+        var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (set == null) return NotFound();
+        if (set.Status != TableSetStatus.Draft || (await ReadVersions(id, number, ct)).Count > 0)
+            return Conflict(new { error = "The record already exists or the set is published." });
+        var spec = PromptAuthoringSpec(set, number);
+        if (spec == null || spec.Profile != body.Profile || spec.Length != body.Length || body.Rows == null)
+            return BadRequest(new { error = "Choose the matching visual-prompt layout and supply its worksheet rows." });
+        byte[] bytes;
+        try { bytes = VisualPromptDraftWire.Create(number, body.Profile, body.Length, body.Rows); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        var (_, error) = ResolveLayout(set, number, bytes, body.Profile);
+        if (error != null) return BadRequest(new { error });
+
+        var definition = await db.TableDefinitions.Where(d => d.TableNumber == number).OrderBy(d => d.CreatedAtUtc).FirstOrDefaultAsync(ct);
+        if (definition == null)
+        {
+            definition = new TableDefinition { Name = $"Visual prompts MT{number}", TableNumber = number };
+            db.TableDefinitions.Add(definition);
+        }
+        var sortOrder = await db.TableVersions.Where(v => v.TableSetId == id).Select(v => (int?)v.SortOrder).MaxAsync(ct) ?? -1;
+        try
+        {
+            await tables.UpsertVersionAsync(id, definition.Id, 1, bytes, sortOrder + 1, null, ct, createOnly: true);
+            return NoContent();
+        }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The record already exists. Reopen the editor to load it." }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    public sealed record PromptAuthoringRequest(string? Profile, int Length, Dictionary<int, string?>? Rows);
+
+    private static VisualPromptDraftSpec? PromptAuthoringSpec(TableSet set, int number)
+    {
+        if (set.Status != TableSetStatus.Draft || VisualPromptDraftWire.Spec(number) is not { } spec) return null;
+        if (set.TargetFirmwareVersionId == null) return spec;
+        var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
+        return firmware != null && !firmware.ObservedLengthsOnly && firmware.VerifiedLengths.TryGetValue(number, out var length)
+            && length == spec.Length && firmware.LayoutFor(number) == spec.Profile ? spec : null;
     }
 
     [HttpPut]
@@ -388,10 +461,20 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
     public sealed record NativeFieldEdits(int Revision, string Sha256, Dictionary<string, string> Changes, string? Profile,
         NumberingPlanChanges? NumberingPlan = null, SpareBytePatch[]? SpareBytes = null, int[]? ClearQuickAccessKeys = null,
         ScreeningEdits? Screening = null);
-    public sealed record NativeTemplate(string Profile, int Length);
+    public sealed record NativeTemplate(string Profile, int Length, ManagementAccessDraftInput? ManagementAccess = null);
+
+    private static ManagementAccessDraftSpec[] ManagementAccessSpecs(TableSet set)
+    {
+        if (set.Status != TableSetStatus.Draft) return [];
+        if (set.TargetFirmwareVersionId == null) return ManagementAccessDraftWire.Specs.ToArray();
+        var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
+        if (firmware == null || firmware.ObservedLengthsOnly || !firmware.VerifiedLengths.TryGetValue(ManagementAccessDraftWire.MessageType, out var length)) return [];
+        return ManagementAccessDraftWire.Specs.Where(spec => spec.Length == length && spec.Profile == firmware.LayoutFor(ManagementAccessDraftWire.MessageType)).ToArray();
+    }
 
     private static string TemplateName(int number) => number switch
     {
+        ManagementAccessDraftWire.MessageType => "NCC terminal access",
         22 or 134 => "Card acceptance",
         23 or 135 => "Carrier screens",
         CollectionPolicyWire.CommunicationsType => "Communications statistics settings",

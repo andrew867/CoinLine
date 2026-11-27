@@ -15,6 +15,9 @@ public static class SeedData
         await EnsureCraftCommandTypesSeedAsync(db, ct);
         await CloseDemoSessionAsync(db, ct);
 
+        if (enableDemoData && await MaintenanceExampleCatalogue.StageMissingAsync(db, ct) > 0)
+            await db.SaveChangesAsync(ct);
+
         if (!enableDemoData)
         {
             await EnsureRatingSeedAsync(db, ct);

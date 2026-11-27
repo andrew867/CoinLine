@@ -7,6 +7,17 @@ import { DlogTransactionDetail } from './DlogTransactionDetail'
 vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiDownload: vi.fn() }))
 afterEach(() => { cleanup(); vi.resetAllMocks() })
 
+it.each([true, false])('distinguishes live version reports from diagnostic records (%s)', async (liveVersionObservation) => {
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({
+    id: 'version-fixture', terminalId: 'phone-fixture', terminalName: 'Fixture phone', direction: 1,
+    messageType: 60, messageTypeName: 'Software version', processingStatus: 1, liveVersionObservation,
+    capturedAtUtc: '2026-11-23T12:05:00Z', fieldEvent: { title: 'Software version', category: 'status', summary: 'Controller version LABROM A002' },
+    rawPayloadHex: '3C', decodedJson: '{}', parseDiagnostics: [], correlationLinks: [],
+  }))
+  render(<MemoryRouter initialEntries={['/dlog/version-fixture']}><Routes><Route path="/dlog/:id" element={<DlogTransactionDetail />} /></Routes></MemoryRouter>)
+  expect(await screen.findByText(liveVersionObservation ? 'Observed on a matched NCC connection' : 'Imported or historical report; not eligible for version-based scheduling')).toBeVisible()
+})
+
 it('shows the alarm and phone clock while keeping hex and JSON in the technical record', async () => {
   vi.mocked(apiFetch).mockImplementation(async (path) => {
     if (path === '/api/dlog/message-types') return Response.json([])

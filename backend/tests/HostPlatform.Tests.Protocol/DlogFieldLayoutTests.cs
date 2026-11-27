@@ -152,4 +152,14 @@ public sealed class DlogFieldLayoutTests
             Assert.Equal($"{row.Description} (opcode {row.Code})",
                 FieldEventSummary.TryBuild(6, [6, (byte)(row.Code & 255), (byte)(row.Code >> 8)]));
     }
+
+    [Fact]
+    public void Historical_maintenance_examples_are_not_reserved_wire_meanings()
+    {
+        var examples = FieldEventSummary.MaintenanceExamples();
+        Assert.Equal(new[] { 15, 40, 45, 50, 87, 97, 106, 114, 115, 116, 160, 206 }, examples.Select(row => row.Code));
+        Assert.Empty(examples.Select(row => row.Code).Intersect(FieldEventSummary.MaintenanceReference().Select(row => row.Code)));
+        foreach (var row in examples)
+            Assert.Equal($"Unlisted maintenance opcode {row.Code}", FieldEventSummary.TryBuild(6, [6, (byte)row.Code, 0]));
+    }
 }
