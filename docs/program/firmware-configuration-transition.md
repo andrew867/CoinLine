@@ -31,7 +31,7 @@ The reviewed MT73 carry-forward stages the common earlier classifications and si
 
 ## Qualification sequence
 
-The [common configuration carry-forward](firmware-common-control-transition.md) reviews MT29, MT30, MT32, MT34, MT35 and MT50 in independently selected groups. The candidate's reserved bytes, one-time clock adjustment and unselected hardware calibration are retained. Coin settings, reporting modes and later device behavior require separate review; creating a draft does not qualify the upgrade.
+The [common configuration carry-forward](firmware-common-control-transition.md) reviews MT29, MT30, MT32, MT34, MT35, MT50 and MT58 in independently selected groups. The candidate's reserved bytes, one-time clock adjustment, unselected hardware calibration and separate restricted-route references are retained. Coin settings, reporting modes, service restriction schedules and later device behavior require separate review; creating a draft does not qualify the upgrade.
 
 1. Identify the exact installed hardware family, installed version, target version and approved compatible image. Record the source assignment and effective records, including protected per-phone settings without recording their values in public evidence.
 2. Prepare a separate candidate configuration using proven target layouts and deliberate conversion rules. Validate required records, preserve supported site settings and verify each intended change. Resolve outstanding downloads before scheduling.
