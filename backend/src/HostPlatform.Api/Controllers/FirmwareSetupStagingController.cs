@@ -17,12 +17,12 @@ namespace HostPlatform.Api.Controllers;
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class FirmwareSetupStagingController(HostPlatformDbContext db, OperatorTokenSigningKey signingKey) : ControllerBase
 {
-    public sealed record SetupRequest(Guid TerminalId, Guid TargetFirmwareVersionId, Guid CandidateSetId, string? Name,
+    public sealed record FirmwareSetupStagingRequest(Guid TerminalId, Guid TargetFirmwareVersionId, Guid CandidateSetId, string? Name,
         Dictionary<int,int>? ReferenceChoices = null, bool CarryCredentials = true, bool RetainPresentation = false,
         bool ReviewedDifferences = false, string? PreviewToken = null);
 
     [HttpPost("preview")]
-    public async Task<ActionResult<object>> Preview(SetupRequest body, CancellationToken ct)
+    public async Task<ActionResult<object>> Preview(FirmwareSetupStagingRequest body, CancellationToken ct)
     {
         if (!CanRead()) return Forbid();
         try
@@ -35,7 +35,7 @@ public sealed class FirmwareSetupStagingController(HostPlatformDbContext db, Ope
 
     [HttpPost]
     [Authorize(Policy = Policies.RequireOperator)]
-    public async Task<ActionResult<object>> Create(SetupRequest body, CancellationToken ct)
+    public async Task<ActionResult<object>> Create(FirmwareSetupStagingRequest body, CancellationToken ct)
     {
         if (!CanRead() || !OperatorPermissions.Allows(HttpContext, "table-sets", PermissionOperation.Add)) return Forbid();
         try
@@ -63,7 +63,7 @@ public sealed class FirmwareSetupStagingController(HostPlatformDbContext db, Ope
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
-    private Task<FirmwareSetupStagingPlan?> Build(SetupRequest body, CancellationToken ct) => FirmwareSetupStaging.BuildAsync(db, body.TerminalId,
+    private Task<FirmwareSetupStagingPlan?> Build(FirmwareSetupStagingRequest body, CancellationToken ct) => FirmwareSetupStaging.BuildAsync(db, body.TerminalId,
         body.TargetFirmwareVersionId, body.CandidateSetId, body.Name, body.ReferenceChoices, body.CarryCredentials, body.RetainPresentation, body.ReviewedDifferences, signingKey.Value, ct);
     private bool CanRead() => OperatorPermissions.Allows(HttpContext, "firmware-jobs", PermissionOperation.Read) &&
         OperatorPermissions.Allows(HttpContext, "phones", PermissionOperation.Read) && OperatorPermissions.Allows(HttpContext, "firmware-registry", PermissionOperation.Read) &&
