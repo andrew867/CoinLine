@@ -116,6 +116,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify firmware visual prompt transition workflow
+        run: npm run e2e -- e2e/firmware-visual-prompt-transition.spec.ts --output test-results/firmware-prompt-transition
+        env:
+          CI: "true"
+
       - name: Verify card authorization history workflow
         run: npm run e2e -- e2e/card-authorization-history.spec.ts --output test-results/card-authorization-history
         env:

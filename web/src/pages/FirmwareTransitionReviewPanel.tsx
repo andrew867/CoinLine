@@ -1,4 +1,5 @@
 import { FirmwareTariffStagingPanel } from './FirmwareTariffStagingPanel'
+import { FirmwareVisualPromptStagingPanel } from './FirmwareVisualPromptStagingPanel'
 import { FirmwareSetupStagingPanel } from './FirmwareSetupStagingPanel'
 import { useState } from 'react'
 import { FirmwareNumberingStagingPanel } from './FirmwareNumberingStagingPanel'
@@ -205,6 +206,14 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
           [[22,661],[23,678],[92,3401]].every(([number,bytes]) => review.records.some(record => record.tableNumber === number && record.sourceBytes === bytes)) &&
           [[134,1153],[135,1109],[92,3061]].every(([number,bytes]) => review.records.some(record => record.tableNumber === number && record.targetExpectedBytes === bytes && record.candidateBytes === bytes)) &&
           <FirmwareCarrierStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
+            }} />}
+      {review && review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
+          laterTariffProfiles.has(review.targetProfileId ?? '') && [[27,85],[28,86]].some(([source,target]) =>
+            review.records.some(record => record.tableNumber === source && record.sourceBytes === 2801) &&
+            review.records.some(record => record.tableNumber === target && record.candidateBytes === 8001)) &&
+          <FirmwareVisualPromptStagingPanel key={`prompts:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
             parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
               setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
             }} />}
