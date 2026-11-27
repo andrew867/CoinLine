@@ -9,6 +9,8 @@ test('finds record layouts and distinguishes historical labels from operational 
   const catalogue = [
     { number: 10, name: 'Terminal status', kind: 'operational', layouts: [], firmware: [],
       registeredDefinitions: [{ id: definition.id, name: definition.name }] },
+    { number: 62, name: 'Numbering plan', kind: 'native_editor', layouts: [{ number:62,length:353,profile:'Later packed profile',draftTemplateAvailable:false,explicitAuthoringAvailable:true }],
+      firmware: [],registeredDefinitions: [] },
     { number: 92, name: 'Call screening', kind: 'native_editor',
       layouts: [{ number: 92, length: 3401, profile: 'MTR 1.9 packed', draftTemplateAvailable: true },
         { number: 92, length: 3061, profile: 'Later packed profile', draftTemplateAvailable: true }],
@@ -52,6 +54,10 @@ test('finds record layouts and distinguishes historical labels from operational 
   await expect(screening).toContainText('emulator MT14 observed')
   await expect(screening).toContainText('acknowledgement not recorded')
   await expect(screening).toContainText('Exact free route observed on the emulator')
+  await page.getByLabel('Find a record').fill('MT62')
+  const numbering = reference.getByRole('row').filter({hasText:'Numbering plan'})
+  await numbering.getByText('1 layout').click()
+  await expect(numbering).toContainText('explicit authoring (no default template)')
   await page.getByLabel('Find a record').fill('')
   await page.getByLabel('Record category').selectOption('scheduler_record')
   await expect(reference.getByRole('row')).toHaveCount(2)

@@ -39,6 +39,15 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
         Assert.Equal(JsonValueKind.Null, rows[133].GetProperty("behaviorObservation").ValueKind);
         Assert.Contains(rows[92].GetProperty("layouts").EnumerateArray(), row => row.GetProperty("length").GetInt32() == 3401);
         Assert.Contains(rows[92].GetProperty("layouts").EnumerateArray(), row => row.GetProperty("length").GetInt32() == 3061);
+        foreach (var number in new[] { 26,30,31,33,62 })
+        {
+            var native = rows[number].GetProperty("layouts").EnumerateArray().ToArray();
+            Assert.NotEmpty(native);
+            Assert.All(native, layout => {
+                Assert.True(layout.GetProperty("explicitAuthoringAvailable").GetBoolean());
+                Assert.False(layout.GetProperty("draftTemplateAvailable").GetBoolean());
+            });
+        }
 
         var definitions = await _client.GetFromJsonAsync<JsonElement>("/api/tables/definitions");
         foreach (var definition in definitions.EnumerateArray())
