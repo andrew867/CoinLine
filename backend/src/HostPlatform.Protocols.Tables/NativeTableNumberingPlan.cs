@@ -44,6 +44,6 @@ public static partial class NativeTableLayouts
                 new[] { "Other rate responses", "Local rate (1 or 2)", "Intra-area rate (5)", "Inter-area rate (6)", "Rate response 7", "Rate response 8" }
                     .SelectMany((label, index) => new[] {
                         Bits($"response-{index}.call", $"{label} call type", 8 + index, 15, CallKinds),
-                        Bits($"response-{index}.payment", $"{label} payment type", 8 + index, 112, PaymentKinds) })])
+                        Bits($"response-{index}.payment", $"{label} payment type", 8 + index, 112, [(0, "Unspecified"), .. PaymentKinds]) })])
         ]);
 }

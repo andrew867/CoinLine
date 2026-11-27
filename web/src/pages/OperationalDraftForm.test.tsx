@@ -4,6 +4,7 @@ import { apiFetch, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { NativeTableEditor } from './NativeTableEditor'
 import { OperationalDraftForm, type OperationalSpec } from './OperationalDraftForm'
+import { NumberingPlanEditor, type NumberingPlan } from './NumberingPlanEditor'
 
 vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiGet: vi.fn(), apiPostRaw: vi.fn() }))
 afterEach(() => { cleanup(); vi.resetAllMocks(); consoleSession.clear() })
@@ -143,4 +144,55 @@ it('creates MT31 with explicit blank predial choices and separately entered prot
     credentials: { craftAccessCode: access, keyCardNumber: card },
   })
   await waitFor(() => expect(screen.queryByRole('form', { name: 'Create operational record' })).toBeNull())
+})
+
+it('authors MT62 with an explicit dialing graph, formatting choice and supported currency glyphs', () => {
+  const early: OperationalSpec = { number: 62, name: 'Numbering and display-format plan', profile: 'MTR 1.9 packed', length: 353, numberingFormatCapacity: 132,
+    sections: [{ key: 'numbering', label: 'Numbering', fields: [numeric('screenTimeout','Screening digit timeout'),
+      { ...numeric('currencySymbol','Currency symbol'), editor: 'text', displayGlyphs: true, maxLength: 4 },
+      { ...numeric('keyCardNumber','Desk terminal key card number'), editor: 'password', maxLength: 10 }] }] }
+  const later: OperationalSpec = { ...early, profile: 'Later packed profile', numberingFormatCapacity: 140,
+    sections: [{ ...early.sections[0], fields: early.sections[0].fields.filter(field => field.key !== 'currencySymbol') }] }
+  const create = vi.fn(), dirty = vi.fn()
+  render(<OperationalDraftForm templates={[early,later]} busy={false} onCreate={create} onDirty={dirty} />)
+  const profile = screen.getByLabelText('Operational layout')
+  const submit = screen.getByRole('button',{name:'Create operational record'})
+  fireEvent.change(profile,{target:{value:early.profile}})
+  fireEvent.change(screen.getByLabelText(/Screening digit timeout/),{target:{value:'300'}})
+  fireEvent.change(screen.getByLabelText(/Desk terminal key card number/),{target:{value:'3'.repeat(10)}})
+  fireEvent.change(screen.getByLabelText('Currency symbol'),{target:{value:'€'}})
+  expect(screen.getByLabelText('Currency symbol')).toHaveAttribute('aria-invalid','true')
+  fireEvent.change(screen.getByLabelText('Currency symbol'),{target:{value:'¢'}})
+  expect(submit).toBeDisabled()
+  fireEvent.click(screen.getByRole('button',{name:'Add rule'}))
+  fireEvent.change(screen.getByLabelText('Call classification'),{target:{value:'3'}})
+  fireEvent.change(screen.getByLabelText('Payment classification'),{target:{value:'4'}})
+  fireEvent.change(screen.getByLabelText('Digit group'),{target:{value:'3'}})
+  expect(submit).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('Rule set'),{target:{value:'format'}})
+  expect(screen.getByText('0 of 132 rule bytes used')).toBeVisible()
+  fireEvent.click(screen.getByRole('button',{name:'Leave display formatting empty'}))
+  expect(submit).toBeEnabled()
+  fireEvent.change(profile,{target:{value:later.profile}})
+  expect(screen.queryByLabelText('Currency symbol')).toBeNull()
+  fireEvent.change(screen.getByLabelText('Rule set'),{target:{value:'format'}})
+  expect(screen.getByText('0 of 140 rule bytes used')).toBeVisible()
+  expect(submit).toBeDisabled()
+  fireEvent.change(profile,{target:{value:early.profile}})
+  expect(submit).toBeEnabled()
+  fireEvent.click(submit)
+  expect(create).toHaveBeenCalledWith({profile:early.profile,length:353,fields:{screenTimeout:'300',currencySymbol:'¢'},
+    credentials:{keyCardNumber:'3'.repeat(10)},numberingPlan:{dial:[expect.objectContaining({callType:67,tag:48,digits:[17]})],format:[]}})
+  expect(dirty).toHaveBeenLastCalledWith(true)
+})
+
+it('warns about broad ordinary no-payment classification but not exact free-service rules', () => {
+  const broad = {id:'ordinary',noMatch:null,match:null,control:0,tag:50,callType:35,digits:[18,17,17,17,17,17,17],conversion:null,maximumDigits:null}
+  const plan: NumberingPlan = {dial:[broad],format:[]}
+  const {rerender}=render(<NumberingPlanEditor plan={plan} changes={{}} editable={false} onChange={vi.fn()}/>)
+  expect(screen.getByRole('status')).toHaveTextContent('A broad ordinary destination rule selects No payment')
+  rerender(<NumberingPlanEditor plan={{dial:[{...broad,callType:67}],format:[]}} changes={{}} editable={false} onChange={vi.fn()}/>)
+  expect(screen.queryByRole('status')).toBeNull()
+  rerender(<NumberingPlanEditor plan={{dial:[{...broad,callType:41,digits:[2,3,4,5]}],format:[]}} changes={{}} editable={false} onChange={vi.fn()}/>)
+  expect(screen.queryByRole('status')).toBeNull()
 })

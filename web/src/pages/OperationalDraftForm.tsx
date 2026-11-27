@@ -1,15 +1,18 @@
 import { useEffect, useState } from 'react'
 import { apiFetch, apiPostRaw } from '../api/client'
+import { authorableDisplayText } from './advertisingGlyphs'
+import { NumberingPlanEditor, numberingRuleBytes, type NumberingPlanChanges } from './NumberingPlanEditor'
 
 type Field = { key: string; label: string; editor: 'number' | 'select' | 'checkbox' | 'text' | 'password'; min: number; max: number;
-  choices: { value: number; label: string }[] | null; help: string | null; maxLength?: number | null }
+  choices: { value: number; label: string }[] | null; help: string | null; maxLength?: number | null; displayGlyphs?: boolean }
 export type OperationalSpec = { number: number; name: string; profile: string; length: number;
-  sections: { key: string; label: string; fields: Field[] }[] }
-type CreateRequest = { profile: string; length: number; fields: Record<string, string>; credentials?: Record<string, string> }
+  sections: { key: string; label: string; fields: Field[] }[]; numberingFormatCapacity?: number | null }
+type CreateRequest = { profile: string; length: number; fields: Record<string, string>; credentials?: Record<string, string>; numberingPlan?: NumberingPlanChanges }
 type Values = Record<string, string>
 
 function validValue(field: Field, value?: string) {
-  if (field.editor === 'text') return value != null && value.length <= (field.maxLength ?? 0) && /^[0-9*#]*$/.test(value)
+  if (field.editor === 'text') return value != null && (field.displayGlyphs ? authorableDisplayText(value, field.maxLength ?? 0)
+    : value.length <= (field.maxLength ?? 0) && /^[0-9*#]*$/.test(value))
   if (field.editor === 'password') return value != null && value.length === field.maxLength && /^[0-9]+$/.test(value)
   if (value == null || value === '') return false
   if (field.editor === 'checkbox') return value === 'true' || value === 'false'
@@ -25,6 +28,7 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
   const [profile, setProfile] = useState(templates.length === 1 ? templates[0].profile : '')
   const [sectionKey, setSectionKey] = useState('')
   const [byProfile, setByProfile] = useState<Record<string, Values>>({})
+  const [rulesByProfile, setRulesByProfile] = useState<Record<string, NumberingPlanChanges>>({})
   const [json, setJson] = useState('')
   const [review, setReview] = useState<Values | null>(null)
   const [error, setError] = useState('')
@@ -32,14 +36,23 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
   const values = byProfile[profile] ?? {}
   const fields = spec?.sections.flatMap(section => section.fields) ?? []
   const section = spec?.sections.find(row => row.key === sectionKey) ?? spec?.sections[0]
+  const rules = rulesByProfile[profile] ?? {}
+  const formatCapacity = spec?.numberingFormatCapacity
+  const rulesComplete = formatCapacity == null || (!!rules.dial?.length && rules.format != null
+    && numberingRuleBytes(rules.dial, true) <= 180 && numberingRuleBytes(rules.format, false) <= formatCapacity)
   const complete = fields.filter(field => validValue(field, values[field.key])).length
-  const canCreate = !!spec && fields.length > 0 && complete === fields.length
+  const canCreate = !!spec && fields.length > 0 && complete === fields.length && rulesComplete
   const unenteredSwitches = fields.filter(field => field.editor === 'checkbox' && !values[field.key])
 
   function update(next: Values) {
     const all = { ...byProfile, [profile]: next }
     setByProfile(all); setReview(null); setError('')
-    onDirty(Object.values(all).some(row => Object.keys(row).length > 0) || !!json.trim())
+    onDirty(Object.values(all).some(row => Object.keys(row).length > 0) || Object.values(rulesByProfile).some(row => Object.keys(row).length > 0) || !!json.trim())
+  }
+
+  function updateRules(group: 'dial' | 'format', next: NonNullable<NumberingPlanChanges[typeof group]>) {
+    setRulesByProfile({ ...rulesByProfile, [profile]: { ...rules, [group]: next } })
+    onDirty(true)
   }
 
   function reviewValues() {
@@ -56,7 +69,7 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
           setJson('')
           throw new Error('Protected configuration values must be entered in their separate fields. The pasted JSON has been cleared.')
         }
-        if (field.editor === 'text' && typeof raw !== 'string') throw new Error(`Use a quoted digit string for ${field.label}.`)
+        if (field.editor === 'text' && typeof raw !== 'string') throw new Error(`Use a quoted string for ${field.label}.`)
         const value = typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean' ? String(raw) : ''
         if (!validValue(field, value)) throw new Error(`Invalid value for ${field.label}.`)
         next[key] = value
@@ -71,7 +84,8 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
     const credentials = fields.filter(field => field.editor === 'password')
     onCreate({ profile: spec.profile, length: spec.length,
       fields: Object.fromEntries(fields.filter(field => field.editor !== 'password').map(field => [field.key, values[field.key]])),
-      ...(credentials.length ? { credentials: Object.fromEntries(credentials.map(field => [field.key, values[field.key]])) } : {}) })
+      ...(credentials.length ? { credentials: Object.fromEntries(credentials.map(field => [field.key, values[field.key]])) } : {}),
+      ...(formatCapacity != null ? { numberingPlan: rules } : {}) })
   }}>
     <h3>Author {spec ? `MT${spec.number} ${spec.name}` : 'operational settings'}</h3>
     <p>You can author this record directly instead of importing a binary. Enter the known settings for the actual target.
@@ -98,8 +112,8 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
           <label>{field.label}<input type="text" maxLength={field.maxLength ?? undefined} value={values[field.key] ?? ''}
             aria-invalid={values[field.key] !== undefined && !validValue(field, values[field.key])}
             onChange={event => update({ ...values, [field.key]: event.target.value })} /></label>
-          <button type="button" className="quiet" aria-label={`Use no digits for ${field.label}`}
-            onClick={() => update({ ...values, [field.key]: '' })}>Use no digits</button>
+          <button type="button" className="quiet" aria-label={`${field.displayGlyphs ? 'Use no text' : 'Use no digits'} for ${field.label}`}
+            onClick={() => update({ ...values, [field.key]: '' })}>{field.displayGlyphs ? 'Use no text' : 'Use no digits'}</button>
           <small>{field.key}{values[field.key] === '' ? ' · Explicitly blank' : values[field.key] === undefined ? ' · Not yet selected' : ''}{field.help ? ` · ${field.help}` : ''}</small>
         </div> : <label className="native-table-field" key={field.key}>
           <span>{field.label}</span>
@@ -124,7 +138,7 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
           {fields.some(field => field.editor === 'password') && ' Enter protected configuration values only in their separate password fields, never in this JSON.'}</p>
         <label>Named settings JSON<textarea rows={5} value={json} disabled={busy} onChange={event => {
           const next = event.target.value; setJson(next); setReview(null); setError('');
-          onDirty(Object.values(byProfile).some(row => Object.keys(row).length > 0) || !!next.trim())
+          onDirty(Object.values(byProfile).some(row => Object.keys(row).length > 0) || Object.values(rulesByProfile).some(row => Object.keys(row).length > 0) || !!next.trim())
         }} /></label>
         <button type="button" className="quiet" disabled={busy || !json.trim()} onClick={reviewValues}>Review named settings</button>
         {error && <p role="alert">{error}</p>}
@@ -134,6 +148,15 @@ export function OperationalDraftForm({ templates, busy, onCreate, onDirty }: {
           <button type="button" disabled={busy} onClick={() => update({ ...values, ...review })}>Apply reviewed settings</button>
         </section>}
       </details>
+      {formatCapacity != null && <section aria-label="New numbering-plan rules">
+        <h4>Dialing and display-format rules</h4>
+        <p>Author the complete linked dialing graph. Display formatting may be deliberately empty; it is not assumed.
+          The earlier and later profiles have different formatting capacities.</p>
+        <p role="status">{rules.dial?.length ?? 0} dialing rules; {rules.format == null ? 'display formatting not yet chosen' : `${rules.format.length} display-format rules`}.</p>
+        {rules.format == null && <button type="button" className="quiet" disabled={busy} onClick={() => updateRules('format', [])}>Leave display formatting empty</button>}
+        <NumberingPlanEditor key={profile} plan={{ dial: [], format: [] }} changes={rules} editable={!busy}
+          formatCapacity={formatCapacity} onChange={updateRules} />
+      </section>}
     </>}
     <button type="submit" disabled={!canCreate || busy}>{busy ? 'Creating…' : 'Create operational record'}</button>
   </form>

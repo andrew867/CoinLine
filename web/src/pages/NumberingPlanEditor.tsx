@@ -16,6 +16,12 @@ type RuleSet = 'dial' | 'format'
 export type NumberingPlan = Record<RuleSet, Rule[] | null>
 export type NumberingPlanChanges = Partial<Record<RuleSet, Rule[]>>
 
+export const numberingRuleBytes = (rules: Rule[], dial: boolean) => rules.reduce((bytes, rule) => bytes + rule.digits.length + (dial ? 6 : 5)
+  + (dial && (rule.conversion !== null || rule.maximumDigits !== null) ? 1 : 0), 0)
+
+const broadNoPayment = (rule: Rule) => (rule.tag >> 4) === 3 && (rule.callType & 15) >= 3 && (rule.callType & 15) <= 6
+  && ((rule.callType >> 4) & 7) === 2 && rule.digits.length >= 7 && rule.digits.some(digit => (digit & 31) >= 16)
+
 type Choice = readonly [number, string]
 const digits: Choice[] = [
   ...Array.from({ length: 9 }, (_, index) => [index + 1, String(index + 1)] as const),
@@ -50,8 +56,7 @@ export function NumberingPlanEditor({ plan, changes, editable, formatCapacity = 
   const rules = changes[group] ?? plan[group]
   const index = Math.max(0, rules?.findIndex((rule) => rule.id === selected) ?? 0)
   const current = rules?.[index]
-  const space = rules?.reduce((bytes, rule) => bytes + rule.digits.length + (dial ? 6 : 5)
-    + (dial && (rule.conversion !== null || rule.maximumDigits !== null) ? 1 : 0), 0)
+  const space = rules ? numberingRuleBytes(rules, dial) : undefined
   const capacity = dial ? 180 : formatCapacity
 
   function update(fields: Partial<Rule>) {
@@ -106,6 +111,8 @@ export function NumberingPlanEditor({ plan, changes, editable, formatCapacity = 
       {space !== undefined && <small>{space} of {capacity} rule bytes used</small>}
     </div>
     {space !== undefined && space > capacity && <p role="alert">The rules exceed this firmware's available space by {space - capacity} bytes.</p>}
+    {dial && rules?.some(broadNoPayment) && <p role="status">A broad ordinary destination rule selects No payment. Review whether this is intentional;
+      it can allow ordinary calls without charging even when the tariff table contains paid rates. Use exact screening entries for specific free services.</p>}
     {rules === null && <p>This rule set uses an unrecognized wire layout.</p>}
     {rules && rules.length === 0 && <p>This rule set is empty.</p>}
     {rules && editable && <div className="row-actions">
