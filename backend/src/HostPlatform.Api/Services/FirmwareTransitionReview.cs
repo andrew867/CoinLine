@@ -13,12 +13,12 @@ internal sealed record TransitionReview(Guid TerminalId, Guid? SourceFirmwareVer
     string? SourceProfileId, Guid TargetFirmwareVersionId, string TargetFirmwareLabel, string? TargetProfileId,
     Guid? SourceSetId, string? SourceSetName, Guid? CandidateSetId, string? CandidateSetName, bool CandidatePublished, int ActiveSessions, int OutstandingDownloads,
     bool ConfigurationReadyForReview, bool UpgradeQualified, IReadOnlyList<TransitionRecord> Records,
-    IReadOnlyList<TransitionFinding> Findings);
+    IReadOnlyList<TransitionFinding> Findings, string? RegisteredFamilyId, TerminalFamilyTableReview? TargetFamilyReview);
 
 internal static class FirmwareTransitionReview
 {
     public static async Task<TransitionReview?> BuildAsync(HostPlatformDbContext db, Guid terminalId,
-        Guid targetFirmwareVersionId, Guid? candidateSetId, CancellationToken ct)
+        Guid targetFirmwareVersionId, Guid? candidateSetId, CancellationToken ct, string? targetFamilyId = null)
     {
         var terminal = await db.Terminals.AsNoTracking().Include(row => row.FirmwareVersion)
             .SingleOrDefaultAsync(row => row.Id == terminalId, ct);
@@ -58,6 +58,16 @@ internal static class FirmwareTransitionReview
 
         var sourceRecords = Map(source, "source");
         var targetRecords = Map(candidate, "candidate");
+        // The legacy family checklist and packed target profile are independent evidence.
+        var family = TerminalFamilies.Find(targetFamilyId ?? terminal.TerminalFamilyId);
+        var familyReview = family == null ? null : LegacyTerminalTableRequirements.Review(family,
+            (candidate?.Versions ?? []).Where(row => row.TableDefinition != null).Select(row =>
+                (row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(row), row.ScreeningLayoutProfile)), targetProfile);
+        if (familyReview?.Documented != true)
+            Add(true, null, "Choose a documented terminal family to review the target configuration requirements.");
+        else
+            foreach (var requirement in familyReview.Tables.Where(row => row.Required && row.Status != "present"))
+                Add(true, null, $"Documented mandatory family needs review: {requirement.Name} ({requirement.Status}). Confirm applicability against the target profile before staging.");
         var numbers = sourceRecords.Keys.Concat(targetRecords.Keys).Concat(targetProfile?.VerifiedLengths.Keys ?? []).Distinct().Order().ToArray();
         var records = new List<TransitionRecord>();
         foreach (var number in numbers)
@@ -138,7 +148,8 @@ internal static class FirmwareTransitionReview
         }
         return new(terminalId, terminal.FirmwareVersionId, terminal.FirmwareVersion?.Label, sourceProfile?.Id,
             target.Id, target.Label, targetProfile?.Id, source?.Id, source?.Name, candidate?.Id, candidate?.Name, candidate?.Status == TableSetStatus.Published,
-            active, outstanding, !findings.Any(row => row.Blocking), false, records, findings.Distinct().ToArray());
+            active, outstanding, !findings.Any(row => row.Blocking), false, records, findings.Distinct().ToArray(),
+            terminal.TerminalFamilyId, familyReview);
 
         Task<TableSet?> Set(Guid id) => db.TableSets.AsNoTracking().Include(row => row.TargetFirmwareVersion)
             .Include(row => row.Versions).ThenInclude(row => row.TableDefinition)

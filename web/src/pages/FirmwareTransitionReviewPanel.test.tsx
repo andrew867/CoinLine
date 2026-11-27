@@ -8,6 +8,38 @@ import { FirmwareTransitionReviewPanel } from './FirmwareTransitionReviewPanel'
 vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiPostRaw: vi.fn() }))
 afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); consoleSession.clear() })
 
+it('reviews the target family requirements without changing the registered phone type', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce([{ id: 'target', label: 'MTR 2.11', tableProfileId: 'later' }])
+    .mockResolvedValueOnce([{ id: 'candidate', name: 'Target configuration', status: 1, targetFirmwareVersionId: 'target' }])
+    .mockResolvedValueOnce([{ id: 'mtr20-desk', release: 'MTR 2.0', variant: 'Desk', maximizerTypeNumbers: [37] }])
+    .mockResolvedValueOnce({ sourceFirmwareLabel: 'MTR 2.0', targetFirmwareLabel: 'MTR 2.11', sourceSetId: 'source',
+      candidateSetId: 'candidate', candidatePublished: true, activeSessions: 0, outstandingDownloads: 0,
+      configurationReadyForReview: false, upgradeQualified: false, records: [], findings: [], registeredFamilyId: 'mtr20-multipay',
+      targetFamilyReview: { familyId: 'mtr20-desk', familyLabel: 'MTR 2.0 Desk', documented: true, screeningEntries: 200, note: null, tables: [
+        { name: 'Dialing rules', required: true, candidates: [62], records: [], status: 'missing' },
+        { name: 'Call screening', required: true, candidates: [92], status: 'present', records: [{ number: 92, length: 3061, format: 'verifiedLength', screeningNote: '180 packed slots' }] },
+        { name: 'Text advertising', required: false, candidates: [29], records: [], status: 'missing' },
+      ] } })
+  render(<MemoryRouter><FirmwareTransitionReviewPanel phones={[{ id: 'phone', displayName: 'Fixture phone' }]} /></MemoryRouter>)
+  fireEvent.click(screen.getByRole('button', { name: 'Review a firmware transition' }))
+  fireEvent.change(await screen.findByLabelText('Target firmware'), { target: { value: 'target' } })
+  fireEvent.change(screen.getByLabelText('Prepared target configuration'), { target: { value: 'candidate' } })
+  fireEvent.click(screen.getByLabelText('Review a different target terminal family'))
+  await screen.findByRole('option', { name: 'MTR 2.0 Desk (37)' })
+  fireEvent.change(screen.getByLabelText('Terminal family'), { target: { value: 'mtr20-desk' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Compare configurations' }))
+  const family = await screen.findByRole('region', { name: 'Target terminal family checklist' })
+  expect(within(family).getByText('1 / 2')).toBeVisible()
+  const dialing = within(family).getByRole('row', { name: /Dialing rules/ })
+  expect(dialing).toHaveTextContent('Mandatory')
+  expect(dialing).toHaveTextContent('Missing from set')
+  expect(within(family).getByRole('row', { name: /Text advertising/ })).toHaveTextContent('Feature-specific')
+  expect(within(family).getByRole('link', { name: 'MT92' })).toHaveAttribute('href', '/table-sets/candidate?record=92&family=mtr20-desk#config-heading')
+  expect(within(family).getByText('180 packed slots')).toBeVisible()
+  expect(apiGet).toHaveBeenLastCalledWith('/api/firmware/transition-review?terminalId=phone&targetFirmwareVersionId=target&candidateSetId=candidate&targetFamilyId=mtr20-desk')
+  expect(apiPostRaw).not.toHaveBeenCalled()
+})
+
 it('reviews record size changes without offering an upgrade execution action', async () => {
   vi.mocked(apiGet).mockResolvedValueOnce([{ id: 'target', label: 'MTR 2.11', tableProfileId: 'later' }])
     .mockResolvedValueOnce([{ id: 'candidate', name: 'Target draft', status: 0, targetFirmwareVersionId: 'target' },

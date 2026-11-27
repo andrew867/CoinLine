@@ -51,10 +51,12 @@ public sealed class FirmwareController(
 
     [HttpGet("transition-review")]
     public async Task<ActionResult<object>> TransitionReview([FromQuery] Guid terminalId, [FromQuery] Guid targetFirmwareVersionId,
-        [FromQuery] Guid? candidateSetId, CancellationToken ct)
+        [FromQuery] Guid? candidateSetId, CancellationToken ct, [FromQuery] string? targetFamilyId = null)
     {
         if (!CanReadTransition()) return Forbid();
-        var review = await FirmwareTransitionReview.BuildAsync(db, terminalId, targetFirmwareVersionId, candidateSetId, ct);
+        if (targetFamilyId != null && TerminalFamilies.Find(targetFamilyId) == null)
+            return BadRequest(new { error = "Choose a known target terminal family." });
+        var review = await FirmwareTransitionReview.BuildAsync(db, terminalId, targetFirmwareVersionId, candidateSetId, ct, targetFamilyId);
         return review == null ? NotFound(new { error = "The selected phone, firmware or candidate set was not found." }) : Ok(review);
     }
 

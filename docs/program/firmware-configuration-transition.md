@@ -2,6 +2,8 @@
 
 Firmware jobs includes a read-only configuration transition review. Select a phone, a registered target firmware version and, optionally, an independently prepared configuration set explicitly targeted to that version. The review compares the phone's assigned record lengths with the target profile and the supplied target records. It neither changes an assignment nor requests a device action. Operators need read access to firmware jobs, the firmware registry, phones, table sets, table records and assignments because the review combines those screens' data.
 
+The comparison also checks the candidate against the documented legacy table families for the registered terminal type. Use **Review a different target terminal family** to compare an explicitly chosen family without altering the phone's registered type. Missing, partial or unidentified mandatory families are highlighted for review before staging. Feature-specific families are displayed separately, and available candidate records link directly to their editors. The documented active screening count and the verified packed target layout may differ; the checklist does not establish actual mandatory records, native behavior or upgrade compatibility.
+
 The table identifies records that need replacement, missing source features, same-length fields that need layout confirmation, new target records and known target records whose applicability has not been established. A missing record type in an incomplete catalogue is unknown, not proof that the feature was removed. A catalogue of acknowledged records is not a list of mandatory records.
 
 ## Example: MTR 2.0 to MTR 2.11

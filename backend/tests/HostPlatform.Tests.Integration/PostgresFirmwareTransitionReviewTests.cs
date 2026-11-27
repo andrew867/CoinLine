@@ -29,7 +29,7 @@ public sealed class PostgresFirmwareTransitionReviewTests
         var later = new FirmwareVersion { Label = "Fixture MTR 2.11", TableProfileId = FirmwareTableProfiles.Mtr211MultiPay };
         var customer = new Customer { Name = "Fixture customer", Code = Guid.NewGuid().ToString("N")[..8] };
         var site = new Site { Customer = customer, Name = "Fixture site", Code = Guid.NewGuid().ToString("N")[..8] };
-        var phone = new Terminal { Site = site, FirmwareVersion = earlier, DisplayName = "Fixture upgrade phone",
+        var phone = new Terminal { Site = site, FirmwareVersion = earlier, DisplayName = "Fixture upgrade phone", TerminalFamilyId = "mtr20-multipay",
             TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() };
         var definitions = new[] { 21, 26, 92, 101, 134 }.ToDictionary(number => number,
             number => new TableDefinition { TableNumber = number, Name = $"Fixture MT{number}" });
@@ -75,6 +75,20 @@ public sealed class PostgresFirmwareTransitionReviewTests
         Check(prepared, 134, "candidate-addition", null, 1153, 1153);
         Assert.False(prepared.GetProperty("configurationReadyForReview").GetBoolean());
         Assert.False(prepared.GetProperty("upgradeQualified").GetBoolean());
+        var family = prepared.GetProperty("targetFamilyReview");
+        Assert.Equal("mtr20-multipay", family.GetProperty("familyId").GetString());
+        var mandatoryCoin = Assert.Single(family.GetProperty("tables").EnumerateArray(), row => row.GetProperty("name").GetString() == "Coin validation");
+        Assert.True(mandatoryCoin.GetProperty("required").GetBoolean()); Assert.Equal("missing", mandatoryCoin.GetProperty("status").GetString());
+        var card = Assert.Single(family.GetProperty("tables").EnumerateArray(), row => row.GetProperty("name").GetString() == "Card acceptance");
+        Assert.Equal("present", card.GetProperty("status").GetString());
+        Assert.Contains(prepared.GetProperty("findings").EnumerateArray(), row => row.GetProperty("blocking").GetBoolean() &&
+            row.GetProperty("message").GetString()!.Contains("Coin validation (missing)"));
+        var deskReview = await Read(path + $"&candidateSetId={candidate.Id}&targetFamilyId=mtr20-desk");
+        Assert.Equal("mtr20-multipay", deskReview.GetProperty("registeredFamilyId").GetString());
+        Assert.Equal("mtr20-desk", deskReview.GetProperty("targetFamilyReview").GetProperty("familyId").GetString());
+        Assert.DoesNotContain(deskReview.GetProperty("targetFamilyReview").GetProperty("tables").EnumerateArray(), row => row.GetProperty("name").GetString() == "Coin validation" && row.GetProperty("required").GetBoolean());
+        using (var invalidFamily = await client.GetAsync(path + $"&candidateSetId={candidate.Id}&targetFamilyId=unknown-family"))
+            Assert.Equal(HttpStatusCode.BadRequest, invalidFamily.StatusCode);
         var incompatible = await Read(path + $"&candidateSetId={wrong.Id}");
         Check(incompatible, 21, "replace-candidate", 18, 48, 18);
         Assert.Contains(incompatible.GetProperty("findings").EnumerateArray(), row => row.GetProperty("blocking").GetBoolean());
@@ -84,7 +98,9 @@ public sealed class PostgresFirmwareTransitionReviewTests
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
-            Assert.Equal(earlier.Id, (await db.Terminals.SingleAsync(row => row.Id == phone.Id)).FirmwareVersionId);
+            var retainedPhone = await db.Terminals.SingleAsync(row => row.Id == phone.Id);
+            Assert.Equal(earlier.Id, retainedPhone.FirmwareVersionId);
+            Assert.Equal("mtr20-multipay", retainedPhone.TerminalFamilyId);
             Assert.Equal(source.Id, (await db.TerminalTableAssignments.SingleAsync(row => row.Id == assignment.Id)).TableSetId);
             Assert.False(await db.DownloadBatches.AnyAsync(row => row.TerminalId == phone.Id));
             Assert.False(await db.FirmwareUpdateJobs.AnyAsync(row => row.TerminalId == phone.Id));
