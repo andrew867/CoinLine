@@ -85,7 +85,7 @@ public static class OperatorPermissions
             ("CraftAccessConfiguration", R, "Reveal"),
             ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
             ("CardSequence", R, "Get"), ("CardSequence", U, "Move Add Remove Refresh Link"),
-            ("GraphicalStarter", A, "Create"),
+            ("GraphicalStarter", A, "Create"), ("OperationalRecordAuthoring", R, "Get"), ("OperationalRecordAuthoring", A, "Create"),
             ("TableRecordUpdates", R, "Preview PausedRuns"), ("TableRecordUpdates", U, "Preview PausedRuns Apply Continue"),
             ("Tables", R, "ScopeOptions"), ("Tables", U, "ScopeOptions"));
         Screen("carrier-library", "Carrier library", ("CarrierLibrary", R, "List Get Schema Apply"),

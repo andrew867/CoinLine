@@ -22,6 +22,7 @@ import { MessagingServicePreview } from './MessagingServicePreview'
 import { CollectionPolicyPreview } from './CollectionPolicyPreview'
 import { InterfaceTimingPanel, interfaceTimingKeys } from './InterfaceTimingPanel'
 import { ModemDebounceReview } from './ModemDebounceReview'
+import { OperationalDraftLoader } from './OperationalDraftForm'
 import { TimeDiscountCalendar } from './TimeDiscountCalendar'
 import { CardSequencePanel } from './CardSequencePanel'
 import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
@@ -337,6 +338,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           Start record for {template.profile}{template.screeningSlots != null ? ` (${template.screeningSlots} wire slots)` : ''}
         </button>
       ))}
+      {canInitialize && layout.templates?.length === 0 && [26, 30, 33].includes(number) &&
+        <OperationalDraftLoader key={`${setId}:${number}`} setId={setId} number={number} onDirty={onDirty}
+          onCreated={selectedProfile => { setProfile(selectedProfile); setReload(count => count + 1); onSaved() }} />}
       {message && <p role="status">{message}</p>}
     </div>
   )
