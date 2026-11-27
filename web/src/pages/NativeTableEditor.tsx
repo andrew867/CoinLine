@@ -15,6 +15,7 @@ import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEdito
 import { LocalDialingImport } from './LocalDialingImport'
 import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
 import { ScreeningBulkPanel } from './ScreeningBulkPanel'
+import { ScreeningSlotReferencesPanel } from './ScreeningSlotReferencesPanel'
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { RestrictedRouteReview, type RestrictedRouteRecord } from './RestrictedRouteReview'
@@ -614,6 +615,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           sha256={layout.sha256} profile={layout.profile} slot={screeningSlot}
           dirty={busy || Object.keys(edits).length > 0 || hasScreeningChanges}
           onApplied={sourceChanged => { if (sourceChanged) { setReload(count => count + 1); onSaved() } }} />}
+      {showingSettings && number === 92 && screeningSlot != null && layout.screening &&
+        <ScreeningSlotReferencesPanel key={`${setId}:${screeningSlot}:${layout.revision}`} setId={setId} slot={screeningSlot}
+          dirty={busy || Object.keys(edits).length > 0 || hasScreeningChanges} />}
       {showingSettings && screeningSlot != null && family && institutionSlot(screeningSlot) &&
         <p className="page-intro">Entry {screeningSlot} is in the documented institutional range. Confirm that any change belongs in this configuration rather than the separate institutional setup.</p>}
       {showingSettings && screeningSlot != null && family && screeningSlot > documentedScreeningSlots &&

@@ -23,6 +23,12 @@ An isolated PostgreSQL regression opened the same 60-slot compact record under a
 
 Editor recognition, exact byte preservation, terminal acknowledgement and a demonstrated change in behavior remain separate acceptance criteria.
 
+### Screening entry references
+
+For a configuration with a registered, verified expanded MT92 profile, select an entry and choose **Review screening references** before editing it. The read-only review identifies the saved, one-based pointers in MT26 alternate operator access and reroute settings, MT23 or MT135 Feature Group B carrier rows, MT72 IOPR, and MT134 stored-value reload settings. A source record link opens the corresponding editor. Configured, retained but disabled, conditional service, and fallback references are shown separately. A later enabled reload with a zero or out-of-range pointer is identified explicitly under entry 1, rather than disappearing from the reference list.
+
+The review excludes unsaved changes, other configurations, incompatible or duplicate records and unverified target layouts. It identifies missing companion records separately because an installed companion may still refer to the slot. An empty reference list is not proof that a screening entry is unused, and the result is not a call simulation. The existing bulk-delete review also protects entry 1 from the identified enabled reload fallback. No record is changed by opening or refreshing the review.
+
 ## Registered family and payment mode
 
 The original terminal information workflow expects the registered terminal family and the Universal Feature configuration to agree. The inventory type number identifies the release and hardware family; it is not the three-value MT26 operating-mode field. The checklist therefore compares the documented family expectation (Card only, Multi-pay or Coin only) with the saved MT26 value when the registered target establishes the exact native layout. Desk and Inmate are Card-family references; Coin Basic and the Multi-pay-based stored-value families have their corresponding ordinary payment-mode expectations. This comparison does not establish optional card-reader, PIN, purse, carrier or coin capabilities.
