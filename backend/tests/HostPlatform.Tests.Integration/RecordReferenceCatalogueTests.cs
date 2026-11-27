@@ -48,6 +48,11 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
                 Assert.False(layout.GetProperty("draftTemplateAvailable").GetBoolean());
             });
         }
+        Assert.Equal("native_editor", rows[29].GetProperty("kind").GetString());
+        var advertising = Assert.Single(rows[29].GetProperty("layouts").EnumerateArray());
+        Assert.Equal(AdvertisingTableWire.RecordLength, advertising.GetProperty("length").GetInt32());
+        Assert.True(advertising.GetProperty("explicitAuthoringAvailable").GetBoolean());
+        Assert.False(advertising.GetProperty("draftTemplateAvailable").GetBoolean());
 
         var definitions = await _client.GetFromJsonAsync<JsonElement>("/api/tables/definitions");
         foreach (var definition in definitions.EnumerateArray())

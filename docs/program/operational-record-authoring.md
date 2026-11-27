@@ -2,7 +2,7 @@
 
 When a draft lacks feature and call options (MT26), user interface parameters (MT30), installation and servicing parameters (MT31), modem parameters (MT33), or numbering and display formatting (MT62), the native editor can create the missing record from explicitly entered settings. Use an independently reviewed compatible record copy instead when actual operating values are already known; the authoring form does not supply a substitute for a validated terminal configuration.
 
-The reference record catalogue labels these confirmed layouts as **explicit authoring (no default template)**, independently of the observed firmware acknowledgement and behavior columns. An observed record length alone does not establish a usable authoring layout.
+The reference record catalogue labels these confirmed layouts as **explicit authoring (no default template)**, independently of the observed firmware acknowledgement and behavior columns. It also recognizes the existing dedicated twenty-slot MT29 text advertising creation workflow. An observed record length alone does not establish a usable authoring layout.
 
 1. Open the relevant configuration panel in an unpublished set and select the missing record. A registered target with a confirmed layout offers that exact profile. An untargeted draft offers a deliberate choice among the identified layouts. Observed-length-only targets and unsupported formats remain import workflows.
 2. Complete the settings section by section. Required choice fields and switches initially have no selected value. Numeric fields retain their documented units and limits. Use **Set unentered switches to Off** only when that is the intended setting; it never replaces a switch already set explicitly.
