@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Data;
 using System.Net.Sockets;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Security;
@@ -949,6 +950,7 @@ internal sealed class NccLinkProcessor(
         {
             var capturedAt = DateTime.UtcNow;
             var i = 0;
+            var observedVersion = false;
             foreach (var record in records)
             {
                 // Cashbox observations were committed before the link acknowledgement.
@@ -967,13 +969,45 @@ internal sealed class NccLinkProcessor(
                     capturedAt,
                     _session.CorrelationId,
                     stoppingToken, craftMatch: match, observedOnNccLink: terminal != null && _session.TerminalId == terminal.Id);
+                observedVersion |= record[0] == FieldEventCatalog.SoftwareVersionMessageType && record.Length == FieldEventCatalog.SoftwareVersionRecordLength;
             }
+            if (observedVersion && terminal != null && _session.TerminalId == terminal.Id)
+                await TryActivateFirmwareConfigurationAsync(terminal.Id);
             return true;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Field event was not stored.");
             return false;
+        }
+    }
+
+    private async Task TryActivateFirmwareConfigurationAsync(Guid terminalId)
+    {
+        try
+        {
+            if (!await db.FirmwareConfigurationTransitions.AsNoTracking().AnyAsync(row => row.TerminalId == terminalId && row.AutoActivateOnContact &&
+                row.ActivatedAtUtc == null && row.CancelledAtUtc == null, stoppingToken)) return;
+
+            // A separate context isolates rolled-back activation changes from the
+            // active NCC session's tracking state and normal acknowledgement path.
+            await using var scope = scopes.CreateAsyncScope();
+            var transitionDb = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var distribution = scope.ServiceProvider.GetRequiredService<TableDistributionService>();
+            if (!transitionDb.Database.IsRelational()) return;
+            await using var transaction = await transitionDb.Database.BeginTransactionAsync(IsolationLevel.Serializable, stoppingToken);
+            var plan = await transitionDb.FirmwareConfigurationTransitions.SingleOrDefaultAsync(row => row.TerminalId == terminalId && row.AutoActivateOnContact &&
+                row.ActivatedAtUtc == null && row.CancelledAtUtc == null, stoppingToken);
+            if (plan == null) return;
+            await FirmwareConfigurationTransitionService.Activate(transitionDb, distribution, plan, clock.GetUtcNow().UtcDateTime, stoppingToken,
+                currentSessionId: _session.Id);
+            await transaction.CommitAsync(stoppingToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A missing prerequisite leaves the plan staged and never suppresses
+            // ordinary alarm, maintenance or upload acknowledgements.
+            logger.LogDebug("Automatic configuration activation not applied ({ErrorType}).", ex.GetType().Name);
         }
     }
 
@@ -1414,6 +1448,9 @@ internal sealed class NccLinkProcessor(
             return;
         }
 
+        if (await TryStartTransitionTargetAsync(stream, terminalId, terminal.Id, cashboxStatus))
+            return;
+
         if (await TryStartIdentityCutoverAsync(stream, terminalId, terminal, allowCutover, mandatoryFull, cashboxStatus))
             return;
 
@@ -1613,6 +1650,33 @@ internal sealed class NccLinkProcessor(
         }
         _batch = queued;
         await SendBatchAsync(stream, terminalId, terminal, queued, cashboxStatus, queuedByOperator: true);
+    }
+
+    private async Task<bool> TryStartTransitionTargetAsync(NetworkStream stream, byte[] terminalId, Guid phoneId, byte[]? cashboxStatus)
+    {
+        var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().Where(row => row.TerminalId == phoneId && row.ActivatedAtUtc != null &&
+            row.TargetBatchId != null && db.DownloadBatches.Any(batch => batch.Id == row.TargetBatchId && batch.Status == DownloadBatchStatus.Pending))
+            .OrderByDescending(row => row.ActivatedAtUtc).FirstOrDefaultAsync(stoppingToken);
+        if (plan == null) return false;
+        var queued = await db.DownloadBatches.Include(batch => batch.TableSet).SingleOrDefaultAsync(batch => batch.Id == plan.TargetBatchId &&
+            batch.Status == DownloadBatchStatus.Pending, stoppingToken);
+        var current = await db.Terminals.AsNoTracking().SingleOrDefaultAsync(row => row.Id == phoneId, stoppingToken);
+        var observation = await FirmwareConfigurationTransitionService.LatestObservation(db, phoneId, stoppingToken);
+        var matchingAssignment = await db.TerminalTableAssignments.AsNoTracking().AnyAsync(row => row.TerminalId == phoneId &&
+            row.TableSetId == plan.TargetTableSetId, stoppingToken);
+        if (queued == null || current == null || current.FirmwareVersionId != plan.TargetFirmwareVersionId || !matchingAssignment ||
+            queued.TerminalId != phoneId || queued.TableSetId != plan.TargetTableSetId || queued.Scope != DownloadScope.Full || queued.ScheduleId != null ||
+            observation == null || FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != (plan.TargetControllerRom, plan.TargetControllerSoftware))
+        {
+            Audit("firmware_transition_holds_target_tables", new { reason = "target assignment or observed version needs review" }, phoneId);
+            await db.SaveChangesAsync(stoppingToken);
+            await SendInstallEndAsync(stream, terminalId, cashboxStatus);
+            return true;
+        }
+        // Claim the exact full batch even for a mandatory INSTALL request. It is
+        // not an older partial delivery, and must not be replaced by a fresh batch.
+        await StartQueuedBatchAsync(stream, terminalId, current, queued, cashboxStatus);
+        return true;
     }
 
     private async Task SendBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal, DownloadBatch batch,

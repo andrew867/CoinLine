@@ -54,3 +54,38 @@ it('does not offer management actions to a nonadministrator even with a reported
   expect(screen.queryByRole('button', { name: 'Activate target configuration' })).not.toBeInTheDocument()
   expect(screen.queryByRole('button', { name: 'Preview configuration transition' })).not.toBeInTheDocument()
 })
+
+it('requires explicit automatic approval and a fresh preview when the activation mode changes', async () => {
+  consoleSession.save('fixture-token', '', 'Fixture admin', 'Admin')
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const plan = { id: 'plan', state: 'staged', revision: 0, blocker: 'Waiting for version', sourceTableSetId: 'source', targetTableSetId: 'target',
+    sourceControllerRom: 'LABOLD', sourceControllerSoftware: 'A001', targetControllerRom: 'LABNEW', targetControllerSoftware: 'A002', targetBatchId: null }
+  let history: Record<string, unknown>[] = []
+  vi.mocked(apiGet).mockImplementation(async (url) => url.includes('/options?') ? {
+    observed: null, schedules: [{ id: 'schedule', rom: 'LABNEW', application: 'B001', availableAtUtc: '2026-11-25T12:00:00Z', completedAtUtc: null }],
+    candidates: [{ id: 'target', name: 'Target set', firmwareLabel: 'Later profile' }],
+  } : history)
+  vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json({ plan: { ...plan, autoActivateOnContact: false }, reviewToken: 'manual' }))
+    .mockResolvedValueOnce(Response.json({ plan: { ...plan, autoActivateOnContact: true }, reviewToken: 'automatic' }))
+    .mockImplementationOnce(async () => { history = [{ ...plan, autoActivateOnContact: true }]; return Response.json(history[0], { status: 201 }) })
+  render(<MemoryRouter><FirmwareConfigurationTransitionPanel phones={[{ id: 'phone', displayName: 'Fixture phone' }]} /></MemoryRouter>)
+  fireEvent.click(screen.getByRole('button', { name: 'Manage configuration transitions' }))
+  fireEvent.change(await screen.findByLabelText('Published target configuration'), { target: { value: 'target' } })
+  fireEvent.change(screen.getByLabelText('Existing enabled code schedule'), { target: { value: 'schedule' } })
+  fireEvent.change(screen.getByLabelText('Expected controller software label (MT60)'), { target: { value: 'A002' } })
+  const choice = screen.getByLabelText('Automatically activate on the first verified target-version contact')
+  expect(choice).not.toBeChecked()
+  fireEvent.click(screen.getByRole('button', { name: 'Preview configuration transition' }))
+  expect(await screen.findByText('Manual administrator activation required.')).toBeVisible()
+  fireEvent.click(choice)
+  expect(screen.queryByRole('button', { name: 'Stage reviewed configuration' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Preview configuration transition' }))
+  expect(await screen.findByText('Automatic activation approved on matching target-version contact.')).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Stage reviewed configuration' }))
+  expect(await screen.findByText('Automatic activation approved')).toBeVisible()
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('authorize automatic activation'))
+  expect(apiPostRaw).toHaveBeenLastCalledWith('/api/firmware/configuration-transitions', expect.objectContaining({ autoActivateOnContact: true, reviewToken: 'automatic' }))
+  history = [{ ...plan, autoActivateOnContact: true, activatedAutomatically: true, state: 'activated', blocker: null, targetBatchId: 'batch' }]
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh transition status' }))
+  expect(await screen.findByText('Activated automatically')).toBeVisible()
+})

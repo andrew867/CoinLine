@@ -2126,6 +2126,12 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<DateTime?>("ActivatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("ActivatedAutomatically")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("AutoActivateOnContact")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("CancelledAtUtc")
                         .HasColumnType("timestamp with time zone");
 

@@ -21,7 +21,15 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresFirmwareConfigurationTransitionTests
 {
     [PostgresIntegrationFact]
-    public async Task Staged_configuration_requires_acknowledged_schedule_and_fresh_target_report_before_atomic_activation()
+    public Task Staged_configuration_requires_acknowledged_schedule_and_fresh_target_report_before_atomic_activation() => Workflow(false);
+
+    [PostgresIntegrationFact]
+    public Task Approved_automatic_activation_delivers_the_original_full_batch_on_first_target_version_install_request() => Workflow(true);
+
+    [PostgresIntegrationFact]
+    public Task Approved_automatic_activation_on_alarm_contact_queues_tables_without_interrupting_alarm_receipt() => Workflow(true, false);
+
+    private static async Task Workflow(bool automatic, bool targetInstallContact = true)
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
         var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
@@ -78,7 +86,7 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
         var schedules = await client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{codeSet.Id}/schedules");
         var scheduleId = Assert.Single(schedules.EnumerateArray()).GetProperty("id").GetGuid();
         const string endpoint = "/api/firmware/configuration-transitions";
-        var request = new { terminalId = phone.Id, targetSetId = target.Id, codeScheduleId = scheduleId, expectedControllerSoftware = "A002" };
+        var request = new { terminalId = phone.Id, targetSetId = target.Id, codeScheduleId = scheduleId, expectedControllerSoftware = "A002", autoActivateOnContact = automatic };
         using var anonymous = factory.CreateClient();
         using (var forbidden = await anonymous.PostAsJsonAsync(endpoint + "/preview", request)) Assert.Equal(HttpStatusCode.Unauthorized, forbidden.StatusCode);
         using var previewResponse = await client.PostAsJsonAsync(endpoint + "/preview", request);
@@ -86,10 +94,13 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
         var preview = await previewResponse.Content.ReadFromJsonAsync<JsonElement>();
         Assert.Equal("LABNEW", preview.GetProperty("plan").GetProperty("targetControllerRom").GetString());
         Assert.Equal("A002", preview.GetProperty("plan").GetProperty("targetControllerSoftware").GetString());
-        using (var rejected = await client.PostAsJsonAsync(endpoint, new { request.terminalId, request.targetSetId, request.codeScheduleId, request.expectedControllerSoftware, reviewToken = "stale" }))
+        Assert.Equal(automatic, preview.GetProperty("plan").GetProperty("autoActivateOnContact").GetBoolean());
+        using (var rejected = await client.PostAsJsonAsync(endpoint, new { request.terminalId, request.targetSetId, request.codeScheduleId, request.expectedControllerSoftware, request.autoActivateOnContact, reviewToken = "stale" }))
             Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+        using (var changedMode = await client.PostAsJsonAsync(endpoint, new { request.terminalId, request.targetSetId, request.codeScheduleId, request.expectedControllerSoftware, autoActivateOnContact = !automatic, reviewToken = preview.GetProperty("reviewToken").GetString() }))
+            Assert.Equal(HttpStatusCode.Conflict, changedMode.StatusCode);
         using var stageResponse = await client.PostAsJsonAsync(endpoint, new { request.terminalId, request.targetSetId, request.codeScheduleId, request.expectedControllerSoftware,
-            reviewToken = preview.GetProperty("reviewToken").GetString() });
+            request.autoActivateOnContact, reviewToken = preview.GetProperty("reviewToken").GetString() });
         Assert.Equal(HttpStatusCode.Created, stageResponse.StatusCode);
         var plan = await stageResponse.Content.ReadFromJsonAsync<JsonElement>();
         var planId = plan.GetProperty("id").GetGuid(); var revision = plan.GetProperty("revision").GetInt32();
@@ -111,16 +122,40 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
         await RejectActivation();
         await Report("LABNEW", "A003");
         await RejectActivation();
-        await Report("LABNEW", "A002");
-
-        // A target-version phone cannot receive the old source assignment while the plan waits.
-        await ExchangeDownload([44, 2], []);
-        var ready = Assert.Single((await client.GetFromJsonAsync<JsonElement>($"{endpoint}?terminalId={phone.Id}")).EnumerateArray());
-        Assert.True(ready.GetProperty("state").GetString() == "ready", ready.GetProperty("blocker").GetString());
-        using var activatedResponse = await client.PostAsJsonAsync($"{endpoint}/{planId}/activate", new { confirm = true, revision });
-        Assert.True(activatedResponse.IsSuccessStatusCode, await activatedResponse.Content.ReadAsStringAsync());
-        var activated = await activatedResponse.Content.ReadFromJsonAsync<JsonElement>();
+        JsonElement activated;
+        if (automatic)
+        {
+            // The first actual target-version request is a mandatory full INSTALL.
+            // Its complete MT60 trailer authorizes the opted-in activation and
+            // selects the original queued target batch on that same connection.
+            if (targetInstallContact)
+            {
+                var requestBundle = new byte[42]; requestBundle[0] = 44; requestBundle[1] = 2; requestBundle[2] = 10;
+                Version("LABNEW", "A002").CopyTo(requestBundle, 13); requestBundle[^1] = 13;
+                var expected = TableDistributionService.OrderVersionsForDownload(target.Versions.ToArray())
+                    .Select(TableDistributionService.GetEffectivePayload).ToArray();
+                await ExchangeDownload(requestBundle, expected);
+            }
+            else
+            {
+                // Report verifies the exact alarm receipt and EOD, with no table transfer.
+                await Report("LABNEW", "A002");
+            }
+            activated = Assert.Single((await client.GetFromJsonAsync<JsonElement>($"{endpoint}?terminalId={phone.Id}")).EnumerateArray());
+        }
+        else
+        {
+            await Report("LABNEW", "A002");
+            // A target-version phone cannot receive the old source assignment while the plan waits.
+            await ExchangeDownload([44, 2], []);
+            var ready = Assert.Single((await client.GetFromJsonAsync<JsonElement>($"{endpoint}?terminalId={phone.Id}")).EnumerateArray());
+            Assert.True(ready.GetProperty("state").GetString() == "ready", ready.GetProperty("blocker").GetString());
+            using var activatedResponse = await client.PostAsJsonAsync($"{endpoint}/{planId}/activate", new { confirm = true, revision });
+            Assert.True(activatedResponse.IsSuccessStatusCode, await activatedResponse.Content.ReadAsStringAsync());
+            activated = await activatedResponse.Content.ReadFromJsonAsync<JsonElement>();
+        }
         Assert.Equal("activated", activated.GetProperty("state").GetString());
+        Assert.Equal(automatic, activated.GetProperty("activatedAutomatically").GetBoolean());
         var batchId = activated.GetProperty("targetBatchId").GetGuid();
         byte[][] targetOrder;
         await using (var scope = factory.Services.CreateAsyncScope())
@@ -130,12 +165,12 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
             var saved = await db.TerminalTableAssignments.SingleAsync(row => row.TerminalId == phone.Id);
             Assert.Equal(target.Id, saved.TableSetId); Assert.Equal(source.Id, saved.PreviousTableSetId);
             var batch = await db.DownloadBatches.Include(row => row.Items).ThenInclude(row => row.TableVersion).ThenInclude(row => row!.TableDefinition).SingleAsync(row => row.Id == batchId);
-            Assert.Equal(DownloadBatchStatus.Pending, batch.Status); Assert.Equal(target.Id, batch.TableSetId);
+            Assert.Equal(automatic && targetInstallContact ? DownloadBatchStatus.Completed : DownloadBatchStatus.Pending, batch.Status); Assert.Equal(target.Id, batch.TableSetId);
             Assert.Equal(targetRecords.Keys.Order(), batch.Items.Select(row => row.TableVersion!.TableDefinition!.TableNumber).Order());
             targetOrder = batch.Items.OrderBy(row => row.StepIndex).Select(row => targetRecords[row.TableVersion!.TableDefinition!.TableNumber]).ToArray();
         }
         using (var repeated = await client.PostAsJsonAsync($"{endpoint}/{planId}/activate", new { confirm = true, revision })) Assert.Equal(HttpStatusCode.Conflict, repeated.StatusCode);
-        await ExchangeDownload([44, 1], targetOrder);
+        if (!automatic || !targetInstallContact) await ExchangeDownload([44, 1], targetOrder);
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();

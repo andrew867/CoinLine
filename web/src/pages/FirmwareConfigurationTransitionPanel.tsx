@@ -9,7 +9,7 @@ type Options = { observed: { rom: string; software: string; capturedAtUtc: strin
   candidates: { id: string; name: string; firmwareLabel: string }[] }
 type Plan = { id: string; revision: number; state: 'staged' | 'ready' | 'activated' | 'cancelled'; blocker: string | null;
   sourceTableSetId: string; targetTableSetId: string; sourceControllerRom: string; sourceControllerSoftware: string;
-  targetControllerRom: string; targetControllerSoftware: string; targetBatchId: string | null }
+  targetControllerRom: string; targetControllerSoftware: string; targetBatchId: string | null; autoActivateOnContact?: boolean; activatedAutomatically?: boolean }
 type Preview = { plan: Plan; reviewToken: string }
 const path = '/api/firmware/configuration-transitions'
 
@@ -21,6 +21,7 @@ export function FirmwareConfigurationTransitionPanel({ phones }: { phones: Phone
   const [targetSetId, setTargetSetId] = useState('')
   const [codeScheduleId, setCodeScheduleId] = useState('')
   const [software, setSoftware] = useState('')
+  const [automatic, setAutomatic] = useState(false)
   const [preview, setPreview] = useState<Preview | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -41,7 +42,7 @@ export function FirmwareConfigurationTransitionPanel({ phones }: { phones: Phone
     setBusy(true); setError('')
     try {
       const response = await apiPostRaw(`${path}${stage ? '' : '/preview'}`, { terminalId: phoneId, targetSetId, codeScheduleId,
-        expectedControllerSoftware: software.trim(), reviewToken: stage ? preview?.reviewToken : undefined })
+        expectedControllerSoftware: software.trim(), autoActivateOnContact: automatic, reviewToken: stage ? preview?.reviewToken : undefined })
       const result = await response.json().catch(() => null)
       if (!response.ok || !result) throw new Error(result?.error ?? `Request failed (HTTP ${response.status}).`)
       if (stage) { setPreview(null); await refresh(phoneId) }
@@ -63,7 +64,7 @@ export function FirmwareConfigurationTransitionPanel({ phones }: { phones: Phone
   }
 
   function selectPhone(id: string) {
-    setPhoneId(id); setOptions(null); setPlans([]); setPreview(null); setTargetSetId(''); setCodeScheduleId(''); setSoftware('')
+    setPhoneId(id); setOptions(null); setPlans([]); setPreview(null); setTargetSetId(''); setCodeScheduleId(''); setSoftware(''); setAutomatic(false)
     if (id) void refresh(id)
   }
 
@@ -86,11 +87,14 @@ export function FirmwareConfigurationTransitionPanel({ phones }: { phones: Phone
           </select></label>
           <label>Expected controller software label (MT60)<input maxLength={4} value={software} disabled={busy} onChange={event => { setSoftware(event.target.value); setPreview(null) }} /></label>
           <small>This is the controller software label actually expected after upgrade, not an assumed copy of the code schedule's application revision.</small>
+          <label><input type="checkbox" checked={automatic} disabled={busy} onChange={event => { setAutomatic(event.target.checked); setPreview(null) }} /> Automatically activate on the first verified target-version contact</label>
+          <small>When selected, the reviewed plan authorizes Manager to activate the target configuration after all schedule and version checks pass. Only a normal table-download request starts transfer.</small>
           <button type="submit" disabled={busy || !targetSetId || !codeScheduleId || !software.trim()}>Preview configuration transition</button>
           {preview && <div aria-label="Reviewed transition">
             <p>{preview.plan.sourceControllerRom} / {preview.plan.sourceControllerSoftware} to {preview.plan.targetControllerRom} / {preview.plan.targetControllerSoftware}</p>
+            <p>{preview.plan.autoActivateOnContact ? 'Automatic activation approved on matching target-version contact.' : 'Manual administrator activation required.'}</p>
             <p><Link to={`/table-sets/${preview.plan.sourceTableSetId}`}>Current source configuration</Link> | <Link to={`/table-sets/${preview.plan.targetTableSetId}`}>Prepared target configuration</Link></p>
-            <button type="button" disabled={busy} onClick={() => { if (window.confirm('Stage this configuration without changing the phone or its code schedule?')) void create(true) }}>Stage reviewed configuration</button>
+            <button type="button" disabled={busy} onClick={() => { if (window.confirm(automatic ? 'Stage this configuration and authorize automatic activation after a verified target-version contact?' : 'Stage this configuration without changing the phone or its code schedule?')) void create(true) }}>Stage reviewed configuration</button>
           </div>}
         </form>}
         {plans.length === 0 ? <p>No staged or previous transitions for this phone.</p> : <div style={{ overflowX: 'auto' }}><table cellPadding={7} style={{ width: '100%' }}>
@@ -98,7 +102,8 @@ export function FirmwareConfigurationTransitionPanel({ phones }: { phones: Phone
           <tbody>{plans.map(plan => <tr key={plan.id}>
             <td>{plan.sourceControllerRom} / {plan.sourceControllerSoftware}</td><td>{plan.targetControllerRom} / {plan.targetControllerSoftware}</td>
             <td><Link to={`/table-sets/${plan.sourceTableSetId}`}>Source</Link> | <Link to={`/table-sets/${plan.targetTableSetId}`}>Target</Link></td>
-            <td>{plan.state === 'ready' ? 'Ready for activation' : plan.state === 'staged' ? 'Awaiting evidence' : plan.state === 'activated' ? 'Activated in Manager' : 'Cancelled'}{plan.blocker && <p>{plan.blocker}</p>}{plan.targetBatchId && <Link to={`/downloads/${plan.targetBatchId}`}>Target download</Link>}</td>
+            <td>{plan.state === 'ready' ? 'Ready for activation' : plan.state === 'staged' ? 'Awaiting evidence' : plan.state === 'activated' ? 'Activated in Manager' : 'Cancelled'}
+              {plan.autoActivateOnContact && <small style={{ display: 'block' }}>{plan.activatedAutomatically ? 'Activated automatically' : 'Automatic activation approved'}</small>}{plan.blocker && <p>{plan.blocker}</p>}{plan.targetBatchId && <Link to={`/downloads/${plan.targetBatchId}`}>Target download</Link>}</td>
             <td>{admin && (plan.state === 'ready' || plan.state === 'staged') && <><button type="button" disabled={busy || plan.state !== 'ready'} onClick={() => void change(plan, 'activate')}>Activate target configuration</button>{' '}<button type="button" disabled={busy || plan.state === 'ready'} onClick={() => void change(plan, 'cancel')}>Cancel plan</button></>}</td>
           </tr>)}</tbody></table></div>}
       </>}

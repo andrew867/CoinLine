@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using HostPlatform.Api.Audit;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
@@ -94,9 +95,9 @@ internal static class FirmwareConfigurationTransitionService
         return new(schedule, code, requested.Rom!, requested.Application!);
     }
 
-    public static async Task EnsureIdle(HostPlatformDbContext db, Guid terminalId, Guid codeScheduleId, CancellationToken ct)
+    public static async Task EnsureIdle(HostPlatformDbContext db, Guid terminalId, Guid codeScheduleId, CancellationToken ct, Guid? allowedSessionId = null)
     {
-        if (await db.NccSessions.AnyAsync(row => row.TerminalId == terminalId && row.Status == NccSessionStatus.Active, ct) ||
+        if (await db.NccSessions.AnyAsync(row => row.TerminalId == terminalId && row.Status == NccSessionStatus.Active && row.Id != allowedSessionId, ct) ||
             await db.DownloadBatches.AnyAsync(row => row.TerminalId == terminalId && row.ScheduleId != codeScheduleId &&
                 (row.Status == DownloadBatchStatus.Pending || row.Status == DownloadBatchStatus.Preparing || row.Status == DownloadBatchStatus.Running), ct) ||
             await db.ScheduledTableDownloads.AnyAsync(row => row.TerminalId == terminalId && row.Id != codeScheduleId && row.CancelledAtUtc == null && row.CompletedAtUtc == null, ct) ||
@@ -105,7 +106,7 @@ internal static class FirmwareConfigurationTransitionService
     }
 
     public static async Task<FirmwareConfigurationTransition> Prepare(HostPlatformDbContext db, Guid terminalId, Guid targetSetId,
-        Guid codeScheduleId, string? software, CancellationToken ct)
+        Guid codeScheduleId, string? software, CancellationToken ct, bool autoActivateOnContact = false)
     {
         software = software?.Trim();
         if (!Label(software, 4)) throw new InvalidOperationException("Enter the expected controller software label, up to four printable ASCII characters.");
@@ -126,21 +127,23 @@ internal static class FirmwareConfigurationTransitionService
             SourceAssignmentId = config.Assignment.Id, SourceAssignmentRevision = config.Assignment.Version,
             SourceTableSetId = config.Source.Id, TargetTableSetId = config.Target.Id,
             SourceSnapshot = SourceSnapshot(config), TargetSnapshot = TargetSnapshot(config), SourceObservationId = observed.Id,
-            SourceControllerRom = source.Rom!, SourceControllerSoftware = source.Software!, TargetControllerRom = code.Rom, TargetControllerSoftware = software!
+            SourceControllerRom = source.Rom!, SourceControllerSoftware = source.Software!, TargetControllerRom = code.Rom, TargetControllerSoftware = software!,
+            AutoActivateOnContact = autoActivateOnContact
         };
     }
 
     public static async Task<(Configuration Configuration, DlogTransaction Observation)> VerifyActivation(HostPlatformDbContext db,
-        FirmwareConfigurationTransition plan, CancellationToken ct)
+        FirmwareConfigurationTransition plan, CancellationToken ct, Guid? currentSessionId = null)
     {
         if (plan.ActivatedAtUtc != null || plan.CancelledAtUtc != null) throw new InvalidOperationException("This transition is no longer awaiting activation.");
+        if (currentSessionId != null && !plan.AutoActivateOnContact) throw new InvalidOperationException("Automatic activation was not approved for this plan.");
         var config = await ReadConfiguration(db, plan.TerminalId, plan.TargetTableSetId, ct);
         if (plan.SourceSnapshot != SourceSnapshot(config) || plan.TargetSnapshot != TargetSnapshot(config))
             throw new InvalidOperationException("The source assignment or target configuration changed since staging. Review again.");
         var code = await ReadSchedule(db, plan.TerminalId, plan.CodeScheduleId, ct);
         if (code.Record.Id != plan.CodeRecordVersionId || TableDistributionService.ComputePayloadSha256Hex(code.Record) != plan.CodeRecordSha256Hex)
             throw new InvalidOperationException("The scheduled code record changed since staging.");
-        await EnsureIdle(db, plan.TerminalId, plan.CodeScheduleId, ct);
+        await EnsureIdle(db, plan.TerminalId, plan.CodeScheduleId, ct, currentSessionId);
         var schedule = code.Schedule; var batch = schedule.LastBatch;
         // The schedule's active session pointer is cleared on completion; the
         // completed batch retains the durable NCC session and exact schedule ID.
@@ -158,12 +161,34 @@ internal static class FirmwareConfigurationTransitionService
         var observation = await LatestObservation(db, plan.TerminalId, ct);
         if (observation == null || observation.NccSessionId == batch.NccSessionId || observation.CapturedAtUtc <= schedule.CompletedAtUtc ||
             observation.CapturedAtUtc <= plan.CreatedAtUtc || observation.Id == plan.SourceObservationId ||
+            currentSessionId != null && observation.NccSessionId != currentSessionId ||
             FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != (plan.TargetControllerRom, plan.TargetControllerSoftware))
             throw new InvalidOperationException("Wait for a fresh matched NCC report of the expected target controller version after the schedule acknowledgement.");
+        var expectedStatus = currentSessionId == null ? NccSessionStatus.Closed : NccSessionStatus.Active;
         if (!await db.NccSessions.AnyAsync(row => row.Id == observation.NccSessionId && row.TerminalId == plan.TerminalId &&
-            row.StartedAtUtc > schedule.CompletedAtUtc && row.Status == NccSessionStatus.Closed, ct))
+            row.StartedAtUtc > schedule.CompletedAtUtc && row.Status == expectedStatus, ct))
             throw new InvalidOperationException("Wait for a separate matched NCC connection opened after the code schedule acknowledgement.");
         return (config, observation);
+    }
+
+    // Caller owns a serializable transaction. No transport I/O occurs here.
+    public static async Task<DownloadBatch> Activate(HostPlatformDbContext db, TableDistributionService tables,
+        FirmwareConfigurationTransition plan, DateTime now, CancellationToken ct, HttpContext? http = null, Guid? currentSessionId = null)
+    {
+        var (config, observation) = await VerifyActivation(db, plan, ct, currentSessionId);
+        config.Phone.FirmwareVersionId = plan.TargetFirmwareVersionId; config.Phone.Version++;
+        config.Assignment.PreviousTableSetId = plan.SourceTableSetId; config.Assignment.TableSetId = plan.TargetTableSetId;
+        config.Assignment.AssignedAtUtc = now; config.Assignment.Version++;
+        // The queue reads the registered firmware from the database. Save within the same transaction.
+        await db.SaveChangesAsync(ct);
+        var (batch, _) = await tables.PrepareDownloadBatchAsync(plan.TerminalId, plan.TargetTableSetId, DownloadScope.Full, null, ct);
+        plan.ActivatedAtUtc = now; plan.TargetObservationId = observation.Id; plan.TargetBatchId = batch.Id;
+        plan.ActivatedAutomatically = currentSessionId != null; plan.Version++;
+        ApiAudit.Write(db, http, "firmware.configuration", "activate_transition", plan.Id.ToString(), new
+        { plan.SourceTableSetId, plan.TargetTableSetId, plan.TargetObservationId, plan.TargetBatchId, plan.ActivatedAutomatically,
+            activationSessionId = currentSessionId, approvedPlanActor = plan.CreatedBy }, plan.TerminalId);
+        await db.SaveChangesAsync(ct);
+        return batch;
     }
 
     private static Task<TableSet> ReadSet(HostPlatformDbContext db, Guid id, CancellationToken ct) =>

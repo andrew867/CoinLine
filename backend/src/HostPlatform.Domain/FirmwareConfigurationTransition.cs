@@ -20,6 +20,8 @@ public sealed class FirmwareConfigurationTransition : AuditableEntity
     public string SourceControllerSoftware { get; set; } = string.Empty;
     public string TargetControllerRom { get; set; } = string.Empty;
     public string TargetControllerSoftware { get; set; } = string.Empty;
+    public bool AutoActivateOnContact { get; set; }
+    public bool ActivatedAutomatically { get; set; }
     public Guid? TargetObservationId { get; set; }
     public Guid? TargetBatchId { get; set; }
     public DateTime? ActivatedAtUtc { get; set; }

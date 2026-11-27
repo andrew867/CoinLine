@@ -25,7 +25,7 @@ public sealed class FirmwareConfigurationTransitionsController(HostPlatformDbCon
     OperatorTokenSigningKey signingKey, TimeProvider clock) : ControllerBase
 {
     public sealed record FirmwareConfigurationTransitionRequest(Guid TerminalId, Guid TargetSetId, Guid CodeScheduleId,
-        string? ExpectedControllerSoftware, string? ReviewToken = null);
+        string? ExpectedControllerSoftware, string? ReviewToken = null, bool AutoActivateOnContact = false);
     public sealed record FirmwareConfigurationTransitionConfirmation(bool Confirm, int Revision);
 
     [HttpGet("options")]
@@ -100,7 +100,7 @@ public sealed class FirmwareConfigurationTransitionsController(HostPlatformDbCon
             var plan = await Prepare(request, ct);
             if (Stamp(plan) != request.ReviewToken) return Conflict(new { error = "The reviewed configuration or live source report changed. Preview again." });
             db.FirmwareConfigurationTransitions.Add(plan);
-            ApiAudit.Write(db, HttpContext, "firmware.configuration", "stage_transition", plan.Id.ToString(), new { plan.SourceTableSetId, plan.TargetTableSetId, plan.CodeScheduleId, plan.SourceObservationId }, plan.TerminalId);
+            ApiAudit.Write(db, HttpContext, "firmware.configuration", "stage_transition", plan.Id.ToString(), new { plan.SourceTableSetId, plan.TargetTableSetId, plan.CodeScheduleId, plan.SourceObservationId, plan.AutoActivateOnContact }, plan.TerminalId);
             await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
             return Created($"/api/firmware/configuration-transitions?terminalId={plan.TerminalId}", View(plan, "Awaiting acknowledged code schedule and a fresh target version report."));
         }
@@ -120,17 +120,8 @@ public sealed class FirmwareConfigurationTransitionsController(HostPlatformDbCon
             var plan = await db.FirmwareConfigurationTransitions.SingleOrDefaultAsync(row => row.Id == id, ct);
             if (plan == null) return NotFound();
             if (plan.Version != request.Revision) return Conflict(new { error = "The transition changed. Reload its status." });
-            var (config, observation) = await FirmwareConfigurationTransitionService.VerifyActivation(db, plan, ct);
-            var now = clock.GetUtcNow().UtcDateTime;
-            config.Phone.FirmwareVersionId = plan.TargetFirmwareVersionId; config.Phone.Version++;
-            config.Assignment.PreviousTableSetId = plan.SourceTableSetId; config.Assignment.TableSetId = plan.TargetTableSetId;
-            config.Assignment.AssignedAtUtc = now; config.Assignment.Version++;
-            // The queue reads the registered firmware from the database. Save within the same transaction.
-            await db.SaveChangesAsync(ct);
-            var (batch, _) = await tables.PrepareDownloadBatchAsync(plan.TerminalId, plan.TargetTableSetId, DownloadScope.Full, null, ct);
-            plan.ActivatedAtUtc = now; plan.TargetObservationId = observation.Id; plan.TargetBatchId = batch.Id; plan.Version++;
-            ApiAudit.Write(db, HttpContext, "firmware.configuration", "activate_transition", plan.Id.ToString(), new { plan.SourceTableSetId, plan.TargetTableSetId, plan.TargetObservationId, plan.TargetBatchId }, plan.TerminalId);
-            await db.SaveChangesAsync(ct); await transaction.CommitAsync(ct);
+            await FirmwareConfigurationTransitionService.Activate(db, tables, plan, clock.GetUtcNow().UtcDateTime, ct, HttpContext);
+            await transaction.CommitAsync(ct);
             return Ok(View(plan));
         }
         catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
@@ -162,16 +153,17 @@ public sealed class FirmwareConfigurationTransitionsController(HostPlatformDbCon
     }
 
     private Task<FirmwareConfigurationTransition> Prepare(FirmwareConfigurationTransitionRequest request, CancellationToken ct) =>
-        FirmwareConfigurationTransitionService.Prepare(db, request.TerminalId, request.TargetSetId, request.CodeScheduleId, request.ExpectedControllerSoftware, ct);
+        FirmwareConfigurationTransitionService.Prepare(db, request.TerminalId, request.TargetSetId, request.CodeScheduleId, request.ExpectedControllerSoftware, ct, request.AutoActivateOnContact);
 
     private string Stamp(FirmwareConfigurationTransition plan) => Convert.ToHexString(HMACSHA256.HashData(Encoding.UTF8.GetBytes(signingKey.Value),
         JsonSerializer.SerializeToUtf8Bytes(new { domain = "firmware-configuration-transition-v1", plan.TerminalId, plan.CodeScheduleId, plan.CodeRecordVersionId,
-            plan.CodeRecordSha256Hex, plan.SourceSnapshot, plan.TargetSnapshot, plan.SourceObservationId, plan.TargetControllerRom, plan.TargetControllerSoftware }))).ToLowerInvariant();
+            plan.CodeRecordSha256Hex, plan.SourceSnapshot, plan.TargetSnapshot, plan.SourceObservationId, plan.TargetControllerRom, plan.TargetControllerSoftware, plan.AutoActivateOnContact }))).ToLowerInvariant();
 
     private static object View(FirmwareConfigurationTransition plan, string? blocker = null) => new
     {
         plan.Id, plan.TerminalId, plan.CodeScheduleId, plan.SourceFirmwareVersionId, plan.TargetFirmwareVersionId, plan.SourceTableSetId, plan.TargetTableSetId,
         plan.SourceControllerRom, plan.SourceControllerSoftware, plan.TargetControllerRom, plan.TargetControllerSoftware, plan.SourceObservationId,
+        plan.AutoActivateOnContact, plan.ActivatedAutomatically,
         plan.TargetObservationId, plan.TargetBatchId, plan.CreatedAtUtc, plan.ActivatedAtUtc, plan.CancelledAtUtc, revision = plan.Version,
         state = plan.ActivatedAtUtc != null ? "activated" : plan.CancelledAtUtc != null ? "cancelled" : blocker == null ? "ready" : "staged", blocker
     };
