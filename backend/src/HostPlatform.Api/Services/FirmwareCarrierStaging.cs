@@ -10,10 +10,12 @@ namespace HostPlatform.Api.Services;
 
 internal sealed record FirmwareCarrierStagingPreview(Guid SourceSetId, Guid CandidateSetId, int RecordCount, bool CanCreate,
     CarrierTransitionRow[] Rows, CarrierTransitionMapping[] Mappings, int[] ChangedSlots, bool DefaultSelectionsChanged,
-    CarrierTransitionFinding[] Findings, string PreviewToken);
+    CarrierTransitionFinding[] Findings, string PreviewToken, FirmwareCardPreparationPreview? CardPreparation);
+
+internal sealed record FirmwareCardPreparationPreview(CardTransitionRow[] Rows, int[] ChangedSlots);
 
 internal sealed record FirmwareCarrierStagingPlan(FirmwareCarrierStagingPreview Preview, TableSet Candidate,
-    TableVersion Carrier, byte[] UpdatedCarrier, Guid CustomerId, Guid TargetFirmwareId, string Name)
+    TableVersion Carrier, byte[] UpdatedCarrier, TableVersion Card, byte[]? UpdatedCard, Guid CustomerId, Guid TargetFirmwareId, string Name)
 {
     public TableSet CreateDraft()
     {
@@ -22,14 +24,18 @@ internal sealed record FirmwareCarrierStagingPlan(FirmwareCarrierStagingPreview 
         foreach (var original in Candidate.Versions)
         {
             var copy = TableDistributionService.CopyVersion(original);
-            if (original.Id == Carrier.Id && (Preview.ChangedSlots.Length > 0 || Preview.DefaultSelectionsChanged))
+            var updated = original.Id == Carrier.Id && (Preview.ChangedSlots.Length > 0 || Preview.DefaultSelectionsChanged) ? UpdatedCarrier
+                : original.Id == Card.Id && Preview.CardPreparation?.ChangedSlots.Length > 0 ? UpdatedCard : null;
+            if (updated != null)
             {
-                var hash = TablePayloadHasher.Sha256Hex(UpdatedCarrier);
+                var hash = TablePayloadHasher.Sha256Hex(updated);
                 copy.TablePayloadId = null;
-                copy.TablePayload = new TablePayload { RawContent = UpdatedCarrier, Sha256Hex = hash, LengthBytes = UpdatedCarrier.Length };
-                copy.EmbeddedPayload = null; copy.PayloadSha256Hex = hash; copy.Checksum = SHA256.HashData(UpdatedCarrier);
+                copy.TablePayload = new TablePayload { RawContent = updated, Sha256Hex = hash, LengthBytes = updated.Length };
+                copy.EmbeddedPayload = null; copy.PayloadSha256Hex = hash; copy.Checksum = SHA256.HashData(updated);
                 copy.TableRevision = checked(copy.TableRevision + 1);
-                (copy.ValidationPassed, copy.ValidationDiagnosticsJson) = TableDistributionService.ValidatePayload(original.TableDefinition!, UpdatedCarrier);
+                (copy.ValidationPassed, copy.ValidationDiagnosticsJson) = TableDistributionService.ValidatePayload(original.TableDefinition!, updated);
+                if (original.Id == Card.Id)
+                    copy.CardMasterLinksJson = CardMasterLinks.Reconcile(134, updated, copy.CardMasterLinksJson);
             }
             draft.Versions.Add(copy);
         }
@@ -41,7 +47,7 @@ internal static class FirmwareCarrierStaging
 {
     public static async Task<FirmwareCarrierStagingPlan?> BuildAsync(HostPlatformDbContext db, Guid phoneId,
         Guid targetFirmwareId, Guid candidateSetId, string? name, Dictionary<int, int>? cardChoices,
-        Dictionary<int, int>? screeningChoices, CancellationToken ct)
+        Dictionary<int, int>? screeningChoices, bool prepareCards, CancellationToken ct)
     {
         name = name?.Trim();
         if (string.IsNullOrWhiteSpace(name) || name.Length > 120) throw new InvalidOperationException("Enter a new draft name of up to 120 characters.");
@@ -67,10 +73,23 @@ internal static class FirmwareCarrierStaging
             throw new InvalidOperationException("Choose registered profiles with identified earlier MT22/23/92 and later MT134/135/92 lengths.");
         var from = Records(source, sourceProfile); var to = Records(candidate, targetProfile);
         var a = Required(from, 23, NativeTableLayouts.MultiPay); var b = Required(to, 135, NativeTableLayouts.Later);
-        var projection = CarrierTransitionWire.Project(Raw(a), Raw(b), Raw(Required(from, 22, NativeTableLayouts.MultiPay)),
-            Raw(Required(to, 134, NativeTableLayouts.Later)), Raw(Required(from, 92, NativeTableLayouts.MultiPay)),
-            Raw(Required(to, 92, NativeTableLayouts.Later)), cardChoices, screeningChoices);
-        var findings = projection.Findings.ToList();
+        var sourceCard = Required(from, 22, NativeTableLayouts.MultiPay); var targetCard = Required(to, 134, NativeTableLayouts.Later);
+        var requestedCardChoices = cardChoices?.OrderBy(row => row.Key).ToArray() ?? [];
+        var requestedScreeningChoices = screeningChoices?.OrderBy(row => row.Key).ToArray() ?? [];
+        var findings = new List<CarrierTransitionFinding>();
+        CardTransitionProjection? cards = null;
+        if (prepareCards)
+        {
+            cards = CardTransitionWire.Project(Raw(sourceCard), Raw(targetCard), Raw(a), Raw(b));
+            findings.AddRange(cards.Findings);
+            if (cardChoices?.Count > 0) findings.Add(new(true, null, "Clear manual card mapping choices when preparing ordered card ranges together with carriers."));
+            cardChoices = cards.Rows.ToDictionary(row => row.SourceSlot, row => row.TargetSlot);
+            if (targetCard.TableRevision == int.MaxValue && cards.ChangedSlots.Length > 0)
+                findings.Add(new(true, null, "The candidate MT134 has reached the maximum record revision."));
+        }
+        var projection = CarrierTransitionWire.Project(Raw(a), Raw(b), Raw(sourceCard), cards?.Payload ?? Raw(targetCard),
+            Raw(Required(from, 92, NativeTableLayouts.MultiPay)), Raw(Required(to, 92, NativeTableLayouts.Later)), cardChoices, screeningChoices);
+        findings.AddRange(projection.Findings);
         if (sourceProfile.ObservedLengthsOnly || targetProfile.ObservedLengthsOnly)
             findings.Add(new(false, null, "At least one registered profile establishes record lengths only. The common packed carrier fields are identified, but native behavior and the upgrade pair remain unqualified."));
         if (b.TableRevision == int.MaxValue && (projection.ChangedSlots.Length != 0 || projection.DefaultSelectionsChanged))
@@ -83,12 +102,15 @@ internal static class FirmwareCarrierStaging
             assignmentId = assignment!.Id, assignmentRevision = assignment.Version,
             sourceId = source.Id, sourceRevision = source.Version, sourceRecords = Snapshot(from.Values),
             candidateId = candidate.Id, candidateRevision = candidate.Version, candidateRecords = Snapshot(to.Values), name,
+            prepareCards, requestedCardChoices, requestedScreeningChoices,
+            cardRows = cards?.Rows, cardOutputHash = cards == null ? null : TablePayloadHasher.Sha256Hex(cards.Payload),
             mappings = projection.Mappings.Select(row => new { row.Kind, row.SourceSlot, row.TargetSlot }),
             outputHash = TablePayloadHasher.Sha256Hex(projection.Payload)
         }));
         return new(new(source.Id, candidate.Id, to.Count, !findings.Any(row => row.Blocking), projection.Rows, projection.Mappings,
-            projection.ChangedSlots, projection.DefaultSelectionsChanged, findings.Distinct().ToArray(), token),
-            candidate, b, projection.Payload, customer, target.Id, name);
+            projection.ChangedSlots, projection.DefaultSelectionsChanged, findings.Distinct().ToArray(), token,
+            cards == null ? null : new(cards.Rows, cards.ChangedSlots)),
+            candidate, b, projection.Payload, targetCard, cards?.Payload, customer, target.Id, name);
 
         Task<TableSet?> ReadSet(Guid id) => db.TableSets.AsNoTracking().Include(s => s.Versions).ThenInclude(r => r.TableDefinition)
             .Include(s => s.Versions).ThenInclude(r => r.TablePayload).SingleOrDefaultAsync(s => s.Id == id, ct);
