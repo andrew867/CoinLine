@@ -10,5 +10,6 @@
 - [Terminal table catalogue and parity audit](table-catalog-and-parity-audit.md)
 - [Cross-configuration call-screening slots](screening-bulk-slots.md)
 - [Manually selected phone download preparation](manual-download-preparation.md)
+- [E-purse module inventory](module-inventory.md)
 - [Cashbox status query](cashbox-status-query.md)
 - [Explicit call upload completion](call-upload-completion.md)

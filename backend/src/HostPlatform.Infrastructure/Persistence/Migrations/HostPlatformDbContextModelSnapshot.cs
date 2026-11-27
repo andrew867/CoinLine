@@ -4412,6 +4412,49 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("TerminalInventories");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.TerminalModuleInventory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("ProtonId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<string>("SmartCityId")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("TerminalModuleInventories");
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.TerminalStatusRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5840,6 +5883,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         });
 
                     b.Navigation("Details")
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.TerminalModuleInventory", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithOne()
+                        .HasForeignKey("HostPlatform.Domain.TerminalModuleInventory", "TerminalId")
+                        .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
                 });
 

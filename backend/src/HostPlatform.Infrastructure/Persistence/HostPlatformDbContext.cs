@@ -24,6 +24,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<TransportEndpoint> TransportEndpoints => Set<TransportEndpoint>();
     public DbSet<Terminal> Terminals => Set<Terminal>();
     public DbSet<TerminalInventory> TerminalInventories => Set<TerminalInventory>();
+    public DbSet<TerminalModuleInventory> TerminalModuleInventories => Set<TerminalModuleInventory>();
     public DbSet<TerminalInmateConfiguration> TerminalInmateConfigurations => Set<TerminalInmateConfiguration>();
     public DbSet<TerminalCallbackRequest> TerminalCallbackRequests => Set<TerminalCallbackRequest>();
     public DbSet<TerminalEvent> TerminalEvents => Set<TerminalEvent>();
@@ -167,6 +168,11 @@ public class HostPlatformDbContext : DbContext
             b.HasOne(row => row.FeatureConfiguration).WithMany().HasForeignKey(row => row.FeatureConfigurationId)
                 .OnDelete(DeleteBehavior.Restrict);
             b.Property(row => row.SetupConfigurationId).HasMaxLength(6);
+            b.Property(row => row.Version).IsConcurrencyToken();
+        });
+        modelBuilder.Entity<TerminalModuleInventory>(b =>
+        {
+            b.HasOne<Terminal>().WithOne().HasForeignKey<TerminalModuleInventory>(row => row.TerminalId);
             b.Property(row => row.Version).IsConcurrencyToken();
         });
         modelBuilder.Entity<TerminalGroupMembership>(b =>
