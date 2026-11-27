@@ -153,6 +153,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify common firmware controls transition workflow
+        run: npm run e2e -- e2e/firmware-common-control-transition.spec.ts --output test-results/firmware-common-control-transition
+        env:
+          CI: "true"
+
       - name: Verify cross-configuration screening workflow
         run: npm run e2e -- e2e/screening-bulk.spec.ts --output test-results/screening-bulk
         env:
