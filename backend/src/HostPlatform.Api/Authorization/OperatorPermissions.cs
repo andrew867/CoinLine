@@ -67,7 +67,7 @@ public static class OperatorPermissions
             ("FirmwareCarrierStaging", A, "Create"),
             ("Terminals", R, "Families"),
             ("Tables", A, "CreateSet CloneSet"), ("Firmware", A, "StageAccessConfiguration StageScreeningConfiguration"), ("Tables", U, "UpdateSet SetFirmwareTarget SetConfigurationId PublishSet ApplyRecordCopy"),
-            ("Tables", A | U, "FirmwareOptions"));
+            ("Tables", A | U, "FirmwareOptions"), ("FirmwareSetupStaging", A, "Create"));
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
@@ -76,6 +76,7 @@ public static class OperatorPermissions
             ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
             ("ConfigurationLibrary", R, "List Options"),
+            ("FirmwareSetupStaging", R, "Preview"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
             ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
             ("NativeTableConfiguration", R, "PreviewNumberingOverlay"), ("NativeTableConfiguration", U, "ApplyNumberingOverlay"),
