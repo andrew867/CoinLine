@@ -1,13 +1,13 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
-import { apiGet } from '../api/client'
+import { apiGet, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { mayOpenScreen } from '../components/Layout'
 import { CashboxQueryLink, CashboxQueryPage } from './CashboxQueryPage'
 import { TerminalCashboxPanel } from './TerminalCashboxPanel'
 
-vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiFetch: vi.fn() }))
+vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiFetch: vi.fn(), apiPostRaw: vi.fn() }))
 
 const phones = ['Alpha', 'Beta', 'Gamma'].map((displayName, index) => ({
   id: `fixture-${index}`, displayName, terminalIdHex: `000000000${index + 1}`,
@@ -134,4 +134,39 @@ it('keeps raw counts when denomination evidence is missing, ambiguous or invalid
     expect(within(row).queryByText(/configured 0/)).not.toBeInTheDocument()
   }
   expect(within(rows[3]).getByText('Slot 4: 3 (configured 0.25, not enabled for acceptance)')).toBeVisible()
+})
+
+it('records only an explicitly verified empty box and keeps it separate from terminal reports', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { cashbox: 5 })
+  vi.mocked(apiGet).mockResolvedValueOnce({ statuses: [], collections: [], initializations: [], canInitializeEmpty: true })
+    .mockResolvedValue({ statuses: [], collections: [], canInitializeEmpty: false, initializations: [{
+      id: 'init-1', boxNumber: '012345AB', openingTime: '2028-02-29T10:11:12', recordedAtUtc: receivedAtUtc, isCurrent: true,
+    }] })
+  vi.mocked(apiPostRaw).mockResolvedValue(new Response('{}', { status: 200 }))
+  render(<MemoryRouter><TerminalCashboxPanel terminalId="fixture-0" /></MemoryRouter>)
+  const form = await screen.findByRole('region', { name: 'Initialize observed empty box' })
+  const submit = within(form).getByRole('button', { name: 'Record empty-box initialization' })
+  expect(submit).toBeDisabled()
+  fireEvent.change(within(form).getByLabelText('Box identifier (8 hexadecimal digits)'), { target: { value: '012345ab' } })
+  fireEvent.change(within(form).getByLabelText('Observed phone opening clock'), { target: { value: '2028-02-29T10:11:12' } })
+  expect(submit).toBeDisabled()
+  fireEvent.click(within(form).getByRole('checkbox'))
+  expect(submit).toBeEnabled()
+  fireEvent.click(submit)
+  await waitFor(() => expect(apiPostRaw).toHaveBeenCalledWith('/api/terminals/fixture-0/cashbox/initialize-empty', {
+    boxNumber: '012345AB', openingClock: '2028-02-29T10:11:12', confirmEmpty: true,
+  }))
+  const baseline = await screen.findByRole('region', { name: 'Operator-confirmed empty box' })
+  expect(within(baseline).getByText(/Starting balance 0.00/)).toBeVisible()
+  expect(within(baseline).getByText(/not a terminal report or collection/)).toBeVisible()
+  expect(screen.getByText('No cashbox reports yet.')).toBeVisible()
+  expect(screen.queryByRole('region', { name: 'Current reported cashbox' })).not.toBeInTheDocument()
+})
+
+it('does not expose empty-box initialization to a read-only operator', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { cashbox: 1 })
+  vi.mocked(apiGet).mockResolvedValue({ statuses: [], collections: [], initializations: [], canInitializeEmpty: true })
+  render(<MemoryRouter><TerminalCashboxPanel terminalId="fixture-0" /></MemoryRouter>)
+  await screen.findByText('No cashbox reports yet.')
+  expect(screen.queryByRole('region', { name: 'Initialize observed empty box' })).not.toBeInTheDocument()
 })

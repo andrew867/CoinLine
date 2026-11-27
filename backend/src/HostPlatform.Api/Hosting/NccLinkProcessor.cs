@@ -586,7 +586,8 @@ internal sealed class NccLinkProcessor(
                 }
 
                 var statusRequested = (packet.Data[1] & DlogCashboxWire.StatusRequestFlag) != 0;
-                var status = statusRequested ? await TerminalCashboxAccounting.ReadCurrentStatusBytesAsync(db, terminal.Id, stoppingToken) : null;
+                var offer = statusRequested ? await TerminalCashboxAccounting.ReadCurrentStatusOfferAsync(db, terminal.Id, stoppingToken) : null;
+                var status = offer?.Bytes;
                 // MT38 is a complete status record. MT17 starts the terminal's
                 // upload, so neither a table-update marker nor EOD belongs here.
                 // An unknown current box must never receive a fabricated status.
@@ -594,7 +595,7 @@ internal sealed class NccLinkProcessor(
                 var sent = await SendDialogueReplyAsync(stream, packet, response, "call upload request");
                 if (statusRequested)
                 {
-                    Audit("call_upload_cashbox_restore", new { available = status != null, sent, responseBytes = response.Length }, terminal.Id);
+                    Audit("call_upload_cashbox_restore", new { available = status != null, sent, responseBytes = response.Length, source = offer?.Source }, terminal.Id);
                     await db.SaveChangesAsync(stoppingToken);
                 }
             }
