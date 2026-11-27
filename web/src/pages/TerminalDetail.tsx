@@ -16,6 +16,7 @@ import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 import { EmptyHint, ErrorBanner, LoadingBlock } from '../components/AppStates'
 import { StatusBadge, terminalStatusLabel, terminalStatusVariant } from '../components/StatusBadge'
+import { TerminalDeliveryReview } from './TerminalDeliveryReview'
 
 type DiagnosticsPayload = {
   hardwareValidationNotice?: string
@@ -718,6 +719,8 @@ export function TerminalDetail() {
           <div>Assigned: {new Date(assign.assignedAtUtc).toLocaleString()}</div>
         </div>
       )}
+      {assign && canPerform('table-records', op.read) && canPerform('downloads', op.read) &&
+        <TerminalDeliveryReview terminalId={id} assignmentKey={`${assign.tableSetId}:${term.firmwareVersionId ?? ''}`} />}
       {!terminalActive && <p>Reactivate the phone before assigning or rolling back a table set.</p>}
       {canAssign && <form onSubmit={applyAssignment} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
         <label>

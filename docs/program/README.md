@@ -2,6 +2,7 @@
 
 - [Backend handoff](handoff-agent-continuation.md)
 - [Individual phone configuration assignments](phone-configuration-worksheet.md)
+- [Assigned configuration delivery review](terminal-delivery-review.md)
 - [Emulator acceptance](phase-5-emulator-acceptance.md)
 - [Firmware lab results](phase-5-gate-status.md)
 - [Latest reported terminal status](current-terminal-status.md)

@@ -102,6 +102,7 @@ public static class OperatorPermissions
         Screen("table-assignments", "Table assignments",
             ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
             ("TerminalConfigurationWorksheet", R, "Get Options Preview"), ("TerminalConfigurationWorksheet", U, "Apply"),
+            ("TerminalDeliveryReview", R, "Get"),
             ("Terminals", R, "GetTableAssignment TableAssignmentOptions RoutineCallIn"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
         Screen("downloads", "Downloads",
             ("Downloads", R, "List Get"), ("Downloads", U, "Cancel Retry"),
