@@ -31,10 +31,12 @@ public sealed class PostgresDialedNumberReviewTests
         var other = new TableSet { Name = "Other configuration", TargetFirmwareVersion = firmware };
         var unknown = new TableSet { Name = "Untargeted review" };
         var screening = Template(92); var rates = Template(73); var plan = Template(62);
+        var international = Edit(Template(151), new() { ["noMatch"] = "1", ["fallback"] = "1", ["country-0.country"] = "44", ["country-0.rate"] = "2",
+            ["country-1.country"] = "441", ["country-1.rate"] = "100" });
         screening = Edit(screening, new() { ["rule-0.pattern"] = "2374", ["rule-0.classification"] = "9", ["rule-0.payment"] = "2", ["rule-0.free"] = "true" });
         var unrelated = Edit(screening, new() { ["rule-0.pattern"] = "2375" });
         plan.AsSpan(21, 5).Fill(0xA5);
-        Add(set, screening); Add(set, rates); Add(set, plan); Add(set, Template(26)); Add(set, Template(26)); Add(other, unrelated);
+        Add(set, screening); Add(set, rates); Add(set, plan); Add(set, international); Add(set, Template(26)); Add(set, Template(26)); Add(other, unrelated);
         var reader = TestOperatorAuthentication.EnsureAccount(factory, $"fixture-review-reader-{Guid.NewGuid():N}", "Operator");
         var restricted = TestOperatorAuthentication.EnsureAccount(factory, $"fixture-review-restricted-{Guid.NewGuid():N}", "Operator");
         await using (var scope = factory.Services.CreateAsyncScope())
@@ -53,6 +55,7 @@ public sealed class PostgresDialedNumberReviewTests
         Assert.Equal(HttpStatusCode.Forbidden, (await noRead.PostAsJsonAsync(path, body)).StatusCode);
         Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync(path, body)).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await read.PostAsJsonAsync(path, new { digits = "2374#" })).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await read.PostAsJsonAsync(path, new { digits = "01144123", internationalDigits = "+44123" })).StatusCode);
         Assert.Equal(HttpStatusCode.NotFound, (await read.PostAsJsonAsync($"/api/tables/sets/{Guid.NewGuid()}/dialed-number-review", body)).StatusCode);
         using var response = await read.PostAsJsonAsync(path, body); response.EnsureSuccessStatusCode();
         Assert.True(response.Headers.CacheControl!.NoStore);
@@ -64,6 +67,14 @@ public sealed class PostgresDialedNumberReviewTests
         Assert.Equal(new[] { 26 }, review.GetProperty("unreviewedRecords").Deserialize<int[]>());
         Assert.DoesNotContain("2375", json); Assert.DoesNotContain("A5A5A5A5", json, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain("rawPayload", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(review.GetProperty("findings").EnumerateArray(), row => row.GetProperty("tableNumber").GetInt32() == 151);
+        using var internationalResponse = await read.PostAsJsonAsync(path, new { digits = "01144123", internationalDigits = "44123" });
+        internationalResponse.EnsureSuccessStatusCode(); Assert.True(internationalResponse.Headers.CacheControl!.NoStore);
+        var internationalReview = (await internationalResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("review");
+        Assert.Equal(new[] { 29, 30 }, internationalReview.GetProperty("tariffs").EnumerateArray().Select(row => row.GetProperty("index").GetInt32()));
+        Assert.Contains(internationalReview.GetProperty("findings").EnumerateArray(), row => row.GetProperty("tableNumber").GetInt32() == 151 &&
+            row.GetProperty("rateIndex").ValueKind == JsonValueKind.Number && row.GetProperty("rateIndex").GetInt32() == 29);
+        Assert.Contains(internationalReview.GetProperty("warnings").EnumerateArray(), row => row.GetString()!.Contains("Multiple international"));
         var noTarget = await (await admin.PostAsJsonAsync($"/api/tables/sets/{unknown.Id}/dialed-number-review", body)).Content.ReadFromJsonAsync<JsonElement>();
         Assert.False(noTarget.GetProperty("review").GetProperty("supported").GetBoolean());
         await using (var scope = factory.Services.CreateAsyncScope())
@@ -74,6 +85,7 @@ public sealed class PostgresDialedNumberReviewTests
             Assert.Equal(set.Version, original.Version); Assert.Equal(TableSetStatus.Draft, original.Status);
             Assert.Equal(screening, TableDistributionService.GetEffectivePayload(Assert.Single(original.Versions, row => row.TableDefinition!.TableNumber == 92)));
             Assert.Equal(plan, TableDistributionService.GetEffectivePayload(Assert.Single(original.Versions, row => row.TableDefinition!.TableNumber == 62)));
+            Assert.Equal(international, TableDistributionService.GetEffectivePayload(Assert.Single(original.Versions, row => row.TableDefinition!.TableNumber == 151)));
             Assert.Empty(await db.TerminalTableAssignments.Where(row => row.TableSetId == set.Id).ToListAsync());
             Assert.Empty(await db.DownloadBatches.Where(row => row.TableSetId == set.Id).ToListAsync());
         }
