@@ -5,7 +5,7 @@ public sealed record TableReviewFinding(int TableNumber, string Message);
 public sealed record TableProvisioningReview(
     string? OperatingType, int? AcceptedCoinSlots, int? ConfiguredCardRanges,
     bool? OnHookAdvertising, IReadOnlyList<TableReviewFinding> Findings, int? VisibleOnHookTextMessages = null,
-    bool? GraphicalOnHookAdvertising = null);
+    bool? GraphicalOnHookAdvertising = null, CollectionConfigurationReview? CollectionConfiguration = null);
 
 public static class NativeTableSetReview
 {
@@ -116,7 +116,8 @@ public static class NativeTableSetReview
             foreach (var finding in MessagingServiceWire.OperatingFindings(messaging))
                 findings.Add(new(MessagingServiceWire.MessageType, finding));
 
-        return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings, visibleOnHookTextMessages, graphicalAdvertising);
+        return new TableProvisioningReview(type, coinSlots, cardRanges, advertising, findings, visibleOnHookTextMessages, graphicalAdvertising,
+            CollectionConfigurationReview.Build(records));
     }
 
     private static byte[]? Get(IReadOnlyDictionary<int, byte[]> records, int number, int length) =>

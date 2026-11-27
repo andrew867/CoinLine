@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { CollectionConfigurationPanel, type CollectionConfiguration } from './CollectionConfigurationPanel'
 import { apiFetch, apiPost, apiPostBareOk, apiPut } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { TableSetAssignment } from './TableSetAssignment'
@@ -53,6 +54,7 @@ type Detail = {
     onHookAdvertising: boolean | null
     graphicalOnHookAdvertising?: boolean | null
     visibleOnHookTextMessages?: number | null
+    collectionConfiguration?: CollectionConfiguration | null
     findings: { tableNumber: number; message: string }[]
   }
 }
@@ -270,6 +272,8 @@ export function TableSetDetail() {
           ))}</ul>}
         </section>
       )}
+      {d.provisioning?.collectionConfiguration && <CollectionConfigurationPanel review={d.provisioning.collectionConfiguration}
+        setId={d.id} allowLinks={canReadRecords && !recordDirty} />}
       {draft && canUpdate && <TableRecordCopy key={d.id} setId={d.id} revision={d.revision} customerId={d.customerId}
         disabled={recordDirty || targetChanged} onSaved={load} />}
       {canReadRecords && <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
