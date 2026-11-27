@@ -11,8 +11,8 @@ const field = (key: string, label: string, value: string | null, editor = 'numbe
   ({ key, label, value, editor, isSpare, min: 0, max: 255, maxLength: null, choices: null, help: null })
 const layout = (length: number, sections: unknown[], profile = 'Later packed profile') =>
   ({ supported: true, editable: true, profile, length, revision: 1, sha256: 'fixture-hash', sections })
-function editor(number: number, data: unknown) {
-  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+function editor(number: number, data: unknown, role = 'Operator') {
+  consoleSession.save('fixture', '', undefined, role, { 'table-records': 3 })
   vi.mocked(apiFetch).mockImplementation(async (_, options) => options?.method === 'PUT'
     ? new Response(null, { status: 204 }) : Response.json(data))
   render(<NativeTableEditor setId="set-fixture" number={number} revision={1} exchangeFile={null}
@@ -45,6 +45,7 @@ it('labels later predial settings by packet-data route and keeps craft credentia
   expect(screen.getByLabelText('Craft access code')).toHaveValue('')
   expect(screen.getByLabelText('Craft access code')).toHaveAttribute('type', 'password')
   expect(screen.getByLabelText('Desk terminal key card number')).toHaveValue('')
+  expect(screen.queryByRole('button', { name: 'Show configured access code' })).not.toBeInTheDocument()
   fireEvent.change(section, { target: { value: 'predial' } })
   expect(screen.queryByLabelText('Apply predial to the primary manager number')).toBeNull()
   fireEvent.click(screen.getByLabelText('Apply predial to the primary packet-data access number'))
@@ -52,6 +53,56 @@ it('labels later predial settings by packet-data route and keeps craft credentia
   fireEvent.click(screen.getByLabelText('Predial control spare bit 7 (0x80)'))
   fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
   expect((await saved()).changes).toEqual({ predialPrimaryManager: 'true', 'spare.predial.bit7': 'false' })
+})
+
+it('reveals only the saved access code to the admin and never stages it as a replacement', async () => {
+  const testCode = Array.from({ length: 7 }, (_, digit) => String(digit)).join('')
+  const data = layout(37, [
+    { key: 'installation', label: 'Installation and packet timing', fields: [field('retries', 'Retries before out of service', '40')] },
+    { key: 'craft', label: 'Craft credentials', fields: [
+      { ...field('craftAccessCode', 'Craft access code', null, 'password'), maxLength: 7 },
+      { ...field('keyCardNumber', 'Desk terminal key card number', null, 'password'), maxLength: 10 },
+    ] },
+  ])
+  editor(31, data, 'Admin')
+  vi.mocked(apiFetch).mockImplementation(async (path, options) => path.endsWith('/craft-access') ? Response.json({ code: testCode })
+    : options?.method === 'PUT' ? new Response(null, { status: 204 }) : Response.json(data))
+  const section = await screen.findByLabelText('Section or entry')
+  fireEvent.change(section, { target: { value: 'craft' } })
+  expect(screen.queryByText(testCode)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Show configured access code' }))
+  expect(await screen.findByLabelText('Saved Craft access code')).toHaveTextContent(testCode)
+  expect(screen.getByLabelText('Craft access code')).toHaveValue('')
+  expect(screen.getByLabelText('Desk terminal key card number')).toHaveValue('')
+  const reveal = vi.mocked(apiFetch).mock.calls.find(([path]) => path.endsWith('/craft-access'))!
+  expect(reveal[1]).toMatchObject({ method: 'POST', cache: 'no-store' })
+  expect(JSON.parse(reveal[1]!.body as string)).toEqual({ revision: 1, sha256: 'fixture-hash', profile: 'Later packed profile' })
+  fireEvent(window, new Event('blur'))
+  expect(screen.queryByText(testCode)).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Show configured access code' }))
+  expect(await screen.findByLabelText('Saved Craft access code')).toHaveTextContent(testCode)
+  fireEvent.change(section, { target: { value: 'installation' } })
+  expect(screen.queryByText(testCode)).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Retries before out of service'), { target: { value: '41' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  expect((await saved()).changes).toEqual({ retries: '41' })
+  fireEvent.change(section, { target: { value: 'craft' } })
+  expect(screen.queryByText(testCode)).not.toBeInTheDocument()
+})
+
+it('allows the explicit saved-code read on a published set without enabling replacement', async () => {
+  const testCode = Array.from({ length: 7 }, (_, digit) => String(digit)).join('')
+  const data = { ...layout(37, [{ key: 'craft', label: 'Craft credentials', fields: [
+    { ...field('craftAccessCode', 'Craft access code', null, 'password'), maxLength: 7 },
+  ] }]), editable: false }
+  editor(31, data, 'Admin')
+  vi.mocked(apiFetch).mockImplementation(async path => path.endsWith('/craft-access') ? Response.json({ code: testCode }) : Response.json(data))
+  expect(await screen.findByLabelText('Craft access code')).toBeDisabled()
+  expect(screen.queryByRole('button', { name: 'Save record' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Show configured access code' }))
+  expect(await screen.findByLabelText('Saved Craft access code')).toHaveTextContent(testCode)
+  fireEvent.click(screen.getByRole('button', { name: 'Hide access code' }))
+  expect(screen.queryByText(testCode)).toBeNull()
 })
 
 it.each([false, true])('keeps the modem timer in its correct profile section (later=%s)', async later => {

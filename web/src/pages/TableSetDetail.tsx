@@ -73,6 +73,7 @@ export function TableSetDetail() {
   const [targetEdit, setTargetEdit] = useState<string | null>(null)
   const [savingTarget, setSavingTarget] = useState(false)
   const [recordDirty, setRecordDirty] = useState(false)
+  const [reviewFamily, setReviewFamily] = useState(initialFamily)
   const currentId = useRef(id)
   const requestRef = useRef<AbortController | null>(null)
   currentId.current = id
@@ -109,6 +110,7 @@ export function TableSetDetail() {
     load()
     return () => requestRef.current?.abort()
   }, [id, canRead])
+  useEffect(() => { setReviewFamily(initialFamily) }, [id, initialFamily])
 
   async function saveTarget(e: React.FormEvent) {
     e.preventDefault()
@@ -247,7 +249,7 @@ export function TableSetDetail() {
       </section>
       <TerminalFamilyReview key={`${id}:${initialFamily}`} setId={id} initialFamily={initialFamily}
         dataKey={`${d.revision}:${d.targetFirmwareVersionId}:${d.versions.map(version => `${version.tableNumber}:${version.payloadSha256Hex}`).join(',')}`}
-        recordDirty={recordDirty} />
+        recordDirty={recordDirty} onFamilyChange={setReviewFamily} />
       {d.provisioning && (d.provisioning.operatingType || d.provisioning.acceptedCoinSlots !== null ||
         d.provisioning.configuredCardRanges !== null || d.provisioning.findings.length > 0) && (
         <section className="table-config-panel" aria-labelledby="provisioning-heading">
@@ -271,7 +273,7 @@ export function TableSetDetail() {
       {draft && canUpdate && <TableRecordCopy key={d.id} setId={d.id} revision={d.revision} customerId={d.customerId}
         disabled={recordDirty || targetChanged} onSaved={load} />}
       {canReadRecords && <TableSetConfiguration key={`${id}:${d.targetFirmwareVersionId ?? ''}:${initialRecord}`} setId={id} draft={draft} initialRecord={initialRecord}
-        versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} />}
+        versions={d.versions} onSaved={load} recordDirty={recordDirty} onRecordDirty={setRecordDirty} familyId={reviewFamily} />}
       {!draft && canPreviewScope && <TableSetAssignment key={`assignment:${id}:${initialSchedulePhone}:${initialScheduleRecord}:${initialRandomizePhone}`} setId={id} revision={d.revision} versions={d.versions} optionalRecords={d.optionalRecordRemovals}
         codeOnly={codeOnly} firmwareSchedule={d.firmwareSchedule} initialSchedulePhone={initialSchedulePhone} initialScheduleRecord={initialScheduleRecord} initialRandomizePhone={initialRandomizePhone} />}
       {!draft && !canPreviewScope && canPerform('downloads', op.read) && <TableDownloadScheduleList setId={id} />}

@@ -422,6 +422,7 @@ public sealed class TerminalsController(
                 x.Id,
                 x.TerminalId,
                 x.NccSessionId,
+                LiveVersionObservation = x.NccVersionObservation != null,
                 x.Direction,
                 x.MessageType,
                 x.MessageTypeName,

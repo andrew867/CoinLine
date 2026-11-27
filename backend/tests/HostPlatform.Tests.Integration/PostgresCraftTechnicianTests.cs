@@ -23,6 +23,102 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresCraftTechnicianTests
 {
     [PostgresIntegrationFact]
+    public async Task Historical_examples_import_only_missing_descriptions_and_native_technician_reports_retain_the_raw_code()
+    {
+        var connection = Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable)!;
+        var schema = "coinline_maintenance_examples_" + Guid.NewGuid().ToString("N");
+        await using (var server = new NpgsqlConnection(connection))
+        {
+            await server.OpenAsync(); await using var create = new NpgsqlCommand($"CREATE SCHEMA {schema}", server); await create.ExecuteNonQueryAsync();
+        }
+        var scoped = new NpgsqlConnectionStringBuilder(connection) { SearchPath = schema }.ConnectionString;
+        var key = Guid.NewGuid().ToString("N"); var portProbe = new TcpListener(IPAddress.Loopback, 0); portProbe.Start();
+        var port = ((IPEndPoint)portProbe.LocalEndpoint).Port; portProbe.Stop();
+        await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web.UseEnvironment("Production")
+            .UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("Security:CraftIdentifierKey", Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)))
+            .UseSetting("ConnectionStrings:Default", scoped).UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Platform:Seed:EnableDemoData", "false").UseSetting("Observability:MetricsEnabled", "false")
+            .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()).UseSetting("Ncc:LoopbackOnly", "true"));
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory); client.DefaultRequestHeaders.Add("X-API-Key", key);
+        const string reference = "/api/field-events/reference";
+        const string import = reference + "/maintenance/examples";
+        var initial = await client.GetFromJsonAsync<JsonElement>(reference);
+        Assert.Equal(12, initial.GetProperty("maintenanceExamples").GetArrayLength());
+        Assert.Equal(new[] {996,997,998,999}, initial.GetProperty("maintenance").EnumerateArray().Select(row => row.GetProperty("code").GetInt32()));
+        await Save(15, "Operator-specific cleaning", 0);
+        await Save(40, "Temporarily described", 0); await Save(40, "", 1);
+        var reader = TestOperatorAuthentication.EnsureAccount(factory, "example-reader-" + Guid.NewGuid().ToString("N"), "Operator");
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var account = await db.OperatorAccounts.SingleAsync(row => row.Id == reader.Id);
+            account.PermissionProfileJson = "{\"phone-status\":1}"; await db.SaveChangesAsync();
+        }
+        using var restricted = TestOperatorAuthentication.CreateAuthenticatedClient(factory, reader.Username, "Operator"); restricted.DefaultRequestHeaders.Add("X-API-Key", key);
+        Assert.Equal(HttpStatusCode.OK, (await restricted.GetAsync(reference)).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await restricted.PostAsync(import, null)).StatusCode);
+        using (var response = await client.PostAsync(import, null))
+        {
+            response.EnsureSuccessStatusCode(); var result = await response.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal(10, result.GetProperty("added").GetInt32()); Assert.Equal(2, result.GetProperty("retained").GetInt32());
+        }
+        using (var response = await client.PostAsync(import, null))
+        {
+            response.EnsureSuccessStatusCode(); Assert.Equal(0, (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("added").GetInt32());
+        }
+        var catalogue = await client.GetFromJsonAsync<JsonElement>(reference);
+        var codes = catalogue.GetProperty("maintenance").EnumerateArray().ToDictionary(row => row.GetProperty("code").GetInt32());
+        Assert.Equal(16, codes.Count); Assert.Equal("Operator-specific cleaning", codes[15].GetProperty("operatorDescription").GetString());
+        Assert.Equal(JsonValueKind.Null, codes[40].GetProperty("operatorDescription").ValueKind);
+        Assert.Equal(2, codes[40].GetProperty("revision").GetInt32());
+        Assert.All(FieldEventSummary.MaintenanceExamples(), row => Assert.Equal(JsonValueKind.Null, codes[row.Code].GetProperty("description").ValueKind));
+        Assert.Equal("Booth cleaned", codes[106].GetProperty("operatorDescription").GetString());
+        Assert.All(catalogue.GetProperty("maintenanceExamples").EnumerateArray(), row => Assert.True(row.GetProperty("configured").GetBoolean()));
+
+        var customer = new Customer { Name = "Fixture customer", Code = Guid.NewGuid().ToString("N")[..8] };
+        var site = new Site { Customer = customer, Name = "Fixture site", Code = Guid.NewGuid().ToString("N")[..8] };
+        var phone = new Terminal { Site = site, DisplayName = "Fixture phone", TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() };
+        await using (var scope = factory.Services.CreateAsyncScope())
+        { var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>(); db.Add(phone); await db.SaveChangesAsync(); }
+        var identifier = RandomNumberGenerator.GetInt32(100000).ToString("D5", CultureInfo.InvariantCulture);
+        using var createTech = await client.PostAsJsonAsync("/api/technicians", new { displayName = "Fixture technician", reportedIdentifier = identifier });
+        createTech.EnsureSuccessStatusCode(); var tech = (await createTech.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using (var tcp = new TcpClient())
+        {
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15)); await tcp.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+            var wire = Convert.FromHexString(phone.TerminalIdHex); var stream = tcp.GetStream();
+            byte[] trailer = new byte[40]; trailer[0] = 10; trailer[11] = 60; trailer[^1] = 13;
+            await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { TerminalId = wire, Control = 0, Data = [..Maintenance(106, identifier), ..trailer] }), timeout.Token);
+            Assert.NotEqual(0, (await Read(stream, timeout.Token)).Control & NccControl.Ack);
+            var reply = await Read(stream, timeout.Token); Assert.Equal(new byte[] {15,106,0,13}, reply.Data);
+            await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { TerminalId = wire, Control = (byte)(NccControl.Ack | NccControl.Clr | reply.Control) }), timeout.Token);
+        }
+        var report = await Activity();
+        Assert.Equal("matched", report.GetProperty("matchStatus").GetString()); Assert.Equal(106, report.GetProperty("opcode").GetInt32());
+        Assert.Equal("Unlisted maintenance opcode 106", report.GetProperty("summary").GetString());
+        Assert.Equal("Booth cleaned", report.GetProperty("operatorDescription").GetString());
+        await Save(106, "Operator-specific booth cleaning", codes[106].GetProperty("revision").GetInt32());
+        var updated = await Activity(); Assert.Equal(report.GetProperty("id").GetGuid(), updated.GetProperty("id").GetGuid());
+        Assert.Equal(106, updated.GetProperty("opcode").GetInt32()); Assert.Equal("Operator-specific booth cleaning", updated.GetProperty("operatorDescription").GetString());
+        Assert.False(updated.TryGetProperty("reportedIdentifier", out _));
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.Single(await db.AuditEvents.Where(row => row.Action == "import_maintenance_examples").ToListAsync());
+            Assert.Empty(await db.DownloadBatches.Where(row => row.TerminalId == phone.Id).ToListAsync());
+        }
+
+        async Task Save(int code, string description, int revision)
+        {
+            using var response = await client.PutAsJsonAsync($"{reference}/maintenance/{code}", new { operatorDescription = description, severity = (int?)null, revision });
+            response.EnsureSuccessStatusCode();
+        }
+        async Task<JsonElement> Activity() => Assert.Single((await client.GetFromJsonAsync<JsonElement>($"/api/technicians/activity?technicianId={tech}"))
+            .GetProperty("items").EnumerateArray());
+    }
+
+    [PostgresIntegrationFact]
     public async Task Native_reports_associate_only_matching_identifiers_and_keep_alarms_as_context()
     {
         var key = Guid.NewGuid().ToString("N");

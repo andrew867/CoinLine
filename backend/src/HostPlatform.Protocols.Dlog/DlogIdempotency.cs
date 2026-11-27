@@ -12,7 +12,8 @@ public static class DlogIdempotency
         Guid? terminalId,
         Guid? nccSessionId,
         string? sessionCorrelationId,
-        string? clientSuppliedKey)
+        string? clientSuppliedKey,
+        bool liveVersionObservation = false)
     {
         using var ms = new MemoryStream(rawPayload.Length + 128);
         ms.Write(rawPayload);
@@ -21,7 +22,11 @@ public static class DlogIdempotency
         WriteUtf8(ms, nccSessionId?.ToString("D") ?? "");
         WriteUtf8(ms, sessionCorrelationId ?? "");
         WriteUtf8(ms, clientSuppliedKey ?? "");
-        return Convert.ToHexString(SHA256.HashData(ms.ToArray())).ToLowerInvariant();
+        var hash = SHA256.HashData(ms.ToArray());
+        // Keep native version observations in a separate domain from imported records.
+        if (liveVersionObservation)
+            hash = SHA256.HashData(hash.Concat(Encoding.ASCII.GetBytes("NCC-MT60")).ToArray());
+        return Convert.ToHexString(hash).ToLowerInvariant();
 
         static void WriteUtf8(MemoryStream m, string s)
         {

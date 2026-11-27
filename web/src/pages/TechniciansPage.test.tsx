@@ -52,3 +52,14 @@ it('allows reporting without an edit form for a read-only technician-directory o
   expect(screen.queryByRole('button', { name: 'Edit Fixture technician' })).toBeNull()
   expect(apiFetch).not.toHaveBeenCalled()
 })
+
+it('shows the reported opcode and current operator maintenance description together', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { technicians: 1 })
+  vi.mocked(apiGet).mockImplementation(async path => String(path).includes('/activity')
+    ? { total: 1, items: [{ ...activity, opcode: 106, summary: 'Unlisted maintenance opcode 106', operatorDescription: 'Booth cleaned' }] }
+    : { identifierMatchingConfigured: true, items: [row] })
+  render(<MemoryRouter><TechniciansPage /></MemoryRouter>)
+  expect(await screen.findByText('Booth cleaned (opcode 106)')).toBeVisible()
+  expect(screen.getByText('Unlisted maintenance opcode 106')).toBeVisible()
+  expect(screen.getByText(/Current operator classification above/)).toBeVisible()
+})

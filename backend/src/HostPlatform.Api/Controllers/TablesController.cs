@@ -1082,7 +1082,8 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
         var shapes = records == null
             ? (await tables.ReadRecordShapesAsync([set.Id], ct)).GetValueOrDefault(set.Id) ?? []
             : TableSetFirmwareCompatibility.Shapes(records).ToArray();
-        var reports = db.DlogTransactions.AsNoTracking().Where(row => row.NccSessionId != null
+        var reports = db.DlogTransactions.AsNoTracking().Where(row => row.NccVersionObservation != null && row.NccSessionId != null
+            && row.NccSession!.TerminalId == row.TerminalId
             && row.Direction == (int)DlogDirection.TerminalToHost && row.MessageType == FieldEventCatalog.SoftwareVersionMessageType
             && row.RawPayload.Length == FieldEventCatalog.SoftwareVersionRecordLength);
         var matchVersion = currentVersion.HasValue;

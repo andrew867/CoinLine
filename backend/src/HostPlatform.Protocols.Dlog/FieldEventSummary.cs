@@ -100,6 +100,24 @@ public static class FieldEventSummary
     public static IReadOnlyList<CodeReference> MaintenanceReference() =>
         MaintenanceNames.Select(entry => new CodeReference(entry.Key, entry.Value)).ToArray();
 
+    // These are printed field-service examples, not reserved wire meanings.
+    // The operator may import them into the editable description catalogue.
+    public static IReadOnlyList<CodeReference> MaintenanceExamples() =>
+    [
+        new(15, "Contractor cleaned booth"),
+        new(40, "Booth repair required"),
+        new(45, "Power off"),
+        new(50, "Phone repair required"),
+        new(87, "Card reader repair required"),
+        new(97, "Card reader replaced"),
+        new(106, "Booth cleaned"),
+        new(114, "New book needed"),
+        new(115, "New sign needed"),
+        new(116, "New card needed"),
+        new(160, "Unsatisfactory booth-cleaning verification"),
+        new(206, "Phone cleaned")
+    ];
+
     public static (string Kind, int Code)? ReadCode(int messageType, ReadOnlySpan<byte> raw)
     {
         if (messageType is 7 or 16)

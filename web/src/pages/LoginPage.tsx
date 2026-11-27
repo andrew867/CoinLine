@@ -1,9 +1,12 @@
 import { useState } from 'react'
 import type { FormEvent } from 'react'
+import { useLocation } from 'react-router-dom'
 import { apiSignIn } from '../api/client'
 import { consoleSession, type ScreenPermissions } from '../api/consoleSession'
 
 export function LoginPage() {
+  const location = useLocation()
+  const expired = location.state?.sessionExpired === true
   const [username, setUsername] = useState('operator')
   const [password, setPassword] = useState('')
   const [apiKey, setApiKey] = useState(() => consoleSession.apiKey() ?? '')
@@ -35,6 +38,7 @@ export function LoginPage() {
       <form className="login-card" onSubmit={(e) => void onSubmit(e)}>
         <h1>CoinLine</h1>
         <p className="page-intro">Sign in to manage the phones.</p>
+        {expired && <p role="status">Your session expired. Sign in again.</p>}
         {err && <p style={{ color: 'crimson' }}>{err}</p>}
         <label>
           Username

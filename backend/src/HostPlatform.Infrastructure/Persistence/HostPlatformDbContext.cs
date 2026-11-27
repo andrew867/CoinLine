@@ -34,6 +34,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<NccFrameCapture> NccFrameCaptures => Set<NccFrameCapture>();
     public DbSet<CapturedHardwareSession> CapturedHardwareSessions => Set<CapturedHardwareSession>();
     public DbSet<DlogTransaction> DlogTransactions => Set<DlogTransaction>();
+    public DbSet<NccVersionObservation> NccVersionObservations => Set<NccVersionObservation>();
     public DbSet<DlogMessageType> DlogMessageTypes => Set<DlogMessageType>();
     public DbSet<DlogParseDiagnostic> DlogParseDiagnostics => Set<DlogParseDiagnostic>();
     public DbSet<DlogCorrelationLink> DlogCorrelationLinks => Set<DlogCorrelationLink>();
@@ -532,6 +533,13 @@ public class HostPlatformDbContext : DbContext
             b.HasIndex(d => d.IdempotencyKey).IsUnique()
                 .HasFilter("\"IdempotencyKey\" IS NOT NULL AND \"IdempotencyKey\" <> ''");
             b.HasMany(d => d.ParseDiagnostics).WithOne(p => p.DlogTransaction).HasForeignKey(p => p.DlogTransactionId);
+        });
+
+        modelBuilder.Entity<NccVersionObservation>(b =>
+        {
+            b.HasKey(row => row.TransactionId);
+            b.HasOne(row => row.Transaction).WithOne(row => row.NccVersionObservation)
+                .HasForeignKey<NccVersionObservation>(row => row.TransactionId);
         });
 
         modelBuilder.Entity<DlogCorrelationLink>(b =>
