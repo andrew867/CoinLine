@@ -39,10 +39,11 @@ function segments(start: number, count: number, label: string): [number, string]
 
 type Props = { setId: string; draft: boolean; versions: Version[]; onSaved: () => void }
 
-export function TableSetConfiguration({ setId, draft, versions, onSaved, initialRecord, recordDirty, onRecordDirty }: Props & {
+export function TableSetConfiguration({ setId, draft, versions, onSaved, initialRecord, recordDirty, onRecordDirty, familyId }: Props & {
   initialRecord: number
   recordDirty: boolean
   onRecordDirty: (dirty: boolean) => void
+  familyId?: string
 }) {
   const initialPanel = panels.findIndex(({ records }) => records.some(([number]) => number === initialRecord))
   const [panelIndex, setPanelIndex] = useState(Math.max(0, initialPanel))
@@ -98,7 +99,7 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
           <Suspense fallback={<p role="status">Loading record editor…</p>}>
             <NativeTableEditor key={importGeneration} setId={setId} number={tableNumber} revision={version?.tableRevision ?? 0}
               exchangeFile={exchangeFile} onExchangeFile={setExchangeFile}
-              onSaved={onSaved} onDirty={onRecordDirty} />
+              onSaved={onSaved} onDirty={onRecordDirty} familyId={familyId} />
           </Suspense>
           {!recordDirty && canImport && (version ? (
             <details><summary>Import replacement record</summary>

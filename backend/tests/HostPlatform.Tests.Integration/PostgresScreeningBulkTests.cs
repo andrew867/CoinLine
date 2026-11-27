@@ -26,6 +26,65 @@ public sealed class PostgresScreeningBulkTests
         ["table-assignments"] = 1, ["downloads"] = 5, ["phones"] = 1 };
 
     [PostgresIntegrationFact]
+    public async Task Family_screening_review_preserves_institutional_and_extra_wire_slots_and_does_not_change_save_semantics()
+    {
+        await using var ncc = new NccFactory();
+        var key = Guid.NewGuid().ToString("N");
+        await using var host = Factory(ncc, key);
+        using var client = host.CreateClient(); client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var password = Guid.NewGuid().ToString("N");
+        var editor = Account(password, FullPermissions);
+        var compact = NativeTableLayouts.DraftTemplates(24).Single();
+        var raw = compact.Apply(NativeTableLayouts.CreateDraftTemplate(compact), new Dictionary<string, string>
+        {
+            ["rule-0.pattern"] = "3335550100", ["rule-15.pattern"] = "3335550116", ["rule-50.pattern"] = "3335550151"
+        });
+        // An unassigned reserve bit alone is not an occupied entry; it must still survive.
+        raw[1 + 48 * 12 + 1] |= 0x80;
+        var set = Set(Customer(), new TableDefinition { Name = "Fixture compact screening", TableNumber = 24 }, raw, "Family review",
+            descriptions: new() { [50] = "Retained institutional description", [60] = "Retained extra description" });
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.True(db.Database.IsNpgsql()); db.AddRange(editor, set); await db.SaveChangesAsync();
+        }
+        await SignIn(client, editor, password);
+        var endpoint = $"/api/tables/sets/{set.Id}/records/24/fields";
+        var ordinary = await client.GetFromJsonAsync<JsonElement>(endpoint);
+        var selected = await client.GetFromJsonAsync<JsonElement>(endpoint + "?familyId=msr17-inmate");
+        var screening = selected.GetProperty("screening"); var family = screening.GetProperty("family");
+        Assert.Equal(50, family.GetProperty("documentedEntries").GetInt32());
+        Assert.Equal(16, family.GetProperty("institutionalFirst").GetInt32());
+        Assert.Equal(50, family.GetProperty("institutionalLast").GetInt32());
+        Assert.Equal(new[] { 1, 16, 50, 51, 60 }, screening.GetProperty("savedRetainedSlots").EnumerateArray().Select(row => row.GetInt32()));
+        Assert.Equal(60, selected.GetProperty("sections").GetArrayLength());
+        Assert.Equal(ordinary.GetProperty("sha256").GetString(), selected.GetProperty("sha256").GetString());
+        Assert.Equal(ordinary.GetProperty("revision").GetInt32(), selected.GetProperty("revision").GetInt32());
+        var later = await client.GetFromJsonAsync<JsonElement>(endpoint + "?familyId=mtr19-multipay");
+        Assert.Equal(200, later.GetProperty("screening").GetProperty("family").GetProperty("documentedEntries").GetInt32());
+        var unknown = await client.GetFromJsonAsync<JsonElement>(endpoint + "?familyId=unknown");
+        Assert.Equal(JsonValueKind.Null, unknown.GetProperty("screening").GetProperty("family").ValueKind);
+        var revision = selected.GetProperty("revision").GetInt32(); var sha256 = selected.GetProperty("sha256").GetString();
+        using (var unchanged = await client.PutAsJsonAsync(endpoint, new { revision, sha256, profile = compact.Profile, changes = new Dictionary<string, string>() }))
+            unchanged.EnsureSuccessStatusCode();
+        var unchangedRecord = await client.GetFromJsonAsync<JsonElement>(endpoint + "?familyId=msr17-inmate");
+        Assert.Equal(revision, unchangedRecord.GetProperty("revision").GetInt32());
+        Assert.Equal(sha256, unchangedRecord.GetProperty("sha256").GetString());
+        using (var saved = await client.PutAsJsonAsync(endpoint, new { revision, sha256, profile = compact.Profile,
+            changes = new Dictionary<string, string> { ["rule-0.answer"] = "true" } })) saved.EnsureSuccessStatusCode();
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var saved = await db.TableVersions.AsNoTracking().Include(row => row.TablePayload).SingleAsync(row => row.TableSetId == set.Id);
+            var expected = raw.ToArray(); expected[1] |= 2;
+            Assert.Equal(expected, TableDistributionService.GetEffectivePayload(saved));
+            Assert.Equal(sha256, TablePayloadHasher.Sha256Hex(raw));
+            Assert.Equal("Retained institutional description", JsonSerializer.Deserialize<Dictionary<int, string>>(saved.ScreeningDescriptionsJson!)![50]);
+            Assert.Equal("Retained extra description", JsonSerializer.Deserialize<Dictionary<int, string>>(saved.ScreeningDescriptionsJson!)![60]);
+        }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Bulk_add_is_atomic_and_prepares_immutable_replacement_then_exact_selected_NCC_download()
     {
         await using var ncc = new NccFactory();

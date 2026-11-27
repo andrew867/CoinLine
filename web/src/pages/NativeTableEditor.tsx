@@ -56,6 +56,8 @@ type Section = {
   key: string; label: string; fields: Field[]; showDisplayPreview?: boolean
   graphicalScreenIndex?: number | null; showPanelPreview?: boolean
 }
+type ScreeningFamily = { familyId: string; familyLabel: string; documentedEntries: number;
+  institutionalFirst: number | null; institutionalLast: number | null }
 type Layout = {
   supported: true
   editable: boolean
@@ -71,7 +73,8 @@ type Layout = {
   numberingPlan?: NumberingPlan | null
   numberingFormatCapacity?: number | null
   spareBytes?: string | null
-  screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean } | null
+  screening?: { descriptions: Record<number, string>; supportsSpeedDial: boolean; family?: ScreeningFamily | null;
+    savedRetainedSlots?: number[] | null } | null
   restrictedRoutes?: RestrictedRouteRecord[] | null
 } | { supported: false; reason: string; profiles?: string[]; observedLengthsOnly?: boolean;
   templates?: { profile: string; length: number; screeningSlots?: number | null }[] }
@@ -84,6 +87,7 @@ type Props = {
   onExchangeFile: (value: ExchangeFile | null) => void
   onSaved: () => void
   onDirty: (dirty: boolean) => void
+  familyId?: string
 }
 
 const quickAccessRecord = 55
@@ -91,7 +95,7 @@ const isCredential = (field: Field) => field.editor === 'password' || field.edit
 const quickAccessNumber = (section: Section) => Number(section.key.slice('key-'.length)) + 1
 const screeningNumber = (section: Section) => Number(section.key.slice('rule-'.length)) + 1
 
-export function NativeTableEditor({ setId, number, revision, exchangeFile, onExchangeFile, onSaved, onDirty }: Props) {
+export function NativeTableEditor({ setId, number, revision, exchangeFile, onExchangeFile, onSaved, onDirty, familyId }: Props) {
   const [layout, setLayout] = useState<Layout | null>(null)
   const [sectionKey, setSectionKey] = useState('')
   const [search, setSearch] = useState('')
@@ -100,7 +104,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const [byteEdits, setByteEdits] = useState<SpareByteEdits>({})
   const [quickAccessLayout, setQuickAccessLayout] = useState('10')
   const [clearedKeys, setClearedKeys] = useState<Set<number>>(new Set())
-  const [showAllScreeningSlots, setShowAllScreeningSlots] = useState(false)
+  const [screeningView, setScreeningView] = useState<'legacy' | 'institution' | 'wire'>('legacy')
   const [screeningActions, setScreeningActions] = useState<Record<number, ScreeningAction>>({})
   const [screeningDescriptions, setScreeningDescriptions] = useState<Record<number, string>>({})
   const [view, setView] = useState<'settings' | 'rules' | 'bytes' | 'prompts'>('settings')
@@ -109,13 +113,17 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const [reload, setReload] = useState(0)
   const [profile, setProfile] = useState('')
   const endpoint = `/api/tables/sets/${setId}/records/${number}/fields`
+  const screeningFamilyId = [24, 59, 92].includes(number) ? familyId ?? '' : ''
   const canInitialize = canPerform('table-records', op.add)
   const canEdit = !!layout?.supported && layout.editable && canPerform('table-records', op.update)
   const hasScreeningChanges = Object.keys(screeningActions).length > 0 || Object.keys(screeningDescriptions).length > 0
 
   useEffect(() => {
     const request = new AbortController()
-    const url = profile ? `${endpoint}?profile=${encodeURIComponent(profile)}` : endpoint
+    const query = new URLSearchParams()
+    if (profile) query.set('profile', profile)
+    if (screeningFamilyId) query.set('familyId', screeningFamilyId)
+    const url = query.size ? `${endpoint}?${query}` : endpoint
     void apiFetch(url, { signal: request.signal }).then(async (response) => {
       if (!response.ok) throw new Error('Could not load this configuration record.')
       const result = await response.json() as Layout
@@ -124,7 +132,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       if (!request.signal.aborted) setMessage(error instanceof Error ? error.message : 'Could not load this record.')
     })
     return () => request.abort()
-  }, [endpoint, revision, reload, profile])
+  }, [endpoint, revision, reload, profile, screeningFamilyId])
+  useEffect(() => { setScreeningView('legacy') }, [screeningFamilyId])
 
   function edit(field: Field, value: string) {
     if (!canEdit) return
@@ -306,10 +315,21 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
 
   const needle = search.trim().toLowerCase()
   const isQuickAccess = number === quickAccessRecord
-  const legacyScreeningView = !!layout.screening && layout.sections.length === 60
+  const family = layout.screening?.family?.familyId === screeningFamilyId ? layout.screening.family : null
+  const packedScreeningSlots = layout.screening ? layout.sections.length : 0
+  const documentedScreeningSlots = family?.documentedEntries ?? (packedScreeningSlots === 60 ? 50 : packedScreeningSlots)
+  const institutionFirst = family?.institutionalFirst ?? null
+  const institutionLast = family?.institutionalLast ?? null
+  const legacyScreeningView = !!layout.screening && (documentedScreeningSlots < packedScreeningSlots || institutionFirst != null)
+  const institutionSlot = (slot: number) => institutionFirst != null && institutionLast != null && slot >= institutionFirst && slot <= institutionLast
+  const retainedSlots = family ? layout.screening?.savedRetainedSlots ?? [] : []
+  const outsideSlots = retainedSlots.filter(slot => slot > documentedScreeningSlots)
+  const retainedInstitutionSlots = retainedSlots.filter(institutionSlot)
+  const inScreeningView = (slot: number) => screeningView === 'wire' || !legacyScreeningView ||
+    (screeningView === 'institution' ? institutionSlot(slot) : slot <= documentedScreeningSlots && !institutionSlot(slot))
   const settings = layout.sections.filter((section) => (!layout.numberingPlan?.dial || !section.key.startsWith('dial-'))
     && (!isQuickAccess || quickAccessLayout === '10' || quickAccessNumber(section) >= 6)
-    && (!legacyScreeningView || showAllScreeningSlots || screeningNumber(section) <= 50))
+    && (!layout.screening || inScreeningView(screeningNumber(section))))
   const sections = settings.filter((section) => !needle || section.label.toLowerCase().includes(needle)
     || (layout.screening && (screeningDescriptions[screeningNumber(section)] ?? layout.screening.descriptions[screeningNumber(section)])
       ?.toLowerCase().includes(needle))
@@ -374,6 +394,17 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       </header>
       {layout.observedLengthsOnly && <p className="page-intro">Observed firmware profile: this editor is a candidate for the wire record.
         Record-length acknowledgement does not establish that every field has the same meaning on this build.</p>}
+      {family && <section aria-label="Screening family workspace" className="table-config-panel">
+        <h3>{family.familyLabel} screening</h3>
+        <p>Maximizer documents {documentedScreeningSlots} entries; this record has {packedScreeningSlots} packed slots.
+          The documented limit does not establish which slots the actual terminal uses.</p>
+        {institutionFirst != null && <p>Entries {institutionFirst} through {institutionLast} are reserved for the separate institutional configuration workflow.
+          The normal operator view starts with entries 1 through {institutionFirst - 1}. Institutional entries remain available for review of imported records.</p>}
+        {retainedInstitutionSlots.length > 0 && <p>Institutional slots with retained settings or descriptions: {retainedInstitutionSlots.join(', ')}.</p>}
+        {outsideSlots.length > 0 && <p>Slots beyond the documented list with retained settings or descriptions: {outsideSlots.join(', ')}.</p>}
+        {documentedScreeningSlots > packedScreeningSlots && <p>The packed record is shorter than the documented list. Verify the target and layout before delivery.</p>}
+        <p>These counts use the saved record. Changing views does not clear entries, modify bytes, change the firmware target, or discard unsaved edits.</p>
+      </section>}
       {(number === 22 || number === 134) && <CardSequencePanel setId={setId} number={number} revision={layout.revision}
         sha256={layout.sha256} editable={canEdit} dirty={changed > 0} busy={busy} onBusyChange={setBusy}
         labels={Object.fromEntries(layout.sections.filter(section => /^card-\d+$/.test(section.key)).map(section => {
@@ -525,9 +556,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       {showingSettings && !isQuickAccess && settings.length > 1 && (
         <div className="table-config-selectors">
           {legacyScreeningView && <label>Screening view
-            <select value={showAllScreeningSlots ? 'wire' : 'legacy'} onChange={event => setShowAllScreeningSlots(event.target.value === 'wire')}>
-              <option value="legacy">First 50 entries</option>
-              <option value="wire">All 60 wire slots</option>
+            <select value={screeningView} onChange={event => setScreeningView(event.target.value as typeof screeningView)}>
+              <option value="legacy">{institutionFirst != null ? `Operator entries 1 through ${institutionFirst - 1}` : `First ${documentedScreeningSlots} entries`}</option>
+              {institutionFirst != null && <option value="institution">Institutional entries {institutionFirst} through {institutionLast}</option>}
+              <option value="wire">All {packedScreeningSlots} wire slots</option>
             </select>
           </label>}
           {settings.length > 12 && <label>Find entry<input type="search" value={search} onChange={(event) => setSearch(event.target.value)} /></label>}
@@ -550,6 +582,10 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           sha256={layout.sha256} profile={layout.profile} slot={screeningSlot}
           dirty={busy || Object.keys(edits).length > 0 || hasScreeningChanges}
           onApplied={sourceChanged => { if (sourceChanged) { setReload(count => count + 1); onSaved() } }} />}
+      {showingSettings && screeningSlot != null && family && institutionSlot(screeningSlot) &&
+        <p className="page-intro">Entry {screeningSlot} is in the documented institutional range. Confirm that any change belongs in this configuration rather than the separate institutional setup.</p>}
+      {showingSettings && screeningSlot != null && family && screeningSlot > documentedScreeningSlots &&
+        <p className="page-intro">Entry {screeningSlot} is outside the documented list. Its active use on this terminal is not established.</p>}
       {showingSettings && number === 26 && layout.length === 72 && current?.key === 'display' &&
         ['languageCount', ...languageOrderKeys].every(key => current.fields.some(field => field.key === key)) &&
         <LanguageOrderPanel value={key => {
