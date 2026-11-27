@@ -11,12 +11,13 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); consoleSe
 
 const group = (id: string, number: number, label: string) => ({ group: { id, number, label, note: 'Review independently.' },
   selected: false, fields: [{ key: 'fixture', label: 'Setting value', source: '12', target: '8', status: 'different' }] })
-const preview = { sourceSetId: 'source', candidateSetId: 'candidate', recordCount: 4, canCreate: false, changedBytes: 0,
+const preview = { sourceSetId: 'source', candidateSetId: 'candidate', recordCount: 5, canCreate: false, changedBytes: 0,
   previewToken: 'initial', findings: [{ blocking: true, number: 0, message: 'Choose and review controls.' }],
   records: [{ number: 29, status: 'available', changedBytes: 0, groups: [group('text-advertising', 29, 'Text advertising messages')] },
     { number: 50, status: 'available', changedBytes: 0, groups: [group('coin-denominations', 50, 'Coin values and acceptance'),
       group('coin-hardware', 50, 'Validator windows and physical capacities')] },
-    { number: 35, status: 'missing-target', changedBytes: 0, groups: [group('routine-call-in', 35, 'Routine call-in and upload threshold')] }] }
+    { number: 35, status: 'missing-target', changedBytes: 0, groups: [group('routine-call-in', 35, 'Routine call-in and upload threshold')] },
+    { number: 58, status: 'available', changedBytes: 0, groups: [group('daily-service-restriction', 58, 'Daily service restriction')] }] }
 
 it('requires explicit selections, excludes unreviewed hardware and stages only a separate draft', async () => {
   vi.mocked(apiGet).mockResolvedValueOnce([{ id: 'target', label: 'Later layout', tableProfileId: 'mtr211-multipay-180-double-compressed' }])
@@ -28,6 +29,7 @@ it('requires explicit selections, excludes unreviewed hardware and stages only a
         { tableNumber: 29, sourceBytes: 481, targetExpectedBytes: 481, candidateBytes: 481 },
         { tableNumber: 35, sourceBytes: 21, targetExpectedBytes: 21, candidateBytes: null },
         { tableNumber: 50, sourceBytes: 105, targetExpectedBytes: 105, candidateBytes: 105 },
+        { tableNumber: 58, sourceBytes: 26, targetExpectedBytes: 26, candidateBytes: 26 },
       ] })
   vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json(preview)).mockResolvedValueOnce(Response.json({ ...preview,
     canCreate: true, changedBytes: 6, findings: [], previewToken: 'reviewed' })).mockResolvedValueOnce(Response.json({ id: 'common-draft' }, { status: 201 }))
@@ -46,6 +48,7 @@ it('requires explicit selections, excludes unreviewed hardware and stages only a
   expect(within(region).getAllByText('Setting value').length).toBeGreaterThan(0)
   fireEvent.click(within(region).getByLabelText('Coin values and acceptance'))
   fireEvent.click(within(region).getByLabelText('Text advertising messages'))
+  fireEvent.click(within(region).getByLabelText('Daily service restriction'))
   fireEvent.click(within(region).getByLabelText('I reviewed the selected controls and target hardware'))
   expect(within(region).queryByRole('button', { name: 'Create common configuration target draft' })).toBeNull()
   fireEvent.click(within(region).getByRole('button', { name: 'Preview common configuration carry-forward' }))
@@ -53,7 +56,7 @@ it('requires explicit selections, excludes unreviewed hardware and stages only a
   fireEvent.click(within(region).getByRole('button', { name: 'Create common configuration target draft' }))
   expect(await within(region).findByRole('link', { name: 'Open common configuration draft' })).toHaveAttribute('href', '/table-sets/common-draft')
   expect(apiPostRaw).toHaveBeenNthCalledWith(3, '/api/firmware/transition-common-controls', expect.objectContaining({
-    selections: ['coin-denominations', 'text-advertising'], reviewed: true, previewToken: 'reviewed',
+    selections: ['coin-denominations', 'daily-service-restriction', 'text-advertising'], reviewed: true, previewToken: 'reviewed',
   }))
   fireEvent.click(within(region).getByRole('button', { name: 'Use as target candidate for further review' }))
   expect(screen.getByLabelText('Prepared target configuration')).toHaveValue('common-draft')
