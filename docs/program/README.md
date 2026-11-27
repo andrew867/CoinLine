@@ -6,6 +6,7 @@
 - [Emulator acceptance](phase-5-emulator-acceptance.md)
 - [Firmware lab results](phase-5-gate-status.md)
 - [Latest reported terminal status](current-terminal-status.md)
+- [Host rate plan selection](host-rate-plan-selection.md)
 - [Observed controller versions and firmware selection](ncc-live-version-evidence.md)
 - [Staged configuration activation](firmware-configuration-activation.md)
 - [Terminal table catalogue and parity audit](table-catalog-and-parity-audit.md)

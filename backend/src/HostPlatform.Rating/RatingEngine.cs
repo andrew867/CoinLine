@@ -34,7 +34,8 @@ public static class RatingEngine
         string DeterminismFingerprint,
         string DeterminismInputJson,
         RatingAirtimeSource AirtimeSource,
-        CallPricing? Pricing = null);
+        CallPricing? Pricing = null,
+        Guid? AppliedVersionId = null);
 
     public sealed record Diagnostic(string Code, string Severity, string Message);
 
@@ -313,7 +314,7 @@ public static class RatingEngine
         var inputJson = JsonSerializer.Serialize(inputObj, JsonOpts);
         var fp = Fingerprint(inputJson, diagnostics);
         return new QuoteResult(amount, kind, allowed, blocked, freeCall, emergencyCall, diagnostics, fp, inputJson,
-            airtimeSource, pricing);
+            airtimeSource, pricing, req.PublishedVersion?.Id);
     }
 
     private static string Fingerprint(string inputJson, IReadOnlyList<Diagnostic> diagnostics)

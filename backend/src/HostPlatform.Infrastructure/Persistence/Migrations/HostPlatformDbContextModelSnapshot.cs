@@ -2602,6 +2602,58 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("FirmwareVersions");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.HostRatePlanSelection", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("CustomerId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("RatePlanId")
+                        .HasColumnType("uuid");
+
+                    b.Property<bool>("RestoreNationalTollPrefix")
+                        .HasColumnType("boolean");
+
+                    b.Property<Guid?>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CustomerId")
+                        .IsUnique();
+
+                    b.HasIndex("RatePlanId");
+
+                    b.HasIndex("TerminalId")
+                        .IsUnique();
+
+                    b.ToTable("HostRatePlanSelections", t =>
+                        {
+                            t.HasCheckConstraint("CK_HostRatePlanSelections_ExactlyOneScope", "(\"CustomerId\" IS NULL) <> (\"TerminalId\" IS NULL)");
+                        });
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.InmateFeatureConfiguration", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5364,6 +5416,27 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired();
 
                     b.Navigation("FirmwareUpdateJob");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.HostRatePlanSelection", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.Customer", null)
+                        .WithMany()
+                        .HasForeignKey("CustomerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.RatePlan", "RatePlan")
+                        .WithMany()
+                        .HasForeignKey("RatePlanId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.Terminal", null)
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("RatePlan");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.NccSession", b =>

@@ -1352,34 +1352,27 @@ internal sealed class NccLinkProcessor(
         Guid? planId = null;
         Guid? publishedVersionId = null;
         Guid? customerId = null;
+        string ratePlanSource = "unmatched";
+        bool restoreNationalTollPrefix = false;
         if (_session.TerminalId is { } terminalId)
         {
-            var siteId = await db.Terminals.AsNoTracking()
-                .Where(t => t.Id == terminalId)
-                .Select(t => t.SiteId)
-                .FirstAsync(stoppingToken);
-            customerId = await db.Sites.AsNoTracking()
-                .Where(s => s.Id == siteId)
-                .Select(s => (Guid?)s.CustomerId)
-                .FirstOrDefaultAsync(stoppingToken);
-            var plans = await db.RatePlans.AsNoTracking()
-                .Where(p => p.CustomerId == customerId && p.PublishedVersionId != null)
-                .ToListAsync(stoppingToken);
-            var plan = plans
-                .OrderByDescending(p => string.Equals(p.Name, "Local default", StringComparison.Ordinal))
-                .ThenBy(p => p.Name, StringComparer.Ordinal)
-                .FirstOrDefault();
-            planId = plan?.Id;
-            publishedVersionId = plan?.PublishedVersionId;
+            var resolution = await HostRatePlanResolver.ForTerminalAsync(db, terminalId, stoppingToken);
+            customerId = resolution.CustomerId;
+            planId = resolution.RatePlanId;
+            publishedVersionId = resolution.PublishedVersionId;
+            ratePlanSource = resolution.Source;
+            restoreNationalTollPrefix = resolution.RestoreNationalTollPrefix;
         }
 
+        var quoteDigits = DlogRateWire.HostQuoteDialedDigits(request, restoreNationalTollPrefix);
         var quote = await RatingWorkflow.QuoteAsync(db, new RatingWorkflow.QuoteRequestDto(
-            request.DialedDigits,
+            quoteDigits,
             RatingMode.RealTimeRated,
             planId,
             customerId,
             1m,
-            DateTime.UtcNow), stoppingToken);
+            DateTime.UtcNow, publishedVersionId), stoppingToken);
+        publishedVersionId = quote.AppliedVersionId;
         var wire = quote.Allowed && quote.Pricing is { Mode: not CallPricingMode.LegacyProrated } pricing
             ? DlogRateWire.QuoteFromPricing(pricing.FirstChargeUsd, pricing.FollowingChargeUsd,
                 pricing.Mode == CallPricingMode.FlatCall, request.CallType)
@@ -1410,6 +1403,10 @@ internal sealed class NccLinkProcessor(
             international = request.International,
             decision = quote.DecisionKind.ToString(),
             amountUsd = quote.AmountUsd,
+            ratePlanSource,
+            ratePlanId = planId,
+            ratePlanVersionId = publishedVersionId,
+            nationalTollPrefixRestored = quoteDigits != request.DialedDigits,
             rateInfo = wire.RateInfo
         }, _session.TerminalId);
         try

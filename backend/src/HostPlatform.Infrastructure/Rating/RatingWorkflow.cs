@@ -17,7 +17,8 @@ public static class RatingWorkflow
         Guid? RatePlanId,
         Guid? CustomerId,
         decimal AssumedDurationMinutes,
-        DateTime? AsOfUtc);
+        DateTime? AsOfUtc,
+        Guid? ExpectedPublishedVersionId = null);
 
     public static async Task<RatingEngine.QuoteResult> QuoteAsync(
         HostPlatformDbContext db,
@@ -41,7 +42,8 @@ public static class RatingWorkflow
                 .ThenInclude(v => v!.DestinationPrefixes)!.ThenInclude(d => d.Tariff)
                 .Include(p => p.PublishedVersion!)!
                 .ThenInclude(v => v!.TimeBands)!.ThenInclude(t => t.Tariff)
-                .FirstOrDefaultAsync(p => p.Id == pid, ct);
+                .FirstOrDefaultAsync(p => p.Id == pid && (dto.ExpectedPublishedVersionId == null ||
+                    p.PublishedVersionId == dto.ExpectedPublishedVersionId), ct);
             published = plan?.PublishedVersion;
         }
 

@@ -143,6 +143,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify host rate plan selection workflow
+        run: npm run e2e -- e2e/host-rate-plan-selection.spec.ts --output test-results/host-rate-plan-selection
+        env:
+          CI: "true"
+
       - name: Verify CDR upload observation workflow
         run: npm run e2e -- e2e/cdr-upload-observation.spec.ts --output test-results/cdr-upload-observation
         env:

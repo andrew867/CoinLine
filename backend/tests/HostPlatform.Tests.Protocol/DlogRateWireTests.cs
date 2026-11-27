@@ -5,6 +5,22 @@ namespace HostPlatform.Tests.Protocol;
 public class DlogRateWireTests
 {
     [Theory]
+    [InlineData("7095550123", false, 0x44, true, "17095550123")]
+    [InlineData("2125550123", false, 0x45, true, "12125550123")]
+    [InlineData("7095550123", false, 0x43, true, "7095550123")]
+    [InlineData("17095550123", false, 0x44, true, "17095550123")]
+    [InlineData("5550123", false, 0x44, true, "5550123")]
+    [InlineData("1095550123", false, 0x44, true, "1095550123")]
+    [InlineData("7091550123", false, 0x44, true, "7091550123")]
+    [InlineData("7095550123", true, 0x44, true, "7095550123")]
+    [InlineData("7095550123", false, 0x44, false, "7095550123")]
+    public void Normalized_national_toll_lookup_is_opt_in(string digits, bool international, byte type, bool enabled, string expected)
+    {
+        var request = new DlogRateWire.RateRequest(digits, international, 0, 0, type);
+        Assert.Equal(expected, DlogRateWire.HostQuoteDialedDigits(request, enabled));
+    }
+
+    [Theory]
     [InlineData(true, .25, 0, 0, "4002FFFF1900FFFF000000000000000000000000000000000000")]
     [InlineData(false, .25, .25, 0, "40013C0019003C000000000000003C0019003C00000000000000")]
     [InlineData(false, .25, .10, 0xA5, "40063C0019003C000000000000003C000A003C00000000000000")]
