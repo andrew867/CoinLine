@@ -14,7 +14,7 @@ namespace HostPlatform.Api.Controllers;
 public sealed class NativeTableConfigurationController(HostPlatformDbContext db, TableDistributionService tables) : ControllerBase
 {
     [HttpGet]
-    public async Task<ActionResult<object>> Get(Guid id, int number, [FromQuery] string? profile, CancellationToken ct)
+    public async Task<ActionResult<object>> Get(Guid id, int number, [FromQuery] string? profile, [FromQuery] string? familyId, CancellationToken ct)
     {
         var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
         if (set == null)
@@ -59,6 +59,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
 
         var restrictedRoutes = number == ServiceRestrictionWire.MessageType && layout.Profile == NativeTableLayouts.Later
             ? await ReadRestrictionRoutes(id, firmware, ct) : null;
+        var screeningFamily = CallScreeningWire.IsRecord(number) ? LegacyTerminalTableRequirements.ScreeningGuidance(familyId) : null;
+        var screeningDescriptions = CallScreeningWire.IsRecord(number) ? ReadScreeningDescriptions(version.ScreeningDescriptionsJson) : null;
 
         return Ok(new
         {
@@ -84,7 +86,11 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             screening = CallScreeningWire.IsRecord(number) ? new
             {
                 supportsSpeedDial = CallScreeningWire.SupportsSpeedDial(layout),
-                descriptions = ReadScreeningDescriptions(version.ScreeningDescriptionsJson)
+                descriptions = screeningDescriptions,
+                family = screeningFamily,
+                savedRetainedSlots = screeningFamily == null ? null : Enumerable.Range(1, layout.Sections.Count)
+                    .Where(slot => !CallScreeningWire.IsVacant(raw, layout, slot) ||
+                        !string.IsNullOrWhiteSpace(screeningDescriptions!.GetValueOrDefault(slot))).ToArray()
             } : null,
             sections = layout.Sections.Select(section => new
             {

@@ -8,6 +8,8 @@ An editor, valid encoding, a terminal acknowledgement and observed device behavi
 
 The entries below describe the supported layouts and observed acceptance, not an assertion that every listed record is required by every terminal family. In the acknowledgement column, **fixture** means the synthetic TCP fixture returned an application MT14; **native** means an actual emulated terminal returned the application MT14. Physical-terminal acceptance remains a separate gate throughout.
 
+The [family-aware screening workspace](terminal-family-checklist-coverage.md) distinguishes the documented 50- or 200-entry list from the complete packed record. PostgreSQL and browser regressions verify institutional entries 16 through 50, retained extra slots, unchanged hashes and a one-bit edit without modifying unrelated data or discarding staged edits. Terminal active-entry limits and institutional behavior remain unverified.
+
 | MT and configuration | Editor | Encoding and preservation | Terminal acknowledgement | Device behavior and remaining checks |
 | --- | --- | --- | --- | --- |
 | 21, management access | Typed terminal identity, access numbers and later ADSI fields | 18, 40 and 48-byte layouts; later 48-byte tail round-tripped. The 40-byte tail is not fully verified. | Native 18-byte and later graphical INSTALL; selected 48-byte fixture updates. | Management contacts work. Verify each authored access change and later ADSI fields on device. |
