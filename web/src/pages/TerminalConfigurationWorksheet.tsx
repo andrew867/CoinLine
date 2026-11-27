@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { InitialConfigurationStarter, type StarterRecord } from './InitialConfigurationStarter'
 import './TerminalConfigurationWorksheet.css'
 
 type RecordSummary = { configurationId: string | null; revision: number; length: number; sha256: string }
@@ -130,6 +131,10 @@ export function TerminalConfigurationWorksheet({ terminalId, assignmentKey, term
       <button type="button" className="quiet" disabled={busy} onClick={() => setReload(value => value + 1)}>Reload worksheet</button>
       {worksheet && <>
         {!worksheet.baseSetId && <p role="note">No configuration is assigned. Select published records to build the initial host assignment.</p>}
+        {!worksheet.baseSetId && editable && <InitialConfigurationStarter endpoint={endpoint} disabled={busy || stagedCount > 0} onStage={(records: StarterRecord[]) => {
+          setStaged(Object.fromEntries(records.map(record => [record.number, { action: 'copy', source: record } as const])))
+          setPersonalize(false); setChooser(null); clearPreview()
+        }} />}
         <FamilyReviewNotice review={worksheet.family} />
         <div className="worksheet-controls"><label>Configuration family<select value={family} onChange={event => setFamily(event.target.value)}>
           <option value="all">All families</option>{families.map(name => <option key={name}>{name}</option>)}</select></label>
