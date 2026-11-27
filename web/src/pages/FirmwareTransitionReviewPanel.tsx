@@ -11,6 +11,7 @@ import { apiGet, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { FirmwareScreeningStagingPanel } from './FirmwareScreeningStagingPanel'
 import { FirmwareCarrierStagingPanel } from './FirmwareCarrierStagingPanel'
+import { FirmwareQuickAccessStagingPanel } from './FirmwareQuickAccessStagingPanel'
 import { FamilyOperatingModeNotice, type FamilyOperatingMode } from './FamilyOperatingModeNotice'
 
 type Phone = { id: string; displayName: string }
@@ -206,6 +207,12 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
               setCandidateId(id); setReview(null); resetStage()
             }} />}
       </div>}
+      {review && review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
+          laterTariffProfiles.has(review.targetProfileId ?? '') && review.records.some(record => record.tableNumber === 55 && record.sourceBytes === 571 && record.candidateBytes === 571) &&
+          <FirmwareQuickAccessStagingPanel key={`keys:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id,name) => {
+              setSets(previous => [...previous, { id,name,status:0,targetFirmwareVersionId:targetId }]); setCandidateId(id); setReview(null); resetStage()
+            }} />}
       {review && review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
           laterTariffProfiles.has(review.targetProfileId ?? '') && [[29,481],[30,68],[32,33],[34,19],[35,21],[50,105]].some(([number,length]) =>
             review.records.some(record => record.tableNumber === number && record.sourceBytes === length && record.candidateBytes === length)) &&
