@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { apiFetch } from '../api/client'
+import { canPerform, permissionOperation as op } from '../api/consoleSession'
 
 type Review = {
   supported: boolean; reason: string | null
@@ -54,6 +56,8 @@ export function DialedNumberReview({ setId, recordRevision }: { setId: string; r
     {error && <p role="alert">{error}</p>}
     {result && <div aria-live="polite">
       <p>Saved revision {result.setRevision}{result.profile ? ` · ${result.profile}` : ''}</p>
+      {canPerform('rating', op.read) && canPerform('rate-plans', op.read) &&
+        <p><Link to="/rating-quote" state={{ source: 'saved-configuration', dialedDigits: digits }}>Compare a published host quote for these digits</Link> (opens the separate quote tool; does not place a call).</p>}
       {!result.review.supported ? <p role="status">{result.review.reason}</p> : <>
         <table><caption>Configured candidates and payment settings</caption><thead><tr><th>Record</th><th>Entry</th><th>Configured value</th></tr></thead>
           <tbody>{result.review.findings.map((finding, index) => <tr key={`${finding.tableNumber}-${index}`}>
