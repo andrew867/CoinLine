@@ -8,7 +8,7 @@ The later type-40 graphical catalogue has native application acknowledgement evi
 
 The Table definitions reference catalogue now scopes observed behavior to the selected registered profile and counts it separately from editors, authorable records and application acknowledgements. Observed-length-only profiles do not inherit the behavior of another terminal with a matching record size. An acknowledged MT133 remains without a specific behavior observation, and MT94 schedule acknowledgement and network connection remain distinct from completed code transfer.
 
-The MT93 credential-preservation regression uses noncredential synthetic sentinel bytes. Ordinary unit-limit, rebate or later discount edits and blank protected fields retain the complete opaque credential region in both layouts. Real PostgreSQL verifies the saved record bytes and read-only credential fields; three isolated NCC fixtures acknowledge the exact selected older, later standard and graphical records. These checks do not establish a stored-value issuer or payment application.
+The [MT93 and MT134 operator guide](mt93-mt134-operator-guide.md) explains the earlier and later editors, card acceptance, discount selection and related configuration. The MT93 credential-preservation regression uses noncredential synthetic sentinel bytes. Ordinary unit-limit, rebate or later discount edits and blank protected fields retain the complete opaque credential region in both layouts. Real PostgreSQL verifies the saved record bytes and read-only credential fields; three isolated NCC fixtures acknowledge the exact selected older, later standard and graphical records. These checks do not establish a stored-value issuer or payment application.
 
 ## Terminal configuration records
 
