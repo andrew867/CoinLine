@@ -18,7 +18,8 @@ namespace HostPlatform.Api.Controllers;
 public sealed class DownloadPreparationController(HostPlatformDbContext db, TableDistributionService tables, TimeProvider clock) : ControllerBase
 {
     private const int MaximumPhones = 40;
-    public sealed record PreparationRequest(Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc = null, string? PreviewToken = null);
+    public sealed record PreparationRequest(Guid[] TerminalIds, DateTimeOffset? AvailableAtUtc = null, string? PreviewToken = null,
+        int[]? RecordNumbers = null);
     private sealed record RecordReview(int TableNumber, Guid VersionId, string PayloadSha256Hex);
     private sealed record PhoneReview(Guid TerminalId, string? TerminalIdHex, string? DisplayName, Guid? TableSetId,
         string? TableSetName, int? AssignmentVersion, int? SetVersion, RecordReview[] Records, string? Reason)
@@ -41,7 +42,12 @@ public sealed class DownloadPreparationController(HostPlatformDbContext db, Tabl
         var results = await phones.OrderBy(phone => phone.TerminalIdHex).ThenBy(phone => phone.Id).Take(101)
             .Select(phone => new { id = phone.Id, phone.TerminalIdHex, phone.DisplayName, active = phone.DeactivatedAtUtc == null })
             .ToListAsync(ct);
-        return Ok(new { phones = results.Take(100), more = results.Count > 100, maximumPhones = MaximumPhones });
+        var registered = await db.TableDefinitions.AsNoTracking().Where(row => row.TableNumber >= 1 && row.TableNumber <= 255)
+            .Select(row => row.TableNumber).Distinct().ToArrayAsync(ct);
+        var recordOptions = RecordReferenceCatalogue.Build(registered)
+            .Where(row => registered.Contains(row.Number) && row.Kind is not ("operational" or "scheduler_record"))
+            .Select(row => new { tableNumber = row.Number, row.Name }).ToArray();
+        return Ok(new { phones = results.Take(100), more = results.Count > 100, maximumPhones = MaximumPhones, recordOptions });
     }
 
     [HttpPost("preview")]
@@ -57,6 +63,12 @@ public sealed class DownloadPreparationController(HostPlatformDbContext db, Tabl
             return BadRequest(new { error = $"Choose between 1 and {MaximumPhones} distinct phones." });
         if (prepare && string.IsNullOrWhiteSpace(body.PreviewToken))
             return BadRequest(new { error = "Review the phone list before preparing downloads." });
+        if (body.RecordNumbers is { } requested && (requested.Length is < 1 or > 255
+            || requested.Any(number => number is < 1 or > 255) || requested.Distinct().Count() != requested.Length))
+            return BadRequest(new { error = "Select at least one distinct data record, with message types from 1 to 255." });
+        var recordNumbers = body.RecordNumbers?.Order().ToArray();
+        if (recordNumbers != null && ContainsNonDataRecords(recordNumbers))
+            return BadRequest(new { error = "Choose configuration records only. Operational messages and firmware schedules are not data downloads." });
         var now = clock.GetUtcNow().UtcDateTime;
         var requestedTime = body.AvailableAtUtc?.UtcDateTime;
         if (requestedTime is { } future && future <= now)
@@ -69,11 +81,11 @@ public sealed class DownloadPreparationController(HostPlatformDbContext db, Tabl
             // A concurrent assignment or schedule must not silently replace an operator's review.
             await using var transaction = prepare && db.Database.IsRelational()
                 ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
-            var plan = await ReadPlanAsync(body.TerminalIds, ready, ct);
+            var plan = await ReadPlanAsync(body.TerminalIds, ready, recordNumbers, ct);
             var reviews = plan.Select(phone => phone.Review).ToArray();
-            var token = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { requestedTime, reviews })));
+            var token = Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(new { requestedTime, recordNumbers, reviews })));
             if (!prepare)
-                return Ok(new { phones = reviews, preparationAtUtc = requestedTime, previewToken = token, eligibleCount = reviews.Count(phone => phone.Eligible) });
+                return Ok(new { phones = reviews, recordNumbers, preparationAtUtc = requestedTime, previewToken = token, eligibleCount = reviews.Count(phone => phone.Eligible) });
             if (!string.Equals(token, body.PreviewToken, StringComparison.Ordinal))
                 return Conflict(new { error = "The phone list, assignment or existing work changed. Review the downloads again." });
             if (reviews.Any(phone => !phone.Eligible))
@@ -84,20 +96,21 @@ public sealed class DownloadPreparationController(HostPlatformDbContext db, Tabl
             {
                 var schedule = new ScheduledTableDownload
                 {
-                    TerminalId = phone.Review.TerminalId, TableSetId = phone.Review.TableSetId!.Value, AvailableAtUtc = ready
+                    TerminalId = phone.Review.TerminalId, TableSetId = phone.Review.TableSetId!.Value, AvailableAtUtc = ready,
+                    RecordNumbers = recordNumbers
                 };
                 db.ScheduledTableDownloads.Add(schedule);
                 var batch = requestedTime == null ? tables.StageScheduledBatch(schedule, phone.Versions, now) : null;
                 ApiAudit.Write(db, HttpContext, "tables.download", "prepare_assigned", schedule.Id.ToString(), new
                 {
                     scheduleId = schedule.Id, phone.Review.TableSetId, batchId = batch?.Id, availableAtUtc = ready,
-                    records = phone.Review.Records.Select(record => record.TableNumber)
+                    recordNumbers, records = phone.Review.Records.Select(record => record.TableNumber)
                 }, schedule.TerminalId);
                 results.Add(new
                 {
                     scheduleId = schedule.Id, batchId = batch?.Id, phone.Review.TerminalId, phone.Review.DisplayName,
                     phone.Review.TerminalIdHex, phone.Review.TableSetId, phone.Review.TableSetName, availableAtUtc = ready,
-                    preparedAtUtc = schedule.PreparedAtUtc
+                    preparedAtUtc = schedule.PreparedAtUtc, recordNumbers
                 });
             }
             await db.SaveChangesAsync(ct);
@@ -111,7 +124,10 @@ public sealed class DownloadPreparationController(HostPlatformDbContext db, Tabl
         }
     }
 
-    private async Task<List<PreparedPhone>> ReadPlanAsync(Guid[] ids, DateTime ready, CancellationToken ct)
+    private static bool ContainsNonDataRecords(int[] numbers) => RecordReferenceCatalogue.Build(numbers)
+        .Any(row => numbers.Contains(row.Number) && row.Kind is ("operational" or "scheduler_record"));
+
+    private async Task<List<PreparedPhone>> ReadPlanAsync(Guid[] ids, DateTime ready, int[]? recordNumbers, CancellationToken ct)
     {
         var phones = await db.Terminals.AsNoTracking().Where(phone => ids.Contains(phone.Id)).ToDictionaryAsync(phone => phone.Id, ct);
         var assignments = await db.TerminalTableAssignments.AsNoTracking().Include(a => a.TableSet)
@@ -139,9 +155,11 @@ public sealed class DownloadPreparationController(HostPlatformDbContext db, Tabl
                 try
                 {
                     records = await tables.ReadScheduledRecordsAsync(new ScheduledTableDownload
-                        { TerminalId = id, TableSetId = set!.Id, AvailableAtUtc = ready }, phone!, ready, ct);
+                        { TerminalId = id, TableSetId = set!.Id, AvailableAtUtc = ready, RecordNumbers = recordNumbers }, phone!, ready, ct);
                     if (records.Any(record => record.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
                         reason = "Use the firmware scheduler for MT94.";
+                    else if (recordNumbers != null && ContainsNonDataRecords(records.Select(record => record.TableDefinition!.TableNumber).ToArray()))
+                        reason = "The selected records have an operational or firmware-schedule dependency.";
                     else if (records.Any(record => !record.ValidationPassed))
                         reason = "The assigned configuration contains an invalid record.";
                 }

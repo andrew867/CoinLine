@@ -80,6 +80,43 @@ it('reviews a future UTC preparation time and invalidates stale confirmation aft
   expect(screen.queryByText('1 download schedule created')).not.toBeInTheDocument()
 })
 
+it('prepares only selected record types across distinct sets, includes dependencies and blocks missing types', async () => {
+  vi.mocked(apiGet).mockResolvedValue({ phones: [first, second], more: false, maximumPhones: 40,
+    recordOptions: [{ tableNumber: 29, name: 'Text advertising' }, { tableNumber: 50, name: 'Coin validation' }] })
+  vi.mocked(apiPostRaw).mockResolvedValueOnce(Response.json({ phones: [reviewRow(first, 'Lobby configuration', [50]),
+    reviewRow(second, 'Shop configuration', [], 'The source set must have exactly one MT50 record.')], eligibleCount: 1,
+    preparationAtUtc: null, previewToken: 'blocked' }))
+    .mockResolvedValueOnce(Response.json({ phones: [reviewRow(first, 'Lobby configuration', [50, 29]),
+      reviewRow(second, 'Shop configuration', [29])], eligibleCount: 2, preparationAtUtc: null, previewToken: 'partial' }))
+    .mockResolvedValueOnce(Response.json({ downloads: [first, second].map((phone, index) => ({ terminalId: phone.id,
+      terminalIdHex: phone.terminalIdHex, displayName: phone.displayName, tableSetName: `Configuration ${index}`,
+      scheduleId: `selected-schedule-${index}`, batchId: `selected-batch-${index}` })) }))
+  const onPrepared = vi.fn()
+  render(<MemoryRouter><DownloadPreparationPanel onPrepared={onPrepared} /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole('button', { name: /Add Lobby phone/ }))
+  fireEvent.click(screen.getByRole('button', { name: /Add Shop phone/ }))
+  expect(screen.getByRole('radio', { name: 'Full assigned configuration' })).toBeChecked()
+  fireEvent.click(screen.getByRole('radio', { name: 'Selected records only' }))
+  expect(screen.getByRole('button', { name: 'Review selected phones' })).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('Record to add'), { target: { value: '50' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add record' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Review selected phones' }))
+  expect(await screen.findByText(/exactly one MT50/)).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Confirm preparation for 2 phones' })).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Remove MT50' }))
+  expect(screen.queryByRole('heading', { name: 'Download review' })).not.toBeInTheDocument()
+  fireEvent.change(screen.getByLabelText('Record to add'), { target: { value: '29' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Add record' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Review selected phones' }))
+  expect(await screen.findByText('MT50, MT29')).toBeVisible()
+  expect(screen.getByText(/Requested records: MT29/)).toBeVisible()
+  expect(apiPostRaw).toHaveBeenLastCalledWith('/api/downloads/preparation/preview', { terminalIds: [first.id, second.id], availableAtUtc: null, recordNumbers: [29] })
+  fireEvent.click(screen.getByRole('button', { name: 'Confirm preparation for 2 phones' }))
+  expect(await screen.findByText('2 download schedules created')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenLastCalledWith('/api/downloads/preparation', { terminalIds: [first.id, second.id], availableAtUtc: null, recordNumbers: [29], previewToken: 'partial' })
+  expect(onPrepared).toHaveBeenCalledOnce()
+})
+
 
 it('lets an Add-only download operator use the minimal preparation workflow without requesting denied registries or history', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { downloads: 4 })

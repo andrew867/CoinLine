@@ -22,6 +22,113 @@ public sealed class PostgresDownloadPreparationTests
     private const string Preparation = "/api/downloads/preparation";
 
     [PostgresIntegrationFact]
+    public async Task Selected_types_include_each_phones_dependencies_and_only_original_partial_batches_are_acknowledged()
+    {
+        await using var ncc = new NccFactory();
+        var key = Guid.NewGuid().ToString("N");
+        await using var host = Factory(ncc, key);
+        using var client = host.CreateClient();
+        client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var fixture = await Seed(host.Services, selectedFixture: true);
+        await SignIn(client, fixture.Username, fixture.Password);
+        var selected = fixture.Phones.Take(2).Select(phone => phone.Id).ToArray();
+        var options = await client.GetFromJsonAsync<JsonElement>($"{Preparation}/options");
+        var types = options.GetProperty("recordOptions").EnumerateArray().Select(row => row.GetProperty("tableNumber").GetInt32()).ToArray();
+        Assert.Contains(29, types); Assert.Contains(50, types); Assert.DoesNotContain(94, types); Assert.DoesNotContain(14, types);
+        foreach (int[] invalid in new int[][] { [], [29, 29], [0], [256], [94], [14] })
+        {
+            using var refusal = await client.PostAsJsonAsync($"{Preparation}/preview", new { terminalIds = selected, recordNumbers = invalid });
+            Assert.Equal(HttpStatusCode.BadRequest, refusal.StatusCode);
+        }
+        var blocked = await Preview(client, selected, records: [32]);
+        Assert.Equal(1, blocked.GetProperty("eligibleCount").GetInt32());
+        Assert.Contains("exactly one MT32", blocked.GetProperty("phones")[1].GetProperty("reason").GetString());
+        using (var refusal = await Confirm(client, selected, blocked, records: [32])) Assert.Equal(HttpStatusCode.BadRequest, refusal.StatusCode);
+        var preview = await Preview(client, selected, records: [29]);
+        Assert.Equal(2, preview.GetProperty("eligibleCount").GetInt32());
+        Assert.Equal(29, Assert.Single(preview.GetProperty("recordNumbers").EnumerateArray()).GetInt32());
+        var reviewed = preview.GetProperty("phones").EnumerateArray().ToArray();
+        Assert.Equal(new[] { 50, 29 }, Numbers(reviewed[0]));
+        Assert.Equal(new[] { 29 }, Numbers(reviewed[1]));
+        using (var changed = await Confirm(client, selected, preview, records: [29, 50])) Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        using (var changed = await Confirm(client, selected, preview)) Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        var sameRecordsFull = await Preview(client, [selected[1]]);
+        using (var changed = await Confirm(client, [selected[1]], sameRecordsFull, records: [29, 50]))
+            Assert.Equal(HttpStatusCode.Conflict, changed.StatusCode);
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.False(await db.ScheduledTableDownloads.AnyAsync(row => selected.Contains(row.TerminalId)));
+            Assert.False(await db.DownloadBatches.AnyAsync(row => selected.Contains(row.TerminalId)));
+        }
+        using var prepared = await Confirm(client, selected, preview, records: [29]);
+        Assert.Equal(HttpStatusCode.OK, prepared.StatusCode);
+        var downloads = (await prepared.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("downloads").EnumerateArray().ToArray();
+        for (var index = 0; index < selected.Length; index++)
+        {
+            var batchId = downloads[index].GetProperty("batchId").GetGuid();
+            var set = index == 0 ? fixture.First : fixture.Second;
+            var expected = TableDistributionService.SelectDataDownloadRecords(set.Versions.ToArray(), [29]);
+            await Transfer(ncc.Port, fixture.Phones[index].TerminalIdHex, expected.Select(TableDistributionService.GetEffectivePayload).ToArray(), routineCallIn: true);
+            for (var attempt = 0; attempt < 60; attempt++)
+            {
+                await using var scope = host.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                var batch = await db.DownloadBatches.AsNoTracking().Include(row => row.Items).SingleAsync(row => row.Id == batchId);
+                if (batch.Status == DownloadBatchStatus.Completed)
+                {
+                    Assert.Equal(DownloadScope.Partial, batch.Scope);
+                    Assert.Equal(expected.Select(row => row.Id), batch.Items.OrderBy(row => row.StepIndex).Select(row => row.TableVersionId));
+                    Assert.All(batch.Items, item => Assert.True(item.Succeeded));
+                    var schedule = await db.ScheduledTableDownloads.SingleAsync(row => row.Id == batch.ScheduleId);
+                    Assert.Equal(new[] { 29 }, schedule.RecordNumbers);
+                    Assert.Equal(set.Id, schedule.TableSetId);
+                    Assert.NotNull(schedule.CompletedAtUtc);
+                    Assert.Equal(1, await db.DownloadBatches.CountAsync(row => row.TerminalId == selected[index]));
+                    break;
+                }
+                if (attempt == 59) Assert.Fail("The original selected batch did not complete.");
+                await Task.Delay(100);
+            }
+        }
+        var third = fixture.Phones[2].Id;
+        var ready = ncc.Clock.GetUtcNow().AddHours(1);
+        var future = await Preview(client, [third], ready, [29]);
+        using var scheduled = await Confirm(client, [third], future, ready, [29]);
+        Assert.Equal(HttpStatusCode.OK, scheduled.StatusCode);
+        var futureId = Assert.Single((await scheduled.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("downloads").EnumerateArray()).GetProperty("scheduleId").GetGuid();
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.False(await db.DownloadBatches.AnyAsync(row => row.TerminalId == third));
+            var assignment = await db.TerminalTableAssignments.SingleAsync(row => row.TerminalId == third);
+            assignment.TableSetId = fixture.Second.Id; assignment.Version++;
+            await db.SaveChangesAsync();
+        }
+        ncc.Clock.Advance(TimeSpan.FromHours(2));
+        for (var attempt = 0; attempt < 60; attempt++)
+        {
+            await using var scope = host.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var schedule = await db.ScheduledTableDownloads.AsNoTracking().Include(row => row.LastBatch).ThenInclude(row => row!.Items).SingleAsync(row => row.Id == futureId);
+            if (schedule.LastBatch is { } batch)
+            {
+                Assert.Equal(fixture.First.Id, schedule.TableSetId);
+                Assert.Equal(new[] { 29 }, schedule.RecordNumbers);
+                Assert.Equal(DownloadScope.Partial, batch.Scope);
+                Assert.Equal(TableDistributionService.SelectDataDownloadRecords(fixture.First.Versions.ToArray(), [29]).Select(row => row.Id),
+                    batch.Items.OrderBy(row => row.StepIndex).Select(row => row.TableVersionId));
+                Assert.Equal(DownloadBatchStatus.Pending, batch.Status);
+                Assert.Null(batch.NccSessionId);
+                break;
+            }
+            if (attempt == 59) Assert.Fail("Future selected preparation did not pack the original records.");
+            await Task.Delay(200);
+        }
+        static int[] Numbers(JsonElement row) => row.GetProperty("records").EnumerateArray().Select(record => record.GetProperty("tableNumber").GetInt32()).ToArray();
+    }
+
+    [PostgresIntegrationFact]
     public async Task Different_assigned_sets_are_prepared_together_and_original_batches_receive_exact_phone_records()
     {
         await using var ncc = new NccFactory();
@@ -199,7 +306,7 @@ public sealed class PostgresDownloadPreparationTests
         .UseSetting("Ncc:LoopbackOnly", "true").UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false"));
 
     private sealed record Fixture(Terminal[] Phones, TableSet First, TableSet Second, string Username, string ReadOnlyUsername, string Password);
-    private static async Task<Fixture> Seed(IServiceProvider services)
+    private static async Task<Fixture> Seed(IServiceProvider services, bool selectedFixture = false)
     {
         var label = Guid.NewGuid().ToString("N")[..8];
         var customer = new Customer { Name = "Preparation fixture", Code = label };
@@ -219,6 +326,15 @@ public sealed class PostgresDownloadPreparationTests
         first.Versions.Add(Record(advertisement, adOne, 1));
         first.Versions.Add(Record(coin, coinRecord, 2));
         second.Versions.Add(Record(advertisement, adTwo, 1));
+        if (selectedFixture)
+        {
+            // The same chosen type has a dependency in only one saved set. The other
+            // records must not leak into either phone's partial batch.
+            first.Versions.First(row => row.TableDefinition == advertisement).DependsOnTableDefinitionId = coin.Id;
+            var statistics = new TableDefinition { TableNumber = 32, Name = "Fixture statistics settings" };
+            first.Versions.Add(Record(statistics, NativeTableLayouts.CreateDraftTemplate(NativeTableLayouts.DraftTemplates(32).First()), 3));
+            second.Versions.Add(Record(coin, coinRecord, 2));
+        }
         TableDistributionService.MarkPublished(first, DateTime.UtcNow);
         TableDistributionService.MarkPublished(second, DateTime.UtcNow);
         var password = Guid.NewGuid().ToString("N");
@@ -254,24 +370,24 @@ public sealed class PostgresDownloadPreparationTests
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", (await login.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("token").GetString());
     }
 
-    private static async Task<JsonElement> Preview(HttpClient client, Guid[] ids, DateTimeOffset? ready = null)
+    private static async Task<JsonElement> Preview(HttpClient client, Guid[] ids, DateTimeOffset? ready = null, int[]? records = null)
     {
-        using var response = await client.PostAsJsonAsync($"{Preparation}/preview", new { terminalIds = ids, availableAtUtc = ready });
+        using var response = await client.PostAsJsonAsync($"{Preparation}/preview", new { terminalIds = ids, availableAtUtc = ready, recordNumbers = records });
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<JsonElement>();
     }
 
-    private static Task<HttpResponseMessage> Confirm(HttpClient client, Guid[] ids, JsonElement preview, DateTimeOffset? ready = null) =>
-        client.PostAsJsonAsync(Preparation, new { terminalIds = ids, availableAtUtc = ready, previewToken = preview.GetProperty("previewToken").GetString() });
+    private static Task<HttpResponseMessage> Confirm(HttpClient client, Guid[] ids, JsonElement preview, DateTimeOffset? ready = null, int[]? records = null) =>
+        client.PostAsJsonAsync(Preparation, new { terminalIds = ids, availableAtUtc = ready, recordNumbers = records, previewToken = preview.GetProperty("previewToken").GetString() });
 
-    private static async Task Transfer(int port, string wireId, IReadOnlyList<byte[]> expected)
+    private static async Task Transfer(int port, string wireId, IReadOnlyList<byte[]> expected, bool routineCallIn = false)
     {
         using var tcp = new TcpClient();
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
         await tcp.ConnectAsync(IPAddress.Loopback, port, deadline.Token);
         var wire = Convert.FromHexString(wireId);
         var stream = tcp.GetStream();
-        await stream.WriteAsync(Packet(0, [44, 1]), deadline.Token);
+        await stream.WriteAsync(Packet(0, routineCallIn ? [8] : [44, 1]), deadline.Token);
         AssertAck(await Read());
         var header = await Read();
         Assert.Equal(new byte[] { 18 }, header.Data);
