@@ -7,4 +7,5 @@ public sealed class HostRatePlanSelection : AuditableEntity
     public Guid? TerminalId { get; set; }
     public Guid RatePlanId { get; set; }
     public RatePlan? RatePlan { get; set; }
+    public bool RestoreNationalTollPrefix { get; set; }
 }

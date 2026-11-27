@@ -10,7 +10,7 @@ afterEach(() => { cleanup(); vi.resetAllMocks(); vi.restoreAllMocks(); consoleSe
 
 const options = [{ id: 'legacy', name: 'Previous default', customerId: 'customer', publishedVersionId: 'v1' },
   { id: 'regional', name: 'Regional tariff', customerId: null, publishedVersionId: 'v2' }]
-const initial = { selectionId: null, revision: null, selectedPlanId: null, inheritedPhones: 2, options,
+const initial = { selectionId: null, revision: null, selectedPlanId: null, restoreNationalTollPrefix: false, inheritedPhones: 2, options,
   effective: { customerId: 'customer', ratePlanId: 'legacy', publishedVersionId: 'v1', name: 'Previous default', source: 'legacy' } }
 const chosen = { ...initial, selectionId: 'selection', revision: 1, selectedPlanId: 'regional',
   effective: { ...initial.effective, ratePlanId: 'regional', publishedVersionId: 'v2', name: 'Regional tariff', source: 'customer' } }
@@ -25,7 +25,7 @@ it('reviews and explicitly selects a shared plan for inheriting phones', async (
   fireEvent.change(screen.getByLabelText('Customer default host rate plan'), { target: { value: 'regional' } })
   fireEvent.click(screen.getByRole('button', { name: 'Save host rate plan selection' }))
   await waitFor(() => expect(apiFetch).toHaveBeenCalledWith('/api/rate-plans/selection/customers/customer', expect.objectContaining({
-    method: 'PUT', body: JSON.stringify({ ratePlanId: 'regional', expectedSelectionId: null, expectedRevision: null, confirm: true }) })))
+    method: 'PUT', body: JSON.stringify({ ratePlanId: 'regional', expectedSelectionId: null, expectedRevision: null, confirm: true, restoreNationalTollPrefix: false }) })))
   expect(await screen.findByText('Host rate plan selection saved. No terminal table download was requested.')).toBeVisible()
   expect(screen.getByRole('link', { name: 'Regional tariff' })).toHaveAttribute('href', '/rate-plans/regional')
 })
@@ -42,5 +42,20 @@ it('can explicitly clear an unavailable phone override and exposes a stale confl
   fireEvent.click(screen.getByRole('button', { name: 'Save host rate plan selection' }))
   expect(await screen.findByRole('alert')).toHaveTextContent('Host rate plan selection changed.')
   expect(apiFetch).toHaveBeenCalledWith('/api/rate-plans/selection/terminals/phone', expect.objectContaining({
-    body: JSON.stringify({ ratePlanId: null, expectedSelectionId: 'selection', expectedRevision: 1, confirm: true }) }))
+    body: JSON.stringify({ ratePlanId: null, expectedSelectionId: 'selection', expectedRevision: 1, confirm: true, restoreNationalTollPrefix: false }) }))
+})
+
+it('can opt in to normalized toll lookups without replacing the selected plan', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce(chosen).mockResolvedValueOnce({ ...chosen, restoreNationalTollPrefix: true,
+    effective: { ...chosen.effective, restoreNationalTollPrefix: true } })
+  vi.mocked(apiFetch).mockResolvedValueOnce(new Response(null, { status: 204 }))
+  vi.spyOn(window, 'confirm').mockReturnValue(true)
+  render(<MemoryRouter><HostRatePlanSelectionPanel scope="customers" id="customer" /></MemoryRouter>)
+  const checkbox = await screen.findByRole('checkbox', { name: /Restore leading 1/ })
+  expect(checkbox).not.toBeChecked()
+  fireEvent.click(checkbox)
+  fireEvent.click(screen.getByRole('button', { name: 'Save host rate plan selection' }))
+  expect(await screen.findByText(/Classified national toll requests use the leading 1/)).toBeVisible()
+  expect(apiFetch).toHaveBeenCalledWith('/api/rate-plans/selection/customers/customer', expect.objectContaining({
+    body: JSON.stringify({ ratePlanId: 'regional', expectedSelectionId: 'selection', expectedRevision: 1, confirm: true, restoreNationalTollPrefix: true }) }))
 })

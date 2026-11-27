@@ -21,7 +21,8 @@ test('sets an explicit customer host plan for inheriting phones without scheduli
       customer: { id: customer, name: 'Fixture customer', code: 'LAB' }, sites: [], terminals: [], tableSets: [], ratePlans: [], cardProducts: [], cardProductsNote: null } })
     if (url.pathname === `/api/rate-plans/selection/customers/${customer}` && request.method() === 'GET')
       return route.fulfill({ json: { selectionId: saved ? 'new-selection' : null, selectedPlanId: saved ? plan : null, revision: saved ? 1 : null,
-        inheritedPhones: 2, effective: { customerId: customer, ratePlanId: saved ? plan : null, publishedVersionId: saved ? 'v1' : null,
+        restoreNationalTollPrefix: saved, inheritedPhones: 2, effective: { customerId: customer, ratePlanId: saved ? plan : null, publishedVersionId: saved ? 'v1' : null,
+          restoreNationalTollPrefix: saved,
           name: saved ? 'Regional calling' : null, source: saved ? 'customer' : 'none' },
         options: [{ id: plan, name: 'Regional calling', customerId: null, publishedVersionId: 'v1' }] } })
     if (request.method() !== 'GET') writes.push({ path: url.pathname, method: request.method(), body: request.postDataJSON() })
@@ -35,11 +36,12 @@ test('sets an explicit customer host plan for inheriting phones without scheduli
   const region = page.getByRole('region', { name: 'Host rate plan selection' })
   await expect(region.getByText('2 active phones inherit this default. Explicit phone selections are retained.')).toBeVisible()
   await region.getByLabel('Customer default host rate plan').selectOption(plan)
+  await region.getByRole('checkbox', { name: /Restore leading 1/ }).check()
   expect(writes).toEqual([])
   page.once('dialog', dialog => dialog.accept())
   await region.getByRole('button', { name: 'Save host rate plan selection' }).click()
   await expect(region.getByRole('link', { name: 'Regional calling' })).toHaveAttribute('href', `/rate-plans/${plan}`)
   await expect(region.getByText('Host rate plan selection saved. No terminal table download was requested.')).toBeVisible()
   expect(writes).toEqual([{ path: `/api/rate-plans/selection/customers/${customer}`, method: 'PUT',
-    body: { ratePlanId: plan, expectedSelectionId: null, expectedRevision: null, confirm: true } }])
+    body: { ratePlanId: plan, expectedSelectionId: null, expectedRevision: null, confirm: true, restoreNationalTollPrefix: true } }])
 })

@@ -1353,6 +1353,7 @@ internal sealed class NccLinkProcessor(
         Guid? publishedVersionId = null;
         Guid? customerId = null;
         string ratePlanSource = "unmatched";
+        bool restoreNationalTollPrefix = false;
         if (_session.TerminalId is { } terminalId)
         {
             var resolution = await HostRatePlanResolver.ForTerminalAsync(db, terminalId, stoppingToken);
@@ -1360,10 +1361,12 @@ internal sealed class NccLinkProcessor(
             planId = resolution.RatePlanId;
             publishedVersionId = resolution.PublishedVersionId;
             ratePlanSource = resolution.Source;
+            restoreNationalTollPrefix = resolution.RestoreNationalTollPrefix;
         }
 
+        var quoteDigits = DlogRateWire.HostQuoteDialedDigits(request, restoreNationalTollPrefix);
         var quote = await RatingWorkflow.QuoteAsync(db, new RatingWorkflow.QuoteRequestDto(
-            request.DialedDigits,
+            quoteDigits,
             RatingMode.RealTimeRated,
             planId,
             customerId,
@@ -1403,6 +1406,7 @@ internal sealed class NccLinkProcessor(
             ratePlanSource,
             ratePlanId = planId,
             ratePlanVersionId = publishedVersionId,
+            nationalTollPrefixRestored = quoteDigits != request.DialedDigits,
             rateInfo = wire.RateInfo
         }, _session.TerminalId);
         try

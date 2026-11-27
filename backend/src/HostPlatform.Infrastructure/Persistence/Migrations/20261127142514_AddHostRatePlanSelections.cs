@@ -19,6 +19,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     CustomerId = table.Column<Guid>(type: "uuid", nullable: true),
                     TerminalId = table.Column<Guid>(type: "uuid", nullable: true),
                     RatePlanId = table.Column<Guid>(type: "uuid", nullable: false),
+                    RestoreNationalTollPrefix = table.Column<bool>(type: "boolean", nullable: false),
                     CreatedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     UpdatedAtUtc = table.Column<DateTime>(type: "timestamp with time zone", nullable: false),
                     CreatedBy = table.Column<string>(type: "text", nullable: false),

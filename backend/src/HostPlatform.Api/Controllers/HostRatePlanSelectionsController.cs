@@ -17,7 +17,7 @@ namespace HostPlatform.Api.Controllers;
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public sealed class HostRatePlanSelectionsController(HostPlatformDbContext db) : ControllerBase
 {
-    public sealed record Change(Guid? RatePlanId, Guid? ExpectedSelectionId, int? ExpectedRevision, bool Confirm);
+    public sealed record Change(Guid? RatePlanId, Guid? ExpectedSelectionId, int? ExpectedRevision, bool Confirm, bool RestoreNationalTollPrefix = false);
 
     [HttpGet("customers/{id:guid}")]
     public Task<ActionResult<object>> Customer(Guid id, CancellationToken ct) => Read(id, null, ct);
@@ -46,6 +46,7 @@ public sealed class HostRatePlanSelectionsController(HostPlatformDbContext db) :
         var affected = terminal != null ? 1 : await db.Terminals.AsNoTracking().CountAsync(t => t.Site!.CustomerId == customerId &&
             t.DeactivatedAtUtc == null && !db.HostRatePlanSelections.Any(s => s.TerminalId == t.Id), ct);
         return Ok(new { selectionId = chosen?.Id, revision = chosen?.Version, selectedPlanId = chosen?.RatePlanId,
+            restoreNationalTollPrefix = chosen?.RestoreNationalTollPrefix ?? false,
             effective, options, inheritedPhones = affected });
     }
 
@@ -53,6 +54,8 @@ public sealed class HostRatePlanSelectionsController(HostPlatformDbContext db) :
     {
         if (!Allowed(terminal, PermissionOperation.Update) || !Allowed(terminal, PermissionOperation.Read)) return Forbid();
         if (!body.Confirm) return BadRequest(new { error = "Confirm the explicit host rate plan selection." });
+        if (body.RatePlanId == null && body.RestoreNationalTollPrefix)
+            return BadRequest(new { error = "Choose an explicit plan before enabling normalized toll handling." });
         try
         {
             await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
@@ -63,14 +66,14 @@ public sealed class HostRatePlanSelectionsController(HostPlatformDbContext db) :
                 return Conflict(new { error = "Host rate plan selection changed. Reload and review again." });
             if (body.RatePlanId is { } plan && !await HostRatePlanResolver.Eligible(db, customerId.Value).AnyAsync(p => p.Id == plan, ct))
                 return BadRequest(new { error = "Choose a published real-time plan for this customer or a shared plan." });
-            if (chosen?.RatePlanId == body.RatePlanId) return NoContent();
+            if (chosen?.RatePlanId == body.RatePlanId && (chosen?.RestoreNationalTollPrefix ?? false) == body.RestoreNationalTollPrefix) return NoContent();
             var previous = chosen?.RatePlanId;
             if (body.RatePlanId == null) db.HostRatePlanSelections.Remove(chosen!);
             else if (chosen == null) db.HostRatePlanSelections.Add(new HostRatePlanSelection { CustomerId = customer, TerminalId = terminal,
-                RatePlanId = body.RatePlanId.Value, Version = 1 });
-            else { chosen.RatePlanId = body.RatePlanId.Value; chosen.Version = checked(chosen.Version + 1); }
+                RatePlanId = body.RatePlanId.Value, Version = 1, RestoreNationalTollPrefix = body.RestoreNationalTollPrefix });
+            else { chosen.RatePlanId = body.RatePlanId.Value; chosen.RestoreNationalTollPrefix = body.RestoreNationalTollPrefix; chosen.Version = checked(chosen.Version + 1); }
             ApiAudit.Write(db, HttpContext, "rating", "set_host_rate_plan_selection", (terminal ?? customer)!.Value.ToString(),
-                new { scope = terminal != null ? "terminal" : "customer", previousPlanId = previous, body.RatePlanId }, terminal);
+                new { scope = terminal != null ? "terminal" : "customer", previousPlanId = previous, body.RatePlanId, body.RestoreNationalTollPrefix }, terminal);
             await db.SaveChangesAsync(ct);
             if (transaction != null) await transaction.CommitAsync(ct);
             return NoContent();

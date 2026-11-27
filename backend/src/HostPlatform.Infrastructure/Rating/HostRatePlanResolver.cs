@@ -4,7 +4,8 @@ using Microsoft.EntityFrameworkCore;
 
 namespace HostPlatform.Infrastructure.Rating;
 
-public sealed record HostRatePlanResolution(Guid? CustomerId, Guid? RatePlanId, Guid? PublishedVersionId, string? Name, string Source);
+public sealed record HostRatePlanResolution(Guid? CustomerId, Guid? RatePlanId, Guid? PublishedVersionId, string? Name, string Source,
+    bool RestoreNationalTollPrefix = false);
 
 /// <summary>Explicit terminal selection, then customer default, then the established legacy customer search.</summary>
 public static class HostRatePlanResolver
@@ -36,7 +37,7 @@ public static class HostRatePlanResolver
             var source = choice.TerminalId.HasValue ? "terminal" : "customer";
             // Never silently fall back to a differently priced plan if an explicit selection is no longer usable.
             return selected == null ? new(customerId, null, null, null, source + "-unavailable")
-                : new(customerId, selected.Id, selected.PublishedVersionId, selected.Name, source);
+                : new(customerId, selected.Id, selected.PublishedVersionId, selected.Name, source, choice.RestoreNationalTollPrefix);
         }
 
         var candidates = await db.RatePlans.AsNoTracking().Where(p => p.CustomerId == customerId && p.PublishedVersionId != null).ToListAsync(ct);

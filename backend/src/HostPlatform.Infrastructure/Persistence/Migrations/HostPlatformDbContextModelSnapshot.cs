@@ -2621,6 +2621,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("RatePlanId")
                         .HasColumnType("uuid");
 
+                    b.Property<bool>("RestoreNationalTollPrefix")
+                        .HasColumnType("boolean");
+
                     b.Property<Guid?>("TerminalId")
                         .HasColumnType("uuid");
 

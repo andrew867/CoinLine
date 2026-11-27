@@ -75,6 +75,13 @@ public static class DlogRateWire
         return new string(chars, 0, n);
     }
 
+    /// <summary>Optional host lookup for profiles that report a classified national toll number without its leading 1.</summary>
+    public static string HostQuoteDialedDigits(RateRequest request, bool restoreNationalTollPrefix) =>
+        restoreNationalTollPrefix && !request.International && (request.CallType & 0x0F) is 4 or 5 &&
+        request.DialedDigits.Length == 10 && request.DialedDigits[0] is >= '2' and <= '9' &&
+        request.DialedDigits[3] is >= '2' and <= '9' && request.DialedDigits.All(char.IsAsciiDigit)
+            ? "1" + request.DialedDigits : request.DialedDigits;
+
     public static byte[] EncodeRequest(string digits, bool international, ReadOnlySpan<byte> trailingNoise = default)
     {
         var buf = new byte[RequestLength];

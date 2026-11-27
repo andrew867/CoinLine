@@ -75,6 +75,12 @@ public sealed class PostgresHostRatePlanSelectionTests
         Assert.Equal("terminal-unavailable", Source(await Get(firstPath)));
         await Quote(first, null, null);
         await Set(firstPath, await Get(firstPath), null); await Quote(first, alternate, 50);
+        using (var denied = await admin.PutAsJsonAsync(firstPath, Body(await Get(firstPath), null, true))) Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+        await Quote(second, alternate, 50, 0x44); // Explicit opt-out retains the original lookup.
+        await Set(customerPath, await Get(customerPath), alternate.plan, true);
+        Assert.True((await Get(firstPath)).GetProperty("effective").GetProperty("restoreNationalTollPrefix").GetBoolean());
+        await Quote(first, alternate, 75, 0x44); // National toll is normalized for lookup only.
+        await Quote(second, alternate, 50, 0x43); // Local calls keep the ten-digit lookup.
         await Set(customerPath, await Get(customerPath), null); await Quote(first, legacy, 5);
         await using (var scope = factory.Services.CreateAsyncScope())
         {
@@ -83,7 +89,8 @@ public sealed class PostgresHostRatePlanSelectionTests
             Assert.Empty(await db.DownloadBatches.Where(b => b.TerminalId == first.Id || b.TerminalId == second.Id).ToListAsync());
             var calls = await db.CallRecords.AsNoTracking().Where(c => c.TerminalId == first.Id || c.TerminalId == second.Id).OrderBy(c => c.StartedAtUtc).ToListAsync();
             Assert.Equal(new Guid?[] { legacy.version, legacy.version, alternate.version, alternate.version, shared.version,
-                alternate.version, null, alternate.version, legacy.version }, calls.Select(c => c.AppliedRatePlanVersionId).ToArray());
+                alternate.version, null, alternate.version, alternate.version, alternate.version, alternate.version, legacy.version }, calls.Select(c => c.AppliedRatePlanVersionId).ToArray());
+            Assert.All(calls, c => Assert.Equal("7095550123", c.DialedDigits));
         }
 
         async Task<(Guid plan, Guid version)> Plan(string name, Guid? scopeId, decimal amount, bool publish = true)
@@ -92,6 +99,8 @@ public sealed class PostgresHostRatePlanSelectionTests
             var version = await Create($"/api/rate-plans/{id}/versions", new { });
             await Create($"/api/rate-plans/{id}/versions/{version}/rules", new { priority = 200, pattern = "7095550123", matchKind = 2,
                 outcome = 0, pricingMode = 1, initialChargeUsd = amount, ratePerMinuteUsd = 0m });
+            await Create($"/api/rate-plans/{id}/versions/{version}/rules", new { priority = 200, pattern = "17095550123", matchKind = 2,
+                outcome = 0, pricingMode = 1, initialChargeUsd = amount + .25m, ratePerMinuteUsd = 0m });
             if (publish)
             {
                 using var response = await admin.PostAsJsonAsync($"/api/rate-plans/{id}/publish", new { ratePlanVersionId = version, confirm = true });
@@ -106,23 +115,24 @@ public sealed class PostgresHostRatePlanSelectionTests
         }
         async Task<JsonElement> Get(string path) => await admin.GetFromJsonAsync<JsonElement>(path);
         static string? Source(JsonElement data) => data.GetProperty("effective").GetProperty("source").GetString();
-        static object Body(JsonElement current, Guid? id) => new { ratePlanId = id, expectedSelectionId = current.GetProperty("selectionId"),
-            expectedRevision = current.GetProperty("revision"), confirm = true };
-        async Task Set(string path, JsonElement current, Guid? id)
+        static object Body(JsonElement current, Guid? id, bool restore = false) => new { ratePlanId = id, expectedSelectionId = current.GetProperty("selectionId"),
+            expectedRevision = current.GetProperty("revision"), confirm = true, restoreNationalTollPrefix = restore };
+        async Task Set(string path, JsonElement current, Guid? id, bool restore = false)
         {
-            using var response = await admin.PutAsJsonAsync(path, Body(current, id)); Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
+            using var response = await admin.PutAsJsonAsync(path, Body(current, id, restore)); Assert.Equal(HttpStatusCode.NoContent, response.StatusCode);
         }
-        async Task Quote(Terminal phone, (Guid plan, Guid version)? selected, ushort? amount)
+        async Task Quote(Terminal phone, (Guid plan, Guid version)? selected, ushort? amount, byte callType = 0)
         {
             using var tcp = new TcpClient(); using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(10));
             await tcp.ConnectAsync(IPAddress.Loopback, port, deadline.Token);
             using var stream = tcp.GetStream(); var wireId = Convert.FromHexString(phone.TerminalIdHex);
-            await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { Control = 0, TerminalId = wireId,
-                Data = DlogRateWire.EncodeRequest("7095550123", false) }), deadline.Token);
+            var request = DlogRateWire.EncodeRequest("7095550123", false);
+            request[20] = callType;
+            await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { Control = 0, TerminalId = wireId, Data = request }), deadline.Token);
             var ack = await ReadFrame(stream, deadline.Token); Assert.NotEqual(0, ack.Control & NccControl.Ack);
             var reply = await ReadFrame(stream, deadline.Token);
             Assert.Equal(DlogRateWire.EncodeResponse(amount is { } cents
-                ? DlogRateWire.QuoteFromPricing(cents / 100m, 0, true, 0)
+                ? DlogRateWire.QuoteFromPricing(cents / 100m, 0, true, callType)
                 : DlogRateWire.QuoteFromDecision(false, false, 0)), reply.Data);
             await stream.WriteAsync(NccFrameCodec.Encode(new NccWirePacket { TerminalId = wireId,
                 Control = (byte)(NccControl.Ack | NccControl.Clr | reply.Control) }), deadline.Token);
