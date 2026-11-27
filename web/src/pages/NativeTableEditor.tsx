@@ -27,6 +27,7 @@ import { QuickAccessCustomerLookup } from './QuickAccessCustomerLookup'
 import { authorableDisplayText } from './advertisingGlyphs'
 import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
 import { VisualPromptWorksheet, type VisualPromptCompanion } from './VisualPromptWorksheet'
+import { VisualPromptDraftForm, type VisualPromptAuthoringRequest, type VisualPromptAuthoringSpec } from './VisualPromptDraftForm'
 import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
 import { RegionalRatingPreview } from './RegionalRatingPreview'
 import { LanguageOrderPanel } from './LanguageOrderPanel'
@@ -260,6 +261,24 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     }
   }
 
+  async function authorPrompts(request: VisualPromptAuthoringRequest) {
+    if (!canInitialize) return
+    setBusy(true); setMessage('')
+    try {
+      const response = await apiPostRaw(`${endpoint}/prompt-authoring`, request)
+      if (!response.ok) throw new Error((await response.json().catch(() => null))?.error ?? 'Could not create this visual prompt record.')
+      setProfile(request.profile)
+      setView('prompts')
+      setReload(count => count + 1)
+      onDirty(false)
+      onSaved()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not create this visual prompt record.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   function changeProfile(value: string) {
     if ((Object.keys(edits).length > 0 || Object.keys(ruleEdits).length > 0 || Object.keys(byteEdits).length > 0
       || clearedKeys.size > 0 || hasScreeningChanges)
@@ -280,9 +299,12 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   }
 
   if (!layout) return <p role="status">{message || 'Loading record fields…'}</p>
+  const promptDraft = layout as Layout & { promptAuthoring?: VisualPromptAuthoringSpec | null; visualPromptCompanions?: VisualPromptCompanion[] | null }
   if (!layout.supported) return (
     <div className="native-table-editor">
       <p className="page-intro">{layout.reason}</p>
+      {canInitialize && promptDraft.promptAuthoring && <VisualPromptDraftForm spec={promptDraft.promptAuthoring} busy={busy}
+        companions={promptDraft.visualPromptCompanions} onCreate={request => void authorPrompts(request)} onDirty={onDirty} />}
       {layout.observedLengthsOnly && <p className="page-intro">This target has an observed record-length catalogue, not confirmed native field meanings.
         Confirm the selected editor or template against the actual firmware before authoring.</p>}
       {layout.profiles && layout.profiles.length > 1 && <label>Firmware profile

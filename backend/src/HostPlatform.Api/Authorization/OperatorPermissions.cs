@@ -75,7 +75,7 @@ public static class OperatorPermissions
             ("Tables", D, "RemoveDraftRecord"),
             ("ConfigurationLibrary", R, "List Options"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
-            ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize"), ("NativeTableConfiguration", U, "Save"),
+            ("NativeTableConfiguration", R, "Get"), ("NativeTableConfiguration", A, "Initialize AuthorPrompts"), ("NativeTableConfiguration", U, "Save"),
             ("NativeTableConfiguration", R, "PreviewNumberingOverlay"), ("NativeTableConfiguration", U, "ApplyNumberingOverlay"),
             ("ScreeningBulk", R, "Preview"), ("ScreeningBulk", U, "Preview Apply"),
             ("CardSequence", R, "Get"), ("CardSequence", U, "Move Add Remove Refresh Link"),

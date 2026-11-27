@@ -36,8 +36,12 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
                         layout.Profile, layout.Length,
                         screeningSlots = CallScreeningWire.IsRecord(number) ? (int?)layout.Sections.Count : null
                     }).ToArray() : [];
-            return Ok(new { supported = false, templates, observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
-                reason = templates.Length == 0 ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
+            var promptAuthoring = PromptAuthoringSpec(set, number);
+            var promptCompanions = promptAuthoring == null ? null : await ReadVisualPromptCompanions(id, number, firmware, ct);
+            return Ok(new { supported = false, templates, promptAuthoring, visualPromptCompanions = promptCompanions,
+                observedLengthsOnly = firmware?.ObservedLengthsOnly == true,
+                reason = promptAuthoring != null ? "Author a new fixed-row visual prompt worksheet, or import a complete record."
+                    : templates.Length == 0 ? "Import a complete record to open its editor." : "Start a record from the default configuration." });
         }
         if (versions.Count != 1)
             return Ok(new { supported = false, reason = "This set has more than one record with the same message type." });
@@ -154,6 +158,49 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
         {
             return BadRequest(new { error = ex.Message });
         }
+    }
+
+    [HttpPost("prompt-authoring")]
+    public async Task<ActionResult> AuthorPrompts(Guid id, int number, [FromBody] PromptAuthoringRequest body, CancellationToken ct)
+    {
+        var set = await db.TableSets.AsNoTracking().Include(s => s.TargetFirmwareVersion).FirstOrDefaultAsync(s => s.Id == id, ct);
+        if (set == null) return NotFound();
+        if (set.Status != TableSetStatus.Draft || (await ReadVersions(id, number, ct)).Count > 0)
+            return Conflict(new { error = "The record already exists or the set is published." });
+        var spec = PromptAuthoringSpec(set, number);
+        if (spec == null || spec.Profile != body.Profile || spec.Length != body.Length || body.Rows == null)
+            return BadRequest(new { error = "Choose the matching visual-prompt layout and supply its worksheet rows." });
+        byte[] bytes;
+        try { bytes = VisualPromptDraftWire.Create(number, body.Profile, body.Length, body.Rows); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+        var (_, error) = ResolveLayout(set, number, bytes, body.Profile);
+        if (error != null) return BadRequest(new { error });
+
+        var definition = await db.TableDefinitions.Where(d => d.TableNumber == number).OrderBy(d => d.CreatedAtUtc).FirstOrDefaultAsync(ct);
+        if (definition == null)
+        {
+            definition = new TableDefinition { Name = $"Visual prompts MT{number}", TableNumber = number };
+            db.TableDefinitions.Add(definition);
+        }
+        var sortOrder = await db.TableVersions.Where(v => v.TableSetId == id).Select(v => (int?)v.SortOrder).MaxAsync(ct) ?? -1;
+        try
+        {
+            await tables.UpsertVersionAsync(id, definition.Id, 1, bytes, sortOrder + 1, null, ct, createOnly: true);
+            return NoContent();
+        }
+        catch (DbUpdateConcurrencyException) { return Conflict(new { error = "The record already exists. Reopen the editor to load it." }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    public sealed record PromptAuthoringRequest(string? Profile, int Length, Dictionary<int, string?>? Rows);
+
+    private static VisualPromptDraftSpec? PromptAuthoringSpec(TableSet set, int number)
+    {
+        if (set.Status != TableSetStatus.Draft || VisualPromptDraftWire.Spec(number) is not { } spec) return null;
+        if (set.TargetFirmwareVersionId == null) return spec;
+        var firmware = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
+        return firmware != null && !firmware.ObservedLengthsOnly && firmware.VerifiedLengths.TryGetValue(number, out var length)
+            && length == spec.Length && firmware.LayoutFor(number) == spec.Profile ? spec : null;
     }
 
     [HttpPut]
