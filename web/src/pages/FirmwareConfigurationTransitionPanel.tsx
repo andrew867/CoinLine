@@ -7,9 +7,10 @@ type Phone = { id: string; displayName: string }
 type Options = { observed: { rom: string; software: string; capturedAtUtc: string } | null;
   schedules: { id: string; rom: string; application: string; availableAtUtc: string; completedAtUtc: string | null }[];
   candidates: { id: string; name: string; firmwareLabel: string }[] }
-type Plan = { id: string; revision: number; state: 'staged' | 'ready' | 'activated' | 'cancelled'; blocker: string | null;
+type Plan = { id: string; revision: number; state: 'staged' | 'ready' | 'activated' | 'cancelled' | 'recovered'; blocker: string | null;
   sourceTableSetId: string; targetTableSetId: string; sourceControllerRom: string; sourceControllerSoftware: string;
-  targetControllerRom: string; targetControllerSoftware: string; targetBatchId: string | null; autoActivateOnContact?: boolean; activatedAutomatically?: boolean }
+  targetControllerRom: string; targetControllerSoftware: string; targetBatchId: string | null; autoActivateOnContact?: boolean; activatedAutomatically?: boolean;
+  canRecover?: boolean; recoveryBlocker?: string | null; recoveryBatchId?: string | null }
 type Preview = { plan: Plan; reviewToken: string }
 const path = '/api/firmware/configuration-transitions'
 
@@ -51,9 +52,10 @@ export function FirmwareConfigurationTransitionPanel({ phones }: { phones: Phone
     finally { setBusy(false) }
   }
 
-  async function change(plan: Plan, action: 'activate' | 'cancel') {
+  async function change(plan: Plan, action: 'activate' | 'cancel' | 'recover') {
     if (!window.confirm(action === 'activate' ? 'Activate the reviewed target configuration and queue its full download?' :
-      'Cancel this configuration plan? The separate code schedule will not be cancelled.')) return
+      action === 'recover' ? 'Restore the retained source configuration and queue its full download? This does not change terminal software.' :
+        'Cancel this configuration plan? The separate code schedule will not be cancelled.')) return
     setBusy(true); setError('')
     try {
       const response = await apiPostRaw(`${path}/${plan.id}/${action}`, { confirm: true, revision: plan.revision })
@@ -102,9 +104,12 @@ export function FirmwareConfigurationTransitionPanel({ phones }: { phones: Phone
           <tbody>{plans.map(plan => <tr key={plan.id}>
             <td>{plan.sourceControllerRom} / {plan.sourceControllerSoftware}</td><td>{plan.targetControllerRom} / {plan.targetControllerSoftware}</td>
             <td><Link to={`/table-sets/${plan.sourceTableSetId}`}>Source</Link> | <Link to={`/table-sets/${plan.targetTableSetId}`}>Target</Link></td>
-            <td>{plan.state === 'ready' ? 'Ready for activation' : plan.state === 'staged' ? 'Awaiting evidence' : plan.state === 'activated' ? 'Activated in Manager' : 'Cancelled'}
+            <td>{plan.state === 'ready' ? 'Ready for activation' : plan.state === 'staged' ? 'Awaiting evidence' : plan.state === 'activated' ? 'Activated in Manager' : plan.state === 'recovered' ? 'Source configuration restored in Manager' : 'Cancelled'}
               {plan.autoActivateOnContact && <small style={{ display: 'block' }}>{plan.activatedAutomatically ? 'Activated automatically' : 'Automatic activation approved'}</small>}{plan.blocker && <p>{plan.blocker}</p>}{plan.targetBatchId && <Link to={`/downloads/${plan.targetBatchId}`}>Target download</Link>}</td>
-            <td>{admin && (plan.state === 'ready' || plan.state === 'staged') && <><button type="button" disabled={busy || plan.state !== 'ready'} onClick={() => void change(plan, 'activate')}>Activate target configuration</button>{' '}<button type="button" disabled={busy || plan.state === 'ready'} onClick={() => void change(plan, 'cancel')}>Cancel plan</button></>}</td>
+            <td>{admin && (plan.state === 'ready' || plan.state === 'staged') && <><button type="button" disabled={busy || plan.state !== 'ready'} onClick={() => void change(plan, 'activate')}>Activate target configuration</button>{' '}<button type="button" disabled={busy || plan.state === 'ready'} onClick={() => void change(plan, 'cancel')}>Cancel plan</button></>}
+              {plan.state === 'activated' && <>{plan.recoveryBlocker && <small style={{ display: 'block' }}>{plan.recoveryBlocker}</small>}
+                {admin && <button type="button" disabled={busy || !plan.canRecover} onClick={() => void change(plan, 'recover')}>Restore source configuration</button>}</>}
+              {plan.recoveryBatchId && <Link to={`/downloads/${plan.recoveryBatchId}`}>Source recovery download</Link>}</td>
           </tr>)}</tbody></table></div>}
       </>}
     </>}

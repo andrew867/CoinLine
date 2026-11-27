@@ -123,6 +123,8 @@ public class HostPlatformDbContext : DbContext
             b.HasOne<DlogTransaction>().WithMany().HasForeignKey(row => row.SourceObservationId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<DlogTransaction>().WithMany().HasForeignKey(row => row.TargetObservationId).OnDelete(DeleteBehavior.Restrict);
             b.HasOne<DownloadBatch>().WithMany().HasForeignKey(row => row.TargetBatchId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DlogTransaction>().WithMany().HasForeignKey(row => row.RecoveryObservationId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<DownloadBatch>().WithMany().HasForeignKey(row => row.RecoveryBatchId).OnDelete(DeleteBehavior.Restrict);
             b.Property(row => row.Version).IsConcurrencyToken();
             b.Property(row => row.CodeRecordSha256Hex).HasMaxLength(64);
             b.Property(row => row.SourceSnapshot).HasMaxLength(64);

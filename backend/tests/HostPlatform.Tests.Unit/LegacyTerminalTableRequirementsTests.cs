@@ -6,6 +6,23 @@ namespace HostPlatform.Tests.Unit;
 public sealed class LegacyTerminalTableRequirementsTests
 {
     [Fact]
+    public void Screening_guidance_separates_legacy_limits_and_institutional_slots_from_packed_layout()
+    {
+        var early = LegacyTerminalTableRequirements.ScreeningGuidance("msr17-desk")!;
+        Assert.Equal(50, early.DocumentedEntries);
+        Assert.Null(early.InstitutionalFirst);
+        var inmate = LegacyTerminalTableRequirements.ScreeningGuidance("msr17-inmate")!;
+        Assert.Equal(50, inmate.DocumentedEntries);
+        Assert.Equal(16, inmate.InstitutionalFirst);
+        Assert.Equal(50, inmate.InstitutionalLast);
+        var later = LegacyTerminalTableRequirements.ScreeningGuidance("mtr19-multipay")!;
+        Assert.Equal(200, later.DocumentedEntries);
+        Assert.Null(later.InstitutionalFirst);
+        Assert.Null(LegacyTerminalTableRequirements.ScreeningGuidance("unknown"));
+        Assert.Null(LegacyTerminalTableRequirements.ScreeningGuidance(null));
+    }
+
+    [Fact]
     public void Every_registered_family_has_a_reference_including_the_shared_desk_checklist()
     {
         var reviews = TerminalFamilies.Catalog.Select(family => LegacyTerminalTableRequirements.Review(family, [], null)).ToArray();

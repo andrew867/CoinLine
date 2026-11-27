@@ -26,7 +26,7 @@ internal static class FirmwareConfigurationTransitionService
     {
         var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().SingleOrDefaultAsync(row => row.TerminalId == terminalId &&
             row.ActivatedAtUtc == null && row.CancelledAtUtc == null, ct);
-        if (plan == null) return false;
+        if (plan == null) return await HoldAfterActivation(db, terminalId, ct);
         var latest = await LatestObservation(db, terminalId, ct);
         var deliveredAt = await db.ScheduledTableDownloads.AsNoTracking().Where(row => row.Id == plan.CodeScheduleId)
             .Select(row => row.CompletedAtUtc).SingleOrDefaultAsync(ct);
@@ -39,6 +39,22 @@ internal static class FirmwareConfigurationTransitionService
         // Once a different running version is observed, neither the old assignment
         // nor unrelated queued source records may be assumed compatible.
         return version != (plan.SourceControllerRom, plan.SourceControllerSoftware);
+    }
+
+    private static async Task<bool> HoldAfterActivation(HostPlatformDbContext db, Guid terminalId, CancellationToken ct)
+    {
+        var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().Where(row => row.TerminalId == terminalId && row.ActivatedAtUtc != null)
+            .OrderByDescending(row => row.ActivatedAtUtc).ThenByDescending(row => row.Id).FirstOrDefaultAsync(ct);
+        if (plan == null) return false;
+        var registered = await db.Terminals.AsNoTracking().Where(row => row.Id == terminalId).Select(row => row.FirmwareVersionId).SingleOrDefaultAsync(ct);
+        var recovered = plan.RecoveredAtUtc != null;
+        // A later independently registered transition supersedes this observation context.
+        if (registered != (recovered ? plan.SourceFirmwareVersionId : plan.TargetFirmwareVersionId)) return false;
+        var latest = await LatestObservation(db, terminalId, ct);
+        var boundary = plan.RecoveredAtUtc ?? plan.ActivatedAtUtc!.Value;
+        if (latest == null || latest.CapturedAtUtc <= boundary) return false;
+        var expected = recovered ? (plan.SourceControllerRom, plan.SourceControllerSoftware) : (plan.TargetControllerRom, plan.TargetControllerSoftware);
+        return FieldEventCatalog.ReadControllerVersion(latest.RawPayload) != expected;
     }
 
     public static async Task<Configuration> ReadConfiguration(HostPlatformDbContext db, Guid terminalId, Guid targetSetId, CancellationToken ct)
@@ -112,6 +128,8 @@ internal static class FirmwareConfigurationTransitionService
         if (!Label(software, 4)) throw new InvalidOperationException("Enter the expected controller software label, up to four printable ASCII characters.");
         if (await db.FirmwareConfigurationTransitions.AnyAsync(row => row.TerminalId == terminalId && row.ActivatedAtUtc == null && row.CancelledAtUtc == null, ct))
             throw new InvalidOperationException("This phone already has an open configuration transition.");
+        if (await HoldAfterActivation(db, terminalId, ct))
+            throw new InvalidOperationException("The reported controller version differs from the activated configuration. Reconcile the earlier transition before staging another one.");
         var config = await ReadConfiguration(db, terminalId, targetSetId, ct);
         var code = await ReadSchedule(db, terminalId, codeScheduleId, ct);
         await EnsureIdle(db, terminalId, codeScheduleId, ct);
@@ -191,6 +209,51 @@ internal static class FirmwareConfigurationTransitionService
         return batch;
     }
 
+    public static async Task<(Configuration Configuration, DlogTransaction Observation)> VerifyRecovery(HostPlatformDbContext db,
+        FirmwareConfigurationTransition plan, CancellationToken ct)
+    {
+        if (plan.ActivatedAtUtc == null || plan.RecoveredAtUtc != null || plan.TargetObservationId == null || plan.TargetBatchId == null)
+            throw new InvalidOperationException("Recovery requires an activated, not previously recovered configuration transition.");
+        if (await db.FirmwareConfigurationTransitions.AnyAsync(row => row.TerminalId == plan.TerminalId && row.Id != plan.Id &&
+            row.CancelledAtUtc == null && (row.ActivatedAtUtc == null || row.ActivatedAtUtc > plan.ActivatedAtUtc), ct))
+            throw new InvalidOperationException("A newer configuration transition exists. Review its recovery path instead.");
+        var observation = await LatestObservation(db, plan.TerminalId, ct);
+        if (observation == null || observation.Id == plan.SourceObservationId || observation.Id == plan.TargetObservationId ||
+            observation.CapturedAtUtc <= plan.ActivatedAtUtc ||
+            FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != (plan.SourceControllerRom, plan.SourceControllerSoftware))
+            throw new InvalidOperationException("Wait for a new matched report of the original controller version after activation. Recovery does not change terminal software.");
+        if (!await db.NccSessions.AnyAsync(row => row.Id == observation.NccSessionId && row.TerminalId == plan.TerminalId &&
+            row.StartedAtUtc > plan.ActivatedAtUtc && row.Status == NccSessionStatus.Closed, ct))
+            throw new InvalidOperationException("Wait for the separate matched recovery connection to close.");
+        var config = await ReadConfiguration(db, plan.TerminalId, plan.SourceTableSetId, ct);
+        if (config.Phone.FirmwareVersionId != plan.TargetFirmwareVersionId || config.Source.Id != plan.TargetTableSetId ||
+            config.Target.TargetFirmwareVersionId != plan.SourceFirmwareVersionId || config.Assignment.Id != plan.SourceAssignmentId ||
+            config.Assignment.Version != plan.SourceAssignmentRevision + 1 || config.Assignment.PreviousTableSetId != plan.SourceTableSetId ||
+            Hash(SetSnapshot(config.Source)) != plan.TargetSnapshot ||
+            SourceSnapshot(config.Phone, config.Target.TargetFirmwareVersion!, config.Assignment, plan.SourceAssignmentRevision, config.Target) != plan.SourceSnapshot)
+            throw new InvalidOperationException("The retained source or activated assignment changed. Do not automatically restore this earlier configuration.");
+        await EnsureIdle(db, plan.TerminalId, plan.CodeScheduleId, ct);
+        return (config, observation);
+    }
+
+    // Recovery changes the Manager assignment only, after an observed return to the earlier version.
+    // Caller owns a serializable transaction; no code transfer or terminal reset occurs.
+    public static async Task<DownloadBatch> Recover(HostPlatformDbContext db, TableDistributionService tables,
+        FirmwareConfigurationTransition plan, DateTime now, CancellationToken ct, HttpContext http)
+    {
+        var (config, observation) = await VerifyRecovery(db, plan, ct);
+        config.Phone.FirmwareVersionId = plan.SourceFirmwareVersionId; config.Phone.Version++;
+        config.Assignment.PreviousTableSetId = plan.TargetTableSetId; config.Assignment.TableSetId = plan.SourceTableSetId;
+        config.Assignment.AssignedAtUtc = now; config.Assignment.Version++;
+        await db.SaveChangesAsync(ct);
+        var (batch, _) = await tables.PrepareDownloadBatchAsync(plan.TerminalId, plan.SourceTableSetId, DownloadScope.Full, null, ct);
+        plan.RecoveredAtUtc = now; plan.RecoveryObservationId = observation.Id; plan.RecoveryBatchId = batch.Id; plan.Version++;
+        ApiAudit.Write(db, http, "firmware.configuration", "recover_source_configuration", plan.Id.ToString(), new
+        { plan.SourceTableSetId, plan.TargetTableSetId, plan.RecoveryObservationId, plan.RecoveryBatchId }, plan.TerminalId);
+        await db.SaveChangesAsync(ct);
+        return batch;
+    }
+
     private static Task<TableSet> ReadSet(HostPlatformDbContext db, Guid id, CancellationToken ct) =>
         db.TableSets.AsNoTracking().Include(row => row.TargetFirmwareVersion).Include(row => row.Versions).ThenInclude(row => row.TableDefinition)
             .Include(row => row.Versions).ThenInclude(row => row.TablePayload).SingleAsync(row => row.Id == id, ct);
@@ -204,9 +267,11 @@ internal static class FirmwareConfigurationTransitionService
             hash = TableDistributionService.ComputePayloadSha256Hex(row) }).ToArray()
     };
 
-    private static string SourceSnapshot(Configuration c) => Hash(new { c.Phone.Id, c.Phone.TerminalIdHex, c.Phone.SiteId, c.Phone.TerminalFamilyId,
-        c.Phone.FirmwareVersionId, firmwareRevision = c.Phone.FirmwareVersion!.Version, c.Phone.FirmwareVersion.TableProfileId,
-        assignment = new { c.Assignment.Id, c.Assignment.Version, c.Assignment.TableSetId, c.Assignment.SiteId, c.Assignment.CustomerId }, set = SetSnapshot(c.Source) });
+    private static string SourceSnapshot(Configuration c) => SourceSnapshot(c.Phone, c.Phone.FirmwareVersion!, c.Assignment, c.Assignment.Version, c.Source);
+    private static string SourceSnapshot(Terminal phone, FirmwareVersion firmware, TerminalTableAssignment assignment, int revision, TableSet source) =>
+        Hash(new { phone.Id, phone.TerminalIdHex, phone.SiteId, phone.TerminalFamilyId,
+            FirmwareVersionId = firmware.Id, firmwareRevision = firmware.Version, firmware.TableProfileId,
+            assignment = new { assignment.Id, Version = revision, TableSetId = source.Id, assignment.SiteId, assignment.CustomerId }, set = SetSnapshot(source) });
     private static string TargetSnapshot(Configuration c) => Hash(SetSnapshot(c.Target));
     private static string Hash(object value) => Convert.ToHexString(SHA256.HashData(JsonSerializer.SerializeToUtf8Bytes(value))).ToLowerInvariant();
     private static bool Label(string? value, int limit) => !string.IsNullOrWhiteSpace(value) && value.Length <= limit && value.All(character => character is >= ' ' and <= '~');

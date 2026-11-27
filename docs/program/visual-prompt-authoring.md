@@ -1,0 +1,13 @@
+# Authoring visual prompt records
+
+Visual prompts are fixed-position caller and service messages. MT27 and MT28 contain 140 rows, and MT85, MT86, MT98 and MT99 contain 400 rows. Each row contains exactly 20 display cells. The record number and row positions are retained independently of the wording.
+
+Open a draft configuration set, choose **Text and display**, then the required **Visual prompts** language record. If it is missing and the selected target has a confirmed compatible layout, the native configuration editor offers a new worksheet. An untargeted draft may use the documented fixed format; a target with only observed record lengths still requires an independently reviewed matching record.
+
+The worksheet supports direct text entry, search, row navigation, reviewed JSON import and export, and supported Western display glyphs. Companion-language coverage shows which saved positions have text, are blank, or contain unmapped glyphs; it does not expose companion text or claim a correct translation. Import a compatible worksheet from another language record if desired, then review the changed rows. Omitted and null rows start blank; an intentionally empty row also remains blank. Creating a blank draft is an explicit separate button choice. No translated or operational prompt text is invented.
+
+Create the record to save the complete fixed-length packed bytes. The new record opens in the existing native worksheet. Subsequent edits preserve all untouched rows. Creating a record does not publish the set, assign it to a phone or initiate a download. A missing caller prompt can be intentional in a given application, but an incomplete or blank worksheet is not evidence of a working service. Review the required content and companion languages before publication; verify the target's supported record lengths and actual display behavior independently.
+
+The create action requires record-add permission and refuses incompatible layouts, invalid row positions, unsupported glyphs, existing records and published sets.
+
+Isolated PostgreSQL created every supported fixed format, including an explicitly blank draft. Exact first and last rows, blank padding and accented cells matched independent byte expectations. A new record's unchanged save retained its revision and digest; changing one accent changed only the intended byte. The companion coverage response returned row states without exposing saved companion text. Browser tests verified row authoring, reviewed worksheet import, retained edits after a failed create, companion coverage and read-only permissions. No native or physical terminal acknowledgement or display behavior was established by these authoring tests.

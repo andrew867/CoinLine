@@ -1448,7 +1448,7 @@ internal sealed class NccLinkProcessor(
             return;
         }
 
-        if (await TryStartTransitionTargetAsync(stream, terminalId, terminal.Id, cashboxStatus))
+        if (await TryStartTransitionConfigurationAsync(stream, terminalId, terminal.Id, cashboxStatus))
             return;
 
         if (await TryStartIdentityCutoverAsync(stream, terminalId, terminal, allowCutover, mandatoryFull, cashboxStatus))
@@ -1652,23 +1652,28 @@ internal sealed class NccLinkProcessor(
         await SendBatchAsync(stream, terminalId, terminal, queued, cashboxStatus, queuedByOperator: true);
     }
 
-    private async Task<bool> TryStartTransitionTargetAsync(NetworkStream stream, byte[] terminalId, Guid phoneId, byte[]? cashboxStatus)
+    private async Task<bool> TryStartTransitionConfigurationAsync(NetworkStream stream, byte[] terminalId, Guid phoneId, byte[]? cashboxStatus)
     {
         var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().Where(row => row.TerminalId == phoneId && row.ActivatedAtUtc != null &&
-            row.TargetBatchId != null && db.DownloadBatches.Any(batch => batch.Id == row.TargetBatchId && batch.Status == DownloadBatchStatus.Pending))
+            db.DownloadBatches.Any(batch => batch.Id == (row.RecoveredAtUtc == null ? row.TargetBatchId : row.RecoveryBatchId) && batch.Status == DownloadBatchStatus.Pending))
             .OrderByDescending(row => row.ActivatedAtUtc).FirstOrDefaultAsync(stoppingToken);
         if (plan == null) return false;
-        var queued = await db.DownloadBatches.Include(batch => batch.TableSet).SingleOrDefaultAsync(batch => batch.Id == plan.TargetBatchId &&
+        var recovery = plan.RecoveredAtUtc != null;
+        var batchId = recovery ? plan.RecoveryBatchId : plan.TargetBatchId;
+        var setId = recovery ? plan.SourceTableSetId : plan.TargetTableSetId;
+        var firmwareId = recovery ? plan.SourceFirmwareVersionId : plan.TargetFirmwareVersionId;
+        var expectedVersion = recovery ? (plan.SourceControllerRom, plan.SourceControllerSoftware) : (plan.TargetControllerRom, plan.TargetControllerSoftware);
+        var queued = await db.DownloadBatches.Include(batch => batch.TableSet).SingleOrDefaultAsync(batch => batch.Id == batchId &&
             batch.Status == DownloadBatchStatus.Pending, stoppingToken);
         var current = await db.Terminals.AsNoTracking().SingleOrDefaultAsync(row => row.Id == phoneId, stoppingToken);
         var observation = await FirmwareConfigurationTransitionService.LatestObservation(db, phoneId, stoppingToken);
         var matchingAssignment = await db.TerminalTableAssignments.AsNoTracking().AnyAsync(row => row.TerminalId == phoneId &&
-            row.TableSetId == plan.TargetTableSetId, stoppingToken);
-        if (queued == null || current == null || current.FirmwareVersionId != plan.TargetFirmwareVersionId || !matchingAssignment ||
-            queued.TerminalId != phoneId || queued.TableSetId != plan.TargetTableSetId || queued.Scope != DownloadScope.Full || queued.ScheduleId != null ||
-            observation == null || FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != (plan.TargetControllerRom, plan.TargetControllerSoftware))
+            row.TableSetId == setId, stoppingToken);
+        if (queued == null || current == null || current.FirmwareVersionId != firmwareId || !matchingAssignment ||
+            queued.TerminalId != phoneId || queued.TableSetId != setId || queued.Scope != DownloadScope.Full || queued.ScheduleId != null ||
+            observation == null || FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != expectedVersion)
         {
-            Audit("firmware_transition_holds_target_tables", new { reason = "target assignment or observed version needs review" }, phoneId);
+            Audit("firmware_transition_holds_target_tables", new { recovery, reason = "reviewed assignment or observed version needs review" }, phoneId);
             await db.SaveChangesAsync(stoppingToken);
             await SendInstallEndAsync(stream, terminalId, cashboxStatus);
             return true;

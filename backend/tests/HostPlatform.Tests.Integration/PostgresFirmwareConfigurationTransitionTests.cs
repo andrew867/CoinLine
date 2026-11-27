@@ -29,7 +29,10 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
     [PostgresIntegrationFact]
     public Task Approved_automatic_activation_on_alarm_contact_queues_tables_without_interrupting_alarm_receipt() => Workflow(true, false);
 
-    private static async Task Workflow(bool automatic, bool targetInstallContact = true)
+    [PostgresIntegrationFact]
+    public Task Restore_retained_configuration_only_after_a_separate_live_original_version_report() => Workflow(false, recover: true);
+
+    private static async Task Workflow(bool automatic, bool targetInstallContact = true, bool recover = false)
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
         var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
@@ -48,12 +51,24 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
         var wire = Convert.FromHexString(phone.TerminalIdHex);
         var source = new TableSet { Name = "Installed source", Customer = customer, TargetFirmwareVersion = earlier };
         var target = new TableSet { Name = "Prepared target", Customer = customer, TargetFirmwareVersion = later };
-        var definitions = new[] { 21, 26, 31, 50, 62, 73, 85, 86, 92, 93, 94, 134, 136 }.ToDictionary(number => number,
+        var targetTypes = new[] { 21, 26, 31, 50, 62, 73, 85, 86, 92, 93, 94, 134, 136 };
+        var definitions = targetTypes.Concat(new[] { 22, 27, 28, 101 }).ToDictionary(number => number,
             number => new TableDefinition { Name = $"Fixture MT{number}", TableNumber = number });
         var earlierAccess = new byte[18]; earlierAccess[0] = 21; wire.CopyTo(earlierAccess, 1);
         Add(source, 21, earlierAccess);
+        if (recover)
+        {
+            var sourceProfile = FirmwareTableProfiles.Find(earlier.TableProfileId)!;
+            foreach (var number in new[] { 22, 26, 27, 28, 31, 50, 62, 73, 92, 93, 101 })
+            {
+                var length = sourceProfile.VerifiedLengths[number];
+                var template = NativeTableLayouts.DraftTemplates(number).SingleOrDefault(row => row.Length == length && row.Profile == sourceProfile.LayoutFor(number));
+                var bytes = template == null ? new byte[length] : NativeTableLayouts.CreateDraftTemplate(template);
+                bytes[0] = (byte)number; Add(source, number, bytes);
+            }
+        }
         var profile = FirmwareTableProfiles.Find(later.TableProfileId)!;
-        var targetRecords = definitions.Keys.Where(number => number != 94).ToDictionary(number => number, number =>
+        var targetRecords = targetTypes.Where(number => number != 94).ToDictionary(number => number, number =>
         {
             var length = profile.VerifiedLengths[number];
             var template = NativeTableLayouts.DraftTemplates(number).SingleOrDefault(row => row.Length == length && row.Profile == profile.LayoutFor(number));
@@ -178,6 +193,52 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
             Assert.Equal(DownloadBatchStatus.Completed, batch.Status); Assert.Equal(targetOrder.Length, batch.Items.Count);
             Assert.All(batch.Items, row => Assert.True(row.Succeeded));
             Assert.Equal(2, await db.DownloadBatches.CountAsync(row => row.TerminalId == phone.Id));
+        }
+        if (recover)
+        {
+            var recoveryRevision = activated.GetProperty("revision").GetInt32();
+            var recoveryPath = $"{endpoint}/{planId}/recover";
+            var confirm = new { confirm = true, revision = recoveryRevision };
+            Assert.Equal(HttpStatusCode.Unauthorized, (await anonymous.PostAsJsonAsync(recoveryPath, confirm)).StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(recoveryPath, confirm)).StatusCode);
+            await Report("LABNEW", "A003");
+            await ExchangeDownload([44, 2], []);
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(recoveryPath, confirm)).StatusCode);
+            await Report("LABOLD", "A001");
+            await ExchangeDownload([44, 2], []); // Do not send target tables to a reported earlier controller.
+            var available = Assert.Single((await client.GetFromJsonAsync<JsonElement>($"{endpoint}?terminalId={phone.Id}")).EnumerateArray());
+            Assert.True(available.GetProperty("canRecover").GetBoolean(), available.GetProperty("recoveryBlocker").ToString());
+            Assert.Equal(HttpStatusCode.BadRequest, (await client.PostAsJsonAsync(recoveryPath, new { confirm = false, revision = recoveryRevision })).StatusCode);
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(recoveryPath, new { confirm = true, revision = recoveryRevision - 1 })).StatusCode);
+            using var result = await client.PostAsJsonAsync(recoveryPath, confirm);
+            Assert.True(result.IsSuccessStatusCode, await result.Content.ReadAsStringAsync());
+            var restored = await result.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Equal("recovered", restored.GetProperty("state").GetString());
+            var recoveryBatchId = restored.GetProperty("recoveryBatchId").GetGuid();
+            Assert.NotEqual(batchId, recoveryBatchId);
+            await AssertSourceUnchanged();
+            byte[][] sourceOrder;
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                Assert.Equal(target.Id, (await db.TerminalTableAssignments.SingleAsync(row => row.TerminalId == phone.Id)).PreviousTableSetId);
+                var batch = await db.DownloadBatches.Include(row => row.Items).ThenInclude(row => row.TableVersion).ThenInclude(row => row!.TableDefinition).SingleAsync(row => row.Id == recoveryBatchId);
+                Assert.Equal(DownloadBatchStatus.Pending, batch.Status); Assert.Equal(source.Id, batch.TableSetId);
+                var sourceVersions = source.Versions.ToDictionary(row => row.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload);
+                Assert.Equal(sourceVersions.Keys.Order(), batch.Items.Select(row => row.TableVersion!.TableDefinition!.TableNumber).Order());
+                sourceOrder = batch.Items.OrderBy(row => row.StepIndex).Select(row => sourceVersions[row.TableVersion!.TableDefinition!.TableNumber]).ToArray();
+                Assert.Equal(DownloadBatchStatus.Completed, (await db.DownloadBatches.FindAsync(batchId))!.Status);
+                Assert.Equal(1, await db.ScheduledTableDownloads.CountAsync(row => row.TerminalId == phone.Id));
+            }
+            await ExchangeDownload([44, 2], sourceOrder);
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                var batch = await db.DownloadBatches.Include(row => row.Items).SingleAsync(row => row.Id == recoveryBatchId);
+                Assert.Equal(DownloadBatchStatus.Completed, batch.Status); Assert.All(batch.Items, row => Assert.True(row.Succeeded));
+                Assert.Equal(3, await db.DownloadBatches.CountAsync(row => row.TerminalId == phone.Id));
+            }
+            Assert.Equal(HttpStatusCode.Conflict, (await client.PostAsJsonAsync(recoveryPath, confirm)).StatusCode);
         }
 
         void Add(TableSet set, int number, byte[] raw) => set.Versions.Add(new TableVersion { TableDefinition = definitions[number],

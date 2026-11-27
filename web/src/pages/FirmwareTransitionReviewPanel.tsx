@@ -1,21 +1,29 @@
 import { FirmwareTariffStagingPanel } from './FirmwareTariffStagingPanel'
+import { FirmwareSetupStagingPanel } from './FirmwareSetupStagingPanel'
 import { useState } from 'react'
+import { FirmwareNumberingStagingPanel } from './FirmwareNumberingStagingPanel'
 import { FirmwareLocalDialingStagingPanel } from './FirmwareLocalDialingStagingPanel'
 import { Link } from 'react-router-dom'
+import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
 import { apiGet, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { FirmwareScreeningStagingPanel } from './FirmwareScreeningStagingPanel'
+import { FirmwareCarrierStagingPanel } from './FirmwareCarrierStagingPanel'
 
 type Phone = { id: string; displayName: string }
 type Version = { id: string; label: string; tableProfileId: string | null }
 type Set = { id: string; name: string; status: number; targetFirmwareVersionId: string | null }
 type Finding = { blocking: boolean; tableNumber: number | null; message: string }
 type RecordReview = { tableNumber: number; sourceBytes: number | null; targetExpectedBytes: number | null; candidateBytes: number | null;
-  action: string; detail: string; targetAcknowledged: boolean; requiresLayoutReview: boolean }
+  action: string; detail: string; targetAcknowledged: boolean; requiresLayoutReview: boolean; replacementRecords?: number[] }
+type FamilyChecklist = { familyId: string; familyLabel: string; documented: boolean; screeningEntries: number | null; note: string | null;
+  tables: { name: string; required: boolean; candidates: number[]; status: string; note?: string | null;
+    records: { number: number; length: number; format: string; screeningNote?: string | null }[] }[] }
 type Review = { sourceFirmwareLabel: string | null; targetFirmwareLabel: string; sourceSetId: string | null; sourceSetName: string | null;
   sourceProfileId?: string | null; targetProfileId?: string | null;
   candidateSetId: string | null; candidateSetName: string | null; candidatePublished: boolean; activeSessions: number; outstandingDownloads: number;
-  configurationReadyForReview: boolean; upgradeQualified: boolean; records: RecordReview[]; findings: Finding[] }
+  configurationReadyForReview: boolean; upgradeQualified: boolean; records: RecordReview[]; findings: Finding[];
+  registeredFamilyId?: string | null; targetFamilyReview?: FamilyChecklist | null }
 type AccessPreview = { sourceSetId: string; candidateSetId: string; sourceBytes: number; targetBytes: number; changedBytes: number; recordCount: number; previewToken: string }
 
 const actions: Record<string, string> = {
@@ -23,6 +31,8 @@ const actions: Record<string, string> = {
   'unverified-target': 'Target layout unverified', 'replace-candidate': 'Replace candidate', 'replace-required': 'Replacement needed',
   'review-source-omission': 'Review missing source feature', 'available-unassigned': 'Available, applicability unverified',
   'candidate-addition': 'New target record', 'candidate-replacement': 'Replacement supplied',
+  'candidate-family-replacement': 'Replacement family supplied', 'family-replacement-needed': 'Replacement family needs preparation',
+  'candidate-local-equivalent': 'Equivalent local tariff tuples', 'inactive-source-segment': 'Disabled source segment',
   'review-native-layout': 'Review field layout', 'candidate-unchanged': 'Same bytes and identified layout', 'candidate-changed': 'Changed target record',
 }
 
@@ -38,6 +48,8 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
   const [phoneId, setPhoneId] = useState('')
   const [targetId, setTargetId] = useState('')
   const [candidateId, setCandidateId] = useState('')
+  const [chooseFamily, setChooseFamily] = useState(false)
+  const [familyId, setFamilyId] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [review, setReview] = useState<Review | null>(null)
@@ -62,6 +74,7 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
     try {
       const query = new URLSearchParams({ terminalId: phoneId, targetFirmwareVersionId: targetId })
       if (candidateId) query.set('candidateSetId', candidateId)
+      if (chooseFamily && familyId) query.set('targetFamilyId', familyId)
       setReview(await apiGet<Review>(`/api/firmware/transition-review?${query}`))
     } catch (e) { setError(e instanceof Error ? e.message : 'Unable to review the transition.') }
     finally { setBusy(false) }
@@ -90,7 +103,7 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
     {!open ? <button type="button" onClick={() => void loadOptions()}>Review a firmware transition</button> : <>
       {loadingOptions ? <p role="status">Loading firmware and configuration choices…</p> : <form onSubmit={e => { e.preventDefault(); void preview() }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14, marginBottom: 12 }}>
-          <label>Source phone<select style={{ display: 'block' }} value={phoneId} disabled={busy} onChange={e => { setPhoneId(e.target.value); setReview(null); resetStage() }}>
+          <label>Source phone<select style={{ display: 'block' }} value={phoneId} disabled={busy} onChange={e => { setPhoneId(e.target.value); setReview(null); setFamilyId(''); setChooseFamily(false); resetStage() }}>
             <option value="">Choose a phone</option>
             {phones.map(phone => <option key={phone.id} value={phone.id}>{phone.displayName}</option>)}</select></label>
           <label>Target firmware<select style={{ display: 'block' }} value={targetId} disabled={busy} onChange={e => { setTargetId(e.target.value); setCandidateId(''); setReview(null); resetStage() }}>
@@ -99,6 +112,11 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
           <label>Prepared target configuration<select style={{ display: 'block' }} value={candidateId} disabled={busy || !targetId} onChange={e => { setCandidateId(e.target.value); setReview(null); resetStage() }}>
             <option value="">None, review source only</option>{sets.filter(set => set.targetFirmwareVersionId === targetId).map(set => <option key={set.id} value={set.id}>
               {set.name} ({set.status === 1 ? 'published' : 'draft'})</option>)}</select></label>
+        </div>
+        <div style={{ marginBottom: 12 }}>
+          <label><input type="checkbox" checked={chooseFamily} disabled={busy} onChange={event => { setChooseFamily(event.target.checked); setFamilyId(''); setReview(null); resetStage() }} /> Review a different target terminal family</label>
+          {chooseFamily && <TerminalFamilySelect value={familyId} onChange={value => { setFamilyId(value); setReview(null); resetStage() }} disabled={busy} emptyLabel="Use registered phone family" />}
+          <small style={{ display: 'block' }}>The default checklist uses the phone's registered terminal family. Choosing another family is for review only and does not reclassify the phone.</small>
         </div>
         <button type="submit" disabled={!phoneId || !targetId || busy}>{busy ? 'Reviewing…' : 'Compare configurations'}</button>
       </form>}
@@ -110,21 +128,55 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
           {review.upgradeQualified ? 'Upgrade qualified.' : 'Remote upgrade is not qualified.'} Active sessions: {review.activeSessions}; outstanding downloads: {review.outstandingDownloads}.</p>
         <ul>{review.findings.map((finding, index) => <li key={index}>
           <strong>{finding.blocking ? 'Action required' : 'Review'}{finding.tableNumber ? `, MT${finding.tableNumber}` : ''}:</strong> {finding.message}</li>)}</ul>
+        {review.targetFamilyReview && <section aria-label="Target terminal family checklist" style={{ marginBottom: 16 }}>
+          <h3>Target terminal family: {review.targetFamilyReview.familyLabel}</h3>
+          {review.targetFamilyReview.note && <p>{review.targetFamilyReview.note}</p>}
+          {review.targetFamilyReview.documented && <>
+            <p>Mandatory families with recognized candidates: <strong>{review.targetFamilyReview.tables.filter(row => row.required && row.status === 'present').length} / {review.targetFamilyReview.tables.filter(row => row.required).length}</strong>. The legacy checklist is not an actual target INSTALL certificate.</p>
+            <div style={{ overflowX: 'auto' }}><table cellPadding={7} style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><th>Configuration family</th><th>Legacy requirement</th><th>Candidate status</th><th>Record evidence</th></tr></thead>
+              <tbody>{review.targetFamilyReview.tables.map(row => <tr key={row.name}>
+                <th scope="row">{row.name}</th><td>{row.required ? 'Mandatory' : 'Feature-specific'}</td>
+                <td>{({ present: 'Candidate present', missing: 'Missing from set', partial: 'Partial record group', invalid: 'Check record format', review: 'Needs review', unmapped: 'Wire record unidentified' } as Record<string, string>)[row.status] ?? row.status}{row.note && <p>{row.note}</p>}</td>
+                <td>{row.records.length ? row.records.map(record => <div key={record.number}>
+                  {review.candidateSetId ? <Link to={`/table-sets/${review.candidateSetId}?record=${record.number}&family=${encodeURIComponent(review.targetFamilyReview!.familyId)}#config-heading`}>MT{record.number}</Link> : `MT${record.number}`} · {record.length} bytes · {({ verifiedLength: 'Previously acknowledged length', catalogueLength: 'Known catalogue length', recognized: 'Recognized editor layout', unverified: 'Unverified layout', unsupported: 'Absent from target catalogue', wrongLength: 'Wrong target length', invalid: 'Incomplete or duplicate' } as Record<string, string>)[record.format] ?? record.format}
+                  {record.screeningNote && <small style={{ display: 'block' }}>{record.screeningNote}</small>}</div>) : <>None supplied{row.candidates.length > 0 && <small style={{ display: 'block' }}>Catalogue candidates: {row.candidates.map(number => `MT${number}`).join(', ')}</small>}</>}</td>
+              </tr>)}</tbody>
+            </table></div>
+          </>}
+        </section>}
         <div style={{ overflowX: 'auto' }}><table cellPadding={7} style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead><tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}><th>Record</th><th>Source bytes</th><th>Target bytes</th><th>Candidate bytes</th><th>Review</th><th>Target evidence</th></tr></thead>
           <tbody>{review.records.map(record => <tr key={record.tableNumber} style={{ borderBottom: '1px solid #eee' }}>
             <th scope="row">MT{record.tableNumber}</th><td>{record.sourceBytes ?? 'Not assigned'}</td><td>{record.targetExpectedBytes ?? 'Unknown'}</td>
-            <td>{record.candidateBytes ?? 'Not supplied'}</td><td><strong>{actions[record.action] ?? record.action}</strong><br />{record.detail}</td>
+            <td>{record.candidateBytes ?? 'Not supplied'}{record.replacementRecords?.map(number => <div key={number}>
+              {review.candidateSetId ? <Link to={`/table-sets/${review.candidateSetId}?record=${number}#config-heading`}>Review MT{number} replacement</Link> : `MT${number} replacement`}</div>)}</td><td><strong>{actions[record.action] ?? record.action}</strong><br />{record.detail}</td>
             <td>{record.targetAcknowledged ? 'Previously acknowledged' : 'Not acknowledged in catalogue'}{record.requiresLayoutReview && <><br />Field layout needs review</>}</td>
           </tr>)}</tbody>
         </table></div>
         {review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
+          laterTariffProfiles.has(review.targetProfileId ?? '') && review.records.some(record => record.tableNumber === 62 &&
+            record.sourceBytes === 353 && record.targetExpectedBytes === 353 && record.candidateBytes === 353) &&
+          <FirmwareNumberingStagingPanel key={`numbering:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            graphical={review.targetProfileId === 'mtr2x-multipay-graphical-180-double-compressed'} parentBusy={busy} onBusyChange={setBusy}
+            canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
+            }} />}
+        {review.sourceSetId && review.candidateSetId && earlierTariffProfiles.has(review.sourceProfileId ?? '') &&
           laterTariffProfiles.has(review.targetProfileId ?? '') && review.records.some(record => record.tableNumber === 73 &&
           record.sourceBytes === 1192 && record.targetExpectedBytes === 1192 && record.candidateBytes === 1192) &&
-          <FirmwareTariffStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+          <FirmwareTariffStagingPanel key={`tariff:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
             parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
               setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }])
               setCandidateId(id); setReview(null); resetStage()
+            }} />}
+        {review.sourceSetId && review.candidateSetId &&
+          [[26,72,72],[31,37,37],[92,3401,3061]].every(([number,sourceBytes,targetBytes]) => review.records.some(record =>
+            record.tableNumber === number && record.sourceBytes === sourceBytes && record.targetExpectedBytes === targetBytes && record.candidateBytes === targetBytes)) &&
+          <FirmwareSetupStagingPanel key={`setup:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            graphical={review.targetProfileId === 'mtr2x-multipay-graphical-180-double-compressed'} parentBusy={busy} onBusyChange={setBusy}
+            canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
             }} />}
         {review.sourceSetId && review.candidateSetId && canPerform('table-sets', op.add) && review.records.some(record =>
           record.tableNumber === 21 && record.targetExpectedBytes === record.candidateBytes &&
@@ -143,16 +195,23 @@ export function FirmwareTransitionReviewPanel({ phones }: { phones: Phone[] }) {
           </section>}
         {review.sourceSetId && review.candidateSetId && canPerform('table-sets', op.add) && review.records.some(record =>
           record.tableNumber === 92 && record.sourceBytes === 3401 && record.targetExpectedBytes === 3061 && record.candidateBytes === 3061) &&
-          <FirmwareScreeningStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId}
+          <FirmwareScreeningStagingPanel key={`screening:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId}
             candidateId={candidateId} parentBusy={busy} onBusyChange={setBusy} onDraftCreated={(id, name) => {
               setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }])
               setCandidateId(id); setReview(null); resetStage()
             }} />}
       </div>}
+      {review && review.sourceSetId && review.candidateSetId &&
+          [[22,661],[23,678],[92,3401]].every(([number,bytes]) => review.records.some(record => record.tableNumber === number && record.sourceBytes === bytes)) &&
+          [[134,1153],[135,1109],[92,3061]].every(([number,bytes]) => review.records.some(record => record.tableNumber === number && record.targetExpectedBytes === bytes && record.candidateBytes === bytes)) &&
+          <FirmwareCarrierStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+            parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
+              setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
+            }} />}
       {review && review.sourceSetId && review.candidateSetId && review.records.some(record => record.tableNumber >= 101 && record.tableNumber <= 115 && record.sourceBytes === 403) &&
           review.records.some(record => ((record.tableNumber >= 136 && record.tableNumber <= 149) || [154, 155].includes(record.tableNumber)) && record.targetExpectedBytes === 203) &&
           review.records.some(record => record.tableNumber === 73 && record.sourceBytes === 1192 && record.candidateBytes === 1192) &&
-          <FirmwareLocalDialingStagingPanel key={`${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
+          <FirmwareLocalDialingStagingPanel key={`local:${phoneId}-${targetId}-${candidateId}`} phoneId={phoneId} targetId={targetId} candidateId={candidateId}
             parentBusy={busy} onBusyChange={setBusy} canAdd={canPerform('table-sets', op.add)} onDraftCreated={(id, name) => {
               setSets(previous => [...previous, { id, name, status: 0, targetFirmwareVersionId: targetId }]); setCandidateId(id); setReview(null); resetStage()
             }} />}

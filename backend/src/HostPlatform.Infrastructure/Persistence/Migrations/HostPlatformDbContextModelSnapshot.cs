@@ -2153,6 +2153,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<DateTime?>("RecoveredAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid?>("RecoveryBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("RecoveryObservationId")
+                        .HasColumnType("uuid");
+
                     b.Property<Guid>("SourceAssignmentId")
                         .HasColumnType("uuid");
 
@@ -2229,6 +2238,10 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasIndex("CodeRecordVersionId");
 
                     b.HasIndex("CodeScheduleId");
+
+                    b.HasIndex("RecoveryBatchId");
+
+                    b.HasIndex("RecoveryObservationId");
 
                     b.HasIndex("SourceFirmwareVersionId");
 
@@ -5172,6 +5185,16 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("CodeScheduleId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.DownloadBatch", null)
+                        .WithMany()
+                        .HasForeignKey("RecoveryBatchId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.DlogTransaction", null)
+                        .WithMany()
+                        .HasForeignKey("RecoveryObservationId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("HostPlatform.Domain.FirmwareVersion", null)
                         .WithMany()

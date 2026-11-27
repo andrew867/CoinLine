@@ -65,14 +65,40 @@ public sealed class FirmwareConfigurationTransitionsController(HostPlatformDbCon
         foreach (var plan in plans)
         {
             string? blocker = null;
+            string? recoveryBlocker = null;
             if (plan.ActivatedAtUtc == null && plan.CancelledAtUtc == null)
             {
                 try { _ = await FirmwareConfigurationTransitionService.VerifyActivation(db, plan, ct); }
                 catch (InvalidOperationException ex) { blocker = ex.Message; }
             }
-            result.Add(View(plan, blocker));
+            if (plan.ActivatedAtUtc != null && plan.RecoveredAtUtc == null)
+            {
+                try { _ = await FirmwareConfigurationTransitionService.VerifyRecovery(db, plan, ct); }
+                catch (InvalidOperationException ex) { recoveryBlocker = ex.Message; }
+            }
+            result.Add(View(plan, blocker, recoveryBlocker, plan.ActivatedAtUtc != null && plan.RecoveredAtUtc == null && recoveryBlocker == null));
         }
         return Ok(result);
+    }
+
+    [Authorize(Policy = Policies.RequireAdmin)]
+    [HttpPost("{id:guid}/recover")]
+    public async Task<ActionResult> Recover(Guid id, FirmwareConfigurationTransitionConfirmation request, CancellationToken ct)
+    {
+        if (!CanManage()) return Forbid();
+        if (!request.Confirm) return BadRequest(new { error = "Confirm restoring the retained source configuration after a matching live version report." });
+        try
+        {
+            await using var transaction = await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
+            var plan = await db.FirmwareConfigurationTransitions.SingleOrDefaultAsync(row => row.Id == id, ct);
+            if (plan == null) return NotFound();
+            if (plan.Version != request.Revision) return Conflict(new { error = "The transition changed. Reload its status." });
+            await FirmwareConfigurationTransitionService.Recover(db, tables, plan, clock.GetUtcNow().UtcDateTime, ct, HttpContext);
+            await transaction.CommitAsync(ct);
+            return Ok(View(plan));
+        }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+        catch (Exception ex) when (WriteConflict(ex)) { return Conflict(new { error = "Concurrent management work conflicted with recovery. Reload the transition." }); }
     }
 
     [Authorize(Policy = Policies.RequireAdmin)]
@@ -159,13 +185,14 @@ public sealed class FirmwareConfigurationTransitionsController(HostPlatformDbCon
         JsonSerializer.SerializeToUtf8Bytes(new { domain = "firmware-configuration-transition-v1", plan.TerminalId, plan.CodeScheduleId, plan.CodeRecordVersionId,
             plan.CodeRecordSha256Hex, plan.SourceSnapshot, plan.TargetSnapshot, plan.SourceObservationId, plan.TargetControllerRom, plan.TargetControllerSoftware, plan.AutoActivateOnContact }))).ToLowerInvariant();
 
-    private static object View(FirmwareConfigurationTransition plan, string? blocker = null) => new
+    private static object View(FirmwareConfigurationTransition plan, string? blocker = null, string? recoveryBlocker = null, bool canRecover = false) => new
     {
         plan.Id, plan.TerminalId, plan.CodeScheduleId, plan.SourceFirmwareVersionId, plan.TargetFirmwareVersionId, plan.SourceTableSetId, plan.TargetTableSetId,
         plan.SourceControllerRom, plan.SourceControllerSoftware, plan.TargetControllerRom, plan.TargetControllerSoftware, plan.SourceObservationId,
         plan.AutoActivateOnContact, plan.ActivatedAutomatically,
         plan.TargetObservationId, plan.TargetBatchId, plan.CreatedAtUtc, plan.ActivatedAtUtc, plan.CancelledAtUtc, revision = plan.Version,
-        state = plan.ActivatedAtUtc != null ? "activated" : plan.CancelledAtUtc != null ? "cancelled" : blocker == null ? "ready" : "staged", blocker
+        plan.RecoveryObservationId, plan.RecoveryBatchId, plan.RecoveredAtUtc, recoveryBlocker, canRecover,
+        state = plan.RecoveredAtUtc != null ? "recovered" : plan.ActivatedAtUtc != null ? "activated" : plan.CancelledAtUtc != null ? "cancelled" : blocker == null ? "ready" : "staged", blocker
     };
 
     private bool CanRead() => new[] { "phones", "firmware-registry", "firmware-jobs", "table-sets", "table-records", "table-assignments", "downloads" }

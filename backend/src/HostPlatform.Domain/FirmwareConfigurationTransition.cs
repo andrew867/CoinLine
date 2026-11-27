@@ -26,4 +26,7 @@ public sealed class FirmwareConfigurationTransition : AuditableEntity
     public Guid? TargetBatchId { get; set; }
     public DateTime? ActivatedAtUtc { get; set; }
     public DateTime? CancelledAtUtc { get; set; }
+    public Guid? RecoveryObservationId { get; set; }
+    public Guid? RecoveryBatchId { get; set; }
+    public DateTime? RecoveredAtUtc { get; set; }
 }

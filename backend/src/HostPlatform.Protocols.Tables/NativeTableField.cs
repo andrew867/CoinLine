@@ -194,6 +194,8 @@ public sealed record NativeTableField(
                 data[1] = (byte)((data[1] & 0xF0) | 0x0E);
                 return;
             case TableFieldEncoding.CredentialBcd:
+                if (value.Length == 0)
+                    return;
                 WriteDigits(data, value, isDial: false, allowKeypad: false);
                 if ((value.Length & 1) != 0)
                     data[^1] = (byte)((data[^1] & 0xF0) | 0x0E);

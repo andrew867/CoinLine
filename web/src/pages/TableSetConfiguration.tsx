@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { apiFetch, apiGet, apiPost, apiPostRaw } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { AdvertisingSimulator } from './AdvertisingSimulator'
+import { DialedNumberReview } from './DialedNumberReview'
 import type { AdvertisingFeatures, AdvertisingSlot } from './advertisingPlayback'
 import { advertisingPage } from './advertisingPlayback'
 import { authorableAdvertisingText, glyphPalettes, normalizedAdvertisingText, advertisingDisplayWidth } from './advertisingGlyphs'
@@ -39,10 +40,11 @@ function segments(start: number, count: number, label: string): [number, string]
 
 type Props = { setId: string; draft: boolean; versions: Version[]; onSaved: () => void }
 
-export function TableSetConfiguration({ setId, draft, versions, onSaved, initialRecord, recordDirty, onRecordDirty }: Props & {
+export function TableSetConfiguration({ setId, draft, versions, onSaved, initialRecord, recordDirty, onRecordDirty, familyId }: Props & {
   initialRecord: number
   recordDirty: boolean
   onRecordDirty: (dirty: boolean) => void
+  familyId?: string
 }) {
   const initialPanel = panels.findIndex(({ records }) => records.some(([number]) => number === initialRecord))
   const [panelIndex, setPanelIndex] = useState(Math.max(0, initialPanel))
@@ -89,6 +91,8 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
         </label>
       </div>
       <p className="page-intro">{panel.fields}</p>
+      {(panel.name === 'Dialing, screening and service' || panel.name === 'Rates and local dialing') &&
+        canPerform('table-records', op.read) && <DialedNumberReview setId={setId} recordRevision={versions.map(item => `${item.tableNumber}:${item.tableRevision}`).sort().join(',')} />}
       {draft && !recordDirty && tableNumber >= 131 && tableNumber <= 133 && canPerform('table-records', op.add) &&
         <GraphicalStarterPanel setId={setId} onSaved={onImported} />}
       {tableNumber === 29 ? (
@@ -98,7 +102,7 @@ export function TableSetConfiguration({ setId, draft, versions, onSaved, initial
           <Suspense fallback={<p role="status">Loading record editor…</p>}>
             <NativeTableEditor key={importGeneration} setId={setId} number={tableNumber} revision={version?.tableRevision ?? 0}
               exchangeFile={exchangeFile} onExchangeFile={setExchangeFile}
-              onSaved={onSaved} onDirty={onRecordDirty} />
+              onSaved={onSaved} onDirty={onRecordDirty} familyId={familyId} />
           </Suspense>
           {!recordDirty && canImport && (version ? (
             <details><summary>Import replacement record</summary>

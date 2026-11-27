@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiGet, apiPostRaw } from '../api/client'
@@ -88,4 +88,26 @@ it('requires explicit automatic approval and a fresh preview when the activation
   history = [{ ...plan, autoActivateOnContact: true, activatedAutomatically: true, state: 'activated', blocker: null, targetBatchId: 'batch' }]
   fireEvent.click(screen.getByRole('button', { name: 'Refresh transition status' }))
   expect(await screen.findByText('Activated automatically')).toBeVisible()
+})
+
+it('requires fresh original-version evidence and explicit confirmation before restoring source configuration', async () => {
+  consoleSession.save('fixture-token', '', 'Fixture admin', 'Admin')
+  const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+  const plan = { id: 'plan', state: 'activated', revision: 1, sourceTableSetId: 'source', targetTableSetId: 'target',
+    sourceControllerRom: 'LABOLD', sourceControllerSoftware: 'A001', targetControllerRom: 'LABNEW', targetControllerSoftware: 'A002', targetBatchId: 'target-batch' }
+  let history: Record<string, unknown>[] = [{ ...plan, canRecover: false, recoveryBlocker: 'Wait for a new matched report of the original controller version.' }]
+  vi.mocked(apiGet).mockImplementation(async (url) => url.includes('/options?') ? { observed: null, schedules: [], candidates: [] } : history)
+  vi.mocked(apiPostRaw).mockImplementation(async () => { history = [{ ...plan, state: 'recovered', recoveryBatchId: 'source-batch' }]; return Response.json(history[0]) })
+  render(<MemoryRouter><FirmwareConfigurationTransitionPanel phones={[{ id: 'phone', displayName: 'Fixture phone' }]} /></MemoryRouter>)
+  fireEvent.click(screen.getByRole('button', { name: 'Manage configuration transitions' }))
+  expect(await screen.findByText('Wait for a new matched report of the original controller version.')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Restore source configuration' })).toBeDisabled()
+  history = [{ ...plan, canRecover: true }]
+  fireEvent.click(screen.getByRole('button', { name: 'Refresh transition status' }))
+  await waitFor(() => expect(screen.getByRole('button', { name: 'Restore source configuration' })).toBeEnabled())
+  fireEvent.click(screen.getByRole('button', { name: 'Restore source configuration' }))
+  expect(confirm).toHaveBeenCalledWith(expect.stringContaining('does not change terminal software'))
+  expect(await screen.findByRole('link', { name: 'Source recovery download' })).toHaveAttribute('href', '/downloads/source-batch')
+  expect(screen.getByText('Source configuration restored in Manager')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenCalledWith('/api/firmware/configuration-transitions/plan/recover', { confirm: true, revision: 1 })
 })

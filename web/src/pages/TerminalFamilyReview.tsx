@@ -31,8 +31,8 @@ function recordRanges(numbers: number[]) {
   return groups.join(', ')
 }
 
-export function TerminalFamilyReview({ setId, initialFamily, dataKey, recordDirty }: {
-  setId: string; initialFamily: string; dataKey: string; recordDirty: boolean
+export function TerminalFamilyReview({ setId, initialFamily, dataKey, recordDirty, onFamilyChange }: {
+  setId: string; initialFamily: string; dataKey: string; recordDirty: boolean; onFamilyChange?: (family: string) => void
 }) {
   const [familyId, setFamilyId] = useState(initialFamily)
   const [review, setReview] = useState<Review | null>(null)
@@ -51,7 +51,7 @@ export function TerminalFamilyReview({ setId, initialFamily, dataKey, recordDirt
   return <section className="table-config-panel" aria-labelledby="family-review-heading">
     <h2 id="family-review-heading">Terminal family checklist</h2>
     <div className="table-config-selectors">
-      <TerminalFamilySelect value={familyId} onChange={setFamilyId} emptyLabel="Select a family to review" />
+      <TerminalFamilySelect value={familyId} onChange={value => { setFamilyId(value); onFamilyChange?.(value) }} emptyLabel="Select a family to review" />
     </div>
     {familyId && error && <p role="alert">{error}</p>}
     {familyId && !review && !error && <p role="status">Loading family requirements…</p>}
