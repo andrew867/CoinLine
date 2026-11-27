@@ -18,6 +18,7 @@ internal static class CardAuthorizationAudit
     public const string DecisionAction = "card_authorization_decision";
     public const string ReplayAction = "card_authorization_replay";
     public const string LabProvider = "synthetic_lab";
+    public const string ShadyBankProvider = "shadybank";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
     { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
     private static readonly HashSet<string> Outcomes =
@@ -25,11 +26,11 @@ internal static class CardAuthorizationAudit
         "approved", "declined", "provider_unavailable", "provider_invalid_decision", "provider_failed", "provider_timeout", "provider_http_error",
         "audit_failed", "malformed_request", "unknown"
     ];
-    private static readonly HashSet<string> Providers = ["synthetic_lab", "trusted_provider", "none", "unrecorded"];
+    private static readonly HashSet<string> Providers = [LabProvider, ShadyBankProvider, "trusted_provider", "none", "unrecorded"];
     private static readonly HashSet<string> Reasons =
     [
         "fixture_not_recognized", "binding_not_found", "account_not_eligible", "quote_missing",
-        "quote_not_eligible", "insufficient_balance", "quote_already_used", "approved"
+        "quote_not_eligible", "insufficient_balance", "quote_already_used", "approved", "bank_approved", "bank_declined"
     ];
 
     public static string Encode(CardAuthorizationAuditDetail detail) => JsonSerializer.Serialize(detail, Json);
@@ -52,17 +53,17 @@ internal static class CardAuthorizationAudit
                 types.ValueKind == JsonValueKind.Array && types.GetArrayLength() <= 3 &&
                 types.EnumerateArray().All(item => item.ValueKind == JsonValueKind.Number && item.TryGetInt32(out var type) && type is 4 or 53 or 61))
                 suffix = types.EnumerateArray().Select(item => item.GetInt32()).ToArray();
-            // Only the built-in synthetic provider can produce account/quote
-            // evidence meaningful to this ledger.
-            if (provider != LabProvider)
+            // Only the built-in providers can produce typed quote evidence;
+            // only the synthetic provider can identify a local ledger account.
+            if (provider != LabProvider && provider != ShadyBankProvider)
                 return new(messageType, outcome, provider, RequestBytes: requestBytes, BundledCallRecords: bundledRecords, SuffixCdrTypes: suffix);
             var amount = root.TryGetProperty("quotedAmountUsd", out var value)
                 && value.ValueKind == JsonValueKind.Number && value.TryGetDecimal(out var money) && money >= 0 ? (decimal?)money : null;
             var sequence = root.TryGetProperty("callSequence", out value) && value.ValueKind == JsonValueKind.Number
                 && value.TryGetUInt16(out var seq) ? (ushort?)seq : null;
             return new(messageType, outcome, provider, SafeString(root, "reason", Reasons),
-                SafeGuid(root, "cardAccountId"), SafeGuid(root, "quoteId"), amount, sequence,
-                SafeGuid(root, "originalDecisionId"), requestBytes, bundledRecords, suffix);
+                provider == LabProvider ? SafeGuid(root, "cardAccountId") : null, SafeGuid(root, "quoteId"), amount, sequence,
+                provider == LabProvider ? SafeGuid(root, "originalDecisionId") : null, requestBytes, bundledRecords, suffix);
         }
         catch (JsonException) { return null; }
     }

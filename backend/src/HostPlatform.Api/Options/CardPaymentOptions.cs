@@ -13,6 +13,25 @@ public sealed class CardPaymentOptions
 
     /// <summary>Explicitly scoped synthetic authorization; never a live payment processor.</summary>
     public LabCardAuthorizationOptions LabAuthorization { get; set; } = new();
+    /// <summary>Independent, explicitly configured ShadyBank merchant authorization.</summary>
+    public ShadyBankAuthorizationOptions ShadyBankAuthorization { get; set; } = new();
+}
+
+public sealed class ShadyBankAuthorizationOptions
+{
+    public bool Enabled { get; set; }
+    public string ServiceUrl { get; set; } = "";
+    public string ServiceKey { get; set; } = "";
+    public bool AllowLoopbackHttp { get; set; }
+    public ShadyBankInstrumentBinding[] Bindings { get; set; } = [];
+}
+
+public sealed class ShadyBankInstrumentBinding
+{
+    public Guid TerminalId { get; set; }
+    public string Destination { get; set; } = "";
+    // Opaque bank-issued instrument token, not a PAN or a card credential.
+    public string InstrumentToken { get; set; } = "";
 }
 
 public sealed class LabCardAuthorizationOptions

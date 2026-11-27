@@ -22,13 +22,14 @@ const outcomes: Record<string, string> = {
   audit_failed: 'Decision could not be recorded', malformed_request: 'Malformed request', unknown: 'Outcome unavailable',
 }
 const providers: Record<string, string> = {
-  synthetic_lab: 'Synthetic lab', trusted_provider: 'Trusted provider', none: 'Decline only', unrecorded: 'Not recorded',
+  synthetic_lab: 'Synthetic lab', shadybank: 'ShadyBank', trusted_provider: 'Trusted provider', none: 'Decline only', unrecorded: 'Not recorded',
 }
 const reasons: Record<string, string> = {
   fixture_not_recognized: 'Test fixture not recognized', binding_not_found: 'No matching phone and test route binding',
   account_not_eligible: 'Account is not an eligible test account', quote_missing: 'No recent matching quote',
   quote_not_eligible: 'Quote is not eligible', insufficient_balance: 'Insufficient test balance',
   quote_already_used: 'Quote already has another authorization decision', approved: 'Eligible test fixture and quote',
+  bank_approved: 'Bank approved a reservation', bank_declined: 'Bank declined the authorization',
 }
 const cardTypes: Record<number, string> = { 0: 'Unknown', 1: 'Magstripe', 2: 'Smart card', 3: 'E-purse', 4: 'Mondex', 5: 'SmartCity', 6: 'Proton' }
 const reconciliations: Record<number, string> = { 0: 'Unknown', 1: 'Pending', 2: 'Matched', 3: 'Exception' }

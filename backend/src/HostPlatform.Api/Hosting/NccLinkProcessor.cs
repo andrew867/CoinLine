@@ -647,8 +647,13 @@ internal sealed class NccLinkProcessor(
     private async Task AuthorizeCardAsync(NetworkStream stream, NccWirePacket request, Guid terminalId,
         int requestLength, bool bundleValid, byte[] receipts)
     {
-        var providerKind = cardProvider is SyntheticLabCardAuthorizationProvider ? CardAuthorizationAudit.LabProvider
-            : cardProvider != null ? "trusted_provider" : "none";
+        var providerKind = cardProvider switch
+        {
+            SyntheticLabCardAuthorizationProvider => CardAuthorizationAudit.LabProvider,
+            ShadyBankCardAuthorizationProvider => CardAuthorizationAudit.ShadyBankProvider,
+            null => "none",
+            _ => "trusted_provider"
+        };
         // A retry of the same dialogue does not create a second authorization.
         if (TryImmediateReplyRetry(request, out var reply))
         {
@@ -677,6 +682,7 @@ internal sealed class NccLinkProcessor(
         var response = decline;
         var outcome = "provider_unavailable";
         SyntheticAuthorizationEvidence? evidence = null;
+        ShadyBankAuthorizationEvidence? bankEvidence = null;
         if (cardProvider != null)
         {
             using var authorizationDeadline = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
@@ -701,6 +707,8 @@ internal sealed class NccLinkProcessor(
                     outcome = decision.Approved ? "approved" : "declined";
                     if (providerKind == CardAuthorizationAudit.LabProvider)
                         evidence = decision.SyntheticEvidence;
+                    if (providerKind == CardAuthorizationAudit.ShadyBankProvider)
+                        bankEvidence = decision.ShadyBankEvidence;
                 }
                 else
                     outcome = "provider_invalid_decision";
@@ -714,6 +722,11 @@ internal sealed class NccLinkProcessor(
             {
                 logger.LogWarning("Card authorization provider HTTP request failed.");
                 outcome = "provider_http_error";
+            }
+            catch (InvalidCardProviderResponseException) when (!stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning("Card authorization provider returned an invalid decision.");
+                outcome = "provider_invalid_decision";
             }
             catch (Exception ex) when (!stoppingToken.IsCancellationRequested)
             {
@@ -780,8 +793,8 @@ internal sealed class NccLinkProcessor(
         await SendDialogueReplyAsync(stream, request, [.. response, .. receipts], $"card authorization {outcome}");
 
         CardAuthorizationAuditDetail Detail(string result, SyntheticAuthorizationEvidence? lab) => new(
-            request.Data[0], result, providerKind, lab?.Reason, lab?.CardAccountId, lab?.QuoteId,
-            lab?.QuotedAmountUsd, lab?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null,
+            request.Data[0], result, providerKind, lab?.Reason ?? bankEvidence?.Reason, lab?.CardAccountId, lab?.QuoteId ?? bankEvidence?.QuoteId,
+            lab?.QuotedAmountUsd ?? bankEvidence?.QuotedAmountUsd, lab?.CallSequence ?? bankEvidence?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null,
             request.Data.Length, receipts.Length / 3);
     }
 

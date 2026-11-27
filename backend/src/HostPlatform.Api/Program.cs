@@ -146,9 +146,23 @@ builder.Services.AddSingleton<ICraftExecutionPolicy, CraftExecutionPolicy>();
 builder.Services.AddSingleton<INccSessionOutbound, NccSessionOutboundHub>();
 builder.Services.AddSingleton<CraftLiveSocketWriter>();
 builder.Services.AddScoped<ICardAccountLedger, CardAccountLedger>();
-if (builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:Enabled"))
+var labAuthorizationEnabled = builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:Enabled");
+var shadyBankAuthorizationEnabled = builder.Configuration.GetValue<bool>("CardPayments:ShadyBankAuthorization:Enabled");
+if (labAuthorizationEnabled && shadyBankAuthorizationEnabled)
+    throw new InvalidOperationException("Choose either the synthetic lab or ShadyBank authorization provider for this instance.");
+if (labAuthorizationEnabled)
     builder.Services.AddScoped<INccCardAuthorizationProvider, SyntheticLabCardAuthorizationProvider>();
-if (builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:Enabled")
+if (shadyBankAuthorizationEnabled)
+{
+    var bankOptions = builder.Configuration.GetSection("CardPayments:ShadyBankAuthorization").Get<ShadyBankAuthorizationOptions>()
+        ?? new ShadyBankAuthorizationOptions();
+    _ = ShadyBankAuthorizationClient.Validate(bankOptions);
+    builder.Services.AddHttpClient(ShadyBankAuthorizationClient.ClientName, client => client.Timeout = Timeout.InfiniteTimeSpan)
+        .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
+        .RedactLoggedHeaders(_ => true);
+    builder.Services.AddScoped<INccCardAuthorizationProvider, ShadyBankCardAuthorizationProvider>();
+}
+if (labAuthorizationEnabled
     && builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:SettleUploadedCalls"))
     builder.Services.AddScoped<SyntheticLabCdrSettlement>();
 builder.Services.AddHostedService<HostPlatform.Api.Hosting.NccModemListenService>();
