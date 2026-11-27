@@ -17,7 +17,9 @@ const preview = { sourceSetId: 'source', candidateSetId: 'candidate', recordCoun
     { number: 50, status: 'available', changedBytes: 0, groups: [group('coin-denominations', 50, 'Coin values and acceptance'),
       group('coin-hardware', 50, 'Validator windows and physical capacities')] },
     { number: 35, status: 'missing-target', changedBytes: 0, groups: [group('routine-call-in', 35, 'Routine call-in and upload threshold')] },
-    { number: 58, status: 'available', changedBytes: 0, groups: [group('daily-service-restriction', 58, 'Daily service restriction')] }] }
+    { number: 58, status: 'available', changedBytes: 0, groups: [group('daily-service-restriction', 58, 'Daily service restriction')] },
+    { number: 93, status: 'available', changedBytes: 0, groups: [group('stored-value-unit-0', 93, 'Stored-value unit limit, index 0'),
+      group('stored-value-unit-1', 93, 'Stored-value unit limit, index 1')] }] }
 
 it('requires explicit selections, excludes unreviewed hardware and stages only a separate draft', async () => {
   vi.mocked(apiGet).mockResolvedValueOnce([{ id: 'target', label: 'Later layout', tableProfileId: 'mtr211-multipay-180-double-compressed' }])
@@ -49,6 +51,10 @@ it('requires explicit selections, excludes unreviewed hardware and stages only a
   fireEvent.click(within(region).getByLabelText('Coin values and acceptance'))
   fireEvent.click(within(region).getByLabelText('Text advertising messages'))
   fireEvent.click(within(region).getByLabelText('Daily service restriction'))
+  expect(within(region).getByLabelText('Stored-value unit limit, index 0')).not.toBeChecked()
+  expect(within(region).getByLabelText('Stored-value unit limit, index 1')).not.toBeChecked()
+  fireEvent.click(within(region).getByLabelText('Stored-value unit limit, index 1'))
+  expect(within(region).getByLabelText('Stored-value unit limit, index 0')).not.toBeChecked()
   fireEvent.click(within(region).getByLabelText('I reviewed the selected controls and target hardware'))
   expect(within(region).queryByRole('button', { name: 'Create common configuration target draft' })).toBeNull()
   fireEvent.click(within(region).getByRole('button', { name: 'Preview common configuration carry-forward' }))
@@ -56,7 +62,7 @@ it('requires explicit selections, excludes unreviewed hardware and stages only a
   fireEvent.click(within(region).getByRole('button', { name: 'Create common configuration target draft' }))
   expect(await within(region).findByRole('link', { name: 'Open common configuration draft' })).toHaveAttribute('href', '/table-sets/common-draft')
   expect(apiPostRaw).toHaveBeenNthCalledWith(3, '/api/firmware/transition-common-controls', expect.objectContaining({
-    selections: ['coin-denominations', 'daily-service-restriction', 'text-advertising'], reviewed: true, previewToken: 'reviewed',
+    selections: ['coin-denominations', 'daily-service-restriction', 'stored-value-unit-1', 'text-advertising'], reviewed: true, previewToken: 'reviewed',
   }))
   fireEvent.click(within(region).getByRole('button', { name: 'Use as target candidate for further review' }))
   expect(screen.getByLabelText('Prepared target configuration')).toHaveValue('common-draft')

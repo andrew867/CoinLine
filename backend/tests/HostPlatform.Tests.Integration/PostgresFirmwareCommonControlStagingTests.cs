@@ -46,7 +46,7 @@ public sealed class PostgresFirmwareCommonControlStagingTests
         slots[0] = new("Fixture target ad",10,0,false,false,0xA5,0xB0); targetBytes[29] = AdvertisingTableWire.Encode(slots);
         expected[29] = targetBytes[29].ToArray(); oldBytes[29].AsSpan(1,2).CopyTo(expected[29].AsSpan(1,2)); expected[29][3] = 0xB0 | 0x42;
         oldBytes[29].AsSpan(5,20).CopyTo(expected[29].AsSpan(5,20));
-        foreach(var (number,length) in new[]{(30,68),(32,33),(34,19),(35,21),(50,105),(58,26),(26,72)})
+        foreach(var (number,length) in new[]{(30,68),(32,33),(34,19),(35,21),(50,105),(58,26),(93,225),(26,72)})
         { oldBytes[number] = Bytes(number,length); targetBytes[number] = Bytes(number,length); }
         Word(oldBytes[30],1,123); Word(oldBytes[30],62,999); Word(targetBytes[30],62,44);
         expected[30] = targetBytes[30].ToArray(); Word(expected[30],1,123);
@@ -64,6 +64,11 @@ public sealed class PostgresFirmwareCommonControlStagingTests
         new byte[]{2,20,30,6,15}.CopyTo(oldBytes[58],1); oldBytes[58].AsSpan(6).Fill(0x11);
         new byte[]{4,9,0,3,0}.CopyTo(targetBytes[58],1); targetBytes[58].AsSpan(6).Fill(0xA5);
         expected[58]=targetBytes[58].ToArray(); oldBytes[58].AsSpan(1,5).CopyTo(expected[58].AsSpan(1,5));
+        // Fixture-only opaque bytes distinguish the source validation and target configuration regions.
+        oldBytes[93].AsSpan(1,160).Fill(0x11); targetBytes[93].AsSpan(1,160).Fill(0xA5);
+        oldBytes[93].AsSpan(161,30).Fill(0x33); targetBytes[93].AsSpan(161,30).Fill(0x55);
+        oldBytes[93].AsSpan(191).Fill(0x22); targetBytes[93].AsSpan(191).Fill(0x5A);
+        expected[93]=targetBytes[93].ToArray(); oldBytes[93].AsSpan(165,2).CopyTo(expected[93].AsSpan(165,2));
         oldBytes[26][1] = 2; targetBytes[26][1] = 2; expected[26] = targetBytes[26].ToArray();
         var oldRecords = oldBytes.ToDictionary(pair => pair.Key,pair => Record(pair.Key,pair.Value));
         var newRecords = targetBytes.ToDictionary(pair => pair.Key,pair => Record(pair.Key,pair.Value));
@@ -84,9 +89,13 @@ public sealed class PostgresFirmwareCommonControlStagingTests
             await db.SaveChangesAsync();
         }
         const string endpoint = "/api/firmware/transition-common-controls";
-        string[] selected = ["text-advertising","ui-prompts","communications","call-collection","routine-call-in","coin-denominations","coin-collection","daily-service-restriction"];
+        string[] selected = ["text-advertising","ui-prompts","communications","call-collection","routine-call-in","coin-denominations","coin-collection","daily-service-restriction","stored-value-unit-2"];
         var initial = await Preview(admin,[],false); Assert.False(initial.GetProperty("canCreate").GetBoolean());
-        Assert.Equal(7,initial.GetProperty("records").GetArrayLength()); Assert.Equal(0,initial.GetProperty("changedBytes").GetInt32());
+        Assert.Equal(8,initial.GetProperty("records").GetArrayLength()); Assert.Equal(0,initial.GetProperty("changedBytes").GetInt32());
+        var units=initial.GetProperty("records").EnumerateArray().Single(row=>row.GetProperty("number").GetInt32()==93).GetProperty("groups");
+        Assert.Equal(15,units.GetArrayLength());
+        Assert.All(units.EnumerateArray(),row=>Assert.Equal(2,row.GetProperty("fields").GetArrayLength()));
+        Assert.DoesNotContain("validation-key-",units.GetRawText()); Assert.DoesNotContain("discount-",units.GetRawText());
         using (var denied = await restricted.PostAsJsonAsync(endpoint+"/preview",Body(selected,true))) Assert.Equal(HttpStatusCode.Forbidden,denied.StatusCode);
         var readable = await Preview(reader,selected,true); Assert.True(readable.GetProperty("canCreate").GetBoolean());
         using (var denied = await reader.PostAsJsonAsync(endpoint,Body(selected,true,Token(readable)))) Assert.Equal(HttpStatusCode.Forbidden,denied.StatusCode);
@@ -112,7 +121,7 @@ public sealed class PostgresFirmwareCommonControlStagingTests
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             var draft = await db.TableSets.Include(set => set.Versions).ThenInclude(row => row.TablePayload).SingleAsync(set => set.Id==draftId);
-            Assert.Equal(TableSetStatus.Draft,draft.Status); Assert.Equal(later.Id,draft.TargetFirmwareVersionId); Assert.Equal(8,draft.Versions.Count);
+            Assert.Equal(TableSetStatus.Draft,draft.Status); Assert.Equal(later.Id,draft.TargetFirmwareVersionId); Assert.Equal(9,draft.Versions.Count);
             foreach(var (number,bytes) in expected)
             {
                 var copy = draft.Versions.Single(row => row.TableDefinitionId==newRecords[number].TableDefinitionId);
@@ -127,12 +136,13 @@ public sealed class PostgresFirmwareCommonControlStagingTests
             Assert.False(await db.FirmwareUpdateJobs.AnyAsync(row => row.TerminalId==phone.Id));
             var audit = await db.AuditEvents.SingleAsync(row => row.TerminalId==phone.Id && row.Action=="stage_common_control_draft");
             Assert.DoesNotContain("Fixture source ad",audit.DetailJson); Assert.DoesNotContain("Fixture target ad",audit.DetailJson);
+            Assert.DoesNotContain("validation-key-",audit.DetailJson); Assert.DoesNotContain("A5A5A5A5A5A5A5A5",audit.DetailJson,StringComparison.OrdinalIgnoreCase);
         }
         var receiver = new Terminal { SiteId = site.Id,FirmwareVersionId = later.Id,DisplayName = "Fixture later receiver",TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant() };
         await using (var scope = factory.Services.CreateAsyncScope())
         { var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>(); db.Terminals.Add(receiver); await db.SaveChangesAsync(); }
         using (var published = await admin.PostAsync($"/api/tables/sets/{draftId}/publish?confirm=true",null)) published.EnsureSuccessStatusCode();
-        var types = new[]{29,30,32,34,35,50,58};
+        var types = new[]{29,30,32,34,35,50,58,93};
         using var queued = await admin.PostAsJsonAsync($"/api/terminals/{receiver.Id}/downloads",new
             { tableSetId=draftId,scope="Partial",partialTableDefinitionIds=types.Select(number=>newRecords[number].TableDefinitionId).ToArray() });
         queued.EnsureSuccessStatusCode(); var batchId = (await queued.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
@@ -143,7 +153,7 @@ public sealed class PostgresFirmwareCommonControlStagingTests
             var batch = await db.DownloadBatches.AsNoTracking().Include(row=>row.Items).SingleAsync(row=>row.Id==batchId);
             if(batch.Status==DownloadBatchStatus.Completed)
             {
-                Assert.Equal(DownloadScope.Partial,batch.Scope); Assert.Equal(7,batch.Items.Count);
+                Assert.Equal(DownloadScope.Partial,batch.Scope); Assert.Equal(8,batch.Items.Count);
                 Assert.All(batch.Items,item=>{Assert.True(item.Succeeded);Assert.Equal("ack",item.LastAckStatus);});
                 Assert.Equal(1,await db.DownloadBatches.CountAsync(row=>row.TerminalId==receiver.Id));
                 Assert.False(await db.DownloadBatches.AnyAsync(row=>row.TerminalId==phone.Id)); break;

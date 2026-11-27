@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace HostPlatform.Protocols.Tables;
 
 public sealed record CommonControlGroup(string Id, int Number, string Label, string Note);
@@ -23,10 +25,12 @@ public static class CommonControlTransitionWire
         new("coin-denominations", 50, "Coin values and acceptance", "The candidate's validator window enablement and volume calibration are retained unless separately selected."),
         new("coin-hardware", 50, "Validator windows and physical capacities", "Select only after checking the physical validator, coin volumes, cashbox and escrow hardware."),
         new("coin-collection", 50, "Cashbox and escrow reporting thresholds", "Review these thresholds against the prepared target capacities. Existing cashbox status and collection history are not configuration fields."),
-        new("daily-service-restriction", 58, "Daily service restriction", "Carry the earlier restriction level and daily local-time window. Candidate-only configurable route permissions and reserved bytes are retained, and must be reviewed independently.")
+        new("daily-service-restriction", 58, "Daily service restriction", "Carry the earlier restriction level and daily local-time window. Candidate-only configurable route permissions and reserved bytes are retained, and must be reviewed independently."),
+        .. Enumerable.Range(0, 15).Select(index => new CommonControlGroup($"stored-value-unit-{index}", 93, $"Stored-value unit limit, index {index}",
+            "Carry only this index's maximum units and multiplier. Confirm the target card-value mapping independently; validation data, discounts, other unit indexes and issuer settings are not carried."))
     ];
 
-    public static int? LengthFor(int number) => number switch { 29 => AdvertisingTableWire.RecordLength, 30 => 68, 32 => 33, 34 => 19, 35 => 21, 50 => 105, 58 => ServiceRestrictionWire.RecordLength, _ => null };
+    public static int? LengthFor(int number) => number switch { 29 => AdvertisingTableWire.RecordLength, 30 => 68, 32 => 33, 34 => 19, 35 => 21, 50 => 105, 58 => ServiceRestrictionWire.RecordLength, 93 => 225, _ => null };
 
     public static CommonControlProjection Project(int number, byte[] source, byte[] target, IReadOnlyCollection<string> selections)
     {
@@ -45,7 +49,7 @@ public static class CommonControlTransitionWire
         else
         {
             var earlier = NativeTableLayouts.Find(number, source, NativeTableLayouts.MultiPay)!;
-            var later = NativeTableLayouts.Find(number, target, number is 34 or 58 ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay)!;
+            var later = NativeTableLayouts.Find(number, target, number is 34 or 58 or 93 ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay)!;
             var targetFields = later.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key, StringComparer.Ordinal);
             foreach (var group in groups)
             {
@@ -84,6 +88,8 @@ public static class CommonControlTransitionWire
         }
         if (selections.Count != 0)
         {
+            if (number == 93)
+                findings.Add(new(false, number, "Confirm that each selected unit index has the intended meaning in the target card-value mapping. This carries only numeric limits and multipliers; issuer and validation data, discounts and acceptance settings remain unchanged. It does not qualify stored-value payment."));
             if (number == 58)
             {
                 if (ServiceRestrictionWire.ConfigurationIssue(source, later: false) is { } sourceIssue)
@@ -129,6 +135,7 @@ public static class CommonControlTransitionWire
                 "coin-hardware" => (field.Key.StartsWith("coin-", StringComparison.Ordinal) && (field.Key.EndsWith(".volume", StringComparison.Ordinal) || field.Key.EndsWith(".window", StringComparison.Ordinal))) || field.Key is "cashBoxVolume" or "escrowVolume",
                 "coin-collection" => field.Key is "cashBoxThreshold" or "cashBoxValue" or "escrowVolumeThreshold" or "escrowValue",
                 "daily-service-restriction" => section.Key == "restriction",
+                _ when group.Number == 93 => section.Key == group.Id["stored-value-".Length..],
                 _ => false
             };
             if (include) yield return field;
@@ -161,11 +168,19 @@ public static class CommonControlTransitionWire
     }
 
     private static bool Masked(NativeTableField field) => field.Encoding is TableFieldEncoding.Flag or TableFieldEncoding.Bits;
-    private static bool ValueEqual(NativeTableField field, byte[] one, byte[] two) => Masked(field)
-        ? (one[field.Offset] & field.Mask) == (two[field.Offset] & field.Mask) : one.AsSpan(field.Offset, field.Width).SequenceEqual(two.AsSpan(field.Offset, field.Width));
+    private static bool ValueEqual(NativeTableField field, byte[] one, byte[] two) => field.Encoding == TableFieldEncoding.BigEndianBits
+        ? (BinaryPrimitives.ReadUInt16BigEndian(one.AsSpan(field.Offset, 2)) & field.Mask) == (BinaryPrimitives.ReadUInt16BigEndian(two.AsSpan(field.Offset, 2)) & field.Mask)
+        : Masked(field) ? (one[field.Offset] & field.Mask) == (two[field.Offset] & field.Mask)
+        : one.AsSpan(field.Offset, field.Width).SequenceEqual(two.AsSpan(field.Offset, field.Width));
     private static void Copy(NativeTableField field, byte[] source, byte[] target)
     {
-        if (Masked(field)) target[field.Offset] = (byte)((target[field.Offset] & ~field.Mask) | (source[field.Offset] & field.Mask));
+        if (field.Encoding == TableFieldEncoding.BigEndianBits)
+        {
+            var to = target.AsSpan(field.Offset, 2);
+            var from = BinaryPrimitives.ReadUInt16BigEndian(source.AsSpan(field.Offset, 2));
+            BinaryPrimitives.WriteUInt16BigEndian(to, (ushort)((BinaryPrimitives.ReadUInt16BigEndian(to) & ~field.Mask) | (from & field.Mask)));
+        }
+        else if (Masked(field)) target[field.Offset] = (byte)((target[field.Offset] & ~field.Mask) | (source[field.Offset] & field.Mask));
         else source.AsSpan(field.Offset, field.Width).CopyTo(target.AsSpan(field.Offset, field.Width));
     }
     private static string? Display(NativeTableField field, string? value) => value == null ? "Unrecognized" :
