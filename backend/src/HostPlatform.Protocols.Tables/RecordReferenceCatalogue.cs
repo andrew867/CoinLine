@@ -1,6 +1,6 @@
 namespace HostPlatform.Protocols.Tables;
 
-public sealed record NativeLayoutReference(int Number, int Length, string Profile, bool DraftTemplateAvailable);
+public sealed record NativeLayoutReference(int Number, int Length, string Profile, bool DraftTemplateAvailable, bool ExplicitAuthoringAvailable = false);
 public sealed record FirmwareRecordReference(string ProfileId, string Label, int Length, bool TerminalAcknowledged);
 public sealed record ReferenceRecord(
     int Number, string Name, string Kind, NativeLayoutReference[] Layouts, FirmwareRecordReference[] Firmware, string? BehaviorObservation);
@@ -29,7 +29,10 @@ public static class RecordReferenceCatalogue
 
     public static IReadOnlyList<ReferenceRecord> Build(IEnumerable<int> registeredNumbers)
     {
-        var layouts = NativeTableLayouts.ReferenceLayouts().ToLookup(row => row.Number);
+        // The dedicated text rotation editor authors complete twenty-slot records
+        // through its own typed endpoint, rather than the generic field layout.
+        var layouts = NativeTableLayouts.ReferenceLayouts().Append(new NativeLayoutReference(
+            AdvertisingTableWire.MessageType, AdvertisingTableWire.RecordLength, "20-slot text advertising", false, true)).ToLookup(row => row.Number);
         var firmware = FirmwareTableProfiles.Catalog.SelectMany(profile => profile.VerifiedLengths
             .Select(pair => (Number: pair.Key, Reference: new FirmwareRecordReference(
                 profile.Id, profile.Label, pair.Value, profile.TerminalAcknowledgedRecords.Contains(pair.Key)))))

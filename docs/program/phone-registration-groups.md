@@ -1,0 +1,9 @@
+# Register a phone with multiple groups
+
+The manager supports up to forty group memberships per phone. On **Phones > Create terminal**, an operator with Phone Add and Membership Add permission can choose a primary group and add further eligible phone groups before saving. The first group is the primary one used by the existing single-group displays; moving an already selected group to the primary position retains the other memberships. Removing the primary group promotes the next selected group. The site selector filters groups to its customer and shared groups, and removes any now-incompatible choices.
+
+Registration saves the phone and all selected memberships in one transaction. The server validates the forty-group limit, distinct group identities and customer scope independently of the browser. A caller with only Phone Add permission can still register an ungrouped phone using the minimal registration choices, but cannot assign any membership. Existing clients submitting the single primary group continue to work. The registration does not create a table assignment, configuration set, download or schedule. Review and prepare the initial configuration separately.
+
+This is a host administration workflow, not a terminal record or proof that a registered terminal has called in.
+
+The isolated PostgreSQL regression registered an exact forty-group phone, including its primary group, and rejected a forty-first group, a duplicate, an unknown group, a different customer's group and a conflicting primary selection without leaving a phone behind. Two competing registrations of one identity produced one accepted registration and one conflict, with exactly the intended memberships. The existing single-group and ungrouped cases still pass. The WebUI component tests and Chromium fixture verified the selected primary, shared group retention after changing sites, and one registration request rather than later membership or download mutations.

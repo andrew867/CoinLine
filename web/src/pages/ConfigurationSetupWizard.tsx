@@ -2,12 +2,13 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiPostRaw } from '../api/client'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
+import { FamilyOperatingModeNotice, type FamilyOperatingMode } from './FamilyOperatingModeNotice'
 
 type Source = { id: string; name: string; status: number; isDefault?: boolean; targetFirmwareVersionId?: string | null; targetFirmware: string | null }
 type Choices = { name: string; familyId: string; paymentMode: number; pricing: string; tariffIndex: string;
   firstChargeCents: string; followingChargeCents: string; advertising: string }
 type Preview = { previewToken: string; canCreate: boolean; sourceIsStarterDraft?: boolean; targetFirmware: string; changedNumbers: number[]; recordCount: number;
-  family: { familyLabel: string; documented: boolean; tables: { name: string; required: boolean; status: string }[] };
+  family: { familyLabel: string; documented: boolean; tables: { name: string; required: boolean; status: string }[]; operatingMode?: FamilyOperatingMode | null };
   provisioning: { operatingType: string | null; acceptedCoinSlots: number | null; configuredCardRanges: number | null;
     visibleOnHookTextMessages?: number | null; onHookAdvertising?: boolean | null; graphicalOnHookAdvertising?: boolean | null;
     findings: { tableNumber: number; message: string }[] };
@@ -125,6 +126,7 @@ export function ConfigurationSetupWizard({ sources, onCreated }: { sources: Sour
           {review.provisioning.graphicalOnHookAdvertising != null && <><dt>Idle graphical rotation (MT131)</dt><dd>{review.provisioning.graphicalOnHookAdvertising ? 'Enabled' : 'Disabled'}</dd></>}
           {review.provisioning.visibleOnHookTextMessages != null && <><dt>Visible idle text messages (MT29)</dt><dd>{review.provisioning.visibleOnHookTextMessages}</dd></>}</dl>
         <h3>Remaining setup checks</h3>
+        <FamilyOperatingModeNotice mode={review.family.operatingMode} />
         {!review.family.documented && <p>The selected terminal family has no complete documented checklist.</p>}
         {review.family.tables.filter(row => row.required && row.status !== 'present').map(row => <p key={row.name}>{row.name}: {row.status}</p>)}
         {[...review.provisioning.findings, ...review.findings].map((finding, i) => <p key={i}>MT{finding.tableNumber}: {finding.message}</p>)}

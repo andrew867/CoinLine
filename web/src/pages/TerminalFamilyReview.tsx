@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet } from '../api/client'
 import { TerminalFamilySelect } from '../components/TerminalFamilySelect'
+import { FamilyOperatingModeNotice, type FamilyOperatingMode } from './FamilyOperatingModeNotice'
 
 type Evidence = { number: number; length: number; format: string; screeningSlots: number[]; screeningFit?: string | null; screeningNote?: string | null }
 type Requirement = { name: string; required: boolean; candidates: number[]; records: Evidence[]; status: string; note?: string | null }
 type Review = {
   familyId: string; familyLabel: string; documented: boolean; screeningEntries: number | null
   note: string | null; tables: Requirement[]
+  operatingMode?: FamilyOperatingMode | null
 }
 
 const statusText: Record<string, string> = {
@@ -57,6 +59,7 @@ export function TerminalFamilyReview({ setId, initialFamily, dataKey, recordDirt
     {familyId && !review && !error && <p role="status">Loading family requirements…</p>}
     {familyId && review?.familyId === familyId && <>
       {review.note && <p>{review.note}</p>}
+      <FamilyOperatingModeNotice mode={review.operatingMode} />
       {review.documented && <>
         <p>Maximizer lists {review.screeningEntries} screening entries for this family. The packed layout and segment
           counts depend on the installed firmware. The checklist describes a full installation. A partial download may omit records already on the phone.</p>

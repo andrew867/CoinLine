@@ -63,6 +63,7 @@ public static class OperatorPermissions
             ("Tables", R, "Sets SetById FamilyReview PreviewRecordCopy"),
             ("FirmwareLocalDialingStaging", A, "Create"),
             ("FirmwareNumberingStaging", A, "Create"),
+            ("FirmwareVisualPromptStaging", A, "Create"),
             ("ConfigurationSetup", R, "Preview"), ("ConfigurationSetup", A, "Create"),
             ("FirmwareTariffStaging", A, "Create"),
             ("FirmwareCarrierStaging", A, "Create"),
@@ -78,6 +79,7 @@ public static class OperatorPermissions
             ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
             ("FirmwareNumberingStaging", R, "Preview"),
+            ("FirmwareVisualPromptStaging", R, "Preview"),
             ("ConfigurationLibrary", R, "List Options"),
             ("FirmwareSetupStaging", R, "Preview"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
@@ -100,8 +102,10 @@ public static class OperatorPermissions
         Screen("quick-access-customer-lookup", "Quick Access Key customer reference lookup",
             ("QuickAccessCustomers", R, "Lookup"));
         Screen("table-assignments", "Table assignments",
+            ("TerminalConfigurationWorksheet", R, "InitialSources InitialSource"),
             ("Tables", R, "PreviewAssignments ScopeOptions"), ("Tables", U, "AssignToScope PreviewAssignments ScopeOptions"),
             ("TerminalConfigurationWorksheet", R, "Get Options Preview"), ("TerminalConfigurationWorksheet", U, "Apply"),
+            ("TerminalDeliveryReview", R, "Get"),
             ("Terminals", R, "GetTableAssignment TableAssignmentOptions RoutineCallIn"), ("Terminals", U, "SetTableAssignment RollbackTableAssignment"));
         Screen("downloads", "Downloads",
             ("Downloads", R, "List Get"), ("Downloads", U, "Cancel Retry"),
@@ -141,7 +145,8 @@ public static class OperatorPermissions
             ("Firmware", U, "PreviewFirmwareTableProfile SetFirmwareTableProfile"));
         Screen("firmware-jobs", "Firmware jobs",
             ("Firmware", R, "ExecutionPolicy ListJobs Job TransitionReview PreviewAccessStaging PreviewScreeningStaging"), ("Terminals", A, "StartFirmwareJob"),
-            ("Firmware", U, "SimulateJob ExecuteLiveJob ApproveJob CancelJob"), ("Tables", U, "QueueFirmwareCancellation"));
+            ("Firmware", U, "SimulateJob ExecuteLiveJob ApproveJob CancelJob"), ("Tables", U, "QueueFirmwareCancellation"),
+            ("FirmwareConfigurationTransitions", R, "Options List Preview"), ("FirmwareConfigurationTransitions", U, "Stage Activate Cancel Recover"));
         Screen("hardware-validation", "Hardware validation",
             ("HardwareValidation", R, "Checklists EvidenceGuide ListCapturedSessions GetCapturedSession"),
             ("HardwareValidation", A, "ImportCapturedSession"), ("HardwareValidation", U, "ReplayCapturedSession"));

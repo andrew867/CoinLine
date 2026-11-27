@@ -5,6 +5,61 @@ namespace HostPlatform.Tests.Unit;
 
 public sealed class LegacyTerminalTableRequirementsTests
 {
+    [Theory]
+    [InlineData("msr17-card-generic", 1)] [InlineData("mtr20-card-graphical", 1)] [InlineData("mtr20-desk", 1)]
+    [InlineData("msr17-inmate", 1)] [InlineData("r1-international-desk", 1)]
+    [InlineData("msr17-multipay-generic-data", 2)] [InlineData("msr18-audiogram", 2)] [InlineData("mtr20-multipay-graphical", 2)]
+    [InlineData("mtr22-mondex", 2)] [InlineData("mtr24-proton", 2)] [InlineData("mtr21-visa", 2)] [InlineData("mtr23-smartcity", 2)]
+    [InlineData("mtr19-coin-basic", 3)] [InlineData("mtr111-coin-basic", 3)]
+    public void Family_expectations_use_payment_hardware_class_not_Maximizer_inventory_code(string id, int expected)
+    {
+        var family = TerminalFamilies.Find(id)!;
+        var review = LegacyTerminalTableRequirements.Review(family, [], null).OperatingMode!;
+        Assert.Equal(expected, review.ExpectedCode);
+        Assert.Equal("missing", review.Status);
+        Assert.Null(review.ConfiguredCode);
+    }
+
+    [Theory]
+    [InlineData(FirmwareTableProfiles.MultiPay200, 1, "differs")]
+    [InlineData(FirmwareTableProfiles.MultiPay200, 2, "matches")]
+    [InlineData(FirmwareTableProfiles.LaterMultiPay180, 3, "differs")]
+    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180, 2, "matches")]
+    [InlineData(FirmwareTableProfiles.GraphicalMultiPay180, 10, "invalid")]
+    public void Qualified_feature_layout_reports_saved_mode_without_rewriting_it(string profile, byte actual, string status)
+    {
+        var family = TerminalFamilies.Find("mtr20-multipay-graphical")!;
+        var features = Payload(26, 72); features[1] = actual; features[^1] = 0xA5;
+        var retained = features.ToArray();
+        var review = LegacyTerminalTableRequirements.Review(family, [(26, features, null)], FirmwareTableProfiles.Find(profile)).OperatingMode!;
+        Assert.Equal(2, review.ExpectedCode);
+        Assert.Equal("Multi-pay", review.ExpectedLabel);
+        Assert.Equal((int)actual, review.ConfiguredCode);
+        Assert.Equal(status, review.Status);
+        Assert.Equal(retained, features);
+        if (status == "invalid") Assert.Null(review.ConfiguredLabel);
+        else Assert.NotNull(review.ConfiguredLabel);
+    }
+
+    [Fact]
+    public void Ambiguous_or_incompatible_MT26_never_receives_payment_mode_credit()
+    {
+        var family = TerminalFamilies.Find("mtr19-multipay")!;
+        var profile = FirmwareTableProfiles.Find(FirmwareTableProfiles.MultiPay200);
+        var features = Payload(26, 72); features[1] = 2;
+        var cases = new (TerminalFamilyTableReview Review, string Status)[]
+        {
+            (LegacyTerminalTableRequirements.Review(family, [(26, features, null)], null), "unverified"),
+            (LegacyTerminalTableRequirements.Review(family, [(26, features, null)], FirmwareTableProfiles.Find(FirmwareTableProfiles.Mtr113MultiPay)), "unverified"),
+            (LegacyTerminalTableRequirements.Review(family, [(26, features, NativeTableLayouts.Later)], profile), "unverified"),
+            (LegacyTerminalTableRequirements.Review(family, [(26, Payload(26, 71), null)], profile), "invalid"),
+            (LegacyTerminalTableRequirements.Review(family, [(26, Payload(29, 72), null)], profile), "invalid"),
+            (LegacyTerminalTableRequirements.Review(family, [(26, features, null), (26, features, null)], profile), "invalid"),
+        };
+        foreach (var (review, status) in cases)
+        { Assert.Equal(status, review.OperatingMode!.Status); Assert.Null(review.OperatingMode.ConfiguredCode); }
+    }
+
     [Fact]
     public void Screening_guidance_separates_legacy_limits_and_institutional_slots_from_packed_layout()
     {
@@ -27,6 +82,7 @@ public sealed class LegacyTerminalTableRequirementsTests
     {
         var reviews = TerminalFamilies.Catalog.Select(family => LegacyTerminalTableRequirements.Review(family, [], null)).ToArray();
         Assert.All(reviews, review => Assert.True(review.Documented));
+        Assert.All(reviews, review => Assert.NotNull(review.OperatingMode));
         var desk = Assert.Single(reviews, review => review.FamilyId == "mtr20-desk");
         Assert.Contains("shared checklist", desk.Note);
         Assert.DoesNotContain(desk.Tables, table => table.Name == "Coin validation");

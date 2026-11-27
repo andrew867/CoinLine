@@ -89,6 +89,73 @@ public sealed class TerminalConfigurationWorksheetController(HostPlatformDbConte
                 : SourceIssue(phone, number, row.length, row.ScreeningLayoutProfile, row.TargetFirmwareVersionId, row.targetFirmware) }) });
     }
 
+    [HttpGet("initial-sources")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> InitialSources(Guid id, [FromQuery] string? query, [FromQuery] int page = 1, CancellationToken ct = default)
+    {
+        if (page is < 1 or > 1_000_000 || query?.Length > 120 || query?.Any(char.IsControl) == true)
+            return BadRequest(new { error = "Choose a search of up to 120 characters and a valid page." });
+        var phone = await Phone(id, ct);
+        if (phone == null) return NotFound();
+        if (phone.DeactivatedAtUtc != null || await db.TerminalTableAssignments.AnyAsync(row => row.TerminalId == id, ct))
+            return Conflict(new { error = "Starter selection is available only for an active phone with no assignment." });
+        if (FirmwareTableProfiles.Find(phone.FirmwareVersion?.TableProfileId) is not { ObservedLengthsOnly: false })
+            return Ok(new { available = false, reason = "Register a firmware with a verified native editor profile before selecting a starter." });
+        var sources = InitialCandidates(phone);
+        var term = query?.Trim().ToUpperInvariant();
+        if (!string.IsNullOrEmpty(term)) sources = sources.Where(set => set.Name.ToUpper().Contains(term));
+        var total = await sources.CountAsync(ct);
+        var choices = await sources.OrderByDescending(set => set.IsDefault).ThenBy(set => set.Name).ThenBy(set => set.Id)
+            .Skip((page - 1) * PageSize).Take(PageSize).Select(set => new { set.Id, set.Name, set.IsDefault,
+                recordCount = set.Versions.Count, hasAccess = set.Versions.Any(row => row.TableDefinition!.TableNumber == 21) }).ToListAsync(ct);
+        return Ok(new { available = true, total, page, pageSize = PageSize, sources = choices });
+    }
+
+    [HttpGet("initial-sources/{sourceId:guid}")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> InitialSource(Guid id, Guid sourceId, CancellationToken ct)
+    {
+        var phone = await Phone(id, ct);
+        if (phone == null) return NotFound();
+        if (phone.DeactivatedAtUtc != null || await db.TerminalTableAssignments.AnyAsync(row => row.TerminalId == id, ct))
+            return Conflict(new { error = "Starter selection is available only for an active phone with no assignment." });
+        if (FirmwareTableProfiles.Find(phone.FirmwareVersion?.TableProfileId) is not { ObservedLengthsOnly: false } profile)
+            return BadRequest(new { error = "Register a firmware with a verified native editor profile before selecting a starter." });
+        if (!await InitialCandidates(phone).AnyAsync(set => set.Id == sourceId, ct)) return NotFound();
+        var source = await Sets().SingleOrDefaultAsync(set => set.Id == sourceId, ct);
+        if (source == null || source.Status != TableSetStatus.Published || source.TargetFirmwareVersionId != phone.FirmwareVersionId ||
+            source.CustomerId is { } owner && owner != phone.Site!.CustomerId) return NotFound();
+        try
+        {
+            var numbers = source.Versions.Select(row => row.TableDefinition!.TableNumber).ToArray();
+            if (numbers.Any(number => !IsDataRecord(number)))
+                throw new InvalidOperationException("Choose a data-only starter configuration, not an operational or firmware-schedule record.");
+            var selected = TableDistributionService.SelectDataDownloadRecords(source.Versions.ToArray(), numbers);
+            foreach (var version in selected)
+            {
+                var number = version.TableDefinition!.TableNumber;
+                if (!profile.VerifiedLengths.ContainsKey(number))
+                    throw new InvalidOperationException($"MT{number} is not in the verified profile catalogue. Review it individually rather than copying the whole starter.");
+                if (SourceIssue(phone, number, TableDistributionService.GetEffectivePayload(version).Length, version.ScreeningLayoutProfile,
+                    source.TargetFirmwareVersionId, source.TargetFirmwareVersion?.Label) is { } issue)
+                    throw new InvalidOperationException($"MT{number}. {issue}");
+            }
+            return Ok(new { source.Id, source.Name, records = selected.OrderBy(row => row.TableDefinition!.TableNumber).Select(row => new
+            {
+                number = row.TableDefinition!.TableNumber, row.Id, row.TableSetId, setName = source.Name, row.ConfigurationId,
+                revision = row.TableRevision, length = TableDistributionService.GetEffectivePayload(row).Length,
+                sha256 = row.PayloadSha256Hex, targetFirmware = source.TargetFirmwareVersion?.Label, issue = (string?)null
+            }), family = Review(phone, selected),
+                requiresAccessPersonalization = TableDistributionService.AccessRecordIssue(selected.Where(row => row.TableDefinition!.TableNumber == 21).ToArray(), phone.TerminalIdHex) != null });
+        }
+        catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
+    }
+
+    private IQueryable<TableSet> InitialCandidates(Terminal phone) => db.TableSets.AsNoTracking().Where(set =>
+        set.Status == TableSetStatus.Published && set.TargetFirmwareVersionId == phone.FirmwareVersionId &&
+        (set.CustomerId == null || set.CustomerId == phone.Site!.CustomerId) && set.Versions.Any() &&
+        !set.Versions.Any(version => NonDataRecords.Contains(version.TableDefinition!.TableNumber)));
+
     [HttpPost("preview")]
     public Task<IActionResult> Preview(Guid id, WorksheetRequest body, CancellationToken ct) => Execute(id, body, false, ct);
 
