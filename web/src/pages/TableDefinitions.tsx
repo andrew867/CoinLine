@@ -7,7 +7,8 @@ import './TableSetConfiguration.css'
 
 type Row = { id: string; name: string; tableNumber: number; description: string | null }
 type Layout = { number: number; length: number; profile: string; draftTemplateAvailable: boolean; explicitAuthoringAvailable?: boolean }
-type Firmware = { profileId: string; label: string; length: number; terminalAcknowledged: boolean }
+type Firmware = { profileId: string; label: string; length: number; terminalAcknowledged: boolean;
+  completeCatalogue?: boolean; observedLengthsOnly?: boolean; editorStatus?: string; editorProfile?: string | null }
 type Reference = {
   number: number; name: string; kind: string; layouts: Layout[]; firmware: Firmware[]
   registeredDefinitions: { id: string; name: string }[]; behaviorObservation?: string | null
@@ -15,6 +16,11 @@ type Reference = {
 const kinds: Record<string, string> = {
   native_editor: 'Native editor', observed_only: 'Observed length only', operational: 'Operational message',
   scheduler_record: 'Code Download Scheduler', documented_only: 'Documented, layout unverified', registered_unclassified: 'Unclassified registry entry',
+}
+const editorStatuses: Record<string, string> = {
+  template: 'Matching native editor with draft template', explicit: 'Matching native editor with explicit authoring',
+  'import-only': 'Matching native editor, import/edit only', 'length-only': 'Observed length only; editor compatibility unverified',
+  unmapped: 'No matching native layout established',
 }
 
 export function TableDefinitions() {
@@ -26,6 +32,7 @@ export function TableDefinitions() {
   const [num, setNum] = useState(100)
   const [desc, setDesc] = useState('')
   const [filter, setFilter] = useState('all')
+  const [profileFilter, setProfileFilter] = useState('all')
   const [search, setSearch] = useState('')
   const [refresh, setRefresh] = useState(0)
   const canAdd = canPerform('table-definitions', op.add)
@@ -52,7 +59,15 @@ export function TableDefinitions() {
   }
 
   const query = search.trim().toLowerCase()
+  const profiles = [...new Map(catalogue?.flatMap(record => record.firmware).map(profile => [profile.profileId, profile])).values()]
+    .sort((a, b) => a.label.localeCompare(b.label))
+  const selectedProfile = profiles.find(profile => profile.profileId === profileFilter)
+  const profileRecords = catalogue?.flatMap(record => record.firmware.filter(profile => profile.profileId === profileFilter)) ?? []
+  const authorable = profileRecords.filter(profile => profile.editorStatus === 'template' || profile.editorStatus === 'explicit').length
+  const editable = authorable + profileRecords.filter(profile => profile.editorStatus === 'import-only').length
+  const acknowledged = profileRecords.filter(profile => profile.terminalAcknowledged).length
   const visible = catalogue?.filter(record => (filter === 'all' || record.kind === filter)
+    && (profileFilter === 'all' || record.firmware.some(profile => profile.profileId === profileFilter))
     && (!query || [
       String(record.number), `mt${record.number}`, record.name, kinds[record.kind] ?? '',
       ...record.registeredDefinitions.map(definition => definition.name),
@@ -77,10 +92,23 @@ export function TableDefinitions() {
               {Object.entries(kinds).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </label>
+          <label>Target profile
+            <select value={profileFilter} onChange={e => setProfileFilter(e.target.value)} style={{ display: 'block' }}>
+              <option value="all">All registered reference profiles</option>
+              {profiles.map(profile => <option key={profile.profileId} value={profile.profileId}>{profile.label}</option>)}
+            </select>
+          </label>
         </div>
         {catalogue === null && !catalogueError && <p role="status">Loading reference catalogue…</p>}
         {catalogueError && <p role="alert">Could not load reference catalogue: {catalogueError}</p>}
         {catalogue && <p role="status">{visible.length} of {catalogue.length} reference records</p>}
+        {selectedProfile && <section aria-label="Selected profile coverage">
+          <h3>{selectedProfile.label}</h3>
+          <p>Recorded message types: {profileRecords.length}; matching native editors: {editable}; authorable: {authorable}; emulator acknowledgements: {acknowledged}.</p>
+          <p>{selectedProfile.completeCatalogue ? 'Registered configuration catalogue.' : 'Incomplete catalogue: unlisted types remain unknown.'} {' '}
+            {selectedProfile.observedLengthsOnly && 'Only record lengths and acknowledgement evidence are established for this profile. '}
+            Counts refer to the profile, not the current search or a mandatory INSTALL list. Behavior and physical qualification are separate.</p>
+        </section>}
         {visible.length > 0 && <div role="region" aria-label="Reference records" tabIndex={0} style={{ overflowX: 'auto' }}>
           <table cellPadding={8} style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead><tr><th scope="col">MT</th><th scope="col">Reference name</th><th scope="col">Category</th>
@@ -93,11 +121,17 @@ export function TableDefinitions() {
               <td>{record.layouts.length ? <details><summary>{record.layouts.length} layout{record.layouts.length === 1 ? '' : 's'}</summary>
                 <ul>{record.layouts.map(layout => <li key={`${layout.profile}-${layout.length}`}>{layout.profile}: {layout.length.toLocaleString()} bytes;
                   {layout.draftTemplateAvailable ? ' draft template' : layout.explicitAuthoringAvailable ? ' explicit authoring (no default template)' : ' import/edit only'}</li>)}</ul></details> : 'Not established'}</td>
-              <td>{record.firmware.length ? <details><summary>{record.firmware.length} profiles; {record.firmware.filter(f => f.terminalAcknowledged).length} acknowledged</summary>
+              <td>{record.firmware.length ? selectedProfile ? <>
+                {record.firmware.filter(profile => profile.profileId === profileFilter).map(profile => <div key={profile.profileId}>
+                  {profile.length.toLocaleString()} bytes; {profile.terminalAcknowledged ? 'emulator MT14 observed' : 'acknowledgement not recorded'}
+                  <br /><small>{editorStatuses[profile.editorStatus ?? ''] ?? 'Editor compatibility not recorded'}</small></div>)}
+              </> : <details><summary>{record.firmware.length} profiles; {record.firmware.filter(f => f.terminalAcknowledged).length} acknowledged</summary>
                 <ul>{record.firmware.map(profile => <li key={profile.profileId}>{profile.label}: {profile.length.toLocaleString()} bytes;
-                  {profile.terminalAcknowledged ? ' emulator MT14 observed' : ' acknowledgement not recorded'}</li>)}</ul>
+                  {profile.terminalAcknowledged ? ' emulator MT14 observed' : ' acknowledgement not recorded'}<br />
+                  <small>{editorStatuses[profile.editorStatus ?? ''] ?? 'Editor compatibility not recorded'}</small></li>)}</ul>
                 <small>Length and emulator acknowledgement do not establish physical behavior.</small></details> : 'Not recorded'}</td>
-              <td style={{ minWidth: 180, maxWidth: 300 }}>{record.behaviorObservation ?? 'Not recorded in this reference catalogue'}</td>
+              <td style={{ minWidth: 180, maxWidth: 300 }}>{record.behaviorObservation ?? 'Not recorded in this reference catalogue'}
+                {selectedProfile && record.behaviorObservation && <div><small>Reference observation, not attributed to every target profile.</small></div>}</td>
               <td>{record.registeredDefinitions.length ? record.registeredDefinitions.map(definition => <div key={definition.id}>
                 <Link to={`/table-definitions/${definition.id}`}>{definition.name}</Link></div>) : 'None'}</td>
             </tr>)}</tbody>

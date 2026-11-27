@@ -20,9 +20,27 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
         Assert.All(FirmwareTableProfiles.Catalog, profile =>
         {
             foreach (var (number, length) in profile.VerifiedLengths)
-                Assert.Contains(rows[number].GetProperty("firmware").EnumerateArray(), item =>
+            {
+                var evidence = Assert.Single(rows[number].GetProperty("firmware").EnumerateArray(), item =>
                     item.GetProperty("profileId").GetString() == profile.Id && item.GetProperty("length").GetInt32() == length
                     && item.GetProperty("terminalAcknowledged").GetBoolean() == profile.TerminalAcknowledgedRecords.Contains(number));
+                Assert.Equal(profile.CompleteCatalogue, evidence.GetProperty("completeCatalogue").GetBoolean());
+                Assert.Equal(profile.ObservedLengthsOnly, evidence.GetProperty("observedLengthsOnly").GetBoolean());
+                if (profile.ObservedLengthsOnly)
+                {
+                    Assert.Equal("length-only", evidence.GetProperty("editorStatus").GetString());
+                    Assert.Equal(JsonValueKind.Null, evidence.GetProperty("editorProfile").ValueKind);
+                }
+                else
+                {
+                    var matches = rows[number].GetProperty("layouts").EnumerateArray().Where(layout => layout.GetProperty("length").GetInt32() == length &&
+                        (number == AdvertisingTableWire.MessageType || layout.GetProperty("profile").GetString() == profile.LayoutFor(number))).ToArray();
+                    var chosen = Assert.Single(matches);
+                    Assert.Equal(chosen.GetProperty("profile").GetString(), evidence.GetProperty("editorProfile").GetString());
+                    Assert.Equal(chosen.GetProperty("draftTemplateAvailable").GetBoolean() ? "template" : chosen.GetProperty("explicitAuthoringAvailable").GetBoolean() ? "explicit" : "import-only",
+                        evidence.GetProperty("editorStatus").GetString());
+                }
+            }
         });
 
         Assert.All(LegacyTerminalTableRequirements.ReferencedRecordNumbers(), number => Assert.True(rows.ContainsKey(number)));

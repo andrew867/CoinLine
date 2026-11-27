@@ -14,8 +14,10 @@ test('finds record layouts and distinguishes historical labels from operational 
     { number: 92, name: 'Call screening', kind: 'native_editor',
       layouts: [{ number: 92, length: 3401, profile: 'MTR 1.9 packed', draftTemplateAvailable: true },
         { number: 92, length: 3061, profile: 'Later packed profile', draftTemplateAvailable: true }],
-      firmware: [{ profileId: 'reference-older', label: 'Older reference profile', length: 3401, terminalAcknowledged: true },
-        { profileId: 'reference-later', label: 'Later reference profile', length: 3061, terminalAcknowledged: false }],
+      firmware: [{ profileId: 'reference-older', label: 'Older reference profile', length: 3401, terminalAcknowledged: true,
+        completeCatalogue: false, observedLengthsOnly: true, editorStatus: 'length-only' },
+        { profileId: 'reference-later', label: 'Later reference profile', length: 3061, terminalAcknowledged: false,
+          completeCatalogue: true, observedLengthsOnly: false, editorStatus: 'template', editorProfile: 'Later packed profile' }],
       registeredDefinitions: [], behaviorObservation: 'Exact free route observed on the emulator' },
     { number: 94, name: 'Code download schedule', kind: 'scheduler_record', layouts: [], firmware: [], registeredDefinitions: [] },
   ]
@@ -54,6 +56,15 @@ test('finds record layouts and distinguishes historical labels from operational 
   await expect(screening).toContainText('emulator MT14 observed')
   await expect(screening).toContainText('acknowledgement not recorded')
   await expect(screening).toContainText('Exact free route observed on the emulator')
+  await page.getByLabel('Target profile').selectOption('reference-older')
+  const coverage = page.getByRole('region', { name: 'Selected profile coverage' })
+  await expect(coverage).toContainText('Recorded message types: 1; matching native editors: 0; authorable: 0; emulator acknowledgements: 1')
+  await expect(coverage).toContainText('Incomplete catalogue')
+  await expect(screening).toContainText('Observed length only; editor compatibility unverified')
+  await page.getByLabel('Target profile').selectOption('reference-later')
+  await expect(coverage).toContainText('Recorded message types: 1; matching native editors: 1; authorable: 1; emulator acknowledgements: 0')
+  await expect(screening).toContainText('Matching native editor with draft template')
+  await page.getByLabel('Target profile').selectOption('all')
   await page.getByLabel('Find a record').fill('MT62')
   const numbering = reference.getByRole('row').filter({hasText:'Numbering plan'})
   await numbering.getByText('1 layout').click()

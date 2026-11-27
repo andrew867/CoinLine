@@ -4,6 +4,8 @@ When a draft lacks feature and call options (MT26), user interface parameters (M
 
 An inventory regression checks every listed native editor layout for either a blank template or explicit authoring. The two currently listed editor layouts that require a compatible existing record are MT21 at 40 bytes and MT49 at 199 bytes. Their unverified regions are preserved on edit and no new default is inferred. This inventory does not include unrecognized wire layouts or establish that every documented optional configuration group has an implementation.
 
+In **Table definitions**, select a target reference profile to see its recorded message types, confirmed matching native layouts, records that can be authored and separate emulator acknowledgement count. The counts cover the registered profile, not the current text search or a mandatory download list. Profiles supported only by observed lengths do not receive native layout or authoring credit merely because the same-length generic editor exists. An incomplete profile does not imply that unlisted records are unsupported.
+
 The reference record catalogue labels these confirmed layouts as **explicit authoring (no default template)**, independently of the observed firmware acknowledgement and behavior columns. It also recognizes the existing dedicated twenty-slot MT29 text advertising creation workflow. An observed record length alone does not establish a usable authoring layout.
 
 1. Open the relevant configuration panel in an unpublished set and select the missing record. A registered target with a confirmed layout offers that exact profile. An untargeted draft offers a deliberate choice among the identified layouts. Observed-length-only targets and unsupported formats remain import workflows.

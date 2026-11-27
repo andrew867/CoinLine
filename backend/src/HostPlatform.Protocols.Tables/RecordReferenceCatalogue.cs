@@ -1,7 +1,8 @@
 namespace HostPlatform.Protocols.Tables;
 
 public sealed record NativeLayoutReference(int Number, int Length, string Profile, bool DraftTemplateAvailable, bool ExplicitAuthoringAvailable = false);
-public sealed record FirmwareRecordReference(string ProfileId, string Label, int Length, bool TerminalAcknowledged);
+public sealed record FirmwareRecordReference(string ProfileId, string Label, int Length, bool TerminalAcknowledged,
+    bool CompleteCatalogue, bool ObservedLengthsOnly, string EditorStatus, string? EditorProfile);
 public sealed record ReferenceRecord(
     int Number, string Name, string Kind, NativeLayoutReference[] Layouts, FirmwareRecordReference[] Firmware, string? BehaviorObservation);
 
@@ -34,8 +35,7 @@ public static class RecordReferenceCatalogue
         var layouts = NativeTableLayouts.ReferenceLayouts().Append(new NativeLayoutReference(
             AdvertisingTableWire.MessageType, AdvertisingTableWire.RecordLength, "20-slot text advertising", false, true)).ToLookup(row => row.Number);
         var firmware = FirmwareTableProfiles.Catalog.SelectMany(profile => profile.VerifiedLengths
-            .Select(pair => (Number: pair.Key, Reference: new FirmwareRecordReference(
-                profile.Id, profile.Label, pair.Value, profile.TerminalAcknowledgedRecords.Contains(pair.Key)))))
+            .Select(pair => (Number: pair.Key, Reference: ProfileReference(profile, pair.Key, pair.Value, layouts[pair.Key]))))
             .ToLookup(row => row.Number, row => row.Reference);
         var documented = LegacyTerminalTableRequirements.ReferencedRecordNumbers();
         var numbers = layouts.Select(row => row.Key).Concat(firmware.Select(row => row.Key))
@@ -49,6 +49,20 @@ public static class RecordReferenceCatalogue
                 : observed.Length > 0 ? "observed_only" : documented.Contains(number) ? "documented_only" : "registered_unclassified";
             return new ReferenceRecord(number, operation ?? ConfigurationName(number), kind, native, observed, Behavior(number));
         }).ToArray();
+    }
+
+    private static FirmwareRecordReference ProfileReference(FirmwareTableProfile profile, int number, int length,
+        IEnumerable<NativeLayoutReference> layouts)
+    {
+        // A matching length on an observed-only profile is not a confirmation of
+        // the field layout. Keep the available generic editor options separate.
+        var matches = profile.ObservedLengthsOnly ? [] : layouts.Where(layout => layout.Length == length &&
+            (number == AdvertisingTableWire.MessageType || layout.Profile == profile.LayoutFor(number))).ToArray();
+        var match = matches.Length == 1 ? matches[0] : null;
+        var status = profile.ObservedLengthsOnly ? "length-only" : match == null ? "unmapped"
+            : match.DraftTemplateAvailable ? "template" : match.ExplicitAuthoringAvailable ? "explicit" : "import-only";
+        return new(profile.Id, profile.Label, length, profile.TerminalAcknowledgedRecords.Contains(number),
+            profile.CompleteCatalogue, profile.ObservedLengthsOnly, status, match?.Profile);
     }
 
     // Specific historical emulator observations, never an assertion that every
