@@ -20,9 +20,17 @@ public class DlogTransaction : AuditableEntity
     public string IdempotencyKey { get; set; } = string.Empty;
     public Guid? NccSessionId { get; set; }
     public NccSession? NccSession { get; set; }
+    public NccVersionObservation? NccVersionObservation { get; set; }
     public DateTime CapturedAtUtc { get; set; }
     public string? SessionCorrelationId { get; set; }
     public ICollection<DlogParseDiagnostic> ParseDiagnostics { get; set; } = new List<DlogParseDiagnostic>();
+}
+
+/// <summary>Evidence of a complete MT60 received on a matched NCC link.</summary>
+public sealed class NccVersionObservation
+{
+    public Guid TransactionId { get; set; }
+    public DlogTransaction? Transaction { get; set; }
 }
 
 /// <summary>Catalog row seeded from the known DLOG message registry.</summary>

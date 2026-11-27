@@ -395,7 +395,7 @@ export function TableSetAssignment({ setId, revision, versions, optionalRecords,
               clearReview()
             }} />
           </label>
-          <p>Enter the controller versions shown in the phone’s latest NCC software report.</p>
+          <p>Enter the controller versions shown in the phone’s latest live NCC software report. Imported and historical reports without verified live evidence are excluded until the phone reports again.</p>
         </>}
         {configurationScope && <label>Configuration ID
           <select disabled={busy} value={targetId} onChange={event => { setTargetId(event.target.value); clearReview() }}>
