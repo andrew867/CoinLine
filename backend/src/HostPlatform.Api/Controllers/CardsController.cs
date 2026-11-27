@@ -471,6 +471,22 @@ public sealed class CardsController(
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? RateSource,
         [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] Guid? RatePlanVersionId);
 
+    /// <summary>External bank posting receipts and unresolved intents, not a local account debit.</summary>
+    [HttpGet("merchant-captures")]
+    public async Task<ActionResult<IEnumerable<object>>> MerchantCaptures([FromQuery] Guid? terminalId, CancellationToken ct)
+    {
+        var query = db.MerchantCaptureIntents.AsNoTracking().AsQueryable();
+        if (terminalId.HasValue) query = query.Where(row => row.TerminalId == terminalId.Value);
+        return Ok(await query.OrderByDescending(row => row.CreatedAtUtc).ThenByDescending(row => row.Id).Take(500)
+            .Select(row => new
+            {
+                row.Id, row.TerminalId, terminalDisplayName = row.Terminal!.DisplayName,
+                row.AuthorizationDecisionId, row.UploadBatchId, row.CallSequence, row.CallStartedAtUtc,
+                row.DurationSeconds, row.AmountUsd, row.Status, row.AttemptCount, row.LastResult,
+                row.CreatedAtUtc, row.LastAttemptAtUtc, row.PostedAtUtc, row.NextAttemptAtUtc
+            }).ToListAsync(ct));
+    }
+
     [HttpGet("reconciliation-pending")]
     public async Task<ActionResult<object>> ReconciliationPending(CancellationToken ct)
     {

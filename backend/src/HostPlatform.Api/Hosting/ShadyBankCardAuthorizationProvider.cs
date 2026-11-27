@@ -1,6 +1,8 @@
+using System.Buffers.Binary;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using HostPlatform.Api.Options;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
@@ -18,9 +20,11 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
     internal const string SequenceClaimAction = "merchant_authorization_sequence_claim";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private static readonly TimeSpan QuoteLifetime = TimeSpan.FromMinutes(5);
-    private sealed record Claim(Guid QuoteId, byte MessageType, ushort CallSequence, decimal Amount);
+    private sealed record Claim(Guid QuoteId, byte MessageType, ushort CallSequence, decimal Amount,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? CapturePeriodSeconds = null);
     private sealed record SequenceClaim(Guid? NativeQuoteId, Guid RatePlanVersionId, byte MessageType,
-        ushort CallSequence, decimal Amount, DateTime QuotedAtUtc);
+        ushort CallSequence, decimal Amount, DateTime QuotedAtUtc,
+        [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] int? CapturePeriodSeconds = null);
 
     public async ValueTask<NccCardAuthorizationDecision> AuthorizeAsync(Guid terminalId,
         ReadOnlyMemory<byte> protectedRequest, CancellationToken cancellationToken)
@@ -62,7 +66,7 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
                 var quoted = SyntheticLabCardAuthorizationProvider.EligibleQuotedAmount(quote);
                 if (quoted == null || quote.AppliedRatePlanVersionId is not { } version)
                     return Decline(new("quote_not_eligible", quote.Id, CallSequence: sequence));
-                candidate = new(quote.Id, version, messageType, sequence, quoted.Value, now);
+                candidate = new(quote.Id, version, messageType, sequence, quoted.Value, now, CapturePeriod(bank, binding, quote));
             }
             else
             {
@@ -78,7 +82,8 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
                     direct.AppliedVersionId != versionId || initial <= 0 || initial > 655.35m)
                     return Decline(new("quote_not_eligible", CallSequence: sequence, RateSource: "authorization_only", RatePlanVersionId: versionId));
                 // The host derived an initial charge, not a terminal-originated MT63 or uploaded call record.
-                candidate = new(null, versionId, messageType, sequence, initial, now);
+                candidate = new(null, versionId, messageType, sequence, initial, now,
+                    CaptureEnabled(bank, binding) ? 60 : null);
             }
             var claimed = await TryClaimSequenceAsync(terminalId, sequenceId, candidate, cancellationToken);
             if (claimed == null) return Decline(new("quote_already_used", CallSequence: sequence));
@@ -87,9 +92,10 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
         if (quote == null) return Decline(new("quote_missing", CallSequence: sequence));
         var amount = SyntheticLabCardAuthorizationProvider.EligibleQuotedAmount(quote);
         if (amount == null) return Decline(new("quote_not_eligible", quote.Id, CallSequence: sequence));
-        var claim = new Claim(quote.Id, messageType, sequence, amount.Value);
+        var proposed = new Claim(quote.Id, messageType, sequence, amount.Value, CapturePeriod(bank, binding, quote));
         var requestId = QuoteRequestId(quote.Id);
-        if (!await TryClaimAsync(terminalId, requestId, claim, cancellationToken))
+        var claim = await TryClaimAsync(terminalId, requestId, proposed, cancellationToken);
+        if (claim == null)
             return Decline(new("quote_already_used", quote.Id, amount, sequence));
 
         // Durable quote claim precedes the external reservation. Retries use the same bank request ID;
@@ -102,7 +108,9 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
         {
             Approved = true,
             AuthorizationReference = messageType == 2 ? Encoding.ASCII.GetBytes("SB" + code) : ReadOnlyMemory<byte>.Empty,
-            ShadyBankEvidence = new("bank_approved", quote.Id, amount, sequence)
+            ShadyBankEvidence = new("bank_approved", quote.Id, amount, sequence,
+                CaptureRequestId: CaptureEnabled(bank, binding) && claim.CapturePeriodSeconds is > 0 ? requestId : null,
+                CapturePeriodSeconds: CaptureEnabled(bank, binding) ? claim.CapturePeriodSeconds : null)
         };
     }
 
@@ -110,12 +118,19 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
         Uri endpoint, ShadyBankInstrumentBinding binding, Guid sequenceId, SequenceClaim claim, CancellationToken ct)
     {
         var source = claim.NativeQuoteId.HasValue ? "native_quote" : "authorization_only";
-        ShadyBankAuthorizationEvidence Evidence(string reason) => new(reason, claim.NativeQuoteId, claim.Amount,
-            claim.CallSequence, source, claim.RatePlanVersionId);
         var requestId = claim.NativeQuoteId is { } quoteId ? QuoteRequestId(quoteId) : sequenceId;
-        if (claim.NativeQuoteId is { } nativeId && !await TryClaimAsync(terminalId, requestId,
-                new(nativeId, claim.MessageType, claim.CallSequence, claim.Amount), ct))
-            return Decline(Evidence("quote_already_used"));
+        var capturePeriod = claim.CapturePeriodSeconds;
+        ShadyBankAuthorizationEvidence Evidence(string reason) => new(reason, claim.NativeQuoteId, claim.Amount,
+            claim.CallSequence, source, claim.RatePlanVersionId,
+            reason == "bank_approved" && CaptureEnabled(bank, binding) && capturePeriod is > 0 ? requestId : null,
+            reason == "bank_approved" && CaptureEnabled(bank, binding) ? capturePeriod : null);
+        if (claim.NativeQuoteId is { } nativeId)
+        {
+            var nativeClaim = await TryClaimAsync(terminalId, requestId,
+                new(nativeId, claim.MessageType, claim.CallSequence, claim.Amount, capturePeriod), ct);
+            if (nativeClaim == null) return Decline(Evidence("quote_already_used"));
+            capturePeriod = capturePeriod is > 0 && nativeClaim.CapturePeriodSeconds == capturePeriod ? capturePeriod : null;
+        }
         using var client = clientFactory.CreateClient(ShadyBankAuthorizationClient.ClientName);
         var code = await ShadyBankAuthorizationClient.AuthorizeAsync(client, endpoint, bank.ServiceKey,
             binding.InstrumentToken, claim.Amount, requestId, ct);
@@ -162,7 +177,7 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
     private static Guid SequenceId(Guid terminalId, string route, ushort sequence) => new(SHA256.HashData(Encoding.UTF8.GetBytes(
         FormattableString.Invariant($"coinline-shadybank-authorization-sequence:{terminalId:N}:{route}:{sequence}"))).AsSpan(0, 16));
 
-    private async Task<bool> TryClaimAsync(Guid terminalId, Guid requestId, Claim claim, CancellationToken ct)
+    private async Task<Claim?> TryClaimAsync(Guid terminalId, Guid requestId, Claim claim, CancellationToken ct)
     {
         var previous = await db.AuditEvents.AsNoTracking().SingleOrDefaultAsync(row => row.Id == requestId, ct);
         if (previous == null)
@@ -170,7 +185,7 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
             var row = new AuditEvent { Id = requestId, Category = "ncc", Action = ClaimAction, Actor = "shadybank-provider",
                 TerminalId = terminalId, Resource = claim.QuoteId.ToString(), DetailJson = JsonSerializer.Serialize(claim, Json) };
             db.AuditEvents.Add(row);
-            try { await db.SaveChangesAsync(ct); return true; }
+            try { await db.SaveChangesAsync(ct); return claim; }
             catch (DbUpdateException)
             {
                 db.Entry(row).State = EntityState.Detached;
@@ -178,9 +193,53 @@ internal sealed class ShadyBankCardAuthorizationProvider(HostPlatformDbContext d
                 if (previous == null) throw;
             }
         }
-        if (previous.TerminalId != terminalId || previous.Category != "ncc" || previous.Action != ClaimAction) return false;
-        try { return JsonSerializer.Deserialize<Claim>(previous.DetailJson, Json) == claim; }
+        if (previous.TerminalId != terminalId || previous.Category != "ncc" || previous.Action != ClaimAction) return null;
+        try
+        {
+            var retained = JsonSerializer.Deserialize<Claim>(previous.DetailJson, Json);
+            return retained != null && retained.QuoteId == claim.QuoteId && retained.MessageType == claim.MessageType &&
+                retained.CallSequence == claim.CallSequence && retained.Amount == claim.Amount ? retained : null;
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private static bool CaptureEnabled(ShadyBankAuthorizationOptions options, ShadyBankInstrumentBinding binding) =>
+        options.CaptureUploadedCalls && binding.AllowCaptureUploadedCalls && binding.TerminalClockOffsetMinutes is >= -840 and <= 840;
+
+    private static int? CapturePeriod(ShadyBankAuthorizationOptions options, ShadyBankInstrumentBinding binding, CallRecord quote)
+    {
+        if (!CaptureEnabled(options, binding) || quote.ResponseRaw.Length != HostPlatform.Protocols.Dlog.DlogRateWire.ResponseLength) return null;
+        var period = BinaryPrimitives.ReadUInt16LittleEndian(quote.ResponseRaw.AsSpan(2, 2));
+        return period > 0 ? period : null;
+    }
+
+    internal static bool MatchesCaptureClaim(AuditEvent row, Guid terminalId, string route, CardAuthorizationAuditDetail approval)
+    {
+        if (row.Id != approval.CaptureRequestId || row.TerminalId != terminalId || row.Category != "ncc" ||
+            approval.Provider != CardAuthorizationAudit.ShadyBankProvider || approval.Outcome != "approved" ||
+            approval.Reason != "bank_approved" || approval.QuotedAmountUsd is not (> 0 and <= 655.35m) ||
+            approval.CallSequence == null || approval.CapturePeriodSeconds is not (> 0 and <= ushort.MaxValue)) return false;
+        try
+        {
+            if (row.Action == ClaimAction && approval.QuoteId is { } quoteId)
+            {
+                var claim = JsonSerializer.Deserialize<Claim>(row.DetailJson, Json);
+                return claim != null && row.Id == QuoteRequestId(quoteId) && claim.QuoteId == quoteId &&
+                    claim.MessageType == approval.MessageType && claim.CallSequence == approval.CallSequence &&
+                    claim.Amount == approval.QuotedAmountUsd && claim.CapturePeriodSeconds == approval.CapturePeriodSeconds;
+            }
+            if (row.Action == SequenceClaimAction && approval.QuoteId == null && approval.RateSource == "authorization_only")
+            {
+                var claim = JsonSerializer.Deserialize<SequenceClaim>(row.DetailJson, Json);
+                return claim != null && row.Id == SequenceId(terminalId, route, approval.CallSequence.Value) &&
+                    claim.NativeQuoteId == null && claim.RatePlanVersionId == approval.RatePlanVersionId &&
+                    claim.RatePlanVersionId != Guid.Empty && claim.MessageType == approval.MessageType &&
+                    claim.CallSequence == approval.CallSequence && claim.Amount == approval.QuotedAmountUsd &&
+                    claim.CapturePeriodSeconds == approval.CapturePeriodSeconds;
+            }
+        }
         catch (JsonException) { return false; }
+        return false;
     }
 
     private static NccCardAuthorizationDecision Decline(ShadyBankAuthorizationEvidence evidence) => new() { ShadyBankEvidence = evidence };

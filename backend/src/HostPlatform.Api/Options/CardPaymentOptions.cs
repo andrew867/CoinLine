@@ -20,6 +20,8 @@ public sealed class CardPaymentOptions
 public sealed class ShadyBankAuthorizationOptions
 {
     public bool Enabled { get; set; }
+    /// <summary>Separate opt-in for posting matched uploaded call records to the scoped bank service.</summary>
+    public bool CaptureUploadedCalls { get; set; }
     public string ServiceUrl { get; set; } = "";
     public string ServiceKey { get; set; } = "";
     public bool AllowLoopbackHttp { get; set; }
@@ -32,6 +34,10 @@ public sealed class ShadyBankInstrumentBinding
     public string Destination { get; set; } = "";
     /// <summary>Explicit legacy MT2 lab route where authorization can precede a separate rate request.</summary>
     public bool AllowAuthorizationOnlyRate { get; set; }
+    /// <summary>Capture is allowed only for this explicitly reviewed synthetic binding.</summary>
+    public bool AllowCaptureUploadedCalls { get; set; }
+    /// <summary>Explicit phone-local clock offset from UTC, needed to associate a call record.</summary>
+    public int? TerminalClockOffsetMinutes { get; set; }
     // Opaque bank-issued instrument token, not a PAN or a card credential.
     public string InstrumentToken { get; set; } = "";
 }
