@@ -115,6 +115,49 @@ public sealed class CommonControlTransitionTests
         Assert.Contains(CommonControlTransitionWire.Project(58,source,target,["daily-service-restriction"]).Findings,row=>row.Blocking);
     }
 
+    [Fact]
+    public void Modem_groups_carry_exact_independent_shared_fields_and_retain_later_answer_removal_and_reserves()
+    {
+        var source=Record(33,36); var target=Record(33,36);
+        source[1]=1; target[1]=0;
+        for(var i=2;i<=16;i+=2) { Word(source,i,(ushort)(100+i)); Word(target,i,(ushort)(200+i)); }
+        for(var i=18;i<=32;i++) { source[i]=(byte)i; target[i]=(byte)(i+40); }
+        source[33]=0x57; source[34]=0x5E; source[35]=13;
+        target[33]=0xA4; target[34]=0xA1; target[35]=25;
+        var sourceBefore=source.ToArray(); var targetBefore=target.ToArray();
+        var answer=CommonControlTransitionWire.Project(33,source,target,["modem-answer-detection"]);
+        var expected=target.ToArray(); source.AsSpan(24,3).CopyTo(expected.AsSpan(24,3)); expected[34]=0xAF;
+        Assert.Equal(expected,answer.Payload); Assert.Equal(4,answer.ChangedBytes);
+        Assert.Contains(answer.Findings,row=>!row.Blocking&&row.Message.Contains("actual line interface"));
+        var carrier=CommonControlTransitionWire.Project(33,source,target,["modem-carrier-detection"]);
+        expected=target.ToArray(); source.AsSpan(27,6).CopyTo(expected.AsSpan(27,6)); expected[33]=0xA6;
+        Assert.Equal(expected,carrier.Payload);
+        var dial=CommonControlTransitionWire.Project(33,source,target,["modem-dial-detection"]);
+        expected=target.ToArray(); source.AsSpan(18,6).CopyTo(expected.AsSpan(18,6)); expected[35]=13;
+        Assert.Equal(expected,dial.Payload);
+        var seizure=CommonControlTransitionWire.Project(33,source,target,["modem-seizure"]);
+        expected=target.ToArray(); expected[33]=0xA5; Assert.Equal(expected,seizure.Payload);
+        var line=CommonControlTransitionWire.Project(33,source,target,["modem-line-timing"]);
+        expected=target.ToArray(); source.AsSpan(1,11).CopyTo(expected.AsSpan(1,11)); source.AsSpan(14,4).CopyTo(expected.AsSpan(14,4));
+        Assert.Equal(expected,line.Payload);
+        var groups=CommonControlTransitionWire.Groups.Where(row=>row.Number==33).Select(row=>row.Id).ToArray();
+        var all=CommonControlTransitionWire.Project(33,source,target,groups);
+        expected=source.ToArray(); target.AsSpan(12,2).CopyTo(expected.AsSpan(12,2)); expected[33]=0xA7; expected[34]=0xAF;
+        Assert.Equal(expected,all.Payload); Assert.Equal(sourceBefore,source); Assert.Equal(targetBefore,target);
+        Assert.Equal(expected,CommonControlTransitionWire.Project(33,source,expected,groups).Payload);
+        Assert.DoesNotContain(all.Groups.SelectMany(row=>row.Fields),field=>field.Key is "spare.timer" or "answerRemovalDelay" || field.Key.StartsWith("spare."));
+    }
+
+    [Fact]
+    public void Unrecognized_modem_speed_blocks_only_its_selected_group()
+    {
+        var source=Record(33,36); var target=Record(33,36); source[1]=2;
+        Assert.Contains(CommonControlTransitionWire.Project(33,source,target,["modem-line-timing"]).Findings,row=>row.Blocking);
+        Assert.DoesNotContain(CommonControlTransitionWire.Project(33,source,target,["modem-answer-detection"]).Findings,row=>row.Blocking);
+        Assert.Equal(target,CommonControlTransitionWire.Project(33,source,target,[]).Payload);
+        Assert.Throws<InvalidOperationException>(()=>CommonControlTransitionWire.Project(33,source[..35],target,[]));
+    }
+
     [Theory]
     [InlineData(0,0x1235,0x1236)][InlineData(7,0x9235,0x1235)][InlineData(14,0x9237,0x1234)]
     public void Stored_value_limit_carries_only_the_selected_big_endian_unit_pair(int index,int sourceWord,int targetWord)
@@ -143,7 +186,7 @@ public sealed class CommonControlTransitionTests
     }
 
     [Theory]
-    [InlineData(29,481)][InlineData(30,68)][InlineData(32,33)][InlineData(34,19)][InlineData(35,21)][InlineData(50,105)][InlineData(93,225)]
+    [InlineData(29,481)][InlineData(30,68)][InlineData(32,33)][InlineData(33,36)][InlineData(34,19)][InlineData(35,21)][InlineData(50,105)][InlineData(93,225)]
     public void Preview_is_read_only_and_rejects_wrong_shape_or_group(int number,int length)
     {
         var source = Record(number,length); var target = Record(number,length); target[^1] = 0xA5;
