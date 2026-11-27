@@ -6,7 +6,7 @@ import { StatusBadge } from '../components/StatusBadge'
 import './TableSetConfiguration.css'
 
 type Row = { id: string; name: string; tableNumber: number; description: string | null }
-type Layout = { number: number; length: number; profile: string; draftTemplateAvailable: boolean }
+type Layout = { number: number; length: number; profile: string; draftTemplateAvailable: boolean; explicitAuthoringAvailable?: boolean }
 type Firmware = { profileId: string; label: string; length: number; terminalAcknowledged: boolean }
 type Reference = {
   number: number; name: string; kind: string; layouts: Layout[]; firmware: Firmware[]
@@ -92,7 +92,7 @@ export function TableDefinitions() {
                 {record.kind === 'scheduler_record' && <div><small>Separate scheduling workflow</small></div>}</td>
               <td>{record.layouts.length ? <details><summary>{record.layouts.length} layout{record.layouts.length === 1 ? '' : 's'}</summary>
                 <ul>{record.layouts.map(layout => <li key={`${layout.profile}-${layout.length}`}>{layout.profile}: {layout.length.toLocaleString()} bytes;
-                  {layout.draftTemplateAvailable ? ' draft template' : ' import/edit only'}</li>)}</ul></details> : 'Not established'}</td>
+                  {layout.draftTemplateAvailable ? ' draft template' : layout.explicitAuthoringAvailable ? ' explicit authoring (no default template)' : ' import/edit only'}</li>)}</ul></details> : 'Not established'}</td>
               <td>{record.firmware.length ? <details><summary>{record.firmware.length} profiles; {record.firmware.filter(f => f.terminalAcknowledged).length} acknowledged</summary>
                 <ul>{record.firmware.map(profile => <li key={profile.profileId}>{profile.label}: {profile.length.toLocaleString()} bytes;
                   {profile.terminalAcknowledged ? ' emulator MT14 observed' : ' acknowledgement not recorded'}</li>)}</ul>

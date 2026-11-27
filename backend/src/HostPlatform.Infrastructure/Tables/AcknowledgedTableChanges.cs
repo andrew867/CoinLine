@@ -8,12 +8,13 @@ namespace HostPlatform.Infrastructure.Tables;
 /// <summary>Conservative selection for an ordinary Craft refresh with no queued work.</summary>
 public static class AcknowledgedTableChanges
 {
-    public sealed record Selection(Guid? BaselineId, IReadOnlyList<Guid>? DefinitionIds, string Reason);
+    public sealed record Selection(Guid? BaselineId, IReadOnlyList<Guid>? DefinitionIds, string Reason,
+        IReadOnlyDictionary<int, string>? AcknowledgedHashes = null, IReadOnlyList<int>? SelectedNumbers = null);
 
     public static async Task<Selection> SelectAsync(HostPlatformDbContext db, Terminal terminal, Guid targetSetId,
-        Guid currentSessionId, CancellationToken ct)
+        Guid? currentSessionId, CancellationToken ct)
     {
-        Selection Full(string reason, Guid? baseline = null) => new(baseline, null, reason);
+        Selection Full(string reason, Guid? baseline = null, IReadOnlyDictionary<int, string>? hashes = null) => new(baseline, null, reason, hashes);
         if (terminal.FirmwareVersionId is not { } firmwareId)
             return Full("unregistered_firmware");
         var target = await db.TableSets.AsNoTracking().Include(set => set.TargetFirmwareVersion)
@@ -91,11 +92,11 @@ public static class AcknowledgedTableChanges
 
         var desired = target.Versions.ToDictionary(record => record.TableDefinition!.TableNumber);
         if (installed.Keys.Any(number => !desired.ContainsKey(number)))
-            return Full("record_removed", baseline.Id);
+            return Full("record_removed", baseline.Id, installed);
         var changed = desired.Values.Where(record => !installed.TryGetValue(record.TableDefinition!.TableNumber, out var hash) ||
             hash != TableDistributionService.ComputePayloadSha256Hex(record)).Select(record => record.TableDefinitionId).ToArray();
         if (changed.Length == 0)
-            return Full("no_changed_records", baseline.Id);
+            return Full("no_changed_records", baseline.Id, installed);
 
         try
         {
@@ -103,7 +104,8 @@ public static class AcknowledgedTableChanges
             TableDistributionService.OrderVersionsForDownload(target.Versions.ToArray());
             var selected = TableDistributionService.SelectRecords(target.Versions.ToArray(),
                 desired.Where(pair => changed.Contains(pair.Value.TableDefinitionId)).Select(pair => pair.Key));
-            return selected.Count == desired.Count ? Full("all_records_selected", baseline.Id) : new(baseline.Id, changed, "changed_records");
+            return selected.Count == desired.Count ? Full("all_records_selected", baseline.Id, installed)
+                : new(baseline.Id, changed, "changed_records", installed, selected.Select(record => record.TableDefinition!.TableNumber).ToArray());
         }
         catch (InvalidOperationException)
         {

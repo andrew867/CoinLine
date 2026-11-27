@@ -175,6 +175,111 @@ public sealed class PostgresPhoneConfigurationWorksheetTests
         Assert.False(await database.DownloadBatches.AnyAsync(row => row.TerminalId == phone.Id));
     }
 
+    [PostgresIntegrationFact]
+    public async Task Published_starter_stages_all_compatible_records_then_initial_assignment_and_full_download_are_separate()
+    {
+        await using var ncc = new NccFactory(); var key = Guid.NewGuid().ToString("N");
+        await using var host = Factory(ncc, key); using var client = host.CreateClient(); client.DefaultRequestHeaders.Add("X-API-Key", key);
+        var password = Guid.NewGuid().ToString("N");
+        var reader = Account(password, new() { ["table-assignments"] = 1 });
+        var denied = Account(password, new() { ["phones"] = 1 });
+        var editor = Account(password, new() { ["table-assignments"] = 3, ["downloads"] = 5 });
+        var owner = Customer(); var foreign = Customer(); var site = Site(owner);
+        var firmware = new FirmwareVersion { Label = "Fixture native target", TableProfileId = FirmwareTableProfiles.MultiPay200 };
+        var different = new FirmwareVersion { Label = "Fixture different target", TableProfileId = FirmwareTableProfiles.MultiPay200 };
+        var observed = new FirmwareVersion { Label = "Fixture observed target", TableProfileId = FirmwareTableProfiles.Mtr19Desk };
+        var phone = Phone(site, firmware); var observedPhone = Phone(site, observed);
+        var definitions = new[] { 21, 26, 29, 50, 94 }.ToDictionary(number => number,
+            number => new TableDefinition { TableNumber = number, Name = $"Fixture MT{number}" });
+        var access = Bytes(21, 18); Convert.FromHexString("0000000001").CopyTo(access, 1); access[8] = 0x42;
+        var features = Bytes(26, 72, 2); var ads = Bytes(29, 481, 1); var coins = Bytes(50, 105, 25); coins[65] = 3;
+        var starter = Set(owner, firmware, "Preferred starter", Version(21, access), Version(26, features), Version(29, ads, 26), Version(50, coins));
+        starter.IsDefault = true;
+        var shared = Set(null, firmware, "Shared starter", Version(29, ads));
+        var bad = Set(owner, firmware, "Wrong-length starter", Version(29, Bytes(29, 480)));
+        var privateSource = Set(foreign, firmware, "Other customer", Version(29, ads));
+        var wrongFirmware = Set(owner, different, "Other firmware", Version(29, ads));
+        var code = Set(owner, firmware, "Code schedule", Version(94, Bytes(94, 100)));
+        var draft = Set(owner, firmware, "Unpublished starter", Version(29, ads)); draft.Status = TableSetStatus.Draft;
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.AddRange(reader, denied, editor, phone, observedPhone, starter, shared, bad, privateSource, wrongFirmware, code, draft);
+            await db.SaveChangesAsync();
+        }
+        var endpoint = $"/api/terminals/{phone.Id}/configuration-worksheet"; var sources = endpoint + "/initial-sources";
+        using (var anonymous = await client.GetAsync(sources)) Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        await SignIn(client, denied, password);
+        using (var response = await client.GetAsync(sources)) Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        await SignIn(client, reader, password);
+        var listed = await client.GetFromJsonAsync<JsonElement>(sources); Assert.True(listed.GetProperty("available").GetBoolean());
+        Assert.Equal(3, listed.GetProperty("total").GetInt32());
+        var rows = listed.GetProperty("sources").EnumerateArray().ToArray();
+        Assert.Equal(starter.Id, rows[0].GetProperty("id").GetGuid()); Assert.True(rows[0].GetProperty("hasAccess").GetBoolean());
+        Assert.Equal(4, rows[0].GetProperty("recordCount").GetInt32());
+        Assert.Equal(1, (await client.GetFromJsonAsync<JsonElement>(sources + "?query=SHARED")).GetProperty("total").GetInt32());
+        foreach (var excluded in new[] { privateSource, wrongFirmware, code, draft })
+            using (var response = await client.GetAsync($"{sources}/{excluded.Id}")) Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        using (var response = await client.GetAsync($"{sources}/{bad.Id}")) Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var unavailable = await client.GetFromJsonAsync<JsonElement>($"/api/terminals/{observedPhone.Id}/configuration-worksheet/initial-sources");
+        Assert.False(unavailable.GetProperty("available").GetBoolean());
+        var detail = await client.GetFromJsonAsync<JsonElement>($"{sources}/{starter.Id}");
+        Assert.True(detail.GetProperty("requiresAccessPersonalization").GetBoolean());
+        var staged = detail.GetProperty("records").EnumerateArray().Select(row => new Choice(row.GetProperty("number").GetInt32(), "copy",
+            row.GetProperty("tableSetId").GetGuid(), row.GetProperty("id").GetGuid())).ToArray();
+        Assert.Equal(new[] { 21, 26, 29, 50 }, staged.Select(row => row.Number));
+        Assert.All(staged, row => Assert.Equal(starter.Id, row.SourceSetId));
+        var worksheet = await client.GetFromJsonAsync<JsonElement>(endpoint);
+        using (var response = await client.PostAsJsonAsync(endpoint, Input(worksheet, staged, personalize: true))) Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        await SignIn(client, editor, password);
+        using (var response = await client.PostAsJsonAsync(endpoint + "/preview", Input(worksheet, staged))) Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        using var previewResponse = await client.PostAsJsonAsync(endpoint + "/preview", Input(worksheet, staged, personalize: true));
+        previewResponse.EnsureSuccessStatusCode(); var preview = await previewResponse.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.True(preview.GetProperty("initialAssignment").GetBoolean()); Assert.True(preview.GetProperty("canApply").GetBoolean());
+        Assert.Equal(4, preview.GetProperty("changes").GetArrayLength());
+        Assert.Contains(preview.GetProperty("family").GetProperty("tables").EnumerateArray(), row => row.GetProperty("required").GetBoolean() && row.GetProperty("status").GetString() == "missing");
+        using var applied = await client.PostAsJsonAsync(endpoint, Input(worksheet, staged, Token(preview), personalize: true)); applied.EnsureSuccessStatusCode();
+        var result = await applied.Content.ReadFromJsonAsync<JsonElement>(); var newSet = result.GetProperty("tableSetId").GetGuid();
+        using (var response = await client.GetAsync(sources)) Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        using (var response = await client.PostAsJsonAsync(endpoint, Input(worksheet, staged, Token(preview), personalize: true))) Assert.Equal(HttpStatusCode.Conflict, response.StatusCode);
+        var expectedAccess = access.ToArray(); Convert.FromHexString(phone.TerminalIdHex).CopyTo(expectedAccess, 1);
+        var expected = new Dictionary<int, byte[]> { [21] = expectedAccess, [26] = features, [29] = ads, [50] = coins };
+        IReadOnlyList<TableVersion> order;
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.False(await db.DownloadBatches.AnyAsync(row => row.TerminalId == phone.Id));
+            Assert.False(await db.ScheduledTableDownloads.AnyAsync(row => row.TerminalId == phone.Id));
+            var records = await db.TableVersions.Include(row => row.TableDefinition).Include(row => row.TablePayload).Where(row => row.TableSetId == newSet).ToArrayAsync();
+            Assert.Equal(4, records.Length);
+            foreach (var record in records) Assert.Equal(expected[record.TableDefinition!.TableNumber], TableDistributionService.GetEffectivePayload(record));
+            var originalRecords = await db.TableVersions.Include(row => row.TableDefinition).Include(row => row.TablePayload)
+                .Where(row => row.TableSetId == starter.Id).ToArrayAsync();
+            Assert.Equal(staged.Select(row => row.SourceVersionId!.Value).Order(), originalRecords.Select(row => row.Id).Order());
+            foreach (var record in originalRecords)
+            {
+                var number = record.TableDefinition!.TableNumber;
+                Assert.Equal(number == 21 ? access : expected[number], TableDistributionService.GetEffectivePayload(record));
+            }
+            order = TableDistributionService.OrderVersionsForDownload(records);
+        }
+        using var queued = await client.PostAsJsonAsync($"/api/terminals/{phone.Id}/downloads", new { tableSetId = newSet, scope = "Full" }); queued.EnsureSuccessStatusCode();
+        var batchId = (await queued.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        await Transfer(ncc.Port, phone.TerminalIdHex, order.Select(TableDistributionService.GetEffectivePayload).ToArray());
+        for (var i = 0; i < 50; i++)
+        {
+            var download = await client.GetFromJsonAsync<JsonElement>($"/api/downloads/{batchId}");
+            if (download.GetProperty("status").GetInt32() == 2)
+            { Assert.Equal(4, download.GetProperty("timeline").GetArrayLength()); Assert.All(download.GetProperty("timeline").EnumerateArray(), row => Assert.Equal("ack", row.GetProperty("lastAckStatus").GetString())); break; }
+            if (i == 49) Assert.Fail("The separately queued full batch did not complete.");
+            await Task.Delay(100);
+        }
+
+        TableVersion Version(int number, byte[] bytes, int? dependency = null) => new() { TableDefinition = definitions[number], TableDefinitionId = definitions[number].Id,
+            EmbeddedPayload = bytes, TableRevision = 1, ConfigurationId = $"FIX{number:D3}",
+            DependsOnTableDefinitionId = dependency != null ? definitions[dependency.Value].Id : null, PayloadSha256Hex = TablePayloadHasher.Sha256Hex(bytes) };
+    }
+
     private sealed record Choice(int Number, string Action, Guid? SourceSetId = null, Guid? SourceVersionId = null);
     private static Choice Copy(int number, TableSet source) => new(number, "copy", source.Id, source.Versions.Single(row => row.TableDefinition!.TableNumber == number).Id);
     private static Choice Clear(int number) => new(number, "clear");

@@ -169,8 +169,16 @@ public sealed class TerminalsController(
     [HttpPost]
     public async Task<ActionResult<object>> Create([FromBody] TerminalCreateDto body, CancellationToken ct)
     {
-        if (body.TerminalGroupId != null && !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Add))
+        var groupIds = body.GroupIds ?? (body.TerminalGroupId is { } single ? [single] : []);
+        if ((body.TerminalGroupId != null || groupIds.Length != 0) && !OperatorPermissions.Allows(HttpContext, "memberships", PermissionOperation.Add))
             return Forbid();
+        if (groupIds.Length > TerminalGroup.MaxMembershipsPerTerminal)
+            return BadRequest(new { error = $"A phone can belong to up to {TerminalGroup.MaxMembershipsPerTerminal} groups." });
+        if (groupIds.Contains(Guid.Empty) || groupIds.Distinct().Count() != groupIds.Length)
+            return BadRequest(new { error = "Select each phone group once." });
+        Guid? primaryGroupId = groupIds.Length == 0 ? null : groupIds[0];
+        if (body.TerminalGroupId != null && body.TerminalGroupId != primaryGroupId)
+            return BadRequest(new { error = "The primary group must match the first selected group." });
         if (body.FirmwareVersionId is { } firmwareId && !await db.FirmwareVersions.AnyAsync(f => f.Id == firmwareId, ct))
             return BadRequest(new { error = "Choose a registered firmware version." });
         if (body.TerminalFamilyId != null && TerminalFamilies.Find(body.TerminalFamilyId) == null)
@@ -181,7 +189,7 @@ public sealed class TerminalsController(
         var e = new Terminal
         {
             SiteId = body.SiteId,
-            TerminalGroupId = body.TerminalGroupId,
+            TerminalGroupId = primaryGroupId,
             TransportEndpointId = body.TransportEndpointId,
             FirmwareVersionId = body.FirmwareVersionId,
             TerminalFamilyId = body.TerminalFamilyId,
@@ -197,12 +205,14 @@ public sealed class TerminalsController(
                 .Select(row => new { row.CustomerId }).SingleOrDefaultAsync(ct);
             if (site == null)
                 return BadRequest(new { error = "Choose a registered site." });
-            if (body.TerminalGroupId is { } groupId && !await db.TerminalGroups.AsNoTracking().AnyAsync(group =>
-                    group.Id == groupId && (group.CustomerId == null || group.CustomerId == site.CustomerId), ct))
-                return BadRequest(new { error = "Choose a phone group available to this site's customer." });
+            if (groupIds.Length != 0 && await db.TerminalGroups.AsNoTracking().CountAsync(group =>
+                    groupIds.Contains(group.Id) && (group.CustomerId == null || group.CustomerId == site.CustomerId), ct) != groupIds.Length)
+                return BadRequest(new { error = "Every selected phone group must be available to this site's customer." });
             if (await WireIdTaken(wireId, e.Id, ct))
                 return DuplicateWireId();
             db.Terminals.Add(e);
+            db.TerminalGroupMemberships.AddRange(groupIds.Skip(1).Select(groupId => new TerminalGroupMembership
+                { TerminalId = e.Id, TerminalGroupId = groupId }));
             ApiAudit.Write(db, HttpContext, "terminals", "create", $"Terminal:{e.Id}",
                 new
                 {
@@ -210,6 +220,7 @@ public sealed class TerminalsController(
                     e.DisplayName,
                     e.TerminalIdHex,
                     e.TerminalFamilyId,
+                    groupIds,
                     status = e.Status,
                     HARDWARE_VALIDATION_REQUIRED = "Verify modem enrollment and identity on the terminal."
                 }, e.Id);
@@ -217,7 +228,11 @@ public sealed class TerminalsController(
             if (transaction != null)
                 await transaction.CommitAsync(ct);
         }
-        catch (Exception ex) when (TerminalWriteConflict(ex)) { return ChangedTerminal(); }
+        catch (Exception ex) when (TerminalWriteConflict(ex) || ex.GetBaseException() is PostgresException
+            { SqlState: PostgresErrorCodes.ForeignKeyViolation or PostgresErrorCodes.UniqueViolation or PostgresErrorCodes.DeadlockDetected })
+        {
+            return ChangedTerminal();
+        }
         return Created($"/api/terminals/{e.Id}", new { e.Id });
     }
 
@@ -234,7 +249,8 @@ public sealed class TerminalsController(
             firmwareVersions = await db.FirmwareVersions.AsNoTracking().OrderBy(version => version.Label)
                 .Select(version => new { version.Id, version.Label, version.BuildId }).ToListAsync(ct),
             families = TerminalFamilies.Catalog,
-            canAssignGroup
+            canAssignGroup,
+            maximumGroups = TerminalGroup.MaxMembershipsPerTerminal
         });
     }
 
@@ -805,7 +821,8 @@ public sealed class TerminalsController(
         string TerminalIdHex,
         string DisplayName,
         TerminalOperationalStatus Status,
-        string? TerminalFamilyId = null);
+        string? TerminalFamilyId = null,
+        Guid[]? GroupIds = null);
 
     public sealed record TerminalUpdateDto(
         string DisplayName,

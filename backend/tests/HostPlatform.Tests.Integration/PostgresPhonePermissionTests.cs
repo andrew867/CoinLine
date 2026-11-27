@@ -43,11 +43,13 @@ public sealed class PostgresPhonePermissionTests
         var site = new Site { Customer = customer, Name = "Fixture site", Code = Guid.NewGuid().ToString("N")[..8] };
         var group = new TerminalGroup { Customer = customer, Name = "Fixture group" };
         var otherGroup = new TerminalGroup { Customer = otherCustomer, Name = "Fixture other group" };
+        var sharedGroups = Enumerable.Range(1, 40).Select(index => new TerminalGroup { Name = $"Fixture shared group {index}" }).ToArray();
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             Assert.Equal("Npgsql.EntityFrameworkCore.PostgreSQL", db.Database.ProviderName);
             db.AddRange(user, groupUser, version, site, group, otherGroup);
+            db.AddRange(sharedGroups);
             await db.SaveChangesAsync();
         }
 
@@ -65,6 +67,8 @@ public sealed class PostgresPhonePermissionTests
 
         using (var denied = await Create(site.Id, group.Id))
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+        using (var denied = await Create(site.Id, null, [group.Id, sharedGroups[0].Id]))
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
         using (var invalid = await Create(Guid.NewGuid(), null))
             Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         using (var created = await Create(site.Id, null))
@@ -78,16 +82,63 @@ public sealed class PostgresPhonePermissionTests
         await SignIn(groupUser);
         choices = await client.GetFromJsonAsync<JsonElement>("/api/terminals/create-options");
         Assert.True(choices.GetProperty("canAssignGroup").GetBoolean());
+        Assert.Equal(TerminalGroup.MaxMembershipsPerTerminal, choices.GetProperty("maximumGroups").GetInt32());
         Assert.Contains(choices.GetProperty("groups").EnumerateArray(), row => row.GetProperty("id").GetGuid() == group.Id);
         using (var invalid = await Create(site.Id, otherGroup.Id))
             Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
         using (var created = await Create(site.Id, group.Id))
             Assert.Equal(HttpStatusCode.Created, created.StatusCode);
 
-        Task<HttpResponseMessage> Create(Guid siteId, Guid? groupId) => client.PostAsJsonAsync("/api/terminals", new
+        var wire = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+        foreach (var invalidGroups in new[] { new[] { group.Id, otherGroup.Id }, new[] { group.Id, Guid.NewGuid() },
+            new[] { group.Id, group.Id }, new[] { Guid.Empty }, new[] { group.Id }.Concat(sharedGroups.Select(row => row.Id)).ToArray() })
         {
-            siteId, terminalGroupId = groupId, firmwareVersionId = version.Id, terminalFamilyId = "mtr19-multipay",
-            terminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant(), displayName = "Fixture phone", status = 1
+            using var invalid = await Create(site.Id, null, invalidGroups, wire);
+            Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
+        }
+        using (var inconsistent = await Create(site.Id, sharedGroups[0].Id, [group.Id, sharedGroups[0].Id], wire))
+            Assert.Equal(HttpStatusCode.BadRequest, inconsistent.StatusCode);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            Assert.False(await db.Terminals.AnyAsync(phone => phone.TerminalIdHex == wire));
+        }
+        var expectedGroups = new[] { group.Id }.Concat(sharedGroups.Take(39).Select(row => row.Id)).ToArray();
+        using (var created = await Create(site.Id, null, expectedGroups, wire))
+        {
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            await using var scope = factory.Services.CreateAsyncScope();
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var phone = await db.Terminals.AsNoTracking().Include(row => row.AdditionalGroups).SingleAsync(row => row.Id == id);
+            Assert.Equal(group.Id, phone.TerminalGroupId);
+            Assert.Equal(expectedGroups.Skip(1).Order(), phone.AdditionalGroups.Select(row => row.TerminalGroupId).Order());
+            Assert.False(await db.TerminalTableAssignments.AnyAsync(row => row.TerminalId == id));
+            Assert.False(await db.DownloadBatches.AnyAsync(row => row.TerminalId == id));
+            Assert.False(await db.ScheduledTableDownloads.AnyAsync(row => row.TerminalId == id));
+            Assert.Equal(1, await db.AuditEvents.CountAsync(row => row.TerminalId == id && row.Action == "create"));
+        }
+
+        using (var created = await Create(site.Id, group.Id, [group.Id, sharedGroups[0].Id]))
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+
+        var competingWire = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant();
+        var competingGroups = new[] { group.Id, sharedGroups[0].Id };
+        var competing = await Task.WhenAll(Create(site.Id, null, competingGroups, competingWire), Create(site.Id, null, competingGroups, competingWire));
+        using var accepted = Assert.Single(competing, response => response.StatusCode == HttpStatusCode.Created);
+        using var rejected = Assert.Single(competing, response => response.StatusCode == HttpStatusCode.Conflict);
+        await using (var scope = factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var phone = await db.Terminals.AsNoTracking().Include(row => row.AdditionalGroups).SingleAsync(row => row.TerminalIdHex == competingWire);
+            Assert.Equal(group.Id, phone.TerminalGroupId);
+            Assert.Equal(sharedGroups[0].Id, Assert.Single(phone.AdditionalGroups).TerminalGroupId);
+        }
+
+        Task<HttpResponseMessage> Create(Guid siteId, Guid? groupId, Guid[]? groupIds = null, string? wireId = null) => client.PostAsJsonAsync("/api/terminals", new
+        {
+            siteId, terminalGroupId = groupId, groupIds, firmwareVersionId = version.Id, terminalFamilyId = "mtr19-multipay",
+            terminalIdHex = wireId ?? Guid.NewGuid().ToString("N")[..10].ToUpperInvariant(), displayName = "Fixture phone", status = 1
         });
 
         async Task SignIn(OperatorAccount account)

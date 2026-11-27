@@ -44,6 +44,9 @@ public sealed class PostgresConfigurationSetupTests
         object Request(string mode, string? token = null, string family = "mtr20-multipay-graphical") => new
         { name = "Graphical fixture result", familyId = family, paymentMode = 0, pricing = "keep", idleAdvertisingMode = mode, previewToken = token };
         var keep = await Preview("keep");
+        var matchingMode = keep.GetProperty("family").GetProperty("operatingMode");
+        Assert.Equal("matches", matchingMode.GetProperty("status").GetString());
+        Assert.Equal(2, matchingMode.GetProperty("configuredCode").GetInt32());
         Assert.Contains(keep.GetProperty("provisioning").GetProperty("findings").EnumerateArray(), f => f.GetProperty("message").GetString()!.Contains("Both idle rotations"));
         var graph = await Preview("graphical");
         Assert.Equal(new[] { 26 }, graph.GetProperty("changedNumbers").EnumerateArray().Select(n => n.GetInt32()));
@@ -112,6 +115,11 @@ public sealed class PostgresConfigurationSetupTests
         using var response = await client.PostAsJsonAsync(endpoint, Request(fresh));
         Assert.Equal(HttpStatusCode.Created, response.StatusCode);
         var copyId = (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        var savedReview = await client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{copyId}/family-review?familyId=mtr19-multipay");
+        var savedMode = savedReview.GetProperty("operatingMode");
+        Assert.Equal("differs", savedMode.GetProperty("status").GetString());
+        Assert.Equal(2, savedMode.GetProperty("expectedCode").GetInt32());
+        Assert.Equal(3, savedMode.GetProperty("configuredCode").GetInt32());
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
@@ -132,6 +140,11 @@ public sealed class PostgresConfigurationSetupTests
             using var preview = await client.PostAsJsonAsync(endpoint + "/preview", Request());
             preview.EnsureSuccessStatusCode(); var result = await preview.Content.ReadFromJsonAsync<JsonElement>();
             Assert.True(result.GetProperty("sourceIsStarterDraft").GetBoolean());
+            var mode = result.GetProperty("family").GetProperty("operatingMode");
+            Assert.Equal("differs", mode.GetProperty("status").GetString());
+            Assert.Equal("Multi-pay", mode.GetProperty("expectedLabel").GetString());
+            Assert.Equal("Coin only", mode.GetProperty("configuredLabel").GetString());
+            Assert.True(result.GetProperty("canCreate").GetBoolean());
             Assert.Contains(result.GetProperty("family").GetProperty("tables").EnumerateArray(), row => row.GetProperty("required").GetBoolean() && row.GetProperty("status").GetString() != "present");
             return result.GetProperty("previewToken").GetString()!;
         }

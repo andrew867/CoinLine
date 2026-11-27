@@ -10,13 +10,15 @@ namespace HostPlatform.Api.Controllers;
 [Route("api/tables/sets/{id:guid}/dialed-number-review")]
 public sealed class DialedNumberReviewController(HostPlatformDbContext db) : ControllerBase
 {
-    public sealed record DialedNumberReviewRequest(string? Digits);
+    public sealed record DialedNumberReviewRequest(string? Digits, string? InternationalDigits = null);
 
     [HttpPost]
     [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
     public async Task<ActionResult<object>> Review(Guid id, DialedNumberReviewRequest request, CancellationToken ct)
     {
         if (!DialedNumberReview.ValidDigits(request.Digits)) return BadRequest(new { error = "Enter 1 to 16 decimal digits." });
+        if (request.InternationalDigits != null && !DialedNumberReview.ValidDigits(request.InternationalDigits))
+            return BadRequest(new { error = "Enter 1 to 16 destination digits after the international access prefix." });
         var set = await db.TableSets.AsNoTracking().Include(row => row.TargetFirmwareVersion).SingleOrDefaultAsync(row => row.Id == id, ct);
         if (set == null) return NotFound();
         var profile = FirmwareTableProfiles.Find(set.TargetFirmwareVersion?.TableProfileId);
@@ -32,6 +34,6 @@ public sealed class DialedNumberReviewController(HostPlatformDbContext db) : Con
                 else records.Add(group.Key, TableDistributionService.GetEffectivePayload(group.Single()));
             }
         }
-        return Ok(new { setRevision = set.Version, profile = profile?.Label, review = DialedNumberReview.Review(profile, request.Digits!, records, invalid) });
+        return Ok(new { setRevision = set.Version, profile = profile?.Label, review = DialedNumberReview.Review(profile, request.Digits!, records, invalid, request.InternationalDigits) });
     }
 }

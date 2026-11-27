@@ -55,7 +55,17 @@ public static class NumberingPlanWire
         var findings = new List<NumberingPlanFinding>();
         ReviewSection(record.Slice(DialStart, DialLength), dial: true, findings);
         ReviewSection(record.Slice(FormatStart, FormatCapacity(later)), dial: false, findings);
+        var dial = Parse(record.Slice(DialStart, DialLength), dial: true);
+        if (dial?.Any(node => IsBroadNoPayment(node.Rule)) == true)
+        {
+            findings.Add(new(false, "A broad ordinary destination rule selects No payment. Review charging behavior even if paid tariffs exist."));
+            if (record.Slice(8, 6).IndexOfAnyExcept((byte)0) < 0)
+                findings.Add(new(false, "The rate-response classification map is entirely unset. Review intended host-rated call classifications."));
+        }
         return findings;
+
+        static bool IsBroadNoPayment(NumberingRule rule) => (rule.Tag >> 4) == 3 && (rule.CallType & 15) is >= 3 and <= 6
+            && ((rule.CallType >> 4) & 7) == 2 && rule.Digits.Length >= 7 && rule.Digits.Any(digit => (digit & 31) >= 16);
     }
 
     /// <summary>Carry recognized earlier rule nodes at their original relative offsets, not the earlier currency tail or unknown gap bytes.</summary>

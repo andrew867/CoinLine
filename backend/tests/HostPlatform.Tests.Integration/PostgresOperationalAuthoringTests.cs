@@ -48,7 +48,8 @@ public sealed class PostgresOperationalAuthoringTests
         Assert.Equal(0, (await Read(admin, observed, 26)).GetProperty("templates").GetArrayLength());
         Assert.Equal(0, (await Read(admin, published, 26)).GetProperty("templates").GetArrayLength());
         var earlyFixture = Fixture(26, NativeTableLayouts.MultiPay);
-        object Request(OperationalDraftSpec spec, Dictionary<string, string?>? values) => new { spec.Profile, spec.Length, fields = values };
+        object Request(OperationalDraftSpec spec, Dictionary<string, string?>? values, Dictionary<string, string?>? credentials = null, NumberingPlanChanges? numberingPlan = null)
+            => new { spec.Profile, spec.Length, fields = values, credentials, numberingPlan };
         Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsJsonAsync(endpoint, Request(earlyFixture.Spec, earlyFixture.Values))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync(endpoint, Request(earlyFixture.Spec, new()))).StatusCode);
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync(endpoint, Request(earlyFixture.Spec, new(earlyFixture.Values) { ["terminalType"] = "0" }))).StatusCode);
@@ -58,15 +59,39 @@ public sealed class PostgresOperationalAuthoringTests
         Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync(Path(observed, 26), Request(laterFixture.Spec, laterFixture.Values))).StatusCode);
         Assert.Equal(HttpStatusCode.Conflict, (await admin.PostAsJsonAsync(Path(published, 26), Request(earlyFixture.Spec, earlyFixture.Values))).StatusCode);
 
+        var installFixture = Fixture(31, NativeTableLayouts.MultiPay);
+        var installEndpoint = Path(older, 31);
+        Assert.Equal(2, (await Read(admin, unbound, 31)).GetProperty("templates").GetArrayLength());
+        Assert.Equal(0, (await Read(admin, observed, 31)).GetProperty("templates").GetArrayLength());
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsJsonAsync(installEndpoint,
+            Request(installFixture.Spec, installFixture.Values, installFixture.Credentials))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync(installEndpoint, Request(installFixture.Spec, installFixture.Values))).StatusCode);
+        using (var misplaced = await admin.PostAsJsonAsync(installEndpoint, Request(installFixture.Spec,
+            new(installFixture.Values) { ["craftAccessCode"] = installFixture.Credentials!["craftAccessCode"] }, installFixture.Credentials)))
+        {
+            Assert.Equal(HttpStatusCode.BadRequest, misplaced.StatusCode);
+            Assert.DoesNotContain(installFixture.Credentials!["craftAccessCode"]!, await misplaced.Content.ReadAsStringAsync());
+        }
+
+        var planFixture = Fixture(62, NativeTableLayouts.Later);
+        Assert.Equal(2, (await Read(admin, unbound, 62)).GetProperty("templates").GetArrayLength());
+        Assert.Equal(0, (await Read(admin, observed, 62)).GetProperty("templates").GetArrayLength());
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync(Path(later,62), Request(planFixture.Spec, planFixture.Values, planFixture.Credentials))).StatusCode);
+        Assert.Equal(HttpStatusCode.BadRequest, (await admin.PostAsJsonAsync(Path(later,62), Request(planFixture.Spec, planFixture.Values, planFixture.Credentials, new([],[])))).StatusCode);
+        Assert.Equal(HttpStatusCode.Forbidden, (await reader.PostAsJsonAsync(Path(later,62), Request(planFixture.Spec, planFixture.Values, planFixture.Credentials, planFixture.Plan))).StatusCode);
+
         var expected = new Dictionary<(Guid, int), byte[]>();
         foreach (var set in new[] { older, later })
-        foreach (var number in new[] { 26, 30, 33 })
+        foreach (var number in new[] { 26, 30, 31, 33, 62 })
         {
             var item = Fixture(number, set.Id == older.Id || number == 30 ? NativeTableLayouts.MultiPay : NativeTableLayouts.Later);
             var info = Assert.Single((await Read(admin, set, number)).GetProperty("templates").EnumerateArray());
             Assert.Equal(item.Spec.Profile, info.GetProperty("profile").GetString());
             Assert.Equal(item.Spec.Length, info.GetProperty("length").GetInt32());
-            using var created = await admin.PostAsJsonAsync(Path(set, number), Request(item.Spec, item.Values));
+            var metadata = info.GetRawText();
+            if (item.Credentials != null)
+                Assert.All(item.Credentials.Values, credential => Assert.DoesNotContain(credential!, metadata));
+            using var created = await admin.PostAsJsonAsync(Path(set, number), Request(item.Spec, item.Values, item.Credentials, item.Plan));
             Assert.True(created.StatusCode == HttpStatusCode.NoContent, await created.Content.ReadAsStringAsync());
             expected.Add((set.Id, number), item.Bytes);
             Assert.Equal(0, (await Read(admin, set, number)).GetProperty("templates").GetArrayLength());
@@ -82,6 +107,39 @@ public sealed class PostgresOperationalAuthoringTests
         using (var edit = await admin.PutAsJsonAsync(modem, new { revision, sha256, profile = NativeTableLayouts.Later,
             changes = new Dictionary<string, string> { ["answerRemovalDelay"] = "18" } })) edit.EnsureSuccessStatusCode();
         expected[(later.Id, 33)][12] = 18;
+        var install = $"/api/tables/sets/{older.Id}/records/31/fields";
+        var installSnapshot = await reader.GetFromJsonAsync<JsonElement>(install);
+        var protectedFields = installSnapshot.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .Where(field => field.GetProperty("editor").GetString() == "password").ToArray();
+        Assert.Equal(2, protectedFields.Length);
+        Assert.All(protectedFields, field => Assert.Equal(JsonValueKind.Null, field.GetProperty("value").ValueKind));
+        Assert.All(installFixture.Credentials!.Values, credential => Assert.DoesNotContain(credential!, installSnapshot.GetRawText()));
+        var installRevision = installSnapshot.GetProperty("revision").GetInt32(); var installHash = installSnapshot.GetProperty("sha256").GetString();
+        (await admin.PutAsJsonAsync(install, new { revision = installRevision, sha256 = installHash, profile = NativeTableLayouts.MultiPay,
+            changes = new Dictionary<string, string>() })).EnsureSuccessStatusCode();
+        var unchangedInstall = await admin.GetFromJsonAsync<JsonElement>(install);
+        Assert.Equal(installRevision, unchangedInstall.GetProperty("revision").GetInt32());
+        Assert.Equal(installHash, unchangedInstall.GetProperty("sha256").GetString());
+        (await admin.PutAsJsonAsync(install, new { revision = installRevision, sha256 = installHash, profile = NativeTableLayouts.MultiPay,
+            changes = new Dictionary<string, string> { ["retries"] = "4" } })).EnsureSuccessStatusCode();
+        expected[(older.Id, 31)][13] = 4;
+        var numbering = $"/api/tables/sets/{later.Id}/records/62/fields";
+        var planSnapshot = await reader.GetFromJsonAsync<JsonElement>(numbering);
+        Assert.Equal(140, planSnapshot.GetProperty("numberingFormatCapacity").GetInt32());
+        var decodedPlan = planSnapshot.GetProperty("numberingPlan");
+        Assert.Equal(67, Assert.Single(decodedPlan.GetProperty("dial").EnumerateArray()).GetProperty("callType").GetInt32());
+        Assert.Empty(decodedPlan.GetProperty("format").EnumerateArray());
+        var keyCard = planSnapshot.GetProperty("sections").EnumerateArray().SelectMany(section => section.GetProperty("fields").EnumerateArray())
+            .Single(field => field.GetProperty("key").GetString() == "keyCardNumber");
+        Assert.Equal(JsonValueKind.Null, keyCard.GetProperty("value").ValueKind);
+        var planRevision = planSnapshot.GetProperty("revision").GetInt32(); var planHash = planSnapshot.GetProperty("sha256").GetString();
+        (await admin.PutAsJsonAsync(numbering, new { revision = planRevision, sha256 = planHash, profile = NativeTableLayouts.Later,
+            changes = new Dictionary<string,string>(), numberingPlan = decodedPlan })).EnsureSuccessStatusCode();
+        var unchangedPlan = await admin.GetFromJsonAsync<JsonElement>(numbering);
+        Assert.Equal(planRevision, unchangedPlan.GetProperty("revision").GetInt32()); Assert.Equal(planHash, unchangedPlan.GetProperty("sha256").GetString());
+        (await admin.PutAsJsonAsync(numbering, new { revision = planRevision, sha256 = planHash, profile = NativeTableLayouts.Later,
+            changes = new Dictionary<string,string> { ["response-1.payment"] = "3" } })).EnsureSuccessStatusCode();
+        expected[(later.Id,62)][9] = 0x33;
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
@@ -89,7 +147,7 @@ public sealed class PostgresOperationalAuthoringTests
             {
                 var stored = await db.TableVersions.Include(row => row.TablePayload).SingleAsync(row => row.TableSetId == setId && row.TableDefinition!.TableNumber == number);
                 Assert.Equal(bytes, TableDistributionService.GetEffectivePayload(stored));
-                Assert.Equal(setId == later.Id && number == 33 ? 2 : 1, stored.TableRevision);
+                Assert.Equal((setId == later.Id && number is 33 or 62) || (setId == older.Id && number == 31) ? 2 : 1, stored.TableRevision);
             }
             var ids = new[] { older.Id, later.Id }; Assert.False(await db.TerminalTableAssignments.AnyAsync(row => ids.Contains(row.TableSetId)));
             Assert.False(await db.DownloadBatches.AnyAsync(row => ids.Contains(row.TableSetId)));
@@ -103,12 +161,15 @@ public sealed class PostgresOperationalAuthoringTests
         static Task<JsonElement> Read(HttpClient client, TableSet set, int number) => client.GetFromJsonAsync<JsonElement>(Path(set, number));
     }
 
-    private static (OperationalDraftSpec Spec, Dictionary<string, string?> Values, byte[] Bytes) Fixture(int number, string profile)
+    private static (OperationalDraftSpec Spec, Dictionary<string, string?> Values, byte[] Bytes, Dictionary<string, string?>? Credentials, NumberingPlanChanges? Plan) Fixture(int number, string profile)
     {
         var spec = OperationalDraftWire.Specs(number).Single(row => row.Profile == profile);
-        var values = spec.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key, field => (string?)(field.Editor == "checkbox" ? "false" :
+        var values = spec.Sections.SelectMany(section => section.Fields).Where(field => field.Editor != "password")
+            .ToDictionary(field => field.Key, field => (string?)(field.Editor == "text" ? "" : field.Editor == "checkbox" ? "false" :
             (field.Choices?.First().Value ?? field.Min).ToString(CultureInfo.InvariantCulture)));
         var bytes = new byte[spec.Length]; bytes[0] = (byte)number; var later = profile == NativeTableLayouts.Later;
+        Dictionary<string, string?>? credentials = null;
+        NumberingPlanChanges? plan = null;
         if (number == 26)
         {
             values["terminalType"] = "2"; bytes[1] = 2; values["displayPresent"] = "1"; bytes[2] = 1;
@@ -117,11 +178,28 @@ public sealed class PostgresOperationalAuthoringTests
             else { values["incomingRate"] = "255"; bytes[10] = 255; }
         }
         else if (number == 30) { values["scrollSpeed"] = "25"; bytes[54] = 25; values["clearDigits"] = "100"; bytes[1] = 100; }
+        else if (number == 31)
+        {
+            credentials = new() { ["craftAccessCode"] = new string('2', 7), ["keyCardNumber"] = new string('3', 10) };
+            bytes[1] = 0x22; bytes[2] = 0x22; bytes[3] = 0x22; bytes[4] = 0x2E; Array.Fill(bytes, (byte)0x33, 5, 5);
+            values["predial"] = "*0#"; bytes[17] = 0xBA; bytes[18] = 0xC0;
+            values["usePredial"] = "true"; bytes[10] = 1; values["retries"] = "3"; bytes[13] = 3;
+            if (later) { values["cashBoxQuery"] = "true"; bytes[14] = 2; values["delayCraftReport"] = "true"; bytes[31] = 1; }
+        }
         else if (number == 33)
         {
             values["baud"] = "1"; bytes[1] = 1; values["seizeDelay"] = "4660"; bytes[2] = 0x34; bytes[3] = 0x12;
             values["carrierLossTimeout"] = "true"; bytes[33] = 2; if (later) { values["answerRemovalDelay"] = "17"; bytes[12] = 17; }
         }
-        return (spec, values, bytes);
+        else if (number == 62)
+        {
+            credentials = new() { ["keyCardNumber"] = new string('3',10) }; Array.Fill(bytes,(byte)0x33,21,5);
+            values["response-1.call"]="3"; values["response-1.payment"]="4"; bytes[9]=0x43;
+            values["screenTimeout"]="300"; bytes[4]=44; bytes[5]=1;
+            if (!later) { values["currencySymbol"]="$"; bytes[345]=0x24; }
+            plan=new([new("local",null,null,0,50,67,[18,17,17,17,17,17,17])],[]);
+            new byte[] {0,0,0,50,67,7,18,17,17,17,17,17,17}.CopyTo(bytes,33);
+        }
+        return (spec, values, bytes, credentials, plan);
     }
 }

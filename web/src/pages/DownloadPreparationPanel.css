@@ -8,6 +8,8 @@
 .preparation-phone-list small, .preparation-table small { display: block; opacity: .75; font-variant-numeric: tabular-nums; }
 .preparation-time { display: flex; flex-wrap: wrap; gap: 18px; align-items: center; margin: 16px 0 8px; }
 .preparation-time label { display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.preparation-record-picker { flex: 1 1 100%; }
+.preparation-record-picker select { max-width: 100%; }
 .preparation-review { margin-top: 16px; border-top: 1px solid var(--border, #d5ded9); padding-top: 12px; }
 .preparation-table { overflow-x: auto; margin-bottom: 12px; }
 .preparation-table table { width: 100%; border-collapse: collapse; text-align: left; }

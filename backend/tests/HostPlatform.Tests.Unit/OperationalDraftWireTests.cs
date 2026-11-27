@@ -57,7 +57,7 @@ public sealed class OperationalDraftWireTests
     {
         var spec = OperationalDraftWire.Specs(26).Single(row => row.Profile == NativeTableLayouts.Later);
         var valid = Values(spec);
-        Assert.Empty(OperationalDraftWire.Specs(31));
+        Assert.Empty(OperationalDraftWire.Specs(32));
         Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(26, spec.Profile, 71, valid));
         var missing = new Dictionary<string, string?>(valid); missing.Remove("terminalType");
         Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(26, spec.Profile, 72, missing));
@@ -67,7 +67,107 @@ public sealed class OperationalDraftWireTests
         Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(26, spec.Profile, 72, new Dictionary<string, string?>(valid) { ["spare.display"] = "255" }));
     }
 
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Installation_authoring_requires_separate_credentials_and_explicit_predial_decisions(bool later)
+    {
+        var specs = OperationalDraftWire.Specs(31); Assert.Equal(2, specs.Count);
+        var spec = specs.Single(row => row.Profile == (later ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay));
+        var values = Values(spec); var credentials = InstallationCredentials();
+        values["transmitDelay"] = "19"; values["receiveGap"] = "8"; values["retries"] = "3"; values["coinBoxTimeout"] = "300";
+        values["predial"] = "*0#"; values["usePredial"] = "true"; values["predialForToll"] = "true";
+        Assert.Equal(later, values.ContainsKey("analogPrefix"));
+        if (later) { values["analogPrefix"] = "#0"; values["useAnalogPrefix"] = "true"; values["cashBoxQuery"] = "true"; values["delayCraftReport"] = "true"; }
+        var actual = OperationalDraftWire.Create(31, spec.Profile, 37, values, credentials);
+        var expected = new byte[37]; expected[0] = 31;
+        expected[1] = 0x22; expected[2] = 0x22; expected[3] = 0x22; expected[4] = 0x2E;
+        Array.Fill(expected, (byte)0x33, 5, 5); expected[10] = later ? (byte)0x43 : (byte)3;
+        expected[11] = 19; expected[12] = 8; expected[13] = 3; expected[15] = 44; expected[16] = 1;
+        expected[17] = 0xBA; expected[18] = 0xC0;
+        if (later) { expected[14] = 2; expected[25] = 0xCA; expected[31] = 1; }
+        Assert.Equal(expected, actual);
+        var layout = NativeTableLayouts.Find(31, actual, spec.Profile)!;
+        Assert.All(layout.Sections.SelectMany(section => section.Fields).Where(field => field.IsCredential), field => Assert.Null(field.Read(actual)));
+        Assert.Equal(actual, layout.Apply(actual, new Dictionary<string, string>()));
+        var edited = layout.Apply(actual, new Dictionary<string, string> { ["retries"] = "4" }); expected[13] = 4;
+        Assert.Equal(expected, edited);
+
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, values));
+        var malformed = new Dictionary<string, string?>(credentials) { ["craftAccessCode"] = new string('1', 6) };
+        var rejected = Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, values, malformed));
+        Assert.DoesNotContain(malformed["craftAccessCode"]!, rejected.Message);
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37,
+            new Dictionary<string, string?>(values) { ["craftAccessCode"] = credentials["craftAccessCode"] }, credentials));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, values,
+            new Dictionary<string, string?>(credentials) { ["retries"] = "3" }));
+        var missing = new Dictionary<string, string?>(values); missing.Remove("alternatePredial");
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, missing, credentials));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37,
+            new Dictionary<string, string?>(values) { ["predial"] = "A" }, credentials));
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Numbering_plan_authoring_packs_explicit_scalar_settings_and_linked_rules_in_the_matching_profile(bool later)
+    {
+        var specs = OperationalDraftWire.Specs(62); Assert.Equal(2, specs.Count);
+        var spec = specs.Single(row => row.Profile == (later ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay));
+        Assert.Equal(later ? 140 : 132, spec.NumberingFormatCapacity);
+        var values = Values(spec); var credentials = new Dictionary<string, string?> { ["keyCardNumber"] = new string('3', 10) };
+        values["screenTimeout"] = "300"; values["response-1.call"] = "3"; values["response-1.payment"] = "4";
+        values["unrestrictedLocalSearch"] = "true";
+        Assert.Equal(!later, values.ContainsKey("currencySymbol"));
+        if (!later) { values["currencySymbol"] = "$"; values["currencyVoice"] = "6"; values["currencyWidth"] = "4"; values["currencyPrecision"] = "2"; values["formatCurrency"] = "true"; }
+        NumberingRule[] dial = [new("local", "service", null, 0, 50, 67, [18,17,17,17,17,17,17]),
+            new("service", null, null, 0, 48, 41, [2,3,4,5])];
+        NumberingRule[] format = [new("format", null, null, 1, 0, 0, later ? Enumerable.Repeat(17, 135).ToArray() : [17,145])];
+        var actual = OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials, new(dial, format));
+        var expected = new byte[353]; expected[0] = 62; expected[4] = 44; expected[5] = 1; expected[9] = 0x43;
+        Array.Fill(expected, (byte)0x33, 21, 5); expected[32] = 1;
+        new byte[] {13,0,0,50,67,7,18,17,17,17,17,17,17,0,0,0,48,41,4,2,3,4,5}.CopyTo(expected,33);
+        expected[215] = 1;
+        if (later) Array.Fill(expected, (byte)17, 217, 135);
+        else { expected[217] = 17; expected[218] = 145; expected[345] = 0x24; expected[349] = 6; expected[350] = 4; expected[351] = 2; expected[352] = 1; }
+        Assert.Equal(expected, actual);
+        var decoded = NumberingPlanWire.Read(actual, later);
+        Assert.NotNull(decoded.Dial); Assert.Equal("row-13", decoded.Dial[0].NoMatch); Assert.Equal(67, decoded.Dial[0].CallType);
+        Assert.Equal(actual, NativeTableLayouts.Find(62, actual, spec.Profile)!.Apply(actual, new Dictionary<string,string>()));
+        NumberingPlanWire.Apply(actual, decoded, later); Assert.Equal(expected, actual);
+
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials, new([], [])));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials, new(dial, null)));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials, new([dial[0] with { Digits = [13] }], [])));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials, new([dial[0] with { CallType = 0x13 }], [])));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials, new([dial[0]], [])));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials, new(dial, [format[0] with { Digits = [49] }])));
+        if (!later)
+            Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(62, spec.Profile, 353, values, credentials,
+                new(dial, [format[0] with { Digits = Enumerable.Repeat(17, 135).ToArray() }])));
+    }
+
+    [Fact]
+    public void Broad_no_payment_ordinary_destination_is_an_advisory_not_an_automatic_tariff_override()
+    {
+        var record = new byte[353]; record[0] = 62;
+        NumberingRule broad = new("ordinary", null, null, 0, 50, 35, [18,17,17,17,17,17,17]);
+        NumberingPlanWire.Apply(record, new([broad], []), later:true);
+        var findings = NumberingPlanWire.Review(record, later:true);
+        Assert.Equal(2, findings.Count); Assert.All(findings, finding => Assert.False(finding.Blocking));
+        Assert.Contains(findings, finding => finding.Message.Contains("No payment"));
+        var fixedPlan = NumberingPlanWire.Read(record, later:true);
+        var paid = Assert.Single(fixedPlan.Dial!) with { CallType = 67 };
+        NumberingPlanWire.Apply(record, new([paid], null), later:true);
+        record[9] = 0x43; Assert.Empty(NumberingPlanWire.Review(record, later:true));
+    }
+
     internal static Dictionary<string, string?> Values(OperationalDraftSpec spec) => spec.Sections.SelectMany(section => section.Fields)
-        .ToDictionary(field => field.Key, field => (string?)(field.Editor == "checkbox" ? "false" :
+        .Where(field => field.Editor != "password")
+        .ToDictionary(field => field.Key, field => (string?)(field.Editor == "text" ? "" : field.Editor == "checkbox" ? "false" :
             (field.Choices?.First().Value ?? field.Min).ToString(CultureInfo.InvariantCulture)));
+
+    private static Dictionary<string, string?> InstallationCredentials() => new()
+    {
+        ["craftAccessCode"] = new string('2', 7), ["keyCardNumber"] = new string('3', 10)
+    };
 }

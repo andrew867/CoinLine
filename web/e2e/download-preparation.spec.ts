@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { signIn } from './auth'
 
-test('prepares a mixed phone list only after reviewing each assigned set', async ({ page, baseURL }) => {
+for (const selectedOnly of [false, true]) test(`prepares ${selectedOnly ? 'selected records' : 'full configurations'} for a mixed phone list only after review`, async ({ page, baseURL }) => {
   if (!baseURL) throw new Error('A local fixture origin is required.')
   const origin = new URL(baseURL).origin
   const token = 'fixture-preparation-token'
@@ -27,7 +27,8 @@ test('prepares a mixed phone list only after reviewing each assigned set', async
       openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
     if (url.pathname === '/api/downloads' || url.pathname === '/api/tables/schedules') return route.fulfill({ json: [] })
     if (url.pathname === '/api/downloads/preparation/options')
-      return route.fulfill({ json: { phones: url.searchParams.get('query') === 'west' ? [phones[1]] : [phones[0], phones[2]], more: false, maximumPhones: 40 } })
+      return route.fulfill({ json: { phones: url.searchParams.get('query') === 'west' ? [phones[1]] : [phones[0], phones[2]], more: false, maximumPhones: 40,
+        recordOptions: [{ tableNumber: 29, name: 'Text advertising' }, { tableNumber: 50, name: 'Coin validation' }] } })
     if (url.pathname === '/api/downloads/preparation/preview' && request.method() === 'POST') {
       const body = request.postDataJSON() as { terminalIds: string[]; availableAtUtc: string | null }
       previewed.push(body)
@@ -50,6 +51,12 @@ test('prepares a mixed phone list only after reviewing each assigned set', async
   await page.getByLabel('Search by phone ID or name').fill('west')
   await page.getByRole('button', { name: 'Search phones' }).click()
   await page.getByRole('button', { name: /Add Workshop west/ }).click()
+  if (selectedOnly) {
+    await page.getByRole('radio', { name: 'Selected records only' }).check()
+    await expect(page.getByRole('button', { name: 'Review selected phones' })).toBeDisabled()
+    await page.getByLabel('Record to add').selectOption('29')
+    await page.getByRole('button', { name: 'Add record' }).click()
+  }
   await page.getByRole('button', { name: 'Review selected phones' }).click()
   await expect(page.getByText('Phone is deactivated.')).toBeVisible()
   await expect(page.getByRole('button', { name: 'Confirm preparation for 3 phones' })).toBeDisabled()
@@ -69,7 +76,8 @@ test('prepares a mixed phone list only after reviewing each assigned set', async
   const links = page.getByRole('link', { name: 'Open prepared batch' })
   await expect(links.nth(0)).toHaveAttribute('href', '/downloads/batch-0')
   await expect(links.nth(1)).toHaveAttribute('href', '/downloads/batch-1')
-  expect(previewed).toEqual([{ terminalIds: [phones[0].id, phones[2].id, phones[1].id], availableAtUtc: null },
-    { terminalIds: [phones[0].id, phones[1].id], availableAtUtc: null }])
-  expect(confirmed).toEqual([{ terminalIds: [phones[0].id, phones[1].id], availableAtUtc: null, previewToken: 'selected-2' }])
+  const scope = selectedOnly ? { recordNumbers: [29] } : {}
+  expect(previewed).toEqual([{ terminalIds: [phones[0].id, phones[2].id, phones[1].id], availableAtUtc: null, ...scope },
+    { terminalIds: [phones[0].id, phones[1].id], availableAtUtc: null, ...scope }])
+  expect(confirmed).toEqual([{ terminalIds: [phones[0].id, phones[1].id], availableAtUtc: null, ...scope, previewToken: 'selected-2' }])
 })

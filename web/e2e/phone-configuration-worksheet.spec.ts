@@ -102,3 +102,87 @@ test('assigns two independently selected configurations and clears one optional 
   expect(unexpectedMutations).toEqual([])
   expect(libraryReads).toEqual([])
 })
+
+test('starts an unassigned phone from a published starter with reviewed identity and no automatic download', async ({ page, baseURL }) => {
+  if (!baseURL) throw new Error('The console fixture requires a local base URL.')
+  const origin = new URL(baseURL).origin, token = 'fixture-starter-operator'
+  const id = '00000000-0000-4000-8000-000000920201', phonePath = `/api/terminals/${id}`, endpoint = `${phonePath}/configuration-worksheet`
+  const firmware = '00000000-0000-4000-8000-000000920202', source = '00000000-0000-4000-8000-000000920203', result = '00000000-0000-4000-8000-000000920204'
+  const phone = { id, siteId: 'fixture-site', displayName: 'New workshop phone', terminalIdHex: '0000000201', status: 1,
+    firmwareVersionId: firmware, terminalFamilyId: 'mtr19-multipay', deactivatedAtUtc: null }
+  const records = [
+    { number: 21, name: 'Management access', family: 'Access', familyRequired: true, length: 18 },
+    { number: 29, name: 'Text advertising', family: 'Advertising', familyRequired: false, length: 481 },
+    { number: 50, name: 'Coin validation', family: 'Coins', familyRequired: true, length: 105 },
+  ]
+  const options = records.map(row => ({ number: row.number, id: `source-${row.number}`, tableSetId: source, setName: 'Published workshop starter',
+    configurationId: `START${row.number}`, revision: 1, length: row.length, sha256: 'a'.repeat(64), targetFirmware: 'Fixture target', issue: null }))
+  const family = { familyLabel: 'MTR 1.9 Multi-pay', documented: true, tables: [{ name: 'Local dialing', required: true, status: 'missing' }] }
+  let applied = false
+  const previews: Record<string, unknown>[] = [], assignments: Record<string, unknown>[] = [], unexpectedMutations: string[] = []
+  await page.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url())
+    if (url.origin !== origin) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    if (url.pathname === '/api/auth/login' && request.method() === 'POST') return route.fulfill({ json: { token, role: 'Operator', displayName: 'Fixture operator',
+      permissions: { overview: 1, phones: 1, 'table-assignments': 3 } } })
+    if (request.headers().authorization !== `Bearer ${token}`) return route.fulfill({ status: 401 })
+    if (url.pathname === endpoint + '/preview' && request.method() === 'POST') {
+      const data = request.postDataJSON(); previews.push(data)
+      if (!data.personalizeAccessIdentity) return route.fulfill({ status: 400, json: { error: 'The terminal access record carries another phone’s wire ID.' } })
+      return route.fulfill({ json: { previewToken: 'starter-review', canApply: true, initialAssignment: true, family,
+        changes: options.map(row => ({ tableNumber: row.number, action: 'add', required: false, personalized: row.number === 21, current: null, result: row })) } })
+    }
+    if (url.pathname === endpoint && request.method() === 'POST') {
+      assignments.push(request.postDataJSON()); applied = true
+      return route.fulfill({ json: { tableSetId: result, tableSetName: 'New phone configuration', changedNumbers: records.map(row => row.number), removedNumbers: [] } })
+    }
+    if (request.method() !== 'GET') { unexpectedMutations.push(url.pathname); return route.fulfill({ status: 405 }) }
+    if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
+      openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
+    if (url.pathname === '/api/terminals/families') return route.fulfill({ json: [{ id: phone.terminalFamilyId, release: 'MTR 1.9', variant: 'Multi-pay', maximizerTypeNumbers: [28] }] })
+    if (url.pathname === '/api/terminals/firmware-options') return route.fulfill({ json: [{ id: firmware, label: 'Fixture target', buildId: null }] })
+    if (url.pathname === phonePath) return route.fulfill({ json: phone })
+    if (url.pathname === `${phonePath}/identity`) return route.fulfill({ json: { terminalIdHex: phone.terminalIdHex, previousId: null, previousType: null, firstContactAtUtc: null } })
+    if (url.pathname === `${phonePath}/table-assignment`) return applied ? route.fulfill({ json: { terminalId: id, tableSetId: result,
+      tableSetName: 'New phone configuration', previousTableSetId: null, siteId: phone.siteId, customerId: null, assignedAtUtc: '2028-01-01T12:00:00Z',
+      targetFirmwareVersionId: firmware, targetFirmware: 'Fixture target' } }) : route.fulfill({ status: 404 })
+    if (url.pathname === `${phonePath}/table-assignment-options`) return route.fulfill({ json: [] })
+    if (url.pathname === `${endpoint}/initial-sources`) return route.fulfill({ json: { available: true, page: 1, pageSize: 50, total: 1,
+      sources: [{ id: source, name: 'Published workshop starter', isDefault: true, recordCount: 3, hasAccess: true }] } })
+    if (url.pathname === `${endpoint}/initial-sources/${source}`) return route.fulfill({ json: { id: source, name: 'Published workshop starter',
+      records: options, requiresAccessPersonalization: true, family } })
+    if (url.pathname === endpoint) return route.fulfill({ json: { id, displayName: phone.displayName, terminalIdHex: phone.terminalIdHex, firmware: 'Fixture target',
+      baseSetId: applied ? result : null, baseSetName: applied ? 'New phone configuration' : null, assignmentRevision: applied ? 1 : null, canUpdate: true, family,
+      records: records.map((row, index) => ({ ...row, canChoose: true, canClear: false, ambiguous: false, assigned: applied ? {
+        ...options[index], setId: result, setName: 'New phone configuration', validationPassed: true } : null })) } })
+    return route.fulfill({ status: 404 })
+  })
+  await signIn(page)
+  await page.goto(`/terminals/${id}`)
+  await expect(page.getByRole('heading', { name: 'New workshop phone' })).toBeVisible()
+  await page.getByText('Individual configuration assignments').click()
+  await page.getByRole('button', { name: 'Choose a matching starter' }).click()
+  const starter = page.getByRole('region', { name: 'Initial configuration starter' })
+  await starter.getByLabel('Published starter').selectOption(source)
+  await expect(starter.getByText('3 records can be staged: MT21, MT29, MT50.')).toBeVisible()
+  await expect(starter.getByText(/MT21 record belongs to a different line/)).toBeVisible()
+  await starter.getByRole('button', { name: 'Stage 3 starter records' }).click()
+  await expect(page.getByText('3 staged changes')).toBeVisible()
+  expect(previews).toEqual([]); expect(assignments).toEqual([])
+  await page.getByRole('button', { name: 'Preview configuration assignment' }).click()
+  await expect(page.getByText(/terminal access record carries another phone/)).toBeVisible()
+  await page.getByLabel(/Use this phone’s registered wire ID/).check()
+  await page.getByRole('button', { name: 'Preview configuration assignment' }).click()
+  const preview = page.getByRole('region', { name: 'Configuration assignment preview' })
+  await expect(preview.getByText('Registered wire ID applied')).toBeVisible()
+  await expect(preview.getByText(/Local dialing \(missing\)/)).toBeVisible()
+  await expect(preview.getByRole('button', { name: 'Apply configuration assignment' })).toBeDisabled()
+  await preview.getByLabel('I reviewed the resulting host assignment.').check()
+  await preview.getByRole('button', { name: 'Apply configuration assignment' }).click()
+  await expect(page.getByText(/Host assignment updated to New phone configuration. No download has been queued/)).toBeVisible()
+  expect(assignments).toEqual([{ baseSetId: null, assignmentRevision: null, personalizeAccessIdentity: true, previewToken: 'starter-review',
+    choices: options.map(row => ({ number: row.number, action: 'copy', sourceSetId: source, sourceVersionId: row.id })) }])
+  expect(previews).toHaveLength(2)
+  expect(unexpectedMutations).toEqual([])
+})

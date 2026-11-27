@@ -17,6 +17,7 @@ type CreateOptions = {
   firmwareVersions: FirmwareVersionOption[]
   families: TerminalFamily[]
   canAssignGroup: boolean
+  maximumGroups?: number
 }
 
 export function TerminalCreatePage() {
@@ -25,7 +26,8 @@ export function TerminalCreatePage() {
   const canRead = canPerform('phones', op.read)
   const [options, setOptions] = useState<CreateOptions | null>(null)
   const [siteId, setSiteId] = useState('')
-  const [groupId, setGroupId] = useState('')
+  const [groupIds, setGroupIds] = useState<string[]>([])
+  const [nextGroup, setNextGroup] = useState('')
   const [firmwareVersionId, setFirmwareVersionId] = useState('')
   const [terminalFamilyId, setTerminalFamilyId] = useState('')
   const [displayName, setDisplayName] = useState('Bench terminal')
@@ -47,12 +49,24 @@ export function TerminalCreatePage() {
 
   const site = options?.sites.find(row => row.id === siteId)
   const groups = options?.groups.filter(group => group.customerId == null || group.customerId === site?.customerId) ?? []
+  const groupLimit = options?.maximumGroups ?? 40
+  const additionalChoices = groups.filter(group => !groupIds.includes(group.id))
 
   function changeSite(value: string) {
     const customerId = options?.sites.find(row => row.id === value)?.customerId
-    const currentGroup = options?.groups.find(group => group.id === groupId)
-    if (currentGroup?.customerId != null && currentGroup.customerId !== customerId) setGroupId('')
+    const available = new Set(options?.groups.filter(group => group.customerId == null || group.customerId === customerId).map(group => group.id) ?? [])
+    setGroupIds(current => current.filter(id => available.has(id)))
+    setNextGroup('')
     setSiteId(value)
+  }
+
+  function changePrimaryGroup(value: string) {
+    setGroupIds(current => {
+      if (!value) return current.slice(1)
+      if (current.includes(value)) return [value, ...current.filter(id => id !== value)]
+      return [value, ...current.slice(1)]
+    })
+    setNextGroup('')
   }
 
   async function onSubmit(e: FormEvent) {
@@ -64,7 +78,8 @@ export function TerminalCreatePage() {
     try {
       const response = await apiPostRaw('/api/terminals', {
         siteId,
-        terminalGroupId: options?.canAssignGroup && groupId ? groupId : null,
+        terminalGroupId: options?.canAssignGroup ? groupIds[0] ?? null : null,
+        ...(options?.canAssignGroup ? { groupIds } : {}),
         transportEndpointId: null,
         firmwareVersionId: firmwareVersionId || null,
         terminalFamilyId: terminalFamilyId || null,
@@ -100,6 +115,8 @@ export function TerminalCreatePage() {
       </p>
       <h1>Create terminal</h1>
       <p>First register the phone with its actual line identity, site, terminal family and installed firmware. After registration, review the configuration assignment and initial download separately.</p>
+      {canRead && canPerform('table-assignments', op.read) && canPerform('table-assignments', op.update) &&
+        <p>On the new phone, open Individual configuration assignments to start from a matching published configuration and review its site-specific settings.</p>}
       {canPerform('table-sets', op.read) && canPerform('table-sets', op.add) && canPerform('table-records', op.read) && canPerform('table-records', op.update) &&
         <p>Need a matching set? <Link to="/table-sets?setup=1">Use guided configuration setup</Link> to choose payment, pricing and advertising before assignment.</p>}
       {!options && !err && <p>Loading phone registration choices…</p>}
@@ -126,17 +143,35 @@ export function TerminalCreatePage() {
             ))}
           </select>
         </label>
-        {options.canAssignGroup && <label>
-          Phone group
-          <select value={groupId} onChange={(e) => setGroupId(e.target.value)} style={{ display: 'block', width: '100%' }}>
-            <option value="">No group</option>
+        {options.canAssignGroup && <fieldset disabled={saving}>
+          <legend>Phone groups ({groupIds.length} of {groupLimit})</legend>
+          <p>The first selected group is primary. Other memberships are saved with the phone. Changing the site removes groups belonging to a different customer.</p>
+          <label>Phone group
+          <select aria-label="Phone group" value={groupIds[0] ?? ''} onChange={(e) => changePrimaryGroup(e.target.value)} style={{ display: 'block', width: '100%' }}>
+            <option value="">{groupIds.length > 1 ? 'Remove primary group' : 'No group'}</option>
             {groups.map((g) => (
               <option key={g.id} value={g.id}>
                 {g.name}
               </option>
             ))}
           </select>
-        </label>}
+          </label>
+          {groupIds.length > 0 && <>
+            <ul aria-label="Additional phone groups">
+              {groupIds.slice(1).map(id => <li key={id}>{groups.find(group => group.id === id)?.name ?? id} <button type="button"
+                aria-label={`Remove ${groups.find(group => group.id === id)?.name ?? id}`} onClick={() => setGroupIds(current => current.filter(group => group !== id))}>Remove</button></li>)}
+            </ul>
+            <label>Additional group<select aria-label="Additional group" value={nextGroup} disabled={groupIds.length >= groupLimit}
+              onChange={event => setNextGroup(event.target.value)} style={{ display: 'block', width: '100%' }}>
+              <option value="">Choose another group</option>
+              {additionalChoices.map(group => <option key={group.id} value={group.id}>{group.name}</option>)}
+            </select></label>
+            <button type="button" disabled={groupIds.length >= groupLimit || !additionalChoices.some(group => group.id === nextGroup)} onClick={() => {
+              setGroupIds(current => current.length < groupLimit && !current.includes(nextGroup) ? [...current, nextGroup] : current)
+              setNextGroup('')
+            }}>Add group</button>
+          </>}
+        </fieldset>}
         <FirmwareVersionSelect label="Installed firmware" value={firmwareVersionId}
           onChange={setFirmwareVersionId} emptyLabel="Unknown firmware" options={options.firmwareVersions} />
         <TerminalFamilySelect value={terminalFamilyId} onChange={setTerminalFamilyId} options={options.families} />

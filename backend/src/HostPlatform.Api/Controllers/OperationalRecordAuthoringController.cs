@@ -11,7 +11,8 @@ namespace HostPlatform.Api.Controllers;
 [Route("api/tables/sets/{id:guid}/records/{number:int}/operational-authoring")]
 public sealed class OperationalRecordAuthoringController(HostPlatformDbContext db, TableDistributionService tables) : ControllerBase
 {
-    public sealed record CreateRequest(string? Profile, int Length, Dictionary<string, string?>? Fields);
+    public sealed record CreateRequest(string? Profile, int Length, Dictionary<string, string?>? Fields,
+        Dictionary<string, string?>? Credentials = null, NumberingPlanChanges? NumberingPlan = null);
 
     [HttpGet]
     public async Task<ActionResult<object>> Get(Guid id, int number, CancellationToken ct)
@@ -31,7 +32,7 @@ public sealed class OperationalRecordAuthoringController(HostPlatformDbContext d
         if (spec == null || request.Fields == null)
             return BadRequest(new { error = "Choose a confirmed operational layout and supply its settings." });
         byte[] bytes;
-        try { bytes = OperationalDraftWire.Create(number, spec.Profile, spec.Length, request.Fields); }
+        try { bytes = OperationalDraftWire.Create(number, spec.Profile, spec.Length, request.Fields, request.Credentials, request.NumberingPlan); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
         var (layout, error) = NativeTableConfigurationController.ResolveLayout(set, number, bytes, spec.Profile);
         if (layout == null || error != null) return BadRequest(new { error = error ?? "The operational layout is unavailable." });

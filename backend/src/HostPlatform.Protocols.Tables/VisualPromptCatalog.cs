@@ -44,7 +44,7 @@ internal static class VisualPromptCatalog
         new($"prompt-{row}.text", label, 1 + CellCount * row, TableFieldEncoding.DisplayText, CellCount,
             Help: help == null ? $"Wire row {row}." : $"Wire row {row}. {help}");
 
-    private static string? MessageName(int message, bool expanded) => message switch
+    internal static string? MessageName(int message, bool expanded) => message switch
     {
         0 => expanded ? "Lift receiver" : "Messaging offer on supported builds",
         1 => expanded ? "Lift receiver and insert card" : "Card removal or data-port payment",
