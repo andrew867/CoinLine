@@ -39,8 +39,9 @@ type Ledger = {
     coinCounts: number[]
   }[]
   coinConfigurations?: Record<string, CoinConfiguration>
-  initializations?: { id: string; recordedAtUtc: string; boxNumber: string; openingTime: string; isCurrent: boolean }[]
+  initializations?: { id: string; recordedAtUtc: string; boxNumber: string; openingTime: string; isCurrent: boolean; source?: 'operator_initialized' | 'protocol_default' }[]
   canInitializeEmpty?: boolean
+  canInitializeDefault?: boolean
   expectedNewBoxNumber?: string | null
 }
 
@@ -89,6 +90,7 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
   const [boxNumber, setBoxNumber] = useState('')
   const [openingClock, setOpeningClock] = useState('')
   const [confirmEmpty, setConfirmEmpty] = useState(false)
+  const [confirmDefault, setConfirmDefault] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
 
@@ -102,7 +104,7 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
     return () => { current = false }
   }, [terminalId, refresh, localRefresh])
 
-  useEffect(() => { setBoxNumber(''); setOpeningClock(''); setConfirmEmpty(false); setSaveError('') }, [terminalId])
+  useEffect(() => { setBoxNumber(''); setOpeningClock(''); setConfirmEmpty(false); setConfirmDefault(false); setSaveError('') }, [terminalId])
 
   const current = ledger?.statuses.find(row => row.isCurrent)
   const initialized = ledger?.initializations?.find(row => row.isCurrent)
@@ -124,6 +126,18 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
     } catch (err) { setSaveError(err instanceof Error ? err.message : 'Could not initialize the empty box.') }
     finally { setSaving(false) }
   }
+  async function initializeDefault() {
+    setSaving(true); setSaveError('')
+    try {
+      const response = await apiPostRaw(`/api/terminals/${terminalId}/cashbox/initialize-default`, { confirmInitialDefault: confirmDefault })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null) as { error?: string } | null
+        throw new Error(payload?.error ?? `Could not initialize the protocol default (${response.status}).`)
+      }
+      setConfirmDefault(false); setLocalRefresh(value => value + 1)
+    } catch (err) { setSaveError(err instanceof Error ? err.message : 'Could not initialize the protocol default.') }
+    finally { setSaving(false) }
+  }
   return (
     <section aria-labelledby="cashbox-heading">
       <h2 id="cashbox-heading">Cashbox</h2>
@@ -136,10 +150,24 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
           A successfully uploaded coin call can still exist without a cashbox report. Its charge and collected amount do not establish the current box balance.
         </div>}
       </>}
-      {initialized && <section className="cashbox-summary" aria-label="Operator-confirmed empty box">
+      {initialized?.source === 'protocol_default' && <section className="cashbox-summary" aria-label="Initial protocol cashbox default">
+        <h3>Initial protocol cashbox default</h3>
+        <p>The standard unreported-box starting record is available for the next status request. Recorded {hostTime(initialized.recordedAtUtc)}.</p>
+        <p><strong>Current physical balance unknown.</strong> The zero counts, all-zero box identifier and 1990-01-01 calendar are protocol defaults, not observed cashbox information or a collection.</p>
+      </section>}
+      {initialized && initialized.source !== 'protocol_default' && <section className="cashbox-summary" aria-label="Operator-confirmed empty box">
         <h3>Operator-confirmed empty-box initialization</h3>
         <p>Starting balance 0.00 for box <code>{initialized.boxNumber}</code>, opened at {phoneTime(initialized.openingTime)}.</p>
         <p>Recorded {hostTime(initialized.recordedAtUtc)}. This is an operator assertion, not a terminal report or collection. It does not establish the present cashbox balance.</p>
+      </section>}
+      {ledger?.canInitializeDefault && canPerform('cashbox', op.add) && <section className="cashbox-summary" aria-label="Initialize protocol cashbox default">
+        <h3>Initialize protocol cashbox default</h3>
+        <p>For a new or deliberately initialized coin phone with no prior reports. Do not use this to clear an existing box or replace its known accounting.</p>
+        <form onSubmit={event => { event.preventDefault(); void initializeDefault() }}>
+          <p><label><input type="checkbox" checked={confirmDefault} onChange={event => setConfirmDefault(event.target.checked)} /> I confirmed there is no retained cashbox accounting to restore.</label></p>
+          <button type="submit" disabled={saving || !confirmDefault}>{saving ? 'Recording…' : 'Record initial protocol default'}</button>
+          {saveError && <ErrorBanner message={saveError} />}
+        </form>
       </section>}
       {ledger?.canInitializeEmpty && canPerform('cashbox', op.add) && <section className="cashbox-summary" aria-label="Initialize observed empty box">
         <h3>Initialize a known empty box</h3>
@@ -169,9 +197,9 @@ export function TerminalCashboxPanel({ terminalId, refresh = 0 }: { terminalId: 
       </section>}
       {hasHistory && !current && !initialized && <p className="cashbox-waiting" role="note">No current box status is available. The last reported collection does not establish the value or condition of the replacement box.</p>}
       {!!ledger?.initializations?.length && <table>
-        <caption>Operator-entered box initializations</caption>
-        <thead><tr><th>Box</th><th>Observed opening clock</th><th>Recorded (UTC)</th><th>Status</th></tr></thead>
-        <tbody>{ledger.initializations.map(row => <tr key={row.id}><td><code>{row.boxNumber}</code></td><td>{phoneTime(row.openingTime)}</td>
+        <caption>Box initializations</caption>
+        <thead><tr><th>Box</th><th>Opening clock</th><th>Recorded (UTC)</th><th>Status</th></tr></thead>
+        <tbody>{ledger.initializations.map(row => <tr key={row.id}><td><code>{row.boxNumber}</code>{row.source === 'protocol_default' && <small>Protocol default</small>}</td><td>{row.source === 'protocol_default' ? 'Not observed' : phoneTime(row.openingTime)}</td>
           <td>{hostTime(row.recordedAtUtc)}</td><td>{row.isCurrent ? 'Current initialization' : 'Superseded'}</td></tr>)}</tbody>
       </table>}
       {ledger && ledger.statuses.length > 0 && (

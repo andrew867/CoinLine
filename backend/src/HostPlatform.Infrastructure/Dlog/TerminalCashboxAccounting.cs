@@ -4,7 +4,9 @@ using System.Text;
 using System.Text.Json;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Infrastructure.Tables;
 using HostPlatform.Protocols.Dlog;
+using HostPlatform.Protocols.Tables;
 using Microsoft.EntityFrameworkCore;
 
 namespace HostPlatform.Infrastructure.Dlog;
@@ -17,16 +19,19 @@ public static class TerminalCashboxAccounting
         string BoxNumber, string NewBoxNumber, ushort Sequence, bool IsSummed, int TotalMinorUnits,
         int RemovedBoxBalanceMinorUnits, ushort[] CoinCounts);
 
-    public sealed record EmptyBoxInitialization(Guid Id, DateTime RecordedAtUtc, string BoxNumber, DateTime OpeningTime, bool IsCurrent);
+    public sealed record EmptyBoxInitialization(Guid Id, DateTime RecordedAtUtc, string BoxNumber, DateTime OpeningTime, bool IsCurrent, string Source);
     public sealed record Ledger(IReadOnlyList<StatusReport> Statuses, IReadOnlyList<CollectionReport> Collections,
-        IReadOnlyList<EmptyBoxInitialization> Initializations, bool CanInitializeEmpty, string? ExpectedNewBoxNumber);
+        IReadOnlyList<EmptyBoxInitialization> Initializations, bool CanInitializeEmpty, string? ExpectedNewBoxNumber, bool CanInitializeDefault);
     public sealed record StatusOffer(byte[] Bytes, string Source);
     public sealed record InitializationResult(EmptyBoxInitialization? Initialization, string? Conflict);
 
     private sealed record Reading(Guid Id, DateTime ReceivedAtUtc, byte[] Bytes);
     private sealed record InitializationDetail(Guid? PriorReportId, string BoxNumber, string OpeningClock);
-    private sealed record InitializationRow(Guid Id, DateTime RecordedAtUtc, InitializationDetail Detail, DateTime OpeningTime);
+    private sealed record InitializationRow(Guid Id, DateTime RecordedAtUtc, InitializationDetail Detail, DateTime OpeningTime, string Source);
     private const string InitializationAction = "initialize_empty_box";
+    private const string DefaultInitializationAction = "initialize_default_box";
+    private const string ObservedSource = "operator_initialized";
+    private const string DefaultSource = "protocol_default";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private const string ClockFormat = "yyyy-MM-dd'T'HH:mm:ss";
 
@@ -57,7 +62,8 @@ public static class TerminalCashboxAccounting
             .OrderByDescending(row => row.ReceivedAtUtc).ToArray();
         return new Ledger(byBox.Values.OrderByDescending(row => row.ReceivedAtUtc).ToArray(), collectionHistory,
             initializations.OrderByDescending(row => row.RecordedAtUtc).Select(row => View(row, initialized?.Id == row.Id)).ToArray(),
-            current == null && initialized == null, ExpectedNewBox(reports));
+            current == null && (initialized == null || initialized.Source == DefaultSource), ExpectedNewBox(reports),
+            reports.Count == 0 && initialized == null && await HasConfiguredCoinsAsync(db, terminalId, ct));
     }
 
     public static async Task<byte[]?> ReadCurrentStatusBytesAsync(HostPlatformDbContext db, Guid terminalId, CancellationToken ct) =>
@@ -68,7 +74,47 @@ public static class TerminalCashboxAccounting
         var reports = await ReadReportsAsync(db, terminalId, ct);
         if (FindCurrentStatus(reports) is { } report) return new(report.Bytes, "terminal_report");
         var initialized = FindCurrentInitialization(reports, await ReadInitializationsAsync(db, terminalId, ct));
-        return initialized == null ? null : new(DlogCashboxWire.EncodeEmptyStatus(initialized.OpeningTime, initialized.Detail.BoxNumber), "operator_initialized");
+        return initialized == null ? null : new(DlogCashboxWire.EncodeEmptyStatus(initialized.OpeningTime, initialized.Detail.BoxNumber), initialized.Source);
+    }
+
+    /// <summary>Uses the legacy initial-status sentinel only for an unreported, configured coin phone.</summary>
+    public static async Task<InitializationResult> InitializeDefaultAsync(HostPlatformDbContext db, Guid terminalId,
+        string actor, bool firstInstall, CancellationToken ct)
+    {
+        var reports = await ReadReportsAsync(db, terminalId, ct);
+        if (reports.Count != 0) return new(null, "A terminal status or collection already exists. The initial default must not replace it.");
+        var prior = FindCurrentInitialization(reports, await ReadInitializationsAsync(db, terminalId, ct));
+        if (prior != null) return prior.Source == DefaultSource ? new(View(prior, true), null)
+            : new(null, "An observed empty-box initialization already exists.");
+        if (!await HasConfiguredCoinsAsync(db, terminalId, ct))
+            return new(null, "A published assignment with an enabled positive-value coin slot is required.");
+        if (firstInstall && await db.DownloadBatches.AsNoTracking().AnyAsync(row => row.TerminalId == terminalId && row.Status == DownloadBatchStatus.Completed, ct))
+            return new(null, "An existing phone requires explicit initialization; its physical box condition is not known.");
+
+        var clock = new DateTime(1990, 1, 1);
+        var detail = new InitializationDetail(null, "00000000", clock.ToString(ClockFormat, CultureInfo.InvariantCulture));
+        var id = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes($"coinline-cashbox-default:{terminalId:N}")).AsSpan(0, 16));
+        var audit = new AuditEvent { Id = id, Category = "cashbox", Action = DefaultInitializationAction,
+            Actor = actor, Resource = terminalId.ToString(), TerminalId = terminalId, DetailJson = JsonSerializer.Serialize(detail, Json) };
+        db.AuditEvents.Add(audit);
+        try { await db.SaveChangesAsync(ct); }
+        catch (DbUpdateException)
+        {
+            db.Entry(audit).State = EntityState.Detached;
+            if (!await db.AuditEvents.AsNoTracking().AnyAsync(row => row.Id == id && row.TerminalId == terminalId && row.Action == DefaultInitializationAction, ct)) throw;
+        }
+        var latest = FindCurrentInitialization(await ReadReportsAsync(db, terminalId, ct), await ReadInitializationsAsync(db, terminalId, ct));
+        return latest?.Source == DefaultSource ? new(View(latest, true), null)
+            : new(null, "An observed initialization or terminal report arrived concurrently; the initial default is not current.");
+    }
+
+    private static async Task<bool> HasConfiguredCoinsAsync(HostPlatformDbContext db, Guid terminalId, CancellationToken ct)
+    {
+        var rows = await db.TerminalTableAssignments.AsNoTracking().Where(row => row.TerminalId == terminalId && row.TableSet!.Status == TableSetStatus.Published)
+            .SelectMany(row => row.TableSet!.Versions).Where(row => row.TableDefinition!.TableNumber == CoinValidationWire.MessageType && row.ValidationPassed)
+            .Include(row => row.TablePayload).Take(2).ToListAsync(ct);
+        return rows.Count == 1 && CoinValidationWire.ReadSlots(TableDistributionService.GetEffectivePayload(rows[0])) is { } slots &&
+            slots.Any(slot => slot.Accepted && slot.ValueMinorUnits > 0);
     }
 
     public static async Task<InitializationResult> InitializeEmptyAsync(HostPlatformDbContext db, Guid terminalId, string boxNumber,
@@ -85,7 +131,7 @@ public static class TerminalCashboxAccounting
         var detail = new InitializationDetail(prior, boxNumber, openingTime.ToString(ClockFormat, CultureInfo.InvariantCulture));
         var id = new Guid(SHA256.HashData(Encoding.UTF8.GetBytes($"coinline-cashbox-empty:{terminalId:N}:{prior:N}")).AsSpan(0, 16));
         var existing = FindCurrentInitialization(reports, await ReadInitializationsAsync(db, terminalId, ct));
-        if (existing != null) return Match(existing, detail);
+        if (existing?.Source == ObservedSource) return Match(existing, detail);
         var audit = new AuditEvent { Id = id, Category = "cashbox", Action = InitializationAction,
             Actor = actor, Resource = terminalId.ToString(), TerminalId = terminalId, DetailJson = JsonSerializer.Serialize(detail, Json) };
         db.AuditEvents.Add(audit);
@@ -107,19 +153,21 @@ public static class TerminalCashboxAccounting
         ? new(View(row, true), null) : new(null, "An empty-box initialization already exists for this reporting period.");
 
     private static EmptyBoxInitialization View(InitializationRow row, bool current) =>
-        new(row.Id, row.RecordedAtUtc, row.Detail.BoxNumber, row.OpeningTime, current);
+        new(row.Id, row.RecordedAtUtc, row.Detail.BoxNumber, row.OpeningTime, current, row.Source);
 
     private static string? ExpectedNewBox(List<Reading> reports) => reports.LastOrDefault() is { } last &&
         DlogCashboxWire.TryReadCollection(last.Bytes, out var collection) ? collection.NewBoxNumber : null;
 
     private static InitializationRow? FindCurrentInitialization(List<Reading> reports, List<InitializationRow> initializations) =>
-        FindCurrentStatus(reports) != null ? null : initializations.LastOrDefault(row => row.Detail.PriorReportId == reports.LastOrDefault()?.Id &&
-            (ExpectedNewBox(reports) is not { } expected || row.Detail.BoxNumber == expected));
+        FindCurrentStatus(reports) != null ? null : initializations.Where(row => row.Detail.PriorReportId == reports.LastOrDefault()?.Id &&
+            (ExpectedNewBox(reports) is not { } expected || row.Detail.BoxNumber == expected) &&
+            (row.Source == ObservedSource || reports.Count == 0)).OrderBy(row => row.Source == ObservedSource).LastOrDefault();
 
     private static async Task<List<InitializationRow>> ReadInitializationsAsync(HostPlatformDbContext db, Guid terminalId, CancellationToken ct)
     {
-        var rows = await db.AuditEvents.AsNoTracking().Where(row => row.TerminalId == terminalId && row.Category == "cashbox" && row.Action == InitializationAction)
-            .OrderBy(row => row.CreatedAtUtc).ThenBy(row => row.Id).Select(row => new { row.Id, row.CreatedAtUtc, row.DetailJson }).ToListAsync(ct);
+        var rows = await db.AuditEvents.AsNoTracking().Where(row => row.TerminalId == terminalId && row.Category == "cashbox" &&
+            (row.Action == InitializationAction || row.Action == DefaultInitializationAction))
+            .OrderBy(row => row.CreatedAtUtc).ThenBy(row => row.Id).Select(row => new { row.Id, row.CreatedAtUtc, row.DetailJson, row.Action }).ToListAsync(ct);
         var result = new List<InitializationRow>();
         foreach (var row in rows)
         {
@@ -128,7 +176,8 @@ public static class TerminalCashboxAccounting
                 var detail = JsonSerializer.Deserialize<InitializationDetail>(row.DetailJson, Json);
                 if (detail == null || !DateTime.TryParseExact(detail.OpeningClock, ClockFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var clock)) continue;
                 _ = DlogCashboxWire.EncodeEmptyStatus(clock, detail.BoxNumber);
-                result.Add(new(row.Id, row.CreatedAtUtc, detail, clock));
+                if (row.Action == DefaultInitializationAction && (detail.PriorReportId != null || detail.BoxNumber != "00000000" || clock != new DateTime(1990, 1, 1))) continue;
+                result.Add(new(row.Id, row.CreatedAtUtc, detail, clock, row.Action == DefaultInitializationAction ? DefaultSource : ObservedSource));
             }
             catch (Exception ex) when (ex is JsonException or ArgumentException) { }
         }

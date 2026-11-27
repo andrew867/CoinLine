@@ -607,6 +607,11 @@ internal sealed class NccLinkProcessor(
             if (applicationType == TableDownloadRequestType && (packet.Data[1] & DlogCashboxWire.StatusRequestFlag) != 0)
             {
                 cashboxStatus = await TerminalCashboxAccounting.ReadCurrentStatusBytesAsync(db, terminal.Id, stoppingToken);
+                if (cashboxStatus == null && (packet.Data[1] & DlogTableRequestWire.Install) != 0)
+                {
+                    _ = await TerminalCashboxAccounting.InitializeDefaultAsync(db, terminal.Id, "ncc-install", firstInstall: true, stoppingToken);
+                    cashboxStatus = await TerminalCashboxAccounting.ReadCurrentStatusBytesAsync(db, terminal.Id, stoppingToken);
+                }
                 if (packet.Data[1] == DlogCashboxWire.StatusRequestFlag)
                 {
                     await SendDialogueReplyAsync(stream, packet, InstallEndPayload(cashboxStatus), "cashbox status request");

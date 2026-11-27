@@ -54,10 +54,25 @@ public sealed class TerminalCashboxController(HostPlatformDbContext db) : Contro
             ledger.Statuses.Select(row => (row.Id, row.ReceivedAtUtc))
                 .Concat(ledger.Collections.Select(row => (row.Id, row.ReceivedAtUtc)))
                 .ToDictionary(row => row.Id, row => references[row.ReceivedAtUtc]), ledger.Initializations,
-            ledger.CanInitializeEmpty, ledger.ExpectedNewBoxNumber));
+            ledger.CanInitializeEmpty, ledger.ExpectedNewBoxNumber, ledger.CanInitializeDefault));
     }
 
     public sealed record EmptyBoxInput(string BoxNumber, string OpeningClock, bool ConfirmEmpty);
+    public sealed record DefaultBoxInput(bool ConfirmInitialDefault);
+
+    [HttpPost("initialize-default")]
+    public async Task<ActionResult<TerminalCashboxAccounting.EmptyBoxInitialization>> InitializeDefault(Guid terminalId,
+        [FromBody] DefaultBoxInput input, CancellationToken ct)
+    {
+        if (!await db.Terminals.AnyAsync(terminal => terminal.Id == terminalId && terminal.DeactivatedAtUtc == null, ct)) return NotFound();
+        if (!input.ConfirmInitialDefault) return BadRequest(new { error = "Confirm that this is a new or deliberately initialized box with no retained cashbox accounting to restore." });
+        if (await db.NccSessions.AnyAsync(session => session.TerminalId == terminalId && session.Status == NccSessionStatus.Active, ct))
+            return Conflict(new { error = "Wait until the phone's active NCC session closes before initializing its cashbox." });
+        var result = await TerminalCashboxAccounting.InitializeDefaultAsync(db, terminalId,
+            OperatorContext.Current?.OperatorId ?? "operator", firstInstall: false, ct);
+        if (result.Conflict != null) return Conflict(new { error = result.Conflict });
+        return Ok(result.Initialization);
+    }
 
     [HttpPost("initialize-empty")]
     public async Task<ActionResult<TerminalCashboxAccounting.EmptyBoxInitialization>> InitializeEmpty(Guid terminalId,

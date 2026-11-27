@@ -64,7 +64,7 @@ internal sealed record CallUploadCashboxRestoreObservation(DateTime ObservedAtUt
                 !root.TryGetProperty("responseBytes", out var count) || count.ValueKind != JsonValueKind.Number || !count.TryGetInt32(out var bytes) ||
                 bytes != (available.GetBoolean() ? DlogCashboxWire.StatusLength + 1 : 1)) return null;
             var source = available.GetBoolean() && root.TryGetProperty("source", out var sourceValue) && sourceValue.ValueKind == JsonValueKind.String &&
-                sourceValue.GetString() is "terminal_report" or "operator_initialized" ? sourceValue.GetString() : null;
+                sourceValue.GetString() is "terminal_report" or "operator_initialized" or "protocol_default" ? sourceValue.GetString() : null;
             return new(time, available.GetBoolean(), sent.GetBoolean(), bytes, source);
         }
         catch (JsonException) { return null; }
