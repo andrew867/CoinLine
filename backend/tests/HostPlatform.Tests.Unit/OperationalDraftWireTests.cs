@@ -57,7 +57,7 @@ public sealed class OperationalDraftWireTests
     {
         var spec = OperationalDraftWire.Specs(26).Single(row => row.Profile == NativeTableLayouts.Later);
         var valid = Values(spec);
-        Assert.Empty(OperationalDraftWire.Specs(31));
+        Assert.Empty(OperationalDraftWire.Specs(32));
         Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(26, spec.Profile, 71, valid));
         var missing = new Dictionary<string, string?>(valid); missing.Remove("terminalType");
         Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(26, spec.Profile, 72, missing));
@@ -67,7 +67,52 @@ public sealed class OperationalDraftWireTests
         Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(26, spec.Profile, 72, new Dictionary<string, string?>(valid) { ["spare.display"] = "255" }));
     }
 
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public void Installation_authoring_requires_separate_credentials_and_explicit_predial_decisions(bool later)
+    {
+        var specs = OperationalDraftWire.Specs(31); Assert.Equal(2, specs.Count);
+        var spec = specs.Single(row => row.Profile == (later ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay));
+        var values = Values(spec); var credentials = InstallationCredentials();
+        values["transmitDelay"] = "19"; values["receiveGap"] = "8"; values["retries"] = "3"; values["coinBoxTimeout"] = "300";
+        values["predial"] = "*0#"; values["usePredial"] = "true"; values["predialForToll"] = "true";
+        Assert.Equal(later, values.ContainsKey("analogPrefix"));
+        if (later) { values["analogPrefix"] = "#0"; values["useAnalogPrefix"] = "true"; values["cashBoxQuery"] = "true"; values["delayCraftReport"] = "true"; }
+        var actual = OperationalDraftWire.Create(31, spec.Profile, 37, values, credentials);
+        var expected = new byte[37]; expected[0] = 31;
+        expected[1] = 0x22; expected[2] = 0x22; expected[3] = 0x22; expected[4] = 0x2E;
+        Array.Fill(expected, (byte)0x33, 5, 5); expected[10] = later ? (byte)0x43 : (byte)3;
+        expected[11] = 19; expected[12] = 8; expected[13] = 3; expected[15] = 44; expected[16] = 1;
+        expected[17] = 0xBA; expected[18] = 0xC0;
+        if (later) { expected[14] = 2; expected[25] = 0xCA; expected[31] = 1; }
+        Assert.Equal(expected, actual);
+        var layout = NativeTableLayouts.Find(31, actual, spec.Profile)!;
+        Assert.All(layout.Sections.SelectMany(section => section.Fields).Where(field => field.IsCredential), field => Assert.Null(field.Read(actual)));
+        Assert.Equal(actual, layout.Apply(actual, new Dictionary<string, string>()));
+        var edited = layout.Apply(actual, new Dictionary<string, string> { ["retries"] = "4" }); expected[13] = 4;
+        Assert.Equal(expected, edited);
+
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, values));
+        var malformed = new Dictionary<string, string?>(credentials) { ["craftAccessCode"] = new string('1', 6) };
+        var rejected = Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, values, malformed));
+        Assert.DoesNotContain(malformed["craftAccessCode"]!, rejected.Message);
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37,
+            new Dictionary<string, string?>(values) { ["craftAccessCode"] = credentials["craftAccessCode"] }, credentials));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, values,
+            new Dictionary<string, string?>(credentials) { ["retries"] = "3" }));
+        var missing = new Dictionary<string, string?>(values); missing.Remove("alternatePredial");
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37, missing, credentials));
+        Assert.Throws<InvalidOperationException>(() => OperationalDraftWire.Create(31, spec.Profile, 37,
+            new Dictionary<string, string?>(values) { ["predial"] = "A" }, credentials));
+    }
+
     internal static Dictionary<string, string?> Values(OperationalDraftSpec spec) => spec.Sections.SelectMany(section => section.Fields)
-        .ToDictionary(field => field.Key, field => (string?)(field.Editor == "checkbox" ? "false" :
+        .Where(field => field.Editor != "password")
+        .ToDictionary(field => field.Key, field => (string?)(field.Editor == "text" ? "" : field.Editor == "checkbox" ? "false" :
             (field.Choices?.First().Value ?? field.Min).ToString(CultureInfo.InvariantCulture)));
+
+    private static Dictionary<string, string?> InstallationCredentials() => new()
+    {
+        ["craftAccessCode"] = new string('2', 7), ["keyCardNumber"] = new string('3', 10)
+    };
 }
