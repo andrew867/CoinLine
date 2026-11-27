@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { afterEach, expect, it, vi } from 'vitest'
 import { apiGet, apiPostRaw } from '../api/client'
@@ -69,6 +69,43 @@ it('filters group choices by the selected site customer and clears an incompatib
   expect(screen.getByRole('option', { name: 'Second group' })).toBeVisible()
   expect(screen.getByRole('option', { name: 'Global group' })).toBeVisible()
   expect(screen.getByLabelText('Phone group')).toHaveValue('')
+})
+
+it('registers multiple group memberships atomically with the chosen primary, customer filtering and membership limit', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { phones: 4, memberships: 4 })
+  vi.mocked(apiGet).mockResolvedValue({ ...options, canAssignGroup: true, maximumGroups: 3, groups: [
+    { id: 'group-one', name: 'First group', customerId: 'customer-one' },
+    { id: 'group-two', name: 'Second group', customerId: 'customer-two' },
+    { id: 'global-one', name: 'Shared one', customerId: null },
+    { id: 'global-two', name: 'Shared two', customerId: null },
+    { id: 'global-three', name: 'Shared three', customerId: null },
+  ] })
+  vi.mocked(apiPostRaw).mockResolvedValue(Response.json({ id: 'fixture-phone' }, { status: 201 }))
+  renderPage()
+  await screen.findByRole('option', { name: 'First group' })
+  const primary = screen.getByLabelText('Phone group')
+  fireEvent.change(primary, { target: { value: 'group-one' } })
+  function add(id: string) {
+    fireEvent.change(screen.getByLabelText('Additional group'), { target: { value: id } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add group' }))
+  }
+  add('global-one'); add('global-two')
+  expect(screen.getByText('Phone groups (3 of 3)')).toBeVisible()
+  expect(screen.getByRole('button', { name: 'Add group' })).toBeDisabled()
+  expect(within(screen.getByRole('list', { name: 'Additional phone groups' })).getAllByRole('listitem')).toHaveLength(2)
+  fireEvent.change(primary, { target: { value: 'global-one' } })
+  expect(within(screen.getByRole('list', { name: 'Additional phone groups' })).getByText('First group')).toBeVisible()
+  fireEvent.change(screen.getByTestId('terminal-create-site'), { target: { value: 'site-two' } })
+  expect(primary).toHaveValue('global-one')
+  expect(screen.getByText('Phone groups (2 of 3)')).toBeVisible()
+  add('group-two')
+  expect(apiPostRaw).not.toHaveBeenCalled()
+  fireEvent.change(screen.getByTestId('terminal-create-hex'), { target: { value: '0000000101' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Create terminal' }))
+  expect(await screen.findByText('Phone registered. You can register another phone.')).toBeVisible()
+  expect(apiPostRaw).toHaveBeenCalledExactlyOnceWith('/api/terminals', expect.objectContaining({
+    siteId: 'site-two', terminalGroupId: 'global-one', groupIds: ['global-one', 'global-two', 'group-two'], terminalIdHex: '0000000101',
+  }))
 })
 
 it('retains a new-phone review after navigating to the registered phone, without scheduling a download', async () => {
