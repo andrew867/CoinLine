@@ -67,6 +67,11 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
         var graphical = FirmwareTableProfiles.Find(FirmwareTableProfiles.GraphicalMultiPay180)!;
         Assert.Equal(43, rows.Values.Count(record => record.GetProperty("firmware").EnumerateArray().Any(profile =>
             profile.GetProperty("profileId").GetString() == graphical.Id && profile.GetProperty("terminalAcknowledged").GetBoolean())));
+        var importOnly = rows.Values.SelectMany(record => record.GetProperty("layouts").EnumerateArray()
+            .Where(layout => !layout.GetProperty("draftTemplateAvailable").GetBoolean() && !layout.GetProperty("explicitAuthoringAvailable").GetBoolean())
+            .Select(layout => (record.GetProperty("number").GetInt32(), layout.GetProperty("length").GetInt32())))
+            .OrderBy(pair => pair.Item1).ThenBy(pair => pair.Item2).ToArray();
+        Assert.Equal(new[] { (21, 40), (49, 199) }, importOnly);
 
         var definitions = await _client.GetFromJsonAsync<JsonElement>("/api/tables/definitions");
         foreach (var definition in definitions.EnumerateArray())
