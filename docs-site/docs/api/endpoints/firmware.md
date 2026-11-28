@@ -2,6 +2,8 @@
 
 **Route prefix:** `/api/firmware`
 
+The execution-policy response distinguishes `allowLiveFlashing` and `liveDlaEnabled` from `transportMode` and `liveTransportConfigured`. Transport configuration reports whether settings for the selected live mode are present, not whether a remote endpoint is reachable or a terminal is compatible. No endpoint addresses or credentials are returned. Both execution switches remain disabled by default.
+
 Packages, artifacts, compatibility rules, targets, jobs:
 
 | Area | Examples |

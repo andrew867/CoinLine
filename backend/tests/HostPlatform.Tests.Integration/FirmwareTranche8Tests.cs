@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using HostPlatform.Domain;
+using Microsoft.AspNetCore.Hosting;
 
 namespace HostPlatform.Tests.Integration;
 
@@ -26,7 +27,36 @@ public sealed class FirmwareTranche8Tests(ApiFixture factory)
         var pol = await _client.GetFromJsonAsync<JsonElement>("/api/firmware/execution-policy", JsonOpts);
         Assert.False(pol.GetProperty("allowLiveFlashing").GetBoolean());
         Assert.False(pol.GetProperty("liveDlaEnabled").GetBoolean());
+        Assert.Equal("simulation", pol.GetProperty("transportMode").GetString());
+        Assert.False(pol.GetProperty("liveTransportConfigured").GetBoolean());
         Assert.Contains("HARDWARE_VALIDATION", pol.GetProperty("hardwareValidationNotice").GetString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("simulation", 0, "simulation", false)]
+    [InlineData("tcp", 0, "tcp", false)]
+    [InlineData("tcp", 12345, "tcp", true)]
+    [InlineData("unrecognized", 12345, "unknown", false)]
+    public async Task Enabled_policy_reports_configuration_without_exposing_endpoint_or_certifying_transfer(
+        string transport, int port, string expectedMode, bool configured)
+    {
+        await using var host = factory.WithWebHostBuilder(web => web
+            .UseSetting("Firmware:AllowLiveFlashing", "true")
+            .UseSetting("DlTransport:LiveDlaEnabled", "true")
+            .UseSetting("DlTransport:TransportKind", transport)
+            .UseSetting("DlTransport:TcpHost", "fixture.invalid")
+            .UseSetting("DlTransport:TcpPort", port.ToString()));
+        using var client = TestOperatorAuthentication.CreateAuthenticatedClient(host, "itest@local", "Admin");
+        var pol = await client.GetFromJsonAsync<JsonElement>("/api/firmware/execution-policy");
+        Assert.True(pol.GetProperty("allowLiveFlashing").GetBoolean());
+        Assert.True(pol.GetProperty("liveDlaEnabled").GetBoolean());
+        Assert.Equal(expectedMode, pol.GetProperty("transportMode").GetString());
+        Assert.Equal(configured, pol.GetProperty("liveTransportConfigured").GetBoolean());
+        var notice = pol.GetProperty("hardwareValidationNotice").GetString();
+        Assert.Contains("Live execution policy enabled", notice);
+        Assert.Contains(configured ? "compatibility remain separate" : "no configured live endpoint", notice);
+        Assert.DoesNotContain("fixture.invalid", pol.GetRawText());
+        Assert.False(pol.TryGetProperty("tcpPort", out _));
     }
 
     [Fact]

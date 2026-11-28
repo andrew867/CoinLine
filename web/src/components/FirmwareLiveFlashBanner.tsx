@@ -4,6 +4,8 @@ import { apiGet } from '../api/client'
 type Policy = {
   allowLiveFlashing: boolean
   liveDlaEnabled?: boolean
+  transportMode?: 'simulation' | 'serial' | 'tcp' | 'pipe' | 'unknown'
+  liveTransportConfigured?: boolean
   hardwareValidationNotice: string
 }
 
@@ -38,19 +40,24 @@ export function FirmwareLiveFlashBanner() {
   if (bothOn) {
     return (
       <div
-        role="alert"
+        role="status"
         style={{
-          background: '#fff8e6',
-          border: '2px solid #e65100',
+          background: '#f8fafc',
+          border: '1px solid #cbd5e1',
           padding: '10px 12px',
           marginBottom: 16,
           borderRadius: 4,
           maxWidth: 960,
         }}
       >
-        <strong>Live firmware flashing gates are both on</strong>
+        <strong>Live execution policy enabled</strong>
         <p style={{ margin: '6px 0 0', fontSize: 14, lineHeight: 1.4 }}>
-          This is unsafe until DLA/XMODEM transport is certified — {pol.hardwareValidationNotice}
+          Both host switches are enabled.{' '}
+          {pol.transportMode === 'simulation' ? 'Transport mode is simulation; no live endpoint is configured.' :
+            pol.transportMode && pol.liveTransportConfigured === true ? `${pol.transportMode.toUpperCase()} transport settings are present.` :
+            pol.transportMode && pol.liveTransportConfigured === false ? `${pol.transportMode.toUpperCase()} transport needs configuration.` :
+            'Transport configuration is not reported by this server.'}
+          {' '}Explicit job approval and terminal compatibility are separate from these settings.
         </p>
       </div>
     )

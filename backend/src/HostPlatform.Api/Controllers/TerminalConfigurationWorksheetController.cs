@@ -5,6 +5,7 @@ using HostPlatform.Api.Audit;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Infrastructure.Rating;
 using HostPlatform.Infrastructure.Tables;
 using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Mvc;
@@ -38,6 +39,9 @@ public sealed class TerminalConfigurationWorksheetController(HostPlatformDbConte
         var profile = FirmwareTableProfiles.Find(phone.FirmwareVersion?.TableProfileId);
         var current = basis?.Versions.ToLookup(row => row.TableDefinition!.TableNumber) ?? Array.Empty<TableVersion>().ToLookup(row => row.TableDefinition!.TableNumber);
         var family = Review(phone, basis?.Versions ?? []);
+        var hostRating = OperatorPermissions.Allows(HttpContext, "rate-plans", PermissionOperation.Read) &&
+            OperatorPermissions.Allows(HttpContext, "phones", PermissionOperation.Read)
+            ? await HostRatePlanResolver.ForTerminalAsync(db, id, ct) : null;
         var catalogue = RecordReferenceCatalogue.Build(current.Select(group => group.Key));
         var documented = family?.Tables.SelectMany(group => group.Candidates).ToHashSet() ?? [];
         var rows = catalogue.Where(row => row.Kind is not ("operational" or "scheduler_record") &&
@@ -55,6 +59,8 @@ public sealed class TerminalConfigurationWorksheetController(HostPlatformDbConte
         return Ok(new { phone.Id, phone.DisplayName, phone.TerminalIdHex, firmware = phone.FirmwareVersion?.Label,
             baseSetId = assignment?.TableSetId, baseSetName = basis?.Name, assignmentRevision = assignment?.Version,
             canUpdate = OperatorPermissions.Allows(HttpContext, "table-assignments", PermissionOperation.Update) && phone.DeactivatedAtUtc == null,
+            hostRating = hostRating == null ? null : new { hostRating.Name, hostRating.Source,
+                hasPublishedPlan = hostRating.PublishedVersionId.HasValue, hostRating.RestoreNationalTollPrefix },
             family, records = rows });
     }
 

@@ -89,6 +89,7 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
         Assert.Equal(45, rows.Values.Count(record => record.GetProperty("firmware").EnumerateArray().Any(profile =>
             profile.GetProperty("profileId").GetString() == graphical.Id && profile.GetProperty("terminalAcknowledged").GetBoolean())));
         Assert.Contains("Sixteen downloaded bitmap frames", Profile(131, graphical.Id).GetProperty("behaviorObservation").GetString());
+        Assert.Contains("disabled record restored the paid prompt", Profile(58, graphical.Id).GetProperty("behaviorObservation").GetString());
         Assert.Equal(JsonValueKind.Null, Profile(133, graphical.Id).GetProperty("behaviorObservation").ValueKind);
         Assert.Contains("No image data was transferred", Profile(94, graphical.Id).GetProperty("behaviorObservation").GetString());
         Assert.True(Profile(94, graphical.Id).GetProperty("terminalAcknowledged").GetBoolean());
