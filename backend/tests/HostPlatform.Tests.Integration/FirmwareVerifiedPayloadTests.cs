@@ -96,6 +96,7 @@ public sealed class FirmwareVerifiedPayloadTests
     private sealed class RecordingAdapter : IDlXmodemTransportAdapter
     {
         public List<byte[]> Payloads { get; } = [];
+        public void ValidateLiveConfiguration(DlaTransferObservation? observation) { }
         public Task<DlaTransportSimulationResult> SimulateTransferAsync(DlaTransportSimulationRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new DlaTransportSimulationResult(true, "Synthetic test fixture"));
         public Task<DlaLiveTransferResult> ExecuteLiveTransferAsync(DlaLiveTransferRequest request, DlaTransferObservation? observation,

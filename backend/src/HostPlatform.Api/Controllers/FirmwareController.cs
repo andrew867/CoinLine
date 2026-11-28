@@ -26,7 +26,8 @@ public sealed class FirmwareController(
     HostPlatformDbContext db,
     FirmwareJobOrchestrator orchestrator,
     IFirmwareExecutionPolicy executionPolicy,
-    IOptions<DlTransportEnvironmentOptions> dlOptions) : ControllerBase
+    IOptions<DlTransportEnvironmentOptions> dlOptions,
+    IOptions<PlatformOptions> platformOptions) : ControllerBase
 {
     /// <summary>UI / operators — surface whether live modem flashing is enabled (default false).</summary>
     [Authorize(Policy = Policies.RequireOperator)]
@@ -45,18 +46,7 @@ public sealed class FirmwareController(
         });
     }
 
-    private (string Mode, bool Configured) TransportPresentation()
-    {
-        var options = dlOptions.Value;
-        return (options.TransportKind ?? "simulation").Trim().ToLowerInvariant() switch
-        {
-            "simulation" => ("simulation", false),
-            "serial" => ("serial", !string.IsNullOrWhiteSpace(options.SerialPort)),
-            "tcp" => ("tcp", !string.IsNullOrWhiteSpace(options.TcpHost) && options.TcpPort is > 0 and <= 65535),
-            "pipe" => ("pipe", !string.IsNullOrWhiteSpace(options.PipeName)),
-            _ => ("unknown", false)
-        };
-    }
+    private (string Mode, bool Configured) TransportPresentation() => dlOptions.Value.DescribeLiveTransport();
 
     private string PolicyNotice(string disabledNotice)
     {
@@ -330,18 +320,64 @@ public sealed class FirmwareController(
             x.ArtifactSizeBytes,
             x.MetadataJson,
             x.PrimaryArtifactId,
-            artifacts,
+            artifacts = artifacts.Select(a => new { a.Id, a.Kind, a.Sha256Hex, a.SizeBytes, a.StorageRef, a.MetadataJson,
+                payloadPresent = FirmwareArtifactStorage.PayloadPresent(platformOptions.Value.PayloadStorage.RootPath, a.StorageRef, a.SizeBytes) }),
             targets,
             rules,
             manifests,
             hardwareValidationNotice = PolicyNotice(
-                "DLA/XMODEM transfer and flash programming remain HARDWARE_VALIDATION_REQUIRED; registry holds metadata only."),
+                "DLA/XMODEM transfer and programming remain HARDWARE_VALIDATION_REQUIRED; stored artifacts are verified separately."),
             skuRoutingNotice =
                 "RequiredTargetSkuContains on compatibility rules is a routing hint only until Terminal stores hardware SKU on host (HARDWARE_VALIDATION_REQUIRED)."
         });
     }
 
     public sealed record ArtifactDto(string Kind, string Sha256Hex, long SizeBytes, string? StorageRef, string? MetadataJson);
+
+    [Authorize(Policy = Policies.RequireAdmin)]
+    [HttpPost("packages/{id:guid}/artifacts/upload")]
+    [Consumes("application/octet-stream")]
+    [RequestSizeLimit(FirmwareArtifactStorage.MaximumBytes)]
+    public async Task<ActionResult<object>> UploadPrimaryArtifact(Guid id, CancellationToken ct)
+    {
+        var expected = await db.FirmwarePackages.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct);
+        if (expected == null) return NotFound();
+        if (Request.ContentLength is { } length && (length != expected.ArtifactSizeBytes || length is <= 0 or > FirmwareArtifactStorage.MaximumBytes))
+            return BadRequest(new { error = "Uploaded artifact length must match the registered package size (1 byte to 50 MB)." });
+        try
+        {
+            var storageRef = await FirmwareArtifactStorage.StorePrimaryAsync(platformOptions.Value.PayloadStorage.RootPath, Request.Body,
+                expected.ArtifactSizeBytes, expected.ArtifactChecksum, ct);
+            var digest = Convert.ToHexString(expected.ArtifactChecksum).ToLowerInvariant();
+            await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            var pkg = await db.FirmwarePackages.SingleOrDefaultAsync(p => p.Id == id, ct);
+            if (pkg == null || pkg.ArtifactSizeBytes != expected.ArtifactSizeBytes || !pkg.ArtifactChecksum.SequenceEqual(expected.ArtifactChecksum))
+                return Conflict(new { error = "The package changed during upload. Review the package and retry." });
+            var art = await db.FirmwareArtifacts.Where(a => a.FirmwarePackageId == id && a.Kind == "primary" && a.Sha256Hex == digest &&
+                    a.SizeBytes == expected.ArtifactSizeBytes && a.StorageRef == storageRef)
+                .OrderBy(a => a.Id).FirstOrDefaultAsync(ct);
+            var created = art == null;
+            if (art == null)
+            {
+                art = new FirmwareArtifact { FirmwarePackageId = id, Kind = "primary", Sha256Hex = digest,
+                    SizeBytes = expected.ArtifactSizeBytes, StorageRef = storageRef };
+                db.FirmwareArtifacts.Add(art);
+            }
+            if (created || pkg.PrimaryArtifactId != art.Id)
+            {
+                pkg.PrimaryArtifactId = art.Id;
+                ApiAudit.Write(db, HttpContext, "firmware.artifact", "upload_verified", $"FirmwareArtifact:{art.Id}",
+                    new { packageId = id, art.Sha256Hex, art.SizeBytes }, null);
+                await db.SaveChangesAsync(ct);
+            }
+            if (transaction != null) await transaction.CommitAsync(ct);
+            var result = new { art.Id, art.Sha256Hex, art.SizeBytes, payloadPresent = true };
+            return created ? Created($"/api/firmware/packages/{id}", result) : Ok(result);
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsSerializationConflict(ex.GetBaseException()))
+        { return Conflict(new { error = "Concurrent registry changes conflicted with upload. Retry the same file." }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
 
     [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("packages/{id:guid}/artifacts")]
@@ -507,6 +543,7 @@ public sealed class FirmwareController(
             steps = orderedSteps,
             safetyChecks = checks,
             rollBackPlan = rollback,
+            liveExecutionConfigured = executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled && TransportPresentation().Configured,
             hardwareValidationNotice = j.SimulationMode && executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled
                 ? "This job is a simulation. Live execution must use a separately approved non-simulation job."
                 : PolicyNotice("Live modem flashing disabled unless Firmware:AllowLiveFlashing; see the firmware transport reference.")

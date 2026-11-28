@@ -231,7 +231,8 @@ public sealed class FirmwareJobOrchestrator(
         if (job.Status != FirmwareUpdateJobStatus.Completed || job.Steps.Any(step => step.Name.StartsWith("live_", StringComparison.Ordinal)))
             throw new InvalidOperationException("Live execution requires an approved simulated job that has not already been attempted.");
 
-        // Verify the complete artifact before claiming a transfer. Validation failure does not consume approval.
+        // Endpoint and artifact preflight are read-only. A configuration error must not consume approval.
+        dlTransport.ValidateLiveConfiguration(observation);
         var (payload, prepareDetail) = await LoadLivePayloadAsync(job, ct);
         await ClaimLiveExecutionAsync(job, ct);
 
@@ -360,48 +361,11 @@ public sealed class FirmwareJobOrchestrator(
         var storageRef = (artifact?.StorageRef ?? "").Trim();
         if (artifact == null || artifact.FirmwarePackageId != job.FirmwarePackageId || root.Length == 0 || storageRef.Length == 0)
             throw new InvalidOperationException("Live transfer requires a registered artifact and configured payload storage.");
-        if (artifact.SizeBytes is <= 0 or > 50_000_000)
-            throw new InvalidOperationException("Artifact must have a registered size between 1 byte and 50 MB.");
         var digest = artifact.Sha256Hex.Trim();
-        if (digest.Length != 64 || !digest.All(Uri.IsHexDigit))
-            throw new InvalidOperationException("Artifact must have a registered SHA-256 digest.");
         if (job.FirmwarePackage == null || !ValidatePackageArtifactChecksum(job.FirmwarePackage, artifact))
             throw new InvalidOperationException("Artifact checksum does not match the registered package.");
-        if (storageRef.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(storageRef))
-            throw new InvalidOperationException("Artifact reference must be a relative path under payload storage.");
-
-        try
-        {
-            var rootFull = Path.GetFullPath(root);
-            var full = Path.GetFullPath(Path.Combine(rootFull, storageRef));
-            var relative = Path.GetRelativePath(rootFull, full);
-            if (relative == "." || Path.IsPathRooted(relative) || relative == ".." ||
-                relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                throw new InvalidOperationException("Artifact reference must stay within payload storage.");
-
-            var current = rootFull;
-            foreach (var part in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
-            {
-                current = Path.Combine(current, part);
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException("Artifact reference must not use a redirected storage path.");
-            }
-            await using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
-            if (stream.Length != artifact.SizeBytes)
-                throw new InvalidOperationException("Artifact blob length does not match the registered size.");
-            var bytes = new byte[(int)artifact.SizeBytes];
-            await stream.ReadExactlyAsync(bytes, ct);
-            if (await stream.ReadAsync(new byte[1], ct) != 0)
-                throw new InvalidOperationException("Artifact blob length changed while reading.");
-            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
-            if (!string.Equals(hash, digest, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Artifact blob SHA-256 does not match the registry.");
-            return (bytes, $"Verified {bytes.Length} byte(s) against the registered size and SHA-256.");
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            throw new InvalidOperationException("Registered artifact could not be read from payload storage.");
-        }
+        var bytes = await FirmwareArtifactStorage.ReadVerifiedAsync(root, storageRef, artifact.SizeBytes, digest, ct);
+        return (bytes, $"Verified {bytes.Length} byte(s) against the registered size and SHA-256.");
     }
 
     public async Task ApproveJobAsync(Guid jobId, string rollbackNotes, CancellationToken ct)

@@ -60,7 +60,7 @@ export function FirmwarePackagesPage() {
     <div>
       <h1>Firmware packages</h1>
       <p style={{ maxWidth: 720, fontSize: 14, color: '#444' }}>
-        Registry metadata only — artifact <code>ChecksumHex</code> must be a full SHA256 (64 hex characters).
+        Register the expected artifact size and full SHA-256, then open the package to upload the matching primary file.
         DLA/code-server wire behavior is <strong>HARDWARE_VALIDATION_REQUIRED</strong>.
       </p>
 

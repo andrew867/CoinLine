@@ -45,6 +45,16 @@ it('does not offer simulation, cancellation or another live execution for a clai
   expect(screen.queryByRole('button', { name: /Execute live/ })).not.toBeInTheDocument()
 })
 
+it('retains approval and disables the live action when the endpoint is not configured', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ ...base, liveExecutionConfigured: false })
+  open()
+  expect(await screen.findByText(/This approval is retained/)).toBeVisible()
+  const execute = screen.getByRole('button', { name: /Execute live/ })
+  expect(execute).toBeDisabled()
+  fireEvent.click(execute)
+  expect(apiPostRaw).not.toHaveBeenCalled()
+})
+
 it('refreshes the job after a lost response instead of assuming no attempt occurred', async () => {
   vi.mocked(apiGet).mockResolvedValueOnce(base).mockResolvedValueOnce({ ...base, status: 3, steps: [liveStep] })
   vi.mocked(apiPostRaw).mockRejectedValueOnce(new Error('Connection ended'))

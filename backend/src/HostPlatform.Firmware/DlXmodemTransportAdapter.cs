@@ -52,14 +52,22 @@ public sealed class DlXmodemTransportAdapter(
         }
     }
 
-    public async Task<DlaLiveTransferResult> ExecuteLiveTransferAsync(DlaLiveTransferRequest request,
-        DlaTransferObservation? observation, CancellationToken cancellationToken = default)
+    public void ValidateLiveConfiguration(DlaTransferObservation? observation)
     {
         if (!_opt.LiveDlaEnabled)
         {
             throw new InvalidOperationException(
                 "Live DLA transport is disabled. Set COINLINE_FIRMWARE_LIVE_DLA_ENABLED=true after operational approval.");
         }
+
+        if (observation?.InjectTransport == null && !_opt.DescribeLiveTransport().Configured)
+            throw new InvalidOperationException("Live delivery transport is not configured. No transfer was started.");
+    }
+
+    public async Task<DlaLiveTransferResult> ExecuteLiveTransferAsync(DlaLiveTransferRequest request,
+        DlaTransferObservation? observation, CancellationToken cancellationToken = default)
+    {
+        ValidateLiveConfiguration(observation);
 
         IAsyncDuplexTransport? owned = null;
         var io = observation?.InjectTransport;
