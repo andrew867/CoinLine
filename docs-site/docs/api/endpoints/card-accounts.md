@@ -24,6 +24,8 @@ Major routes:
 
 Authorization history never returns raw requests, processor references or arbitrary audit JSON. Approval is not a payment transaction.
 
+`GET /api/cards/simulation-state` reports ShadyBank authorization configuration through `shadyBankAuthorizationEnabled`, `shadyBankRouteBindingCount` and `shadyBankCaptureEnabled`. The route count describes explicit terminal/destination bindings, not the number of active tariffs. These fields do not expose account identifiers, service URLs, credentials or instrument tokens and do not test bank connectivity. Capture is separately configured; authorization does not establish a posted purchase.
+
 New authorization observations include `requestBytes` and, for validated immediate-clear bundles, `bundledCallRecords` (zero through two). These are structural metadata only. Older observations may not have them; malformed suffixes have no validated record count. The history never contains card or trailing call-record bytes.
 
 Read results are `0` (unknown), `1` (succeeded), or `2` (failed). Supply `panLast4` only when it contains exactly four ASCII digits; the console displays a masked fragment. If a linked account already has a valid last-four fragment, the host can use it. Old clients may still send legacy opaque fields, but the host ignores them. A write record reports the simulation disposition, not physical card programming.

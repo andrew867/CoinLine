@@ -42,3 +42,30 @@ it('reports separate optional simulated CDR posting without implying reconciliat
   expect(await screen.findByText(/Synthetic CDR ledger posting is enabled/)).toBeVisible()
   expect(screen.getByText(/payment reconciliation remains separate/)).toBeVisible()
 })
+
+it('names ShadyBank and separates configured route scope from capture', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ runtimeAuthorizationProviderRegistered: true, shadyBankAuthorizationEnabled: true,
+    shadyBankRouteBindingCount: 2, shadyBankCaptureEnabled: false, physicalCardWritesDisabled: true })
+  render(<RuntimeCardAuthorizationStatus />)
+  expect(await screen.findByText(/ShadyBank authorization configured/)).toBeVisible()
+  expect(screen.getByText(/Current bank connectivity is not established/)).toBeVisible()
+  expect(screen.getByText('2 configured terminal/route bindings')).toBeVisible()
+  expect(screen.getByText(/Disabled. An approved authorization does not post a purchase/)).toBeVisible()
+  expect(screen.getByText(/terminal acceptance and tariff tables are separate/)).toBeVisible()
+})
+
+it('labels configured capture without asserting a posted transaction', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ runtimeAuthorizationProviderRegistered: true, shadyBankAuthorizationEnabled: true,
+    shadyBankRouteBindingCount: 1, shadyBankCaptureEnabled: true, physicalCardWritesDisabled: true })
+  render(<RuntimeCardAuthorizationStatus />)
+  expect(await screen.findByText('1 configured terminal/route binding')).toBeVisible()
+  expect(screen.getByText(/Authorization and capture remain separate/)).toBeVisible()
+})
+
+it('does not infer ShadyBank capture or binding count from an older host', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ runtimeAuthorizationProviderRegistered: true, shadyBankAuthorizationEnabled: true,
+    physicalCardWritesDisabled: true })
+  render(<RuntimeCardAuthorizationStatus />)
+  expect(await screen.findByText(/ShadyBank authorization configured/)).toBeVisible()
+  expect(screen.getAllByText('Not reported by this host')).toHaveLength(2)
+})

@@ -96,6 +96,10 @@ public sealed class PostgresShadyBankAuthorizationTests
         var state = await admin.GetFromJsonAsync<JsonElement>("/api/cards/simulation-state");
         Assert.True(state.GetProperty("shadyBankAuthorizationEnabled").GetBoolean());
         Assert.False(state.GetProperty("labAuthorizationEnabled").GetBoolean());
+        Assert.Equal(1, state.GetProperty("shadyBankRouteBindingCount").GetInt32());
+        Assert.False(state.GetProperty("shadyBankCaptureEnabled").GetBoolean());
+        Assert.DoesNotContain(state.EnumerateObject(), property => property.Name.Contains("token", StringComparison.OrdinalIgnoreCase) ||
+            property.Name.Contains("key", StringComparison.OrdinalIgnoreCase) || property.Name.Contains("url", StringComparison.OrdinalIgnoreCase));
         var request = ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 1);
         Assert.Equal(1, (await Exchange(wireId, request))[1]); // no quote
         Assert.Equal(1, (await Exchange(otherId, request))[1]); // no binding
@@ -205,6 +209,10 @@ public sealed class PostgresShadyBankAuthorizationTests
             .ConfigureServices(services => services.AddHttpClient("shadybank-authorization").ConfigurePrimaryHttpMessageHandler(() => bank)));
         using var admin = TestOperatorAuthentication.CreateAuthenticatedClient(host);
         admin.DefaultRequestHeaders.Add("X-API-Key", key);
+        var captureState = await admin.GetFromJsonAsync<JsonElement>("/api/cards/simulation-state");
+        Assert.True(captureState.GetProperty("shadyBankAuthorizationEnabled").GetBoolean());
+        Assert.Equal(1, captureState.GetProperty("shadyBankRouteBindingCount").GetInt32());
+        Assert.True(captureState.GetProperty("shadyBankCaptureEnabled").GetBoolean());
         int beforePayments;
         await using (var scope = host.Services.CreateAsyncScope())
         {
