@@ -18,6 +18,8 @@ type Row = {
 type TermOpt = { id: string; displayName: string }
 type Pkg = { id: string; name?: string; versionLabel?: string }
 type ExecutionPolicy = { allowLiveFlashing: boolean; liveDlaEnabled: boolean; liveTransportConfigured?: boolean }
+type ArtifactOptions = { id: string; primaryArtifactId: string | null; artifactChecksumHex: string; artifactSizeBytes: number;
+  artifacts: { id: string; kind: string; sha256Hex: string; sizeBytes: number; payloadPresent?: boolean }[] }
 
 export function FirmwareJobsPage() {
   const [rows, setRows] = useState<Row[]>([])
@@ -27,6 +29,9 @@ export function FirmwareJobsPage() {
   const [packageId, setPackageId] = useState('')
   const [policy, setPolicy] = useState<ExecutionPolicy | null>(null)
   const [prepareLive, setPrepareLive] = useState(false)
+  const [artifactOptions, setArtifactOptions] = useState<ArtifactOptions | null>(null)
+  const [artifactId, setArtifactId] = useState('')
+  const [artifactError, setArtifactError] = useState('')
   const [starting, setStarting] = useState(false)
   const [jobErr, setJobErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -65,15 +70,35 @@ export function FirmwareJobsPage() {
   }, [])
   const allowPreparation = policy?.allowLiveFlashing === true && policy.liveDlaEnabled === true
   const liveSelected = allowPreparation && prepareLive
+  const eligibleArtifacts = artifactOptions?.id === packageId ? (artifactOptions?.artifacts ?? []).filter(artifact =>
+    artifact.payloadPresent === true && artifact.sizeBytes === artifactOptions.artifactSizeBytes &&
+    artifact.sha256Hex.toLowerCase() === artifactOptions.artifactChecksumHex.toLowerCase()) : []
+  const selectedArtifact = eligibleArtifacts.find(artifact => artifact.id === artifactId)
+
+  useEffect(() => {
+    setArtifactOptions(null); setArtifactId(''); setArtifactError('')
+    if (!liveSelected || !packageId) return
+    let active = true
+    void apiGet<ArtifactOptions>(`/api/firmware/packages/${packageId}`).then(value => {
+      if (!active) return
+      if (!value || value.id !== packageId || !Array.isArray(value.artifacts)) throw new Error('Invalid package response.')
+      setArtifactOptions(value)
+      const primary = value.artifacts.find(artifact => artifact.id === value.primaryArtifactId && artifact.payloadPresent === true &&
+        artifact.sizeBytes === value.artifactSizeBytes && artifact.sha256Hex.toLowerCase() === value.artifactChecksumHex.toLowerCase())
+      setArtifactId(primary?.id ?? '')
+    }).catch(reason => { if (active) setArtifactError(reason instanceof Error ? reason.message : 'Could not load registered artifacts.') })
+    return () => { active = false }
+  }, [packageId, liveSelected])
 
   async function startJob(e: FormEvent) {
     e.preventDefault()
-    if (!terminalId || !packageId || starting) return
+    if (!terminalId || !packageId || starting || (liveSelected && !selectedArtifact)) return
     setJobErr(null)
     setStarting(true)
     try {
       await apiPost<{ id: string }>(`/api/terminals/${terminalId}/firmware-jobs`, {
         firmwarePackageId: packageId,
+        ...(liveSelected && selectedArtifact ? { firmwareArtifactId: selectedArtifact.id } : {}),
         simulationMode: !liveSelected,
       })
       setPrepareLive(false)
@@ -139,7 +164,13 @@ export function FirmwareJobsPage() {
           </label>
           {allowPreparation && <label><input type="checkbox" checked={liveSelected} disabled={starting} onChange={event => setPrepareLive(event.target.checked)} /> Prepare for live execution after simulation and approval</label>}
           {liveSelected && <p>This prepares a job only. No terminal contact or code transfer is started.{policy?.liveTransportConfigured === false ? ' Live delivery can be configured separately.' : ''}</p>}
-          <button type="submit" data-testid="firmware-job-start" disabled={starting || !terminalId || !packageId}>
+          {liveSelected && <>
+            <label>Registered artifact<select value={artifactId} onChange={event => setArtifactId(event.target.value)} disabled={starting || !eligibleArtifacts.length}>
+              <option value="">Choose a stored artifact</option>{eligibleArtifacts.map(artifact => <option key={artifact.id} value={artifact.id}>{artifact.kind} · {artifact.sizeBytes} B · {artifact.sha256Hex.slice(0, 12)}</option>)}
+            </select></label>
+            {artifactError ? <p role="alert">{artifactError}</p> : !artifactOptions ? <p role="status">Loading artifacts…</p> : !eligibleArtifacts.length ? <p role="status">No matching stored artifact. <Link to={`/firmware/packages/${packageId}`}>Open package</Link> and upload the primary file first.</p> : <p>Manager verifies the complete artifact again before any transfer.</p>}
+          </>}
+          <button type="submit" data-testid="firmware-job-start" disabled={starting || !terminalId || !packageId || (liveSelected && !selectedArtifact)}>
             {liveSelected ? 'Prepare live-capable job' : 'Queue simulation job'}
           </button>
         </form>

@@ -6,6 +6,14 @@ The page reports the actual execution policy for this host. Public defaults keep
 
 In **Prepare a firmware job**, the default remains a simulation-only job. When both live switches are enabled, explicitly select **Prepare for live execution after simulation and approval** to create a live-capable job for the registered phone and package. Preparation does not call the terminal or transfer code. Run the simulation and complete the separate approval and rollback review in the job detail. If the transport is not configured, the live action is unavailable and an attempted API request is rejected before claiming the job. The approval and previous simulation are retained; a configuration issue does not become a failed transfer attempt.
 
+### Register and store the exact artifact
+
+1. In **Firmware packages**, register a package with its independently checked SHA-256 and exact byte size (up to 50 MB).
+2. Open the package and, as an administrator, choose **Upload primary artifact**. The uploaded bytes must match both registered values. Manager stores the verified file under its content digest in the configured payload storage. Repeating the same upload reuses the identical file and registry entry. A different file cannot replace it.
+3. In **Firmware jobs**, select the phone and package, enable live-capable preparation, and select the matching stored artifact. Metadata-only entries and missing files are not offered. The complete file is verified again before the job is claimed.
+
+File presence in the package list identifies a stored path of the expected length, not a fresh digest verification. Registering or uploading a file does not initiate a terminal connection, authorize a job, or establish compatibility.
+
 ## Review a change of firmware version
 
 1. Register the installed and proposed versions with their matching table profiles in the firmware registry.

@@ -10,6 +10,7 @@ Packages, artifacts, compatibility rules, targets, jobs:
 |------|----------|
 | Policy | `GET /api/firmware/execution-policy` |
 | Catalog | `GET/POST .../packages`, `GET .../packages/{id}`, artifacts POST |
+| Artifact storage | `POST .../packages/{id}/artifacts/upload` with an `application/octet-stream` body (admin) |
 | Versions | `GET/POST .../versions` |
 | Revise a build's layout | `POST .../versions/{id}/table-profile/preview`, `PUT .../versions/{id}/table-profile` |
 | Table layouts | `GET .../table-profiles` |
@@ -39,6 +40,8 @@ The local dialing draft preview accepts `terminalId`, `targetFirmwareVersionId`,
     **`Firmware:AllowLiveFlashing`** default **false**. DLA/XMODEM **`HARDWARE VALIDATION REQUIRED`**.
 
 The job detail exposes `liveExecutionConfigured`, which reports whether both execution policies and the selected endpoint settings are present. It does not establish connectivity, authorization of a particular job or device compatibility. `POST .../execute-live` validates the configured transport and registered artifact before atomically claiming an approved job. An unavailable transport configuration returns HTTP 409 without changing approval, status or attempt history. A configured endpoint that fails after the claim remains a recorded attempt.
+
+Primary artifact upload requires an existing package with a valid registered SHA-256 and exact size, from 1 byte to 50,000,000 bytes. The complete body is checked before the immutable digest-addressed file is installed under the configured payload root. Replaying a verified upload for the same package returns the existing artifact ID. Upload never overwrites an existing file, even if that file is corrupted. Registry metadata-only operations remain available separately. Package detail reports `payloadPresent` for each artifact when its path resolves to a stored file of the registered length; this is not a digest check. Live-capable job creation supplies `firmwareArtifactId` explicitly, and execution independently verifies the complete blob.
 
 To revise a registered build, preview with `{"tableProfileId":"mtr19-multipay-200"}`. Use explicit `null` to remove its verified profile reference. The preview returns affected counts, grouped findings, `canApply` and a `previewToken`. Apply with the same `tableProfileId` and token. Both endpoints require Firmware registry Update permission. An incompatible published targeted or currently assigned record, incompatible queued selection, active NCC session or active transfer blocks the change; draft findings and unobserved lengths are advisory. Scheduled and queued partial transfers are reviewed using their selected records and dependencies, not unrelated source records. A changed configuration or blocking finding returns HTTP 409. Apply updates only the registered firmware reference, its revision and audit history. It does not rewrite tables, reassign phones, schedule downloads or certify device operation.
 
