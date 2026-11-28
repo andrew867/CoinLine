@@ -2,6 +2,8 @@
 
 The MT94 Manager scheduling workflow prepares, delivers and records the acknowledgement of code-download parameters. The subsequent independent code-server call is a different protocol conversation. Parameter acknowledgement does not prove the call occurred, an image was transferred, or the terminal rebooted into the requested version.
 
+The existing XMODEM sender is tested separately using generated payloads and scripted peers. It requires a receiver negotiation byte before writing a block, distinguishes a closed transport from a response timeout, reports receiver cancellation, and repeats a rejected block without advancing its sequence or payload progress. An acknowledged EOT establishes transport completion only. The firmware job still requires independent terminal version and configuration confirmation; this sender does not establish that the native code-server call uses this exact transfer sequence.
+
 For an isolated laboratory phone whose normal INSTALL and restart have been verified, the receive-only observer provides a first test of the independent call route. It listens on IPv4 loopback only, handles one connection at a time and stops after its configured lifetime. Each connection has independent idle, total-time and received-byte limits. It never sends an image, a greeting or any application data.
 
 ```sh

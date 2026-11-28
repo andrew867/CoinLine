@@ -17,7 +17,7 @@ internal static class AsyncDuplexTransportExtensions
         }
     }
 
-    /// <summary>Returns null on timeout (caller distinguishes from CAN).</summary>
+    /// <summary>Returns null only on timeout; an orderly peer disconnect is end of stream.</summary>
     internal static async ValueTask<byte?> ReadByteWithTimeoutAsync(this IAsyncDuplexTransport t, int timeoutMs,
         CancellationToken cancellationToken)
     {
@@ -27,7 +27,9 @@ internal static class AsyncDuplexTransportExtensions
         try
         {
             var n = await t.ReadAsync(buf, cts.Token).ConfigureAwait(false);
-            return n == 0 ? null : buf[0];
+            if (n == 0)
+                throw new EndOfStreamException("Transport closed while waiting for a control byte.");
+            return buf[0];
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
