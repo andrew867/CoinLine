@@ -538,6 +538,7 @@ public class HostPlatformDbContext : DbContext
 
         modelBuilder.Entity<FirmwarePackage>(b =>
         {
+            b.HasOne(p => p.TargetFirmwareVersion).WithMany().HasForeignKey(p => p.TargetFirmwareVersionId).OnDelete(DeleteBehavior.Restrict);
             b.HasMany(p => p.Artifacts).WithOne(a => a.FirmwarePackage).HasForeignKey(a => a.FirmwarePackageId);
             b.HasOne(p => p.PrimaryArtifact).WithMany().HasForeignKey(p => p.PrimaryArtifactId).OnDelete(DeleteBehavior.SetNull);
             b.HasMany(p => p.CompatibilityRules).WithOne(r => r.FirmwarePackage).HasForeignKey(r => r.FirmwarePackageId);
@@ -554,6 +555,14 @@ public class HostPlatformDbContext : DbContext
             b.HasOne(j => j.Terminal).WithMany().HasForeignKey(j => j.TerminalId);
             b.HasOne(j => j.FirmwarePackage).WithMany().HasForeignKey(j => j.FirmwarePackageId);
             b.HasOne(j => j.FirmwareArtifact).WithMany().HasForeignKey(j => j.FirmwareArtifactId).OnDelete(DeleteBehavior.SetNull);
+            b.HasOne<FirmwareConfigurationTransition>().WithMany().HasForeignKey(j => j.CodeTransitionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<ScheduledTableDownload>().WithMany().HasForeignKey(j => j.CodeScheduleId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(j => j.CodeTransitionId).IsUnique();
+            b.HasIndex(j => j.CodeScheduleId).IsUnique();
+            b.Property(j => j.ApprovedArtifactSha256Hex).HasMaxLength(64);
+            b.Property(j => j.ApprovedAtUtc).IsConcurrencyToken();
+            b.Property(j => j.CodeTransitionId).IsConcurrencyToken();
+            b.Property(j => j.Status).IsConcurrencyToken();
             b.HasIndex(j => new { j.TerminalId, j.Status });
         });
         modelBuilder.Entity<FirmwareRollBackPlan>(b =>

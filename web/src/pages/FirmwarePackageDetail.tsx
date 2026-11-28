@@ -7,6 +7,7 @@ type Detail = {
   id: string
   name: string
   versionLabel: string
+  targetFirmwareVersionLabel?: string | null
   artifactChecksumHex: string
   artifactSizeBytes: number
   metadataJson: string
@@ -162,6 +163,7 @@ export function FirmwarePackageDetail() {
         <Link to="/firmware/packages">← Packages</Link>
       </p>
       <h1>{x.name}</h1>
+      <p>Target registry version: {x.targetFirmwareVersionLabel ?? 'Not specified'}</p>
       <p style={{ color: '#555', fontSize: 14 }}>{x.hardwareValidationNotice}</p>
       {x.skuRoutingNotice && (
         <p style={{ color: '#555', fontSize: 13 }}>{x.skuRoutingNotice}</p>

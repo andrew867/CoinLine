@@ -2,13 +2,14 @@ import { createHash } from 'node:crypto'
 import { expect, test } from '@playwright/test'
 import { signIn } from './auth'
 
-test('uploads a matching artifact and prepares the exact live-capable job without transferring code', async ({ page, baseURL }) => {
+test('uploads a matching artifact and approves the exact scheduled job without transferring code', async ({ page, baseURL }) => {
   if (!baseURL) throw new Error('A local fixture origin is required.')
   const origin = new URL(baseURL).origin
   const token = 'fixture-artifact-admin', packageId = 'fixture-package', artifactId = 'fixture-artifact', phoneId = 'fixture-phone'
-  const bytes = Buffer.from([0x12, 0x34, 0x56, 0x78]), digest = createHash('sha256').update(bytes).digest('hex')
+  const bytes = Buffer.from(Array.from({ length: 4096 }, (_, index) => index % 251)), digest = createHash('sha256').update(bytes).digest('hex')
   const endpoint = `/api/firmware/packages/${packageId}`
-  let uploaded = false, prepared = false, liveRequests = 0
+  const jobEndpoint = '/api/firmware/jobs/fixture-job'
+  let uploaded = false, prepared = false, simulated = false, approved = false, liveRequests = 0
   const pkg = { id: packageId, name: 'Fixture package', versionLabel: 'A001', artifactChecksumHex: digest, artifactSizeBytes: bytes.length,
     metadataJson: '{}', hardwareValidationNotice: 'Fixture policy', targets: [], rules: [] }
   await page.route('**/*', async route => {
@@ -37,6 +38,25 @@ test('uploads a matching artifact and prepares the exact live-capable job withou
       expect(request.postDataJSON()).toEqual({ firmwarePackageId: packageId, firmwareArtifactId: artifactId, simulationMode: false })
       prepared = true; return route.fulfill({ status: 201, json: { id: 'fixture-job' } })
     }
+    if (url.pathname === jobEndpoint && request.method() === 'GET') return route.fulfill({ json: {
+      id: 'fixture-job', terminalId: phoneId, firmwarePackageId: packageId, firmwareArtifactId: artifactId,
+      status: simulated ? 4 : 2, simulationMode: false, liveExecutionConfigured: false, safetyStateJson: '{}',
+      approvedAtUtc: approved ? '2026-01-01T00:00:00Z' : null, approvedByOperatorId: approved ? 'fixture' : '',
+      codeTransitionId: approved ? 'fixture-transition' : null, codeScheduleId: approved ? 'fixture-schedule' : null,
+      cancelReason: '', createdAtUtc: '2026-01-01T00:00:00Z', steps: [], safetyChecks: [], rollBackPlan: null,
+      hardwareValidationNotice: 'Fixture policy' } })
+    if (url.pathname === `${jobEndpoint}/simulate`) {
+      expect(request.method()).toBe('POST'); simulated = true
+      return route.fulfill({ json: { status: 4 } })
+    }
+    if (url.pathname === `${jobEndpoint}/code-transitions`) return route.fulfill({ json: [
+      { id: 'fixture-transition', codeScheduleId: 'fixture-schedule', sourceControllerRom: 'LABOLD',
+        sourceControllerSoftware: 'A001', targetControllerRom: 'LABNEW', targetControllerSoftware: 'A002' }] })
+    if (url.pathname === `${jobEndpoint}/approve`) {
+      expect(request.method()).toBe('POST')
+      expect(request.postDataJSON()).toMatchObject({ codeTransitionId: 'fixture-transition', rollbackNotes: expect.any(String) })
+      approved = true; return route.fulfill({ json: { approved: true } })
+    }
     if (url.pathname.endsWith('/execute-live')) liveRequests++
     if (request.method() === 'GET') return route.fulfill({ json: [] })
     return route.fulfill({ status: 404 })
@@ -54,5 +74,12 @@ test('uploads a matching artifact and prepares the exact live-capable job withou
   await expect(page.getByLabel('Registered artifact')).toHaveValue(artifactId)
   await page.getByRole('button', { name: 'Prepare live-capable job' }).click()
   await expect(page.getByRole('button', { name: 'Queue simulation job' })).toBeVisible()
-  expect(prepared).toBe(true); expect(liveRequests).toBe(0)
+  expect(prepared).toBe(true)
+  await page.goto('/firmware/jobs/fixture-job')
+  await page.getByRole('button', { name: 'Run simulation' }).click()
+  await page.getByLabel('Delivery configuration').selectOption('fixture-transition')
+  await page.getByRole('button', { name: 'Approve (after simulation)' }).click()
+  await expect(page.getByText(/Approval bound to terminal-initiated delivery/)).toContainText('fixture-schedule')
+  await expect(page.getByRole('button', { name: /Execute live/ })).toHaveCount(0)
+  expect(simulated).toBe(true); expect(approved).toBe(true); expect(liveRequests).toBe(0)
 })
