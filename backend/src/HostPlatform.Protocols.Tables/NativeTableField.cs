@@ -414,6 +414,7 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
         if (Number == ServiceRestrictionWire.MessageType && !original.SequenceEqual(edited) &&
             ServiceRestrictionWire.ConfigurationIssue(edited, Profile == NativeTableLayouts.Later) is { } restrictionIssue)
             throw new InvalidOperationException(restrictionIssue);
+        RetainedLayoutCoverage.EnsurePreserved(this, original, edited);
         return edited;
     }
 

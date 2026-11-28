@@ -1,6 +1,7 @@
 namespace HostPlatform.Protocols.Tables;
 
-public sealed record NativeLayoutReference(int Number, int Length, string Profile, bool DraftTemplateAvailable, bool ExplicitAuthoringAvailable = false);
+public sealed record NativeLayoutReference(int Number, int Length, string Profile, bool DraftTemplateAvailable,
+    bool ExplicitAuthoringAvailable = false, RetainedLayoutCoverage? RetainedLayout = null);
 public sealed record FirmwareRecordReference(string ProfileId, string Label, int Length, bool TerminalAcknowledged,
     bool CompleteCatalogue, bool ObservedLengthsOnly, string EditorStatus, string? EditorProfile, string? BehaviorObservation);
 public sealed record ReferenceRecord(

@@ -87,6 +87,7 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             layout.Length,
             revision = version.TableRevision,
             sha256 = version.PayloadSha256Hex,
+            retainedLayout = RetainedLayoutCoverage.Inspect(layout),
             graphicalLinks = number is >= 131 and <= 133 ? await ReadGraphicalLinks(id, ct) : null,
             visualPromptCompanions = VisualPromptCoverage.CompanionNumbers(number).Length > 0
                 ? await ReadVisualPromptCompanions(id, number, firmware, ct) : null,
