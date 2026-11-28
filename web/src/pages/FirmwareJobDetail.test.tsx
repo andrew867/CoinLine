@@ -66,7 +66,7 @@ it('refreshes the job after a lost response instead of assuming no attempt occur
 })
 
 it('approves the selected staged schedule and does not offer outbound execution for the bound job', async () => {
-  const bound = { ...base, codeTransitionId: 'transition-fixture', codeScheduleId: 'schedule-fixture' }
+  const bound = { ...base, codeTransitionId: 'transition-fixture', codeScheduleId: 'schedule-fixture', incomingAttemptLimit: 2, incomingAttemptCount: 0 }
   vi.mocked(apiGet).mockResolvedValueOnce({ ...base, approvedAtUtc: null })
     .mockResolvedValueOnce([{ id: 'transition-fixture', codeScheduleId: 'schedule-fixture', sourceControllerRom: 'LABOLD',
       sourceControllerSoftware: 'A001', targetControllerRom: 'LABNEW', targetControllerSoftware: 'A002' }])
@@ -76,14 +76,41 @@ it('approves the selected staged schedule and does not offer outbound execution 
   const option = await screen.findByRole('option', { name: 'LABOLD A001 to LABNEW A002' })
   expect(option).toBeVisible()
   fireEvent.change(screen.getByLabelText('Delivery configuration'), { target: { value: 'transition-fixture' } })
+  fireEvent.change(screen.getByLabelText('Maximum incoming attempts (including initial)'), { target: { value: '2' } })
   fireEvent.click(screen.getByRole('button', { name: 'Approve (after simulation)' }))
   await waitFor(() => expect(apiPost).toHaveBeenCalledWith('/api/firmware/jobs/job-fixture/approve',
-    expect.objectContaining({ codeTransitionId: 'transition-fixture' })))
+    expect.objectContaining({ codeTransitionId: 'transition-fixture', maximumIncomingAttempts: 2 })))
   expect(await screen.findByText(/Approval bound to terminal-initiated delivery/)).toBeVisible()
   expect(screen.queryByRole('button', { name: /Execute live/ })).not.toBeInTheDocument()
   expect(screen.getByRole('button', { name: 'Cancel job' })).toBeDisabled()
   fireEvent.click(screen.getByLabelText('Confirm cancel (audited)'))
   expect(screen.getByRole('button', { name: 'Cancel job' })).toBeEnabled()
+})
+
+it('reports a confirmed incomplete attempt awaiting an exact callback and allows audited cancellation', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ ...base, status: 5, codeTransitionId: 'transition-fixture',
+    codeScheduleId: 'schedule-fixture', incomingCodeServerListening: true, incomingAttemptLimit: 2,
+    incomingAttemptCount: 1, incomingRetryEligible: true, steps: [{ ...liveStep, name: 'live_code_transport', succeeded: false }] })
+  open()
+  expect(await screen.findByText(/Waiting for terminal retry/)).toHaveTextContent('Attempts: 1/2')
+  expect(screen.getByText('Did not complete', { exact: true })).toBeVisible()
+  expect(screen.queryByRole('button', { name: /Execute live/ })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByLabelText('Confirm cancel (audited)'))
+  expect(screen.getByRole('button', { name: 'Cancel job' })).toBeEnabled()
+})
+
+it('uses the latest delivery result after a successful repeated callback', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ ...base, codeTransitionId: 'transition-fixture', codeScheduleId: 'schedule-fixture',
+    incomingAttemptLimit: 2, incomingAttemptCount: 2, incomingRetryEligible: false, steps: [
+      { ...liveStep, name: 'live_code_transport', stepIndex: 101, succeeded: false },
+      { ...liveStep, id: 'transport2', name: 'live_code_transport', stepIndex: 111, succeeded: true },
+      { ...liveStep, id: 'response2', name: 'live_code_application_response', stepIndex: 112, succeeded: true }
+    ] })
+  open()
+  expect(await screen.findByText(/Attempts: 2\/2/)).toBeVisible()
+  expect(screen.getByText('Completed', { exact: true })).toBeVisible()
+  expect(screen.getByText('Observed', { exact: true })).toBeVisible()
+  expect(screen.queryByText(/Waiting for terminal retry/)).not.toBeInTheDocument()
 })
 
 it('reports completed incoming transport separately from an unobserved response and terminal service', async () => {

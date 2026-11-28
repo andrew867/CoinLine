@@ -505,6 +505,9 @@ public sealed class FirmwareController(
                 j.FirmwareArtifactId,
                 j.CodeTransitionId,
                 j.CodeScheduleId,
+                j.IncomingAttemptLimit,
+                j.IncomingAttemptCount,
+                j.IncomingRetryEligible,
                 j.Status,
                 j.SimulationMode,
                 j.ApprovedAtUtc
@@ -554,6 +557,9 @@ public sealed class FirmwareController(
             j.FirmwareArtifactId,
             j.CodeTransitionId,
             j.CodeScheduleId,
+            j.IncomingAttemptLimit,
+            j.IncomingAttemptCount,
+            j.IncomingRetryEligible,
             j.Status,
             j.SimulationMode,
             j.SafetyStateJson,
@@ -625,7 +631,7 @@ public sealed class FirmwareController(
         }
     }
 
-    public sealed record ApproveDto(string RollbackNotes, Guid? CodeTransitionId = null);
+    public sealed record ApproveDto(string RollbackNotes, Guid? CodeTransitionId = null, int? MaximumIncomingAttempts = null);
 
     [Authorize(Policy = Policies.RequireAdmin)]
     [HttpPost("jobs/{id:guid}/approve")]
@@ -633,7 +639,7 @@ public sealed class FirmwareController(
     {
         try
         {
-            await orchestrator.ApproveJobAsync(id, body.RollbackNotes, ct, body.CodeTransitionId);
+            await orchestrator.ApproveJobAsync(id, body.RollbackNotes, ct, body.CodeTransitionId, body.MaximumIncomingAttempts);
             return Ok(new { id, approved = true });
         }
         catch (InvalidOperationException ex)

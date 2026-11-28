@@ -47,8 +47,12 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
     public Task Incoming_code_server_rejects_previously_approved_schedule_after_actual_disabled_record_receipt() =>
         Workflow(false, bindJob: true, serveJob: true, cancelBeforeTransfer: true);
 
+    [PostgresIntegrationFact]
+    public Task Incoming_code_server_resumes_exact_incomplete_transfer_within_approved_limit() =>
+        Workflow(false, bindJob: true, serveJob: true, resumeAfterInterruption: true);
+
     private static async Task Workflow(bool automatic, bool targetInstallContact = true, bool recover = false, bool bindJob = false,
-        bool serveJob = false, bool cancelBeforeTransfer = false)
+        bool serveJob = false, bool cancelBeforeTransfer = false, bool resumeAfterInterruption = false)
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
         var port = ((IPEndPoint)probe.LocalEndpoint).Port;
@@ -203,6 +207,8 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
             using (var changed = await Approve(job1)) Assert.Equal(HttpStatusCode.BadRequest, changed.StatusCode);
             await File.WriteAllBytesAsync(file, image);
             var job2 = await Job();
+            using (var invalid = await client.PostAsJsonAsync(job1 + "/approve", new { rollbackNotes = notes, codeTransitionId = planId, maximumIncomingAttempts = 11 }))
+                Assert.Equal(HttpStatusCode.BadRequest, invalid.StatusCode);
             var attempts = await Task.WhenAll(Approve(job1), Approve(job2));
             var winnerIndex = Assert.Single(Enumerable.Range(0, attempts.Length), index => attempts[index].IsSuccessStatusCode);
             Assert.Contains(attempts[1 - winnerIndex].StatusCode, new[] { HttpStatusCode.BadRequest, HttpStatusCode.Conflict });
@@ -213,6 +219,8 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
             Assert.Equal(scheduleId, detail.GetProperty("codeScheduleId").GetGuid());
             Assert.False(detail.GetProperty("liveExecutionConfigured").GetBoolean());
             Assert.Equal(serveJob, detail.GetProperty("incomingCodeServerListening").GetBoolean());
+            Assert.Equal(serveJob ? 2 : 1, detail.GetProperty("incomingAttemptLimit").GetInt32());
+            Assert.Equal(0, detail.GetProperty("incomingAttemptCount").GetInt32());
             using (var outbound = await client.PostAsync(winner + "/execute-live", null))
             {
                 Assert.Equal(HttpStatusCode.Conflict, outbound.StatusCode);
@@ -270,19 +278,52 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
                 var resume = incoming.ToArray(); resume[1] = 2;
                 await File.WriteAllBytesAsync(file, new byte[image.Length]);
                 await RejectIncoming(incoming); await File.WriteAllBytesAsync(file, image);
-                var delivery = await Task.WhenAll(ReceiveIncoming(incoming), ReceiveIncoming(resume));
-                Assert.Single(delivery, received => received);
-                JsonElement outcome = default;
-                for (var retry = 0; retry < 50; retry++)
+                if (resumeAfterInterruption)
                 {
-                    outcome = await client.GetFromJsonAsync<JsonElement>(winner);
-                    if (outcome.GetProperty("steps").EnumerateArray().Any(step => step.GetProperty("name").GetString() == "live_code_transport")) break;
-                    await Task.Delay(100);
+                    using var partialDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                    await using (var peer = new TcpClientDuplexTransport("127.0.0.1", codePort))
+                    {
+                        await SendIncoming(peer, incoming, partialDeadline.Token);
+                        await peer.WriteAsync(new byte[] { XmodemConstants.CrcRequest }, partialDeadline.Token);
+                        for (var packet = 0; packet < 2; packet++)
+                        {
+                            var frame = new byte[1029];
+                            var count = 0;
+                            while (count < frame.Length)
+                            {
+                                var read = await peer.ReadAsync(frame.AsMemory(count), partialDeadline.Token);
+                                Assert.True(read > 0); count += read;
+                            }
+                            Assert.Equal(XmodemConstants.Stx, frame[0]);
+                            if (packet == 0) await peer.WriteAsync(new byte[] { XmodemConstants.Ack }, partialDeadline.Token);
+                        }
+                        // Close before acknowledging packet two; no later data packet was attempted.
+                    }
+                    var partial = await WaitForOutcome(101);
+                    Assert.Equal((int)FirmwareUpdateJobStatus.Failed, partial.GetProperty("status").GetInt32());
+                    Assert.Equal(1, partial.GetProperty("incomingAttemptCount").GetInt32());
+                    Assert.True(partial.GetProperty("incomingRetryEligible").GetBoolean());
+                    using var partialState = JsonDocument.Parse(partial.GetProperty("safetyStateJson").GetString()!);
+                    Assert.True(partialState.RootElement.GetProperty("DefinitivelyIncomplete").GetBoolean());
+                    Assert.Equal(5, partialState.RootElement.GetProperty("ExpectedPackets").GetInt32());
+                    Assert.Equal(2, partialState.RootElement.GetProperty("PacketsAttempted").GetInt32());
+                    await RejectIncoming(incoming);
+                    var mismatch = resume.ToArray(); mismatch[37] ^= 0x02; await RejectIncoming(mismatch);
+                    await File.WriteAllBytesAsync(file, new byte[image.Length]);
+                    await RejectIncoming(resume); await File.WriteAllBytesAsync(file, image);
                 }
+                var delivery = await Task.WhenAll(ReceiveIncoming(resumeAfterInterruption ? resume : incoming), ReceiveIncoming(resume));
+                Assert.Single(delivery, received => received);
+                var finalStep = resumeAfterInterruption ? 111 : 101;
+                var outcome = await WaitForOutcome(finalStep);
+                Assert.Equal(resumeAfterInterruption ? 2 : 1, outcome.GetProperty("incomingAttemptCount").GetInt32());
+                Assert.False(outcome.GetProperty("incomingRetryEligible").GetBoolean());
                 var steps = outcome.GetProperty("steps").EnumerateArray().ToArray();
-                Assert.True(Assert.Single(steps, step => step.GetProperty("name").GetString() == "live_code_claim").GetProperty("succeeded").GetBoolean());
-                Assert.True(Assert.Single(steps, step => step.GetProperty("name").GetString() == "live_code_transport").GetProperty("succeeded").GetBoolean());
-                Assert.True(Assert.Single(steps, step => step.GetProperty("name").GetString() == "live_code_application_response").GetProperty("succeeded").GetBoolean());
+                Assert.True(Assert.Single(steps, step => step.GetProperty("stepIndex").GetInt32() == finalStep - 1).GetProperty("succeeded").GetBoolean());
+                Assert.True(Assert.Single(steps, step => step.GetProperty("stepIndex").GetInt32() == finalStep).GetProperty("succeeded").GetBoolean());
+                Assert.True(Assert.Single(steps, step => step.GetProperty("stepIndex").GetInt32() == finalStep + 1).GetProperty("succeeded").GetBoolean());
+                if (resumeAfterInterruption)
+                    Assert.False(Assert.Single(steps, step => step.GetProperty("stepIndex").GetInt32() == 101).GetProperty("succeeded").GetBoolean());
                 using var state = JsonDocument.Parse(outcome.GetProperty("safetyStateJson").GetString()!);
                 Assert.False(state.RootElement.GetProperty("targetVersionVerified").GetBoolean());
                 Assert.False(state.RootElement.GetProperty("serviceVerified").GetBoolean());
@@ -324,7 +365,19 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
                 using var simulation = await client.PostAsync(path + "/simulate", null); simulation.EnsureSuccessStatusCode();
                 return path;
             }
-            Task<HttpResponseMessage> Approve(string path) => client.PostAsJsonAsync(path + "/approve", new { rollbackNotes = notes, codeTransitionId = planId });
+            Task<HttpResponseMessage> Approve(string path) => client.PostAsJsonAsync(path + "/approve", new { rollbackNotes = notes, codeTransitionId = planId, maximumIncomingAttempts = serveJob ? 2 : 1 });
+
+            async Task<JsonElement> WaitForOutcome(int transportStep)
+            {
+                for (var retry = 0; retry < 100; retry++)
+                {
+                    var outcome = await client.GetFromJsonAsync<JsonElement>(winner);
+                    if (outcome.GetProperty("steps").EnumerateArray().Any(step => step.GetProperty("stepIndex").GetInt32() == transportStep))
+                        return outcome;
+                    await Task.Delay(100);
+                }
+                throw new TimeoutException("Fixture delivery outcome not retained.");
+            }
 
             async Task SendIncoming(IAsyncDuplexTransport peer, byte[] requestBytes, CancellationToken ct)
             {

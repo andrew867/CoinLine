@@ -32,6 +32,7 @@ public sealed class DlaAuthorizedCodeServerSessionTests
         var result = await serve;
         Assert.Equal(1, calls); Assert.True(result.RequestReceived && result.AuthorizationMatched && result.TransportCompleted && result.ApplicationResponseSeen && result.Success);
         Assert.Equal(new byte[] { 2 }, result.DeliveredBlocks); Assert.Equal(5, result.PacketsSent); Assert.Equal(1, result.RequestedBlockCount);
+        Assert.Equal(5, result.ExpectedPackets); Assert.Equal(5, result.PacketsAttempted); Assert.False(result.DefinitivelyIncomplete);
         Assert.Equal(69, observed.Length); Assert.All(observed.ToArray(), value => Assert.Equal(0, value));
         Assert.DoesNotContain("sha256", JsonSerializer.Serialize(result), StringComparison.OrdinalIgnoreCase);
     }
@@ -57,6 +58,7 @@ public sealed class DlaAuthorizedCodeServerSessionTests
         var result = await serve;
         Assert.Equal(expectedCallback ? 1 : 0, calls); Assert.True(result.RequestReceived);
         Assert.False(result.AuthorizationMatched || result.TransportCompleted || result.Success); Assert.Empty(result.DeliveredBlocks); Assert.Equal(0, result.PacketsSent);
+        Assert.Equal(0, result.ExpectedPackets); Assert.Equal(0, result.PacketsAttempted); Assert.False(result.DefinitivelyIncomplete);
         Assert.All(observed.ToArray(), value => Assert.Equal(0, value));
         using var wait = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
         await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => { await terminal.ReadAsync(new byte[1], wait.Token); });
@@ -84,7 +86,59 @@ public sealed class DlaAuthorizedCodeServerSessionTests
         Assert.Equal(1, received.Data[1]);
         var result = await serve;
         Assert.True(result.AuthorizationMatched && result.TransportCompleted); Assert.False(result.ApplicationResponseSeen || result.Success);
+        Assert.False(result.DefinitivelyIncomplete);
         Assert.Equal(new byte[] { 1 }, result.DeliveredBlocks);
+    }
+
+    [Theory]
+    [InlineData(3, true)]
+    [InlineData(5, false)]
+    public async Task Interrupted_packet_attempt_distinguishes_incomplete_and_uncertain_final_write(int failAt, bool incomplete)
+    {
+        var image = new byte[2 * 4096];
+        var (server, terminal) = MemoryDuplexPair.CreateUnbounded();
+        await using var serverDispose = server; await using var terminalDispose = terminal;
+        await using var fault = new InterruptedSender(server, failAt);
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var serve = DlaAuthorizedCodeServerSession.RunAsync(fault, (_, _) => ValueTask.FromResult<DlaAuthorizedPayload?>(
+            new(image, Convert.ToHexString(SHA256.HashData(image)), [1])), Options);
+        await Send(terminal, Request(1, 1));
+        await terminal.WriteAsync(new byte[] { XmodemConstants.CrcRequest }, timeout.Token);
+        for (var i = 1; i < failAt; i++)
+        {
+            var lead = new byte[1]; await ReadExactly(terminal, lead, timeout.Token);
+            Assert.True(lead[0] is XmodemConstants.Stx or XmodemConstants.Soh);
+            await ReadExactly(terminal, new byte[(lead[0] == XmodemConstants.Stx ? 1024 : 128) + 4], timeout.Token);
+            await terminal.WriteAsync(new byte[] { XmodemConstants.Ack }, timeout.Token);
+        }
+        var result = await serve;
+        Assert.True(result.AuthorizationMatched); Assert.False(result.TransportCompleted);
+        Assert.Equal(5, result.ExpectedPackets); Assert.Equal(failAt, result.PacketsAttempted);
+        Assert.Equal(failAt - 1, result.PacketsSent);
+        Assert.Equal(incomplete, result.DefinitivelyIncomplete);
+    }
+
+    private static async Task ReadExactly(IAsyncDuplexTransport peer, Memory<byte> bytes, CancellationToken ct)
+    {
+        while (!bytes.IsEmpty)
+        {
+            var read = await peer.ReadAsync(bytes, ct);
+            Assert.True(read > 0);
+            bytes = bytes[read..];
+        }
+    }
+
+    private sealed class InterruptedSender(IAsyncDuplexTransport inner, int failAt) : IAsyncDuplexTransport
+    {
+        private int packets;
+        public ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken ct = default)
+        {
+            if (buffer.Length is 1029 or 133 && buffer.Span[0] is XmodemConstants.Stx or XmodemConstants.Soh && ++packets == failAt)
+                throw new IOException("Fixture interrupted write.");
+            return inner.WriteAsync(buffer, ct);
+        }
+        public ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken ct = default) => inner.ReadAsync(buffer, ct);
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 
     private static byte[] Request(byte reason, params byte[] blocks)

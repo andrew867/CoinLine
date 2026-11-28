@@ -563,6 +563,9 @@ public class HostPlatformDbContext : DbContext
             b.Property(j => j.ApprovedAtUtc).IsConcurrencyToken();
             b.Property(j => j.CodeTransitionId).IsConcurrencyToken();
             b.Property(j => j.Status).IsConcurrencyToken();
+            b.Property(j => j.IncomingAttemptLimit).HasDefaultValue(1);
+            b.Property(j => j.IncomingAttemptCount).IsConcurrencyToken();
+            b.Property(j => j.IncomingRetryEligible).IsConcurrencyToken();
             b.HasIndex(j => new { j.TerminalId, j.Status });
         });
         modelBuilder.Entity<FirmwareRollBackPlan>(b =>

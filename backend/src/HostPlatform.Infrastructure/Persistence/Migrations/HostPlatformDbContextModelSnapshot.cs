@@ -2449,6 +2449,19 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("FirmwarePackageId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("IncomingAttemptCount")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<int>("IncomingAttemptLimit")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<bool>("IncomingRetryEligible")
+                        .IsConcurrencyToken()
+                        .HasColumnType("boolean");
+
                     b.Property<string>("SafetyStateJson")
                         .IsRequired()
                         .HasColumnType("text");

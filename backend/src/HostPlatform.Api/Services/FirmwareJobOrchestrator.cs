@@ -374,11 +374,14 @@ public sealed class FirmwareJobOrchestrator(
         return (bytes, $"Verified {bytes.Length} byte(s) against the registered size and SHA-256.");
     }
 
-    public async Task ApproveJobAsync(Guid jobId, string rollbackNotes, CancellationToken ct, Guid? codeTransitionId = null)
+    public async Task ApproveJobAsync(Guid jobId, string rollbackNotes, CancellationToken ct, Guid? codeTransitionId = null,
+        int? maximumIncomingAttempts = null)
     {
         var trimmed = rollbackNotes.Trim();
         if (trimmed.Length < 10)
             throw new InvalidOperationException("rollbackNotes required (min 10 chars) — backup / rollback intent.");
+        if (maximumIncomingAttempts.HasValue && (!codeTransitionId.HasValue || maximumIncomingAttempts.Value is < 1 or > 10))
+            throw new InvalidOperationException("Incoming attempt limit must be 1 to 10 and requires a scheduled code transition.");
 
         await using var transaction = codeTransitionId.HasValue && db.Database.IsRelational()
             ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
@@ -400,7 +403,10 @@ public sealed class FirmwareJobOrchestrator(
             throw new InvalidOperationException("Safety checks failed — cannot approve.");
 
         if (codeTransitionId.HasValue)
+        {
             await BindCodeTransitionAsync(job, codeTransitionId.Value, ct);
+            job.IncomingAttemptLimit = maximumIncomingAttempts ?? 1;
+        }
 
         job.ApprovedAtUtc = DateTime.UtcNow;
         job.ApprovedByOperatorId = OperatorContext.Current?.OperatorId ?? "system";
@@ -424,7 +430,7 @@ public sealed class FirmwareJobOrchestrator(
 
         var http = httpAccessor.HttpContext;
         ApiAudit.Write(db, http, "firmware.job", "approve", $"FirmwareUpdateJob:{job.Id}",
-            new { job.ApprovedByOperatorId, job.CodeTransitionId, job.CodeScheduleId }, job.TerminalId);
+            new { job.ApprovedByOperatorId, job.CodeTransitionId, job.CodeScheduleId, job.IncomingAttemptLimit }, job.TerminalId);
         await SaveChangesWithRetryAsync(ct);
         if (transaction != null) await transaction.CommitAsync(ct);
     }
@@ -483,6 +489,7 @@ public sealed class FirmwareJobOrchestrator(
             throw new InvalidOperationException("Job cannot be cancelled in this state.");
 
         job.Status = FirmwareUpdateJobStatus.Cancelled;
+        job.IncomingRetryEligible = false;
         job.CancelReason = reason ?? "";
 
         var http = httpAccessor.HttpContext;

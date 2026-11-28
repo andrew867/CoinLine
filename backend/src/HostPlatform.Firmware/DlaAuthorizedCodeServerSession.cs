@@ -15,7 +15,13 @@ public sealed record DlaAuthorizedSessionOptions(TimeSpan SessionTimeout, TimeSp
 
 public sealed record DlaAuthorizedSessionResult(bool RequestReceived, bool AuthorizationMatched, bool TransportCompleted,
     bool ApplicationResponseSeen, bool Success, int RequestedBlockCount, IReadOnlyList<byte> DeliveredBlocks,
-    int PacketsSent, string Detail, IReadOnlyList<DlaWireEvent> Events);
+    int PacketsSent, string Detail, IReadOnlyList<DlaWireEvent> Events, int ExpectedPackets, int PacketsAttempted)
+{
+    // Counting attempts before writes prevents a partial/failed final write
+    // from being mistaken for proof that the full stream was never attempted.
+    public bool DefinitivelyIncomplete => AuthorizationMatched && !TransportCompleted &&
+        ExpectedPackets > 0 && PacketsAttempted < ExpectedPackets;
+}
 
 /// <summary>
 /// Incoming transfer with independent per-request authorization. Only the observed full-download request layout is admitted.
@@ -44,7 +50,7 @@ public static class DlaAuthorizedCodeServerSession
         var ct = deadline.Token;
         var events = new List<DlaWireEvent>();
         bool requestReceived = false, matched = false, transportCompleted = false, responseSeen = false;
-        int requestedCount = 0, packets = 0; byte[] delivered = [];
+        int requestedCount = 0, packets = 0, expectedPackets = 0, attemptedPackets = 0; byte[] delivered = [];
         void Record(DlaWireEvent item)
         {
             if (item.Direction == "out" && item.Kind == "packet" && item.Packet is { } packet)
@@ -52,7 +58,7 @@ public static class DlaAuthorizedCodeServerSession
             if (events.Count < options.MaximumEvidenceEvents) events.Add(item);
         }
         DlaAuthorizedSessionResult Result(bool success, string detail) => new(requestReceived, matched, transportCompleted,
-            responseSeen, success, requestedCount, delivered, packets, detail, events.ToArray());
+            responseSeen, success, requestedCount, delivered, packets, detail, events.ToArray(), expectedPackets, attemptedPackets);
 
         try
         {
@@ -93,8 +99,9 @@ public static class DlaAuthorizedCodeServerSession
             matched = true;
             ct.ThrowIfCancellationRequested();
             var application = DlaCodeServerSession.BuildApplicationStream(image, requested);
+            expectedPackets = DlaXmodemStreamSender.RequiredPacketCount(application.Length);
             var sent = await DlaXmodemStreamSender.SendAsync(io, application, options.AckTimeoutMs,
-                options.MaximumRetries, 0, Record, ct).ConfigureAwait(false);
+                options.MaximumRetries, 0, Record, ct, ordinal => attemptedPackets = Math.Max(attemptedPackets, ordinal)).ConfigureAwait(false);
             packets = Math.Max(packets, sent.PacketCount); transportCompleted = sent.Success;
             if (!sent.Success) return Result(false, sent.Detail);
             delivered = requested;

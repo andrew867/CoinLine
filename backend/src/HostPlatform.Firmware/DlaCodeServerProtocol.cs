@@ -261,6 +261,12 @@ public static class DlaXmodemReceiver
 /// </summary>
 public static class DlaXmodemStreamSender
 {
+    public static int RequiredPacketCount(int applicationBytes)
+    {
+        if (applicationBytes < 0) throw new ArgumentOutOfRangeException(nameof(applicationBytes));
+        return applicationBytes / XmodemConstants.Block1024 + (applicationBytes % XmodemConstants.Block1024 == 0 ? 0 : 1);
+    }
+
     public static async Task<DlaXmodemSendResult> SendAsync(
         IAsyncDuplexTransport io,
         ReadOnlyMemory<byte> applicationData,
@@ -268,7 +274,8 @@ public static class DlaXmodemStreamSender
         int maxRetries,
         int interruptAfterPackets,
         Action<DlaWireEvent>? onEvent,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Action<int>? onPacketAttempt = null)
     {
         var handshakeRetries = 0;
         while (true)
@@ -304,6 +311,9 @@ public static class DlaXmodemStreamSender
             var retries = 0;
             while (true)
             {
+                // A failed write can have delivered bytes. Record the ordinal
+                // before starting it, including when the write itself fails.
+                onPacketAttempt?.Invoke(packet + 1);
                 await io.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
                 onEvent?.Invoke(new DlaWireEvent(DateTimeOffset.UtcNow, "out", "packet", packet + 1,
                     sequence, payloadSize, retries == 0 ? "sent" : "resent"));

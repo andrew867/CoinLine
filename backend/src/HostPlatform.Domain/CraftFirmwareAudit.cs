@@ -87,6 +87,9 @@ public class FirmwareUpdateJob : AuditableEntity
     public Guid? CodeScheduleId { get; set; }
     public string? ApprovedArtifactSha256Hex { get; set; }
     public long? ApprovedArtifactSizeBytes { get; set; }
+    public int IncomingAttemptLimit { get; set; } = 1;
+    public int IncomingAttemptCount { get; set; }
+    public bool IncomingRetryEligible { get; set; }
     public string ApprovedByOperatorId { get; set; } = string.Empty;
     public string CancelReason { get; set; } = string.Empty;
     public ICollection<FirmwareUpdateStep> Steps { get; set; } = new List<FirmwareUpdateStep>();

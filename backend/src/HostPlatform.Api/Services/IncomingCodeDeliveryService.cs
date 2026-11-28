@@ -53,7 +53,8 @@ internal static class IncomingCodeRequest
 public sealed class IncomingCodeDeliveryService(HostPlatformDbContext db, IFirmwareExecutionPolicy policy,
     IOptions<DlTransportEnvironmentOptions> transportOptions, IOptions<PlatformOptions> platform, TimeProvider clock)
 {
-    private sealed record Claim(Guid JobId, DlaAuthorizedPayload Grant);
+    private sealed record Claim(Guid JobId, int Attempt, int Limit, DlaAuthorizedPayload Grant);
+    private static int StepIndex(int attempt) => 100 + (attempt - 1) * 10;
 
     public async Task<DlaAuthorizedSessionResult> ServeAsync(IAsyncDuplexTransport io, DlaAuthorizedSessionOptions options, CancellationToken ct)
     {
@@ -68,7 +69,7 @@ public sealed class IncomingCodeDeliveryService(HostPlatformDbContext db, IFirmw
             // A cancelled/crashed listener leaves the durable claim Running
             // rather than making an unknown outcome eligible for another transfer.
             using var persist = new CancellationTokenSource(TimeSpan.FromSeconds(15));
-            await RecordOutcomeAsync(claim.JobId, result, persist.Token);
+            await RecordOutcomeAsync(claim, result, persist.Token);
         }
         return result;
     }
@@ -79,6 +80,7 @@ public sealed class IncomingCodeDeliveryService(HostPlatformDbContext db, IFirmw
             return null;
         var terminalIdentity = IncomingCodeRequest.TerminalIdentity(request.Span);
         if (terminalIdentity == null) return null;
+        var resume = request.Span[1] == 2;
 
         try
         {
@@ -86,11 +88,28 @@ public sealed class IncomingCodeDeliveryService(HostPlatformDbContext db, IFirmw
             var candidates = await db.FirmwareUpdateJobs.AsNoTracking().Include(row => row.FirmwarePackage).Include(row => row.FirmwareArtifact)
                 .Where(row => row.Terminal!.TerminalIdHex == terminalIdentity && row.Terminal.DeactivatedAtUtc == null &&
                     row.CodeTransitionId != null && row.CodeScheduleId != null && !row.SimulationMode &&
-                    row.ApprovedAtUtc != null && row.Status == FirmwareUpdateJobStatus.Completed &&
-                    !row.Steps.Any(step => step.Name.StartsWith("live_")))
+                    row.ApprovedAtUtc != null && row.IncomingAttemptLimit >= 1 && row.IncomingAttemptLimit <= 10 &&
+                    ((row.Status == FirmwareUpdateJobStatus.Completed && row.IncomingAttemptCount == 0 &&
+                        !row.Steps.Any(step => step.Name.StartsWith("live_"))) ||
+                     (resume && row.Status == FirmwareUpdateJobStatus.Failed && row.IncomingRetryEligible &&
+                        row.IncomingAttemptCount > 0 && row.IncomingAttemptCount < row.IncomingAttemptLimit)))
                 .Take(2).ToListAsync(ct);
             if (candidates.Count != 1) return null;
             var job = candidates[0];
+            if (job.IncomingAttemptCount > 0)
+            {
+                var last = StepIndex(job.IncomingAttemptCount);
+                // A retry needs the persisted outcome of the previous attempt.
+                // A Running claim or any completed transport is never reusable.
+                if (!await db.FirmwareUpdateSteps.AnyAsync(step => step.FirmwareUpdateJobId == job.Id &&
+                        step.Name == "live_code_claim" && step.StepIndex == last && step.Succeeded, ct) ||
+                    !await db.FirmwareUpdateSteps.AnyAsync(step => step.FirmwareUpdateJobId == job.Id &&
+                        step.Name == "live_code_transport" && step.StepIndex == last + 1 &&
+                        step.StepStatus == FirmwareUpdateStepStatus.Failed && !step.Succeeded, ct) ||
+                    await db.FirmwareUpdateSteps.AnyAsync(step => step.FirmwareUpdateJobId == job.Id &&
+                        step.Name == "live_code_transport" && step.Succeeded, ct))
+                    return null;
+            }
             var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().SingleOrDefaultAsync(row =>
                 row.Id == job.CodeTransitionId && row.TerminalId == job.TerminalId && row.CodeScheduleId == job.CodeScheduleId, ct);
             var package = job.FirmwarePackage;
@@ -124,43 +143,59 @@ public sealed class IncomingCodeDeliveryService(HostPlatformDbContext db, IFirmw
             var image = await FirmwareArtifactStorage.ReadVerifiedAsync(platform.Value.PayloadStorage.RootPath,
                 artifact.StorageRef, artifact.SizeBytes, job.ApprovedArtifactSha256Hex, ct);
 
-            var claimed = await db.FirmwareUpdateJobs.Where(row => row.Id == job.Id && row.Status == FirmwareUpdateJobStatus.Completed &&
+            var attempt = job.IncomingAttemptCount + 1;
+            var claimed = await db.FirmwareUpdateJobs.Where(row => row.Id == job.Id && row.Status == job.Status &&
                 !row.SimulationMode && row.ApprovedAtUtc == job.ApprovedAtUtc && row.CodeTransitionId == plan.Id &&
-                row.CodeScheduleId == code.Schedule.Id && !row.Steps.Any(step => step.Name.StartsWith("live_")))
-                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Status, FirmwareUpdateJobStatus.Running), ct);
+                row.CodeScheduleId == code.Schedule.Id && row.IncomingAttemptCount == job.IncomingAttemptCount &&
+                row.IncomingAttemptLimit == job.IncomingAttemptLimit &&
+                ((row.IncomingAttemptCount == 0 && !row.Steps.Any(step => step.Name.StartsWith("live_"))) ||
+                 (resume && row.IncomingRetryEligible && row.IncomingAttemptCount < row.IncomingAttemptLimit)))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Status, FirmwareUpdateJobStatus.Running)
+                    .SetProperty(row => row.IncomingAttemptCount, attempt).SetProperty(row => row.IncomingRetryEligible, false), ct);
             if (claimed != 1) return null;
-            db.FirmwareUpdateSteps.Add(new FirmwareUpdateStep { FirmwareUpdateJobId = job.Id, StepIndex = 100,
+            db.FirmwareUpdateSteps.Add(new FirmwareUpdateStep { FirmwareUpdateJobId = job.Id, StepIndex = StepIndex(attempt),
                 Name = "live_code_claim", StepStatus = FirmwareUpdateStepStatus.Succeeded, Succeeded = true,
-                Detail = "Matched the delivered schedule and verified primary artifact for an independently approved job." });
+                Detail = $"Attempt {attempt}: matched the delivered schedule and verified primary artifact for an independently approved job." });
             ApiAudit.Write(db, null, "firmware.job", "incoming_code_claim", $"FirmwareUpdateJob:{job.Id}",
-                new { job.CodeTransitionId, job.CodeScheduleId, selectedBlockCount = blocks.Length }, job.TerminalId);
+                new { job.CodeTransitionId, job.CodeScheduleId, selectedBlockCount = blocks.Length,
+                    attempt, maximumAttempts = job.IncomingAttemptLimit, resume }, job.TerminalId);
             await db.SaveChangesAsync(ct);
             await transaction.CommitAsync(ct);
-            return new Claim(job.Id, new DlaAuthorizedPayload(image, job.ApprovedArtifactSha256Hex, blocks));
+            return new Claim(job.Id, attempt, job.IncomingAttemptLimit, new DlaAuthorizedPayload(image, job.ApprovedArtifactSha256Hex, blocks));
         }
         catch (InvalidOperationException) { return null; }
         catch (Exception ex) when (ex is DbUpdateConcurrencyException || ex.GetBaseException() is PostgresException
             { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation }) { return null; }
     }
 
-    private async Task RecordOutcomeAsync(Guid id, DlaAuthorizedSessionResult result, CancellationToken ct)
+    private async Task RecordOutcomeAsync(Claim claim, DlaAuthorizedSessionResult result, CancellationToken ct)
     {
+        var id = claim.JobId;
         db.ChangeTracker.Clear();
-        var job = await db.FirmwareUpdateJobs.SingleAsync(row => row.Id == id && row.Status == FirmwareUpdateJobStatus.Running, ct);
-        db.FirmwareUpdateSteps.Add(new FirmwareUpdateStep { FirmwareUpdateJobId = id, StepIndex = 101,
+        var job = await db.FirmwareUpdateJobs.SingleAsync(row => row.Id == id && row.Status == FirmwareUpdateJobStatus.Running &&
+            row.IncomingAttemptCount == claim.Attempt && row.IncomingAttemptLimit == claim.Limit, ct);
+        job.IncomingRetryEligible = result.DefinitivelyIncomplete && claim.Attempt < claim.Limit;
+        var step = StepIndex(claim.Attempt);
+        db.FirmwareUpdateSteps.Add(new FirmwareUpdateStep { FirmwareUpdateJobId = id, StepIndex = step + 1,
             Name = "live_code_transport", Succeeded = result.TransportCompleted,
             StepStatus = result.TransportCompleted ? FirmwareUpdateStepStatus.Succeeded : FirmwareUpdateStepStatus.Failed,
-            Detail = result.TransportCompleted ? "Code transport completed." : "Code transport did not complete; reconcile before another execution." });
-        db.FirmwareUpdateSteps.Add(new FirmwareUpdateStep { FirmwareUpdateJobId = id, StepIndex = 102,
+            Detail = $"Attempt {claim.Attempt}: " + (result.TransportCompleted ? "code transport completed." :
+                result.DefinitivelyIncomplete ? $"incomplete delivery; {result.PacketsAttempted} of {result.ExpectedPackets} packets attempted." :
+                "transport outcome requires reconciliation.") });
+        db.FirmwareUpdateSteps.Add(new FirmwareUpdateStep { FirmwareUpdateJobId = id, StepIndex = step + 2,
             Name = "live_code_application_response", Succeeded = result.ApplicationResponseSeen,
             StepStatus = result.ApplicationResponseSeen ? FirmwareUpdateStepStatus.Succeeded : FirmwareUpdateStepStatus.Pending,
-            Detail = result.ApplicationResponseSeen ? "Application response observed." : "Application response not observed." });
+            Detail = $"Attempt {claim.Attempt}: " + (result.ApplicationResponseSeen ? "application response observed." : "application response not observed.") });
         job.Status = result.Success ? FirmwareUpdateJobStatus.Completed : FirmwareUpdateJobStatus.Failed;
         job.SafetyStateJson = JsonSerializer.Serialize(new { mode = "incoming_code", result.TransportCompleted, result.ApplicationResponseSeen,
             result.PacketsSent, result.RequestedBlockCount, deliveredBlockCount = result.DeliveredBlocks.Count,
+            result.ExpectedPackets, result.PacketsAttempted, result.DefinitivelyIncomplete,
+            attempt = claim.Attempt, maximumAttempts = claim.Limit, retryEligible = job.IncomingRetryEligible,
             targetVersionVerified = false, serviceVerified = false });
         ApiAudit.Write(db, null, "firmware.job", "incoming_code_outcome", $"FirmwareUpdateJob:{id}",
-            new { result.TransportCompleted, result.ApplicationResponseSeen, result.PacketsSent, result.RequestedBlockCount }, job.TerminalId);
+            new { result.TransportCompleted, result.ApplicationResponseSeen, result.PacketsSent, result.RequestedBlockCount,
+                result.ExpectedPackets, result.PacketsAttempted, result.DefinitivelyIncomplete,
+                attempt = claim.Attempt, retryEligible = job.IncomingRetryEligible }, job.TerminalId);
         await db.SaveChangesAsync(ct);
     }
 }

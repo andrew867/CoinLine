@@ -21,7 +21,7 @@ test('uploads a matching artifact and approves the exact scheduled job without t
     if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
       openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
     if (url.pathname === '/api/firmware/execution-policy') return route.fulfill({ json: { allowLiveFlashing: true, liveDlaEnabled: true,
-      transportMode: 'simulation', liveTransportConfigured: false, incomingCodeServerListening: true, hardwareValidationNotice: 'Fixture policy' } })
+      transportMode: 'simulation', liveTransportConfigured: false, incomingCodeServerConfigured: true, incomingCodeServerListening: true, hardwareValidationNotice: 'Fixture policy' } })
     if (url.pathname === endpoint) return route.fulfill({ json: { ...pkg, primaryArtifactId: uploaded ? artifactId : null,
       artifacts: uploaded ? [{ id: artifactId, kind: 'primary', sha256Hex: digest, sizeBytes: bytes.length, storageRef: 'firmware/fixture.bin', payloadPresent: true }] : [] } })
     if (url.pathname === `${endpoint}/artifacts/upload`) {
@@ -43,6 +43,7 @@ test('uploads a matching artifact and approves the exact scheduled job without t
       status: simulated ? 4 : 2, simulationMode: false, liveExecutionConfigured: false, incomingCodeServerListening: true, safetyStateJson: '{}',
       approvedAtUtc: approved ? '2026-01-01T00:00:00Z' : null, approvedByOperatorId: approved ? 'fixture' : '',
       codeTransitionId: approved ? 'fixture-transition' : null, codeScheduleId: approved ? 'fixture-schedule' : null,
+      incomingAttemptLimit: approved ? 2 : 1, incomingAttemptCount: 0, incomingRetryEligible: false,
       cancelReason: '', createdAtUtc: '2026-01-01T00:00:00Z', steps: [], safetyChecks: [], rollBackPlan: null,
       hardwareValidationNotice: 'Fixture policy' } })
     if (url.pathname === `${jobEndpoint}/simulate`) {
@@ -54,7 +55,7 @@ test('uploads a matching artifact and approves the exact scheduled job without t
         sourceControllerSoftware: 'A001', targetControllerRom: 'LABNEW', targetControllerSoftware: 'A002' }] })
     if (url.pathname === `${jobEndpoint}/approve`) {
       expect(request.method()).toBe('POST')
-      expect(request.postDataJSON()).toMatchObject({ codeTransitionId: 'fixture-transition', rollbackNotes: expect.any(String) })
+      expect(request.postDataJSON()).toMatchObject({ codeTransitionId: 'fixture-transition', maximumIncomingAttempts: 2, rollbackNotes: expect.any(String) })
       approved = true; return route.fulfill({ json: { approved: true } })
     }
     if (url.pathname.endsWith('/execute-live')) liveRequests++
@@ -79,9 +80,11 @@ test('uploads a matching artifact and approves the exact scheduled job without t
   await page.goto('/firmware/jobs/fixture-job')
   await page.getByRole('button', { name: 'Run simulation' }).click()
   await page.getByLabel('Delivery configuration').selectOption('fixture-transition')
+  await page.getByLabel('Maximum incoming attempts (including initial)').selectOption('2')
   await page.getByRole('button', { name: 'Approve (after simulation)' }).click()
   await expect(page.getByText(/Approval bound to terminal-initiated delivery/)).toContainText('fixture-schedule')
   await expect(page.getByText(/Waiting for the scheduled terminal callback/)).toBeVisible()
+  await expect(page.getByText(/Attempts: 0\/2/)).toBeVisible()
   await expect(page.getByRole('button', { name: /Execute live/ })).toHaveCount(0)
   expect(simulated).toBe(true); expect(approved).toBe(true); expect(liveRequests).toBe(0)
 })
