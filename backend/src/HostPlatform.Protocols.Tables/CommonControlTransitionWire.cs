@@ -19,6 +19,11 @@ public static class CommonControlTransitionWire
         new("ui-assisted", 30, "Operator and carrier access timing", "Review the intended carrier and access behavior."),
         new("ui-data-port", 30, "Data port timing", "Select only if the target includes the intended data-port hardware and configuration."),
         new("communications", 32, "Communications statistics", "The reserved timing pair is retained; review the resulting collection schedule and histogram bounds."),
+        new("modem-line-timing", 33, "Modem speed and shared line timing", "Review speed, call progress and turnaround times against the target modem. The later answer-tone removal timer is retained; the earlier spare word is never interpreted as a timer."),
+        new("modem-seizure", 33, "Modem line seizure method", "Carry the configured ground-start choice only after checking the target line interface."),
+        new("modem-dial-detection", 33, "Dial, busy and ringback detection", "Carry both detector debounce triplets and the busy threshold. Review against the target line and modem."),
+        new("modem-answer-detection", 33, "Modem answer-tone detection", "Carry the answer debounce and shared detection, optional-answer and removal-wait choices. The candidate's separate answer-removal timer remains unchanged."),
+        new("modem-carrier-detection", 33, "Modem carrier and loss detection", "Carry the carrier and lost-carrier debounce triplets and the carrier-loss timeout switch. Review the complete target modem exchange."),
         new("call-collection", 34, "Call statistics and CDR logging", "Carries the defined collection schedule and CDR policy, independently of carrier statistics."),
         new("carrier-collection", 34, "Carrier statistics mode", "Explicitly maps earlier disabled or per-carrier mode to the later field. If selected, the prepared combined-summary mode is replaced."),
         new("routine-call-in", 35, "Routine call-in and upload threshold", "Carries time of day, interval, retries and threshold. Candidate start date and one-time clock adjustment are retained."),
@@ -30,7 +35,7 @@ public static class CommonControlTransitionWire
             "Carry only this index's maximum units and multiplier. Confirm the target card-value mapping independently; validation data, discounts, other unit indexes and issuer settings are not carried."))
     ];
 
-    public static int? LengthFor(int number) => number switch { 29 => AdvertisingTableWire.RecordLength, 30 => 68, 32 => 33, 34 => 19, 35 => 21, 50 => 105, 58 => ServiceRestrictionWire.RecordLength, 93 => 225, _ => null };
+    public static int? LengthFor(int number) => number switch { 29 => AdvertisingTableWire.RecordLength, 30 => 68, 32 => 33, 33 => 36, 34 => 19, 35 => 21, 50 => 105, 58 => ServiceRestrictionWire.RecordLength, 93 => 225, _ => null };
 
     public static CommonControlProjection Project(int number, byte[] source, byte[] target, IReadOnlyCollection<string> selections)
     {
@@ -49,7 +54,7 @@ public static class CommonControlTransitionWire
         else
         {
             var earlier = NativeTableLayouts.Find(number, source, NativeTableLayouts.MultiPay)!;
-            var later = NativeTableLayouts.Find(number, target, number is 34 or 58 or 93 ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay)!;
+            var later = NativeTableLayouts.Find(number, target, number is 33 or 34 or 58 or 93 ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay)!;
             var targetFields = later.Sections.SelectMany(section => section.Fields).ToDictionary(field => field.Key, StringComparer.Ordinal);
             foreach (var group in groups)
             {
@@ -88,6 +93,8 @@ public static class CommonControlTransitionWire
         }
         if (selections.Count != 0)
         {
+            if (number == 33)
+                findings.Add(new(false, number, "Review the resulting target modem timing and detector choices against the actual line interface. The later answer-tone removal timer and reserved flag bits remain unchanged. Configuration preparation does not qualify carrier, management calls or code transfer."));
             if (number == 93)
                 findings.Add(new(false, number, "Confirm that each selected unit index has the intended meaning in the target card-value mapping. This carries only numeric limits and multipliers; issuer and validation data, discounts and acceptance settings remain unchanged. It does not qualify stored-value payment."));
             if (number == 58)
@@ -129,6 +136,11 @@ public static class CommonControlTransitionWire
             {
                 "ui-prompts" => section.Key == "prompts", "ui-calls" => section.Key == "calls", "ui-assisted" => section.Key == "assisted", "ui-data-port" => section.Key == "dataPort",
                 "communications" => section.Key != "reserved",
+                "modem-line-timing" => field.Key is "baud" or "seizeDelay" or "dialToneDelay" or "busyCycle" or "answerDelay" or "laptopSeizeTime" or "carrierDelay" or "turnaroundDelay",
+                "modem-seizure" => field.Key == "groundStart",
+                "modem-dial-detection" => section.Key is "debounce-0" or "debounce-1" || field.Key == "busyThreshold",
+                "modem-answer-detection" => section.Key == "debounce-2" || field.Key is "answerToneDetection" or "answerToneOptional" or "skipAnswerToneRemoval",
+                "modem-carrier-detection" => section.Key is "debounce-3" or "debounce-4" || field.Key == "carrierLossTimeout",
                 "call-collection" => field.Key != "carrierStatistics", "carrier-collection" => field.Key == "carrierStatistics",
                 "routine-call-in" => field.Key is "startTime" or "intervalDays" or "intervalHours" or "intervalMinutes" or "retryMinutes" or "retrySeconds" or "recordThreshold",
                 "coin-denominations" => field.Key.StartsWith("coin-", StringComparison.Ordinal) && (field.Key.EndsWith(".value", StringComparison.Ordinal) || field.Key.EndsWith(".accepted", StringComparison.Ordinal)),
