@@ -43,6 +43,8 @@ public static class TableSetFirmwareCompatibility
                 yield return new(number, true, issue);
             else if (profile == null || !profile.VerifiedLengths.ContainsKey(number))
                 yield return new(number, false, "The record format has no verified length for the selected firmware.");
+            else if (ConfirmedLayoutIssue(profile, number, record.Single().ScreeningLayoutProfile) is { } layoutIssue)
+                yield return new(number, true, layoutIssue);
             else
             {
                 verifiedRecords.Add(number, data);
@@ -189,6 +191,11 @@ public static class TableSetFirmwareCompatibility
             record.TableDefinition!.TableNumber, TableDistributionService.GetEffectivePayload(record).Length,
             record.ScreeningLayoutProfile));
 
+    public static string? ConfirmedLayoutIssue(FirmwareTableProfile? profile, int number, string? confirmed) =>
+        confirmed != null && profile != null && profile.VerifiedLengths.ContainsKey(number)
+            && profile.LayoutFor(number) is { } expected && confirmed != expected
+            ? "The confirmed record layout differs from the registered firmware layout." : null;
+
     // Unknown or incomplete profiles do not prove that an unlisted record is
     // unsupported. Reject only contradictions with the known installed profile.
     public static string? SelectionIssue(FirmwareTableProfile? profile, IEnumerable<TableRecordShape> records)
@@ -199,9 +206,8 @@ public static class TableSetFirmwareCompatibility
         {
             if (RecordIssue(profile, record.TableNumber, record.Length) is { } issue)
                 return $"MT{record.TableNumber}. {issue}";
-            if (record.ConfirmedLayout != null && profile.VerifiedLengths.ContainsKey(record.TableNumber)
-                && profile.LayoutFor(record.TableNumber) is { } expected && record.ConfirmedLayout != expected)
-                return $"MT{record.TableNumber}. The confirmed record layout differs from the phone's registered firmware layout.";
+            if (ConfirmedLayoutIssue(profile, record.TableNumber, record.ConfirmedLayout) is { } layoutIssue)
+                return $"MT{record.TableNumber}. {layoutIssue}";
         }
         return null;
     }

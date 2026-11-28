@@ -2705,6 +2705,105 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.ToTable("InmateFeatureConfigurations");
                 });
 
+            modelBuilder.Entity("HostPlatform.Domain.MerchantCaptureIntent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<decimal>("AmountUsd")
+                        .HasPrecision(8, 2)
+                        .HasColumnType("numeric(8,2)");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("AuthorizationDecisionId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid>("AuthorizationRequestId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("BindingFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<int>("CallSequence")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CallStartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("DurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("LastResult")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<DateTime>("NextAttemptAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("PostedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.Property<Guid>("TerminalId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UpdatedBy")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("UploadBatchId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("Version")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AuthorizationDecisionId");
+
+                    b.HasIndex("AuthorizationRequestId")
+                        .IsUnique();
+
+                    b.HasIndex("TerminalId");
+
+                    b.HasIndex("UploadBatchId")
+                        .IsUnique();
+
+                    b.HasIndex("Status", "NextAttemptAtUtc");
+
+                    b.ToTable("MerchantCaptureIntents", t =>
+                        {
+                            t.HasCheckConstraint("CK_MerchantCaptureIntent_CallSequence", "\"CallSequence\" BETWEEN 0 AND 65535");
+
+                            t.HasCheckConstraint("CK_MerchantCaptureIntent_Duration", "\"DurationSeconds\" > 0");
+
+                            t.HasCheckConstraint("CK_MerchantCaptureIntent_PositiveAmount", "\"AmountUsd\" > 0 AND \"AmountUsd\" <= 655.35");
+
+                            t.HasCheckConstraint("CK_MerchantCaptureIntent_State", "\"AttemptCount\" >= 0 AND \"Status\" BETWEEN 0 AND 2");
+                        });
+                });
+
             modelBuilder.Entity("HostPlatform.Domain.NccFrameCapture", b =>
                 {
                     b.Property<Guid>("Id")
@@ -5437,6 +5536,35 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("RatePlan");
+                });
+
+            modelBuilder.Entity("HostPlatform.Domain.MerchantCaptureIntent", b =>
+                {
+                    b.HasOne("HostPlatform.Domain.AuditEvent", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorizationDecisionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.AuditEvent", null)
+                        .WithMany()
+                        .HasForeignKey("AuthorizationRequestId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.Terminal", "Terminal")
+                        .WithMany()
+                        .HasForeignKey("TerminalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("HostPlatform.Domain.UploadBatch", null)
+                        .WithMany()
+                        .HasForeignKey("UploadBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Terminal");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.NccSession", b =>

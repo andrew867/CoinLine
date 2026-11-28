@@ -111,6 +111,7 @@ public static class NativeTableSetReview
         }
 
         var discountSchedule = Get(records, NativeTableLayouts.TimeDiscountRecord, 95);
+        findings.AddRange(TerminalDiscountReferences.ProvisioningFindings(Get(records, 134, 1153), discountSchedule, Get(records, 93, 225)));
         if (discountSchedule != null)
         {
             if (NativeTableLayouts.UsesTimeDiscountRates(discountSchedule) && Get(records, 93, 225) == null)

@@ -121,17 +121,28 @@ public sealed class PostgresVisualPromptWorksheetTests
                 Assert.Equal(20, fields[row].GetProperty("maxLength").GetInt32());
             }
             Assert.Equal(JsonValueKind.Null, fields[1].GetProperty("value").ValueKind);
+            var opaque = Assert.Single(snapshot.GetProperty("visualPromptOpaqueRows").EnumerateArray());
+            Assert.Equal(1, opaque.GetProperty("row").GetInt32());
+            Assert.Equal(JsonValueKind.Null, opaque.GetProperty("cells")[0].ValueKind);
+            Assert.Equal("", opaque.GetProperty("cells")[1].GetString());
             using (var unchanged = await Save(snapshot, new() { ["prompt-32.text"] = "Café" })) unchanged.EnsureSuccessStatusCode();
             await Check(record.Imported, 1);
             using (var denied = await Save(snapshot, new(record.Changes) { [$"prompt-{count}.text"] = "Invalid" }))
                 Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
             using (var denied = await Save(snapshot, new(record.Changes) { ["prompt-1.text"] = "漢" }))
                 Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+            using (var denied = await Save(snapshot, new() { ["prompt-1.cell-0"] = "A" }))
+                Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
+            using (var denied = await Save(snapshot, new() { ["prompt-1.cell-1"] = "AB" }))
+                Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
             await Check(record.Imported, 1);
             using (var edited = await Save(snapshot, record.Changes)) edited.EnsureSuccessStatusCode();
             await Check(record.Expected, 2);
             using (var stale = await Save(snapshot, record.Changes)) Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
             snapshot = await Read();
+            var retainedOpaque = Assert.Single(snapshot.GetProperty("visualPromptOpaqueRows").EnumerateArray());
+            Assert.Equal(JsonValueKind.Null, retainedOpaque.GetProperty("cells")[0].ValueKind);
+            Assert.Equal("Q", retainedOpaque.GetProperty("cells")[1].GetString());
             using (var unchanged = await Save(snapshot, record.Changes)) unchanged.EnsureSuccessStatusCode();
             await Check(record.Expected, 2);
             using (var published = await client.PostAsync($"/api/tables/sets/{set.Id}/publish?confirm=true", null)) published.EnsureSuccessStatusCode();

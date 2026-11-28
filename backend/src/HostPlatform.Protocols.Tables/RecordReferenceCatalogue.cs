@@ -2,7 +2,7 @@ namespace HostPlatform.Protocols.Tables;
 
 public sealed record NativeLayoutReference(int Number, int Length, string Profile, bool DraftTemplateAvailable, bool ExplicitAuthoringAvailable = false);
 public sealed record FirmwareRecordReference(string ProfileId, string Label, int Length, bool TerminalAcknowledged,
-    bool CompleteCatalogue, bool ObservedLengthsOnly, string EditorStatus, string? EditorProfile);
+    bool CompleteCatalogue, bool ObservedLengthsOnly, string EditorStatus, string? EditorProfile, string? BehaviorObservation);
 public sealed record ReferenceRecord(
     int Number, string Name, string Kind, NativeLayoutReference[] Layouts, FirmwareRecordReference[] Firmware, string? BehaviorObservation);
 
@@ -62,8 +62,29 @@ public static class RecordReferenceCatalogue
         var status = profile.ObservedLengthsOnly ? "length-only" : match == null ? "unmapped"
             : match.DraftTemplateAvailable ? "template" : match.ExplicitAuthoringAvailable ? "explicit" : "import-only";
         return new(profile.Id, profile.Label, length, profile.TerminalAcknowledgedRecords.Contains(number),
-            profile.CompleteCatalogue, profile.ObservedLengthsOnly, status, match?.Profile);
+            profile.CompleteCatalogue, profile.ObservedLengthsOnly, status, match?.Profile, ProfileBehavior(profile.Id, number));
     }
+
+    // These observations are associated with the named profile only. An MT14 or
+    // a shared record length cannot establish behavior on another profile.
+    private static string? ProfileBehavior(string profile, int number) => (profile, number) switch
+    {
+        (FirmwareTableProfiles.MultiPay200, 22) => "Synthetic magnetic stripe accepted under the installed card policy. Charged-call settlement remains unqualified.",
+        (FirmwareTableProfiles.MultiPay200, 29) => "Two downloaded on-hook text messages rotated on the emulated display. Other glyph and timing edits remain unqualified.",
+        (FirmwareTableProfiles.MultiPay200, 34 or 35) => "Both edited collection records were acknowledged; a local quarter call subsequently uploaded one charged MT53 through Craft without duplication. Automatic count-triggered pickup and changed carrier statistics remain unqualified.",
+        (FirmwareTableProfiles.MultiPay200, 50) => "One configured quarter was accepted for an answered local call; the terminal returned on-hook normally.",
+        (FirmwareTableProfiles.MultiPay200, 73) => "Authored local whole-call and national initial rates were displayed. A local call remained answered for 130 emulated seconds without an additional payment request.",
+        (FirmwareTableProfiles.MultiPay200, 92) => "Exact toll-free and other permitted free routes proceeded without collecting payment; blocked and paid controls were tested separately.",
+        (FirmwareTableProfiles.MultiPay200, 101) => "An authored local exchange used its matching offline tariff without a runtime host quote.",
+        (FirmwareTableProfiles.LaterMultiPay180, 134) => "An installed synthetic magnetic range accepted the stripe and reached local-only authorization. Generic contact transport was tested separately; application-specific smart-card use and settlement remain unqualified.",
+        (FirmwareTableProfiles.GraphicalMultiPay180, 26) => "A selected feature record update disabled the text idle preference; the operator confirmed graphical rotation after normal restart.",
+        (FirmwareTableProfiles.GraphicalMultiPay180, 29) => "The installed populated text rotation took priority before the graphical idle preference was changed. Both advertising records were retained.",
+        (FirmwareTableProfiles.GraphicalMultiPay180, 50) => "A configured quarter was accepted during an answered local call; collection was observed separately from the quoted charge.",
+        (FirmwareTableProfiles.GraphicalMultiPay180, 73 or 92) => "Selected regional records produced the intended local and national initial prices and permitted exact free controls. Service codes 711 and 811, the seven-digit pre-payment prompt and paid continuation remain unqualified.",
+        (FirmwareTableProfiles.GraphicalMultiPay180, 94) => "Enabled and disabled schedules were acknowledged; an independent scheduled code-server network connection was observed. No image data was transferred or reboot into a target version demonstrated.",
+        (FirmwareTableProfiles.GraphicalMultiPay180, 131 or 132) => "Sixteen downloaded bitmap frames matched exactly on the graphical emulated display. Interactive navigation and MT153 reporting are separate acceptance checks.",
+        _ => null
+    };
 
     // Specific historical emulator observations, never an assertion that every
     // field, firmware profile or physical terminal implements this behavior.

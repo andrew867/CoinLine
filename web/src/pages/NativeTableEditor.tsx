@@ -5,6 +5,7 @@ import { CraftAccessReveal } from './CraftAccessReveal'
 import { NativeBitmapField } from './NativeBitmapField'
 import { CarrierLibraryPanel } from './CarrierLibraryPanel'
 import { CarrierBrandingPreview } from './CarrierLibraryPage'
+import { TerminalCarrierReferencePanel } from './TerminalCarrierReferencePanel'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
 import { GraphicalLinkReviewPanel, type GraphicalLinkReview } from './GraphicalLinkReviewPanel'
@@ -15,6 +16,7 @@ import { SpareTableByteEditor, type SpareByteEdits } from './SpareTableByteEdito
 import { LocalDialingImport } from './LocalDialingImport'
 import { ScreeningSlotActions, type ScreeningAction } from './ScreeningSlotActions'
 import { ScreeningBulkPanel } from './ScreeningBulkPanel'
+import { ScreeningSlotReferencesPanel } from './ScreeningSlotReferencesPanel'
 import { exchangeCount, type ExchangeFile } from './localDialingExchangeData'
 import { describeServiceRestriction } from './serviceRestrictionSchedule'
 import { RestrictedRouteReview, type RestrictedRouteRecord } from './RestrictedRouteReview'
@@ -30,12 +32,13 @@ import { authorableDisplayText } from './advertisingGlyphs'
 import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
 import { VisualPromptWorksheet, type VisualPromptCompanion } from './VisualPromptWorksheet'
 import { VisualPromptDraftForm, type VisualPromptAuthoringRequest, type VisualPromptAuthoringSpec } from './VisualPromptDraftForm'
-import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
+import { isPromptCellKey, promptRows, stagePromptChanges, undoPromptChanges, visualPromptRowCount, type OpaquePromptRow } from './visualPromptWorksheetCodec'
 import { RegionalRatingPreview } from './RegionalRatingPreview'
 import { LanguageOrderPanel } from './LanguageOrderPanel'
 import { languageOrderKeys } from './languageOrderPlan'
 import { TerminalTariffPricing } from './TerminalTariffPricing'
 import { TerminalTariffReferencePanel } from './TerminalTariffReferencePanel'
+import { TerminalDiscountReferencePanel } from './TerminalDiscountReferencePanel'
 import { ManagementAccessDraftForm, type ManagementAccessInput, type ManagementAccessSpec } from './ManagementAccessDraftForm'
 
 type Field = {
@@ -73,6 +76,7 @@ type Layout = {
   sections: Section[]
   graphicalLinks?: GraphicalLinkReview | null
   visualPromptCompanions?: VisualPromptCompanion[] | null
+  visualPromptOpaqueRows?: OpaquePromptRow[] | null
   numberingPlan?: NumberingPlan | null
   numberingFormatCapacity?: number | null
   spareBytes?: string | null
@@ -213,9 +217,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     event.preventDefault()
     if (!layout?.supported || !canEdit) return
     if (visualPromptRowCount(number, layout.length) !== null) {
-      const invalid = Object.entries(edits).find(([, text]) => !authorableDisplayText(text, 20))
+      const invalid = Object.entries(edits).find(([key, text]) => !authorableDisplayText(text, isPromptCellKey(key) ? 1 : 20))
       if (invalid) {
-        setMessage(`Wire row ${invalid[0].match(/^prompt-(\d+)\.text$/)?.[1] ?? ''} exceeds 20 cells or contains an unsupported glyph.`)
+        setMessage(`Wire row ${invalid[0].match(/^prompt-(\d+)\./)?.[1] ?? ''} exceeds ${isPromptCellKey(invalid[0]) ? 'one display cell' : '20 cells'} or contains an unsupported glyph.`)
         return
       }
     }
@@ -375,7 +379,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const showingRules = layout.numberingPlan && view === 'rules'
   const showingBytes = layout.spareBytes && view === 'bytes'
   const promptCount = visualPromptRowCount(number, layout.length)
-  const worksheetRows = promptCount !== null ? promptRows(layout.sections, promptCount) : null
+  const worksheetRows = promptCount !== null ? promptRows(layout.sections, promptCount, layout.visualPromptOpaqueRows) : null
   const showingPrompts = worksheetRows !== null && view === 'prompts'
   const showingSettings = !showingRules && !showingBytes && !showingPrompts
   const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
@@ -399,6 +403,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const keyCleared = selectedKey != null && clearedKeys.has(selectedKey)
   const carrierReference = selectedKey != null && current && keyValue(current, 'free') === 'true' && keyValue(current, 'featureGroupB') === 'true'
   const carrierRow = (number === 23 || number === 135) && current?.key.startsWith('carrier-') ? Number(current.key.slice(8)) : null
+  const savedCarrierReference = carrierRow == null ? null : current?.fields.find(field => field.key === `${current.key}.reference`)?.value ?? null
   const displayFields = current?.showDisplayPreview ? current.fields
     : selectedKey != null && current ? current.fields.filter(field => field.key.endsWith('.upper') || field.key.endsWith('.lower')) : []
   const visibleFields = current?.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
@@ -529,7 +534,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           setEdits(updated); onDirty(Object.keys(updated).length > 0); setMessage('')
         }}
         onUndo={key => {
-          const updated = { ...edits }; delete updated[key]
+          const updated = undoPromptChanges(worksheetRows, edits, key)
           setEdits(updated); onDirty(Object.keys(updated).length > 0); setMessage('')
         }} />}
       {exchangeSegment && areaField && <LocalDialingImport segment={exchangeSegment} editable={canEdit && !busy}
@@ -605,6 +610,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       )}
       {showingSettings && current && carrierRow != null && <>
         <CarrierBrandingPreview name={keyValue(current, 'name') ?? ''} />
+        {savedCarrierReference != null && /^\d+$/.test(savedCarrierReference) && Number(savedCarrierReference) < 255 &&
+          <TerminalCarrierReferencePanel key={`${setId}:${number}:${carrierRow}:${layout.revision}`} setId={setId} reference={Number(savedCarrierReference)} dirty={changed > 0} />}
         <CarrierLibraryPanel key={`${setId}:${number}:${carrierRow}`} setId={setId} number={number} slot={carrierRow}
           revision={layout.revision} sha256={layout.sha256} reference={keyValue(current, 'reference') ?? null}
           editable={canEdit} dirty={changed !== 0 || busy} onApplied={() => { setReload(count => count + 1); onSaved() }} />
@@ -614,6 +621,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           sha256={layout.sha256} profile={layout.profile} slot={screeningSlot}
           dirty={busy || Object.keys(edits).length > 0 || hasScreeningChanges}
           onApplied={sourceChanged => { if (sourceChanged) { setReload(count => count + 1); onSaved() } }} />}
+      {showingSettings && number === 92 && screeningSlot != null && layout.screening &&
+        <ScreeningSlotReferencesPanel key={`${setId}:${screeningSlot}:${layout.revision}`} setId={setId} slot={screeningSlot}
+          dirty={busy || Object.keys(edits).length > 0 || hasScreeningChanges} />}
       {showingSettings && screeningSlot != null && family && institutionSlot(screeningSlot) &&
         <p className="page-intro">Entry {screeningSlot} is in the documented institutional range. Confirm that any change belongs in this configuration rather than the separate institutional setup.</p>}
       {showingSettings && screeningSlot != null && family && screeningSlot > documentedScreeningSlots &&
@@ -639,6 +649,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         }} />}
       {showingSettings && current && number === 73 && /^rate-\d+$/.test(current.key) &&
         <TerminalTariffReferencePanel key={`${setId}:${current.key}:${layout.revision}`} setId={setId} rateIndex={Number(current.key.slice(5))} />}
+      {showingSettings && current && number === 93 && /^discount-\d+$/.test(current.key) &&
+        <TerminalDiscountReferencePanel key={`${setId}:${current.key}:${layout.revision}`} setId={setId} discount={Number(current.key.slice(9)) + 1} dirty={changed > 0} />}
       {showingSettings && current?.key === 'craft' && number === 31 && consoleSession.role() === 'Admin' && !busy &&
         <CraftAccessReveal key={`${endpoint}:${layout.revision}:${layout.sha256}:${layout.profile}:${reload}`} endpoint={endpoint}
           revision={layout.revision} sha256={layout.sha256} profile={layout.profile} />}

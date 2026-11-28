@@ -11,6 +11,7 @@ test('reviews a language worksheet and saves only chosen fixed wire rows', async
     value: row === 1 ? null : row === 0 ? 'Café' : '', displayGlyphs: true, min: 0, max: 0, maxLength: 20, choices: null, help: `Wire row ${row}.`,
   }))
   let revision = 1
+  const opaqueCells: (string | null)[] = [null, 'A', ...Array<string>(18).fill(' ')]
   const saves: Record<string, unknown>[] = []
   await page.route('**/*', async route => {
     const request = route.request(), url = new URL(request.url())
@@ -34,11 +35,12 @@ test('reviews a language worksheet and saves only chosen fixed wire rows', async
         const body = request.postDataJSON()
         saves.push(body)
         for (const field of fields) if (field.key in body.changes) field.value = body.changes[field.key]
+        if ('prompt-1.cell-1' in body.changes) opaqueCells[1] = body.changes['prompt-1.cell-1']
         revision++
         return route.fulfill({ status: 204 })
       }
       return route.fulfill({ json: { supported: true, editable: true, profile: 'Later packed profile', length: 8001, revision,
-        sha256: 'a'.repeat(64), sections: Array.from({ length: 200 }, (_, index) => ({
+        sha256: 'a'.repeat(64), visualPromptOpaqueRows: [{ row: 1, cells: opaqueCells }], sections: Array.from({ length: 200 }, (_, index) => ({
           key: `message-${index}`, label: `Message ${index}`, showDisplayPreview: true, fields: fields.slice(index * 2, index * 2 + 2),
         })) } })
     }
@@ -75,4 +77,20 @@ test('reviews a language worksheet and saves only chosen fixed wire rows', async
   await expect(page.getByRole('textbox', { name: /Row 0 text/ })).toHaveValue('Préparez')
   await page.getByLabel('Find prompt row').fill('399')
   await expect(page.getByRole('textbox', { name: /Row 399 text/ })).toHaveValue('Fin')
+  await page.getByLabel('Find prompt row').fill('1')
+  await page.getByText('Inspect known cells in row 1', { exact: true }).click()
+  await expect(page.getByLabel('Row 1 cell 1 unmapped')).toBeVisible()
+  await page.getByRole('textbox', { name: 'Row 1 cell 2', exact: true }).fill('é')
+  await expect(page.getByRole('button', { name: 'Replace row 1' })).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Export worksheet JSON' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Save record' }).click()
+  await expect(page.getByText('Changes saved to this draft.')).toBeVisible()
+  expect(saves).toHaveLength(2)
+  expect(saves[1]).toMatchObject({ revision: 2, changes: { 'prompt-1.cell-1': 'é' } })
+  expect(Object.keys(saves[1].changes as object)).toHaveLength(1)
+  await page.reload()
+  await page.getByRole('button', { name: 'Visual prompt worksheet' }).click()
+  await page.getByText('Inspect known cells in row 1', { exact: true }).click()
+  await expect(page.getByLabel('Row 1 cell 1 unmapped')).toBeVisible()
+  await expect(page.getByRole('textbox', { name: 'Row 1 cell 2', exact: true })).toHaveValue('é')
 })

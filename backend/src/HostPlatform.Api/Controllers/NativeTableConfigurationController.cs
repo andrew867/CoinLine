@@ -90,6 +90,8 @@ public sealed class NativeTableConfigurationController(HostPlatformDbContext db,
             graphicalLinks = number is >= 131 and <= 133 ? await ReadGraphicalLinks(id, ct) : null,
             visualPromptCompanions = VisualPromptCoverage.CompanionNumbers(number).Length > 0
                 ? await ReadVisualPromptCompanions(id, number, firmware, ct) : null,
+            visualPromptOpaqueRows = VisualPromptCells.Supports(number, raw)
+                ? VisualPromptCells.Inspect(number, raw) : null,
             numberingPlan = number == NumberingPlanWire.MessageType && NumberingPlanWire.Supports(raw)
                 ? NumberingPlanWire.Read(raw, later: layout.Profile == NativeTableLayouts.Later) : null,
             numberingFormatCapacity = number == NumberingPlanWire.MessageType

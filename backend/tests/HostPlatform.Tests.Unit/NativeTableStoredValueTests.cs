@@ -4,6 +4,32 @@ namespace HostPlatform.Tests.Unit;
 
 public sealed class NativeTableStoredValueTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Ordinary_edits_and_blank_credential_fields_preserve_all_existing_opaque_bytes(bool later)
+    {
+        var template = NativeTableLayouts.DraftTemplates(93).Single(layout => layout.Profile == (later ? NativeTableLayouts.Later : NativeTableLayouts.MultiPay));
+        var record = NativeTableLayouts.CreateDraftTemplate(template);
+        // Noncredential fixture sentinel; no issuer or usable validation data.
+        var opaqueLength = later ? 64 : 128;
+        record.AsSpan(1, opaqueLength).Fill(0xA5);
+        var layout = NativeTableLayouts.Find(93, record, template.Profile)!;
+        var protectedFields = layout.Sections.SelectMany(section => section.Fields).Where(field => field.IsCredential).ToArray();
+        Assert.Equal(opaqueLength / 8, protectedFields.Length);
+        Assert.All(protectedFields, field => Assert.Null(field.Read(record)));
+        Assert.Equal(record, layout.Apply(record, new Dictionary<string, string>()));
+        var changes = protectedFields.ToDictionary(field => field.Key, _ => "");
+        changes["unit-0.limit"] = "1000";
+        if (later) { changes["discount-0.localMode"] = "1"; changes["discount-0.localInitial"] = "75"; }
+        else changes["domestic"] = "25";
+        var edited = layout.Apply(record, changes);
+        Assert.Equal(record.AsSpan(1, opaqueLength).ToArray(), edited.AsSpan(1, opaqueLength).ToArray());
+        Assert.NotEqual(record, edited);
+        Assert.All(NativeTableLayouts.Find(93, edited, template.Profile)!.Sections.SelectMany(section => section.Fields).Where(field => field.IsCredential),
+            field => Assert.Null(field.Read(edited)));
+    }
+
     [Fact]
     public void Older_profile_encodes_big_endian_value_limits_and_replaces_only_the_selected_key_slot()
     {
