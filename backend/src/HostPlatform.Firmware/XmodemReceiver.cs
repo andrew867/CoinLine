@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Security.Cryptography;
 using HostPlatform.Transport;
 
 namespace HostPlatform.Firmware;
@@ -91,6 +92,7 @@ public static class XmodemReceiver
                         await Control(XmodemConstants.Can).ConfigureAwait(false);
                         return Failed("Application receive block limit exceeded.");
                     }
+                    if (lastBlock != null) CryptographicOperations.ZeroMemory(lastBlock);
                     lastBlock = payload.ToArray();
                     data.Write(lastBlock);
                     blocks++;
@@ -106,6 +108,14 @@ public static class XmodemReceiver
         catch (IOException)
         {
             return Failed("Transport disconnected or failed during receive.");
+        }
+        finally
+        {
+            // The returned payload is a separate copy. Do not retain the
+            // receiver's working buffers after returning to the caller.
+            CryptographicOperations.ZeroMemory(body);
+            if (lastBlock != null) CryptographicOperations.ZeroMemory(lastBlock);
+            if (data.TryGetBuffer(out var buffer)) CryptographicOperations.ZeroMemory(buffer.AsSpan());
         }
     }
 }

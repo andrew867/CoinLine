@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
+import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 
 type Row = {
   id: string
@@ -8,6 +9,7 @@ type Row = {
   versionLabel: string
   artifactSizeBytes: number
   primaryArtifactId: string | null
+  targetFirmwareVersionLabel?: string | null
 }
 
 export function FirmwarePackagesPage() {
@@ -16,6 +18,7 @@ export function FirmwarePackagesPage() {
   const [err, setErr] = useState<string | null>(null)
   const [name, setName] = useState('')
   const [versionLabel, setVersionLabel] = useState('')
+  const [targetVersion, setTargetVersion] = useState('')
   const [checksumHex, setChecksumHex] = useState('')
   const [artifactSizeBytes, setArtifactSizeBytes] = useState('1')
 
@@ -43,12 +46,14 @@ export function FirmwarePackagesPage() {
       await apiPost<{ id: string }>('/api/firmware/packages', {
         name: name || 'Package',
         versionLabel: versionLabel || '0.0.0',
+        targetFirmwareVersionId: targetVersion || null,
         checksumHex,
         artifactSizeBytes: Number(artifactSizeBytes) || 1,
         metadataJson: '{}',
       })
       setName('')
       setVersionLabel('')
+      setTargetVersion('')
       setChecksumHex('')
       await refresh()
     } catch (e) {
@@ -60,7 +65,7 @@ export function FirmwarePackagesPage() {
     <div>
       <h1>Firmware packages</h1>
       <p style={{ maxWidth: 720, fontSize: 14, color: '#444' }}>
-        Registry metadata only — artifact <code>ChecksumHex</code> must be a full SHA256 (64 hex characters).
+        Register the expected artifact size and full SHA-256, then open the package to upload the matching primary file.
         DLA/code-server wire behavior is <strong>HARDWARE_VALIDATION_REQUIRED</strong>.
       </p>
 
@@ -77,6 +82,10 @@ export function FirmwarePackagesPage() {
           Version label{' '}
           <input value={versionLabel} onChange={(e) => setVersionLabel(e.target.value)} style={{ width: '100%' }} />
         </label>
+        <div style={{ marginBottom: 8 }}>
+          <FirmwareVersionSelect label="Target registry version" value={targetVersion} onChange={setTargetVersion}
+            emptyLabel="Not specified (not eligible for scheduled code delivery)" />
+        </div>
         <label style={{ display: 'block', marginBottom: 8 }}>
           SHA256 hex (64 chars){' '}
           <input
@@ -122,7 +131,7 @@ export function FirmwarePackagesPage() {
                 <td>
                   <Link to={`/firmware/packages/${r.id}`}>{r.name}</Link>
                 </td>
-                <td>{r.versionLabel}</td>
+                <td>{r.versionLabel}{r.targetFirmwareVersionLabel && <small style={{ display: 'block' }}>Target: {r.targetFirmwareVersionLabel}</small>}</td>
                 <td>{r.artifactSizeBytes}</td>
                 <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{r.primaryArtifactId ?? '—'}</td>
               </tr>

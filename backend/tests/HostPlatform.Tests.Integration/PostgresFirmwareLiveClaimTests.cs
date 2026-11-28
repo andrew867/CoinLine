@@ -18,6 +18,67 @@ namespace HostPlatform.Tests.Integration;
 public sealed class PostgresFirmwareLiveClaimTests
 {
     [PostgresIntegrationFact]
+    public async Task Missing_live_endpoint_does_not_consume_a_valid_job_approval()
+    {
+        var root = Directory.CreateTempSubdirectory("coinline-live-preflight-fixture-");
+        var blob = Path.Combine(root.FullName, "fixture.bin");
+        byte[] generated = [0x11, 0x22, 0x33]; await File.WriteAllBytesAsync(blob, generated);
+        var digest = Convert.ToHexString(SHA256.HashData(generated)).ToLowerInvariant();
+        var key = Guid.NewGuid().ToString("N");
+        try
+        {
+            await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+                .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+                .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+                .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+                .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
+                .UseSetting("Firmware:AllowLiveFlashing", "true").UseSetting("DlTransport:LiveDlaEnabled", "true")
+                .UseSetting("DlTransport:TransportKind", "simulation").UseSetting("Platform:PayloadStorage:RootPath", root.FullName));
+            using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory); client.DefaultRequestHeaders.Add("X-API-Key", key);
+            var terminal = new Terminal { DisplayName = "Fixture terminal", TerminalIdHex = Guid.NewGuid().ToString("N")[..10].ToUpperInvariant(),
+                Site = new Site { Name = "Fixture site", Code = Guid.NewGuid().ToString("N")[..8],
+                    Customer = new Customer { Name = "Fixture customer", Code = Guid.NewGuid().ToString("N")[..8] } } };
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>(); Assert.True(db.Database.IsNpgsql());
+                db.Terminals.Add(terminal); await db.SaveChangesAsync();
+            }
+            var policy = await client.GetFromJsonAsync<JsonElement>("/api/firmware/execution-policy");
+            Assert.True(policy.GetProperty("allowLiveFlashing").GetBoolean()); Assert.True(policy.GetProperty("liveDlaEnabled").GetBoolean());
+            Assert.False(policy.GetProperty("liveTransportConfigured").GetBoolean());
+            using var packageResponse = await client.PostAsJsonAsync("/api/firmware/packages", new
+            { name = "Generated preflight fixture", versionLabel = "A001", checksumHex = digest, artifactSizeBytes = generated.Length, metadataJson = "{}" });
+            packageResponse.EnsureSuccessStatusCode();
+            var package = (await packageResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            using var artifactResponse = await client.PostAsJsonAsync($"/api/firmware/packages/{package}/artifacts", new
+            { kind = "primary", sha256Hex = digest, sizeBytes = generated.Length, storageRef = "fixture.bin", metadataJson = "{}" });
+            artifactResponse.EnsureSuccessStatusCode();
+            var artifact = (await artifactResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            using var created = await client.PostAsJsonAsync($"/api/terminals/{terminal.Id}/firmware-jobs", new
+            { firmwarePackageId = package, firmwareArtifactId = artifact, simulationMode = false });
+            created.EnsureSuccessStatusCode();
+            var id = (await created.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            var path = $"/api/firmware/jobs/{id}";
+            using var simulated = await client.PostAsync(path + "/simulate", null); simulated.EnsureSuccessStatusCode();
+            using var approved = await client.PostAsJsonAsync(path + "/approve", new { rollbackNotes = "Fixture backup and rollback notes." }); approved.EnsureSuccessStatusCode();
+            var before = await client.GetFromJsonAsync<JsonElement>(path);
+            Assert.False(before.GetProperty("liveExecutionConfigured").GetBoolean());
+            for (var attempt = 0; attempt < 2; attempt++)
+            {
+                using var rejected = await client.PostAsync(path + "/execute-live", null);
+                Assert.Equal(HttpStatusCode.Conflict, rejected.StatusCode);
+                Assert.Contains("No transfer was started", await rejected.Content.ReadAsStringAsync());
+            }
+            var after = await client.GetFromJsonAsync<JsonElement>(path);
+            Assert.Equal((int)FirmwareUpdateJobStatus.Completed, after.GetProperty("status").GetInt32());
+            Assert.Equal(before.GetProperty("approvedAtUtc").GetString(), after.GetProperty("approvedAtUtc").GetString());
+            Assert.Equal(before.GetProperty("steps").GetArrayLength(), after.GetProperty("steps").GetArrayLength());
+            Assert.DoesNotContain(after.GetProperty("steps").EnumerateArray(), row => row.GetProperty("name").GetString()!.StartsWith("live_"));
+        }
+        finally { File.Delete(blob); root.Delete(); }
+    }
+
+    [PostgresIntegrationFact]
     public async Task Concurrent_live_requests_claim_once_and_keep_the_attempt_history()
     {
         var root = Directory.CreateTempSubdirectory("coinline-live-claim-fixture-");
@@ -109,6 +170,7 @@ public sealed class PostgresFirmwareLiveClaimTests
         public int Calls => Volatile.Read(ref calls);
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void ValidateLiveConfiguration(DlaTransferObservation? observation) { }
         public Task<DlaTransportSimulationResult> SimulateTransferAsync(DlaTransportSimulationRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(new DlaTransportSimulationResult(true, "Generated fixture"));
         public async Task<DlaLiveTransferResult> ExecuteLiveTransferAsync(DlaLiveTransferRequest request,

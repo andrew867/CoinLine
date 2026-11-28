@@ -150,11 +150,10 @@ internal static class FirmwareConfigurationTransitionService
         };
     }
 
-    public static async Task<(Configuration Configuration, DlogTransaction Observation)> VerifyActivation(HostPlatformDbContext db,
+    internal static async Task<(Configuration Configuration, CodeSchedule Code)> VerifyStagedConfiguration(HostPlatformDbContext db,
         FirmwareConfigurationTransition plan, CancellationToken ct, Guid? currentSessionId = null)
     {
         if (plan.ActivatedAtUtc != null || plan.CancelledAtUtc != null) throw new InvalidOperationException("This transition is no longer awaiting activation.");
-        if (currentSessionId != null && !plan.AutoActivateOnContact) throw new InvalidOperationException("Automatic activation was not approved for this plan.");
         var config = await ReadConfiguration(db, plan.TerminalId, plan.TargetTableSetId, ct);
         if (plan.SourceSnapshot != SourceSnapshot(config) || plan.TargetSnapshot != TargetSnapshot(config))
             throw new InvalidOperationException("The source assignment or target configuration changed since staging. Review again.");
@@ -162,11 +161,18 @@ internal static class FirmwareConfigurationTransitionService
         if (code.Record.Id != plan.CodeRecordVersionId || TableDistributionService.ComputePayloadSha256Hex(code.Record) != plan.CodeRecordSha256Hex)
             throw new InvalidOperationException("The scheduled code record changed since staging.");
         await EnsureIdle(db, plan.TerminalId, plan.CodeScheduleId, ct, currentSessionId);
+        return (config, code);
+    }
+
+    internal static async Task<DownloadBatch> VerifyScheduleReceipt(HostPlatformDbContext db, FirmwareConfigurationTransition plan,
+        Configuration config, CodeSchedule code, CancellationToken ct)
+    {
         var schedule = code.Schedule; var batch = schedule.LastBatch;
         // The schedule's active session pointer is cleared on completion; the
         // completed batch retains the durable NCC session and exact schedule ID.
         if (schedule.CompletedAtUtc == null || batch == null || batch.NccSessionId == null ||
-            batch.ScheduleId != schedule.Id || batch.Status != DownloadBatchStatus.Completed || batch.CompletedAtUtc != schedule.CompletedAtUtc ||
+            batch.ScheduleId != schedule.Id || batch.TerminalId != plan.TerminalId || batch.TableSetId != schedule.TableSetId ||
+            batch.Status != DownloadBatchStatus.Completed || batch.CompletedAtUtc != schedule.CompletedAtUtc ||
             batch.Items.Count != 1 || batch.Items.Single().TableVersionId != code.Record.Id || !batch.Items.Single().Succeeded ||
             batch.Items.Single().ItemStatus != DownloadBatchItemStatus.Succeeded)
             throw new InvalidOperationException("Wait for the scheduled MT94 application's acknowledgement on a matched NCC connection.");
@@ -176,6 +182,48 @@ internal static class FirmwareConfigurationTransitionService
             row.TerminalIdHex == config.Phone.TerminalIdHex).Select(row => row.RawBytes).ToListAsync(ct);
         if (!frames.Any(raw => NccFrameCodec.TryDecode(raw, NccParseMode.Strict) is { Success: true, Packet.Data: [14, 94] }))
             throw new InvalidOperationException("The scheduled download has no retained terminal MT14/94 observation.");
+        return batch;
+    }
+
+    internal static async Task EnsureLatestDeliveredCodeSchedule(HostPlatformDbContext db, Guid terminalId, Guid scheduleId, CancellationToken ct)
+    {
+        var latest = await LatestDeliveredCodeSchedule(db, terminalId).Select(row => row.Id).FirstOrDefaultAsync(ct);
+        if (latest != scheduleId)
+            throw new InvalidOperationException("A later code schedule or cancellation has replaced the delivered parameters.");
+    }
+
+    private static IQueryable<ScheduledTableDownload> LatestDeliveredCodeSchedule(HostPlatformDbContext db, Guid terminalId) =>
+        db.ScheduledTableDownloads.AsNoTracking().Where(row => row.TerminalId == terminalId &&
+                row.CompletedAtUtc != null && row.CancelledAtUtc == null && row.RecordNumbers == null &&
+                row.TableSet!.Versions.Count == 1 && row.TableSet.Versions.Any(version => version.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
+            .OrderByDescending(row => row.CompletedAtUtc).ThenByDescending(row => row.CreatedAtUtc).ThenByDescending(row => row.Id);
+
+    internal static async Task<bool> IsExactDisabledCodeCancellation(HostPlatformDbContext db, TableDistributionService tables,
+        ScheduledTableDownload candidate, CancellationToken ct)
+    {
+        if (candidate.RecordNumbers != null || candidate.TableSet?.Status != TableSetStatus.Published)
+            return false;
+        var latest = await LatestDeliveredCodeSchedule(db, candidate.TerminalId).FirstOrDefaultAsync(ct);
+        if (latest == null) return false;
+        var current = await tables.FindCodeOnlyVersionAsync(latest.TableSetId, ct);
+        var pending = await tables.FindCodeOnlyVersionAsync(candidate.TableSetId, ct);
+        if (current == null || pending == null || !pending.ValidationPassed) return false;
+        if (candidate.LastBatch is { Status: DownloadBatchStatus.Pending } batch &&
+            (batch.TerminalId != candidate.TerminalId || batch.TableSetId != candidate.TableSetId || batch.ScheduleId != candidate.Id ||
+                batch.Items.Count != 1 || batch.Items.Single().TableVersionId != pending.Id))
+            return false;
+        var raw = TableDistributionService.GetEffectivePayload(current);
+        return CodeDownloadWire.IsEnabled(raw) &&
+            CodeDownloadWire.Disable(raw).SequenceEqual(TableDistributionService.GetEffectivePayload(pending));
+    }
+
+    public static async Task<(Configuration Configuration, DlogTransaction Observation)> VerifyActivation(HostPlatformDbContext db,
+        FirmwareConfigurationTransition plan, CancellationToken ct, Guid? currentSessionId = null)
+    {
+        if (currentSessionId != null && !plan.AutoActivateOnContact) throw new InvalidOperationException("Automatic activation was not approved for this plan.");
+        var (config, code) = await VerifyStagedConfiguration(db, plan, ct, currentSessionId);
+        var batch = await VerifyScheduleReceipt(db, plan, config, code, ct);
+        var schedule = code.Schedule;
         var observation = await LatestObservation(db, plan.TerminalId, ct);
         if (observation == null || observation.NccSessionId == batch.NccSessionId || observation.CapturedAtUtc <= schedule.CompletedAtUtc ||
             observation.CapturedAtUtc <= plan.CreatedAtUtc || observation.Id == plan.SourceObservationId ||

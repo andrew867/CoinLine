@@ -1,0 +1,12 @@
+# Optional incoming server publication for a local bench or SSH forward.
+# The two live execution switches must also be explicitly enabled.
+services:
+  api:
+    environment:
+      Firmware__AllowLiveFlashing: "${COINLINE_FIRMWARE_ALLOW_LIVE_FLASHING:-false}"
+      COINLINE_FIRMWARE_LIVE_DLA_ENABLED: "${COINLINE_FIRMWARE_LIVE_DLA_ENABLED:-false}"
+      IncomingCodeServer__Enabled: "true"
+      IncomingCodeServer__BindAddress: "0.0.0.0"
+      IncomingCodeServer__Port: "4001"
+    ports:
+      - "127.0.0.1:${COINLINE_CODE_SERVER_PORT:-4001}:4001"

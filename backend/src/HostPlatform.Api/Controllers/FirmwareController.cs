@@ -2,6 +2,7 @@ using System.Data;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Firmware;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Options;
 using HostPlatform.Api.Services;
 using HostPlatform.Domain;
@@ -26,7 +27,10 @@ public sealed class FirmwareController(
     HostPlatformDbContext db,
     FirmwareJobOrchestrator orchestrator,
     IFirmwareExecutionPolicy executionPolicy,
-    IOptions<DlTransportEnvironmentOptions> dlOptions) : ControllerBase
+    IOptions<DlTransportEnvironmentOptions> dlOptions,
+    IOptions<PlatformOptions> platformOptions,
+    IOptions<IncomingCodeServerOptions> incomingOptions,
+    IncomingCodeServerState incomingState) : ControllerBase
 {
     /// <summary>UI / operators — surface whether live modem flashing is enabled (default false).</summary>
     [Authorize(Policy = Policies.RequireOperator)]
@@ -40,27 +44,24 @@ public sealed class FirmwareController(
             liveDlaEnabled = dlOptions.Value.LiveDlaEnabled,
             transportMode = transport.Mode,
             liveTransportConfigured = transport.Configured,
+            incomingCodeServerConfigured = IncomingConfigured(),
+            incomingCodeServerListening = incomingState.Listening,
             hardwareValidationNotice = PolicyNotice(
                 "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only. Live execute needs Firmware:AllowLiveFlashing and COINLINE_FIRMWARE_LIVE_DLA_ENABLED.")
         });
     }
 
-    private (string Mode, bool Configured) TransportPresentation()
-    {
-        var options = dlOptions.Value;
-        return (options.TransportKind ?? "simulation").Trim().ToLowerInvariant() switch
-        {
-            "simulation" => ("simulation", false),
-            "serial" => ("serial", !string.IsNullOrWhiteSpace(options.SerialPort)),
-            "tcp" => ("tcp", !string.IsNullOrWhiteSpace(options.TcpHost) && options.TcpPort is > 0 and <= 65535),
-            "pipe" => ("pipe", !string.IsNullOrWhiteSpace(options.PipeName)),
-            _ => ("unknown", false)
-        };
-    }
+    private (string Mode, bool Configured) TransportPresentation() => dlOptions.Value.DescribeLiveTransport();
+    private bool IncomingConfigured() => executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled &&
+        incomingOptions.Value.Enabled && incomingOptions.Value.IsValid;
 
     private string PolicyNotice(string disabledNotice)
     {
         if (!executionPolicy.AllowLiveFlashing || !dlOptions.Value.LiveDlaEnabled) return disabledNotice;
+        if (incomingState.Listening)
+            return "Terminal-initiated code server is listening. Select a reviewed scheduled transition and approve the exact job.";
+        if (IncomingConfigured())
+            return "Incoming code server is configured but not listening. Review the service status before scheduling delivery.";
         var transport = TransportPresentation();
         return transport.Configured
             ? $"Live execution policy enabled; {transport.Mode} transport settings are present. Job approval, endpoint connectivity and terminal compatibility remain separate checks."
@@ -70,7 +71,8 @@ public sealed class FirmwareController(
     [HttpGet("packages")]
     public async Task<ActionResult<IEnumerable<object>>> Packages(CancellationToken ct) =>
         Ok(await db.FirmwarePackages.AsNoTracking()
-            .Select(p => new { p.Id, p.Name, p.VersionLabel, p.ArtifactSizeBytes, p.PrimaryArtifactId })
+            .Select(p => new { p.Id, p.Name, p.VersionLabel, p.ArtifactSizeBytes, p.PrimaryArtifactId, p.TargetFirmwareVersionId,
+                targetFirmwareVersionLabel = p.TargetFirmwareVersion == null ? null : p.TargetFirmwareVersion.Label })
             .ToListAsync(ct));
 
     [HttpGet("table-profiles")]
@@ -288,11 +290,14 @@ public sealed class FirmwareController(
         var hex = body.ChecksumHex.Trim().Replace("0x", "", StringComparison.OrdinalIgnoreCase);
         if (hex.Length != 64 || hex.Any(c => !Uri.IsHexDigit(c)))
             return BadRequest(new { error = "ChecksumHex must be SHA256 (64 hex characters)." });
+        if (body.TargetFirmwareVersionId.HasValue && !await db.FirmwareVersions.AnyAsync(row => row.Id == body.TargetFirmwareVersionId, ct))
+            return BadRequest(new { error = "Choose an existing target firmware registry version." });
         var checksum = Convert.FromHexString(hex);
         var p = new FirmwarePackage
         {
             Name = body.Name,
             VersionLabel = body.VersionLabel,
+            TargetFirmwareVersionId = body.TargetFirmwareVersionId,
             ArtifactChecksum = checksum,
             ArtifactSizeBytes = body.ArtifactSizeBytes,
             MetadataJson = body.MetadataJson ?? "{}"
@@ -307,7 +312,7 @@ public sealed class FirmwareController(
     [HttpGet("packages/{id:guid}")]
     public async Task<ActionResult<object>> PackageDetail(Guid id, CancellationToken ct)
     {
-        var x = await db.FirmwarePackages.AsNoTracking().FirstOrDefaultAsync(p => p.Id == id, ct);
+        var x = await db.FirmwarePackages.AsNoTracking().Include(p => p.TargetFirmwareVersion).FirstOrDefaultAsync(p => p.Id == id, ct);
         if (x == null)
             return NotFound();
         var artifacts = await db.FirmwareArtifacts.AsNoTracking()
@@ -326,22 +331,70 @@ public sealed class FirmwareController(
             x.Id,
             x.Name,
             x.VersionLabel,
+            x.TargetFirmwareVersionId,
+            targetFirmwareVersionLabel = x.TargetFirmwareVersion?.Label,
             artifactChecksumHex = Convert.ToHexString(x.ArtifactChecksum),
             x.ArtifactSizeBytes,
             x.MetadataJson,
             x.PrimaryArtifactId,
-            artifacts,
+            artifacts = artifacts.Select(a => new { a.Id, a.Kind, a.Sha256Hex, a.SizeBytes, a.StorageRef, a.MetadataJson,
+                payloadPresent = FirmwareArtifactStorage.PayloadPresent(platformOptions.Value.PayloadStorage.RootPath, a.StorageRef, a.SizeBytes) }),
             targets,
             rules,
             manifests,
             hardwareValidationNotice = PolicyNotice(
-                "DLA/XMODEM transfer and flash programming remain HARDWARE_VALIDATION_REQUIRED; registry holds metadata only."),
+                "DLA/XMODEM transfer and programming remain HARDWARE_VALIDATION_REQUIRED; stored artifacts are verified separately."),
             skuRoutingNotice =
                 "RequiredTargetSkuContains on compatibility rules is a routing hint only until Terminal stores hardware SKU on host (HARDWARE_VALIDATION_REQUIRED)."
         });
     }
 
     public sealed record ArtifactDto(string Kind, string Sha256Hex, long SizeBytes, string? StorageRef, string? MetadataJson);
+
+    [Authorize(Policy = Policies.RequireAdmin)]
+    [HttpPost("packages/{id:guid}/artifacts/upload")]
+    [Consumes("application/octet-stream")]
+    [RequestSizeLimit(FirmwareArtifactStorage.MaximumBytes)]
+    public async Task<ActionResult<object>> UploadPrimaryArtifact(Guid id, CancellationToken ct)
+    {
+        var expected = await db.FirmwarePackages.AsNoTracking().SingleOrDefaultAsync(p => p.Id == id, ct);
+        if (expected == null) return NotFound();
+        if (Request.ContentLength is { } length && (length != expected.ArtifactSizeBytes || length is <= 0 or > FirmwareArtifactStorage.MaximumBytes))
+            return BadRequest(new { error = "Uploaded artifact length must match the registered package size (1 byte to 50 MB)." });
+        try
+        {
+            var storageRef = await FirmwareArtifactStorage.StorePrimaryAsync(platformOptions.Value.PayloadStorage.RootPath, Request.Body,
+                expected.ArtifactSizeBytes, expected.ArtifactChecksum, ct);
+            var digest = Convert.ToHexString(expected.ArtifactChecksum).ToLowerInvariant();
+            await using var transaction = db.Database.IsRelational() ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
+            var pkg = await db.FirmwarePackages.SingleOrDefaultAsync(p => p.Id == id, ct);
+            if (pkg == null || pkg.ArtifactSizeBytes != expected.ArtifactSizeBytes || !pkg.ArtifactChecksum.SequenceEqual(expected.ArtifactChecksum))
+                return Conflict(new { error = "The package changed during upload. Review the package and retry." });
+            var art = await db.FirmwareArtifacts.Where(a => a.FirmwarePackageId == id && a.Kind == "primary" && a.Sha256Hex == digest &&
+                    a.SizeBytes == expected.ArtifactSizeBytes && a.StorageRef == storageRef)
+                .OrderBy(a => a.Id).FirstOrDefaultAsync(ct);
+            var created = art == null;
+            if (art == null)
+            {
+                art = new FirmwareArtifact { FirmwarePackageId = id, Kind = "primary", Sha256Hex = digest,
+                    SizeBytes = expected.ArtifactSizeBytes, StorageRef = storageRef };
+                db.FirmwareArtifacts.Add(art);
+            }
+            if (created || pkg.PrimaryArtifactId != art.Id)
+            {
+                pkg.PrimaryArtifactId = art.Id;
+                ApiAudit.Write(db, HttpContext, "firmware.artifact", "upload_verified", $"FirmwareArtifact:{art.Id}",
+                    new { packageId = id, art.Sha256Hex, art.SizeBytes }, null);
+                await db.SaveChangesAsync(ct);
+            }
+            if (transaction != null) await transaction.CommitAsync(ct);
+            var result = new { art.Id, art.Sha256Hex, art.SizeBytes, payloadPresent = true };
+            return created ? Created($"/api/firmware/packages/{id}", result) : Ok(result);
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || IsSerializationConflict(ex.GetBaseException()))
+        { return Conflict(new { error = "Concurrent registry changes conflicted with upload. Retry the same file." }); }
+        catch (InvalidOperationException ex) { return Conflict(new { error = ex.Message }); }
+    }
 
     [Authorize(Policy = Policies.RequireOperator)]
     [HttpPost("packages/{id:guid}/artifacts")]
@@ -450,6 +503,8 @@ public sealed class FirmwareController(
                 j.TerminalId,
                 j.FirmwarePackageId,
                 j.FirmwareArtifactId,
+                j.CodeTransitionId,
+                j.CodeScheduleId,
                 j.Status,
                 j.SimulationMode,
                 j.ApprovedAtUtc
@@ -497,6 +552,8 @@ public sealed class FirmwareController(
             j.TerminalId,
             j.FirmwarePackageId,
             j.FirmwareArtifactId,
+            j.CodeTransitionId,
+            j.CodeScheduleId,
             j.Status,
             j.SimulationMode,
             j.SafetyStateJson,
@@ -507,10 +564,29 @@ public sealed class FirmwareController(
             steps = orderedSteps,
             safetyChecks = checks,
             rollBackPlan = rollback,
+            liveExecutionConfigured = j.CodeTransitionId == null && executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled && TransportPresentation().Configured,
+            incomingCodeServerListening = incomingState.Listening,
             hardwareValidationNotice = j.SimulationMode && executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled
                 ? "This job is a simulation. Live execution must use a separately approved non-simulation job."
                 : PolicyNotice("Live modem flashing disabled unless Firmware:AllowLiveFlashing; see the firmware transport reference.")
         });
+    }
+
+    [Authorize(Policy = Policies.RequireAdmin)]
+    [HttpGet("jobs/{id:guid}/code-transitions")]
+    public async Task<ActionResult<object>> CodeTransitions(Guid id, CancellationToken ct)
+    {
+        var job = await db.FirmwareUpdateJobs.AsNoTracking().Include(row => row.FirmwarePackage).SingleOrDefaultAsync(row => row.Id == id, ct);
+        if (job == null) return NotFound();
+        var target = job.FirmwarePackage?.TargetFirmwareVersionId;
+        if (job.SimulationMode || target == null || job.ApprovedAtUtc != null) return Ok(Array.Empty<object>());
+        return Ok(await db.FirmwareConfigurationTransitions.AsNoTracking()
+            .Where(plan => plan.TerminalId == job.TerminalId && plan.TargetFirmwareVersionId == target &&
+                plan.ActivatedAtUtc == null && plan.CancelledAtUtc == null &&
+                db.ScheduledTableDownloads.Any(schedule => schedule.Id == plan.CodeScheduleId && schedule.CancelledAtUtc == null) &&
+                !db.FirmwareUpdateJobs.Any(other => other.CodeTransitionId == plan.Id || other.CodeScheduleId == plan.CodeScheduleId))
+            .Select(plan => new { plan.Id, plan.CodeScheduleId, plan.SourceControllerRom, plan.SourceControllerSoftware,
+                plan.TargetControllerRom, plan.TargetControllerSoftware }).ToListAsync(ct));
     }
 
     [Authorize(Policy = Policies.RequireOperator)]
@@ -549,7 +625,7 @@ public sealed class FirmwareController(
         }
     }
 
-    public sealed record ApproveDto(string RollbackNotes);
+    public sealed record ApproveDto(string RollbackNotes, Guid? CodeTransitionId = null);
 
     [Authorize(Policy = Policies.RequireAdmin)]
     [HttpPost("jobs/{id:guid}/approve")]
@@ -557,12 +633,17 @@ public sealed class FirmwareController(
     {
         try
         {
-            await orchestrator.ApproveJobAsync(id, body.RollbackNotes, ct);
+            await orchestrator.ApproveJobAsync(id, body.RollbackNotes, ct, body.CodeTransitionId);
             return Ok(new { id, approved = true });
         }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { error = ex.Message });
+        }
+        catch (Exception ex) when (ex is DbUpdateConcurrencyException || ex.GetBaseException() is PostgresException
+            { SqlState: PostgresErrorCodes.SerializationFailure or PostgresErrorCodes.UniqueViolation })
+        {
+            return Conflict(new { error = "The job or schedule was changed concurrently. Reload before approval." });
         }
     }
 
@@ -584,7 +665,12 @@ public sealed class FirmwareController(
         {
             return Conflict(new { error = ex.Message });
         }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { error = "The job changed concurrently. Reload its status." });
+        }
     }
 
-    public sealed record PackageDto(string Name, string VersionLabel, string ChecksumHex, long ArtifactSizeBytes, string? MetadataJson);
+    public sealed record PackageDto(string Name, string VersionLabel, string ChecksumHex, long ArtifactSizeBytes, string? MetadataJson,
+        Guid? TargetFirmwareVersionId = null);
 }

@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { apiGet, apiPost } from '../api/client'
+import { apiFetch, apiGet, apiPost } from '../api/client'
+import { consoleSession } from '../api/consoleSession'
 
 type Detail = {
   id: string
   name: string
   versionLabel: string
+  targetFirmwareVersionLabel?: string | null
   artifactChecksumHex: string
   artifactSizeBytes: number
   metadataJson: string
@@ -13,7 +15,7 @@ type Detail = {
   hardwareValidationNotice: string
   skuRoutingNotice?: string
   manifests?: { id: string; layoutJson: string }[]
-  artifacts: { id: string; kind: string; sha256Hex: string; sizeBytes: number; storageRef: string }[]
+  artifacts: { id: string; kind: string; sha256Hex: string; sizeBytes: number; storageRef: string; payloadPresent?: boolean }[]
   targets: { id: string; sku: string; notes: string }[]
   rules: {
     id: string
@@ -32,6 +34,11 @@ export function FirmwarePackageDetail() {
   const [artKind, setArtKind] = useState('primary')
   const [artSha, setArtSha] = useState('')
   const [artSize, setArtSize] = useState('1')
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
+  const [uploadMessage, setUploadMessage] = useState('')
+  const uploadInput = useRef<HTMLInputElement>(null)
 
   const [sku, setSku] = useState('')
   const [skuNotes, setSkuNotes] = useState('')
@@ -66,7 +73,7 @@ export function FirmwarePackageDetail() {
         kind: artKind,
         sha256Hex: artSha,
         sizeBytes: Number(artSize) || 1,
-        storageRef: 'registry:ui',
+        storageRef: '',
         metadataJson: '{}',
       })
       setArtSha('')
@@ -74,6 +81,29 @@ export function FirmwarePackageDetail() {
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'artifact failed')
     }
+  }
+
+  async function uploadPrimary(e: React.FormEvent) {
+    e.preventDefault()
+    if (!id || !x || !uploadFile || uploading || consoleSession.role() !== 'Admin') return
+    setUploadError(''); setUploadMessage('')
+    if (uploadFile.size !== x.artifactSizeBytes || uploadFile.size < 1 || uploadFile.size > 50_000_000) {
+      setUploadError('Choose a file with exactly the registered package size (1 byte to 50 MB).'); return
+    }
+    setUploading(true)
+    try {
+      const response = await apiFetch(`/api/firmware/packages/${id}/artifacts/upload`, {
+        method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: uploadFile,
+      })
+      if (!response.ok) {
+        const body = await response.json().catch(() => null)
+        throw new Error(body?.error ?? `Upload failed (HTTP ${response.status}).`)
+      }
+      setUploadFile(null); if (uploadInput.current) uploadInput.current.value = ''
+      setUploadMessage('Primary artifact stored and verified against the registered size and SHA-256.')
+      await refresh()
+    } catch (e) { setUploadError(e instanceof Error ? e.message : 'Artifact upload failed.') }
+    finally { setUploading(false) }
   }
 
   async function addTarget(e: React.FormEvent) {
@@ -133,6 +163,7 @@ export function FirmwarePackageDetail() {
         <Link to="/firmware/packages">← Packages</Link>
       </p>
       <h1>{x.name}</h1>
+      <p>Target registry version: {x.targetFirmwareVersionLabel ?? 'Not specified'}</p>
       <p style={{ color: '#555', fontSize: 14 }}>{x.hardwareValidationNotice}</p>
       {x.skuRoutingNotice && (
         <p style={{ color: '#555', fontSize: 13 }}>{x.skuRoutingNotice}</p>
@@ -143,9 +174,16 @@ export function FirmwarePackageDetail() {
       </p>
 
       <h2 style={{ fontSize: 18 }}>Artifacts</h2>
+      {consoleSession.role() === 'Admin' && <form onSubmit={uploadPrimary} className="table-config-panel" style={{ marginBottom: 16 }}>
+        <h3>Upload verified primary artifact</h3>
+        <p>Upload exactly the registered {x.artifactSizeBytes} bytes. Manager checks the registered SHA-256 before storing the file. Uploading does not contact a terminal or prepare a job.</p>
+        <label>Primary artifact file<input ref={uploadInput} type="file" disabled={uploading} onChange={event => { setUploadFile(event.target.files?.[0] ?? null); setUploadError(''); setUploadMessage('') }} /></label>{' '}
+        <button type="submit" disabled={!uploadFile || uploading}>{uploading ? 'Uploading…' : 'Upload primary artifact'}</button>
+        {uploadError && <p role="alert">{uploadError}</p>}{uploadMessage && <p role="status">{uploadMessage}</p>}
+      </form>}
       {x.artifacts.length === 0 ? (
         <p role="status" style={{ color: '#666' }}>
-          No artifacts registered — add SHA256 metadata below (blob storage is out-of-band).
+          No artifacts registered. Upload the primary file or register metadata only below.
         </p>
       ) : (
         <table cellPadding={6} style={{ borderCollapse: 'collapse', marginBottom: 16 }}>
@@ -154,6 +192,7 @@ export function FirmwarePackageDetail() {
               <th>Kind</th>
               <th>SHA256</th>
               <th>Size</th>
+              <th>Payload storage</th>
             </tr>
           </thead>
           <tbody>
@@ -162,13 +201,14 @@ export function FirmwarePackageDetail() {
                 <td>{a.kind}</td>
                 <td style={{ fontFamily: 'monospace', fontSize: 11 }}>{a.sha256Hex}</td>
                 <td>{a.sizeBytes}</td>
+                <td>{a.payloadPresent === true ? 'File present' : a.payloadPresent === false ? 'File unavailable' : 'Not reported'}{a.id === x.primaryArtifactId ? ' · Primary' : ''}</td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
       <form onSubmit={addArtifact} style={{ marginBottom: 24 }}>
-        <h3 style={{ fontSize: 15 }}>Register artifact</h3>
+        <h3 style={{ fontSize: 15 }}>Register artifact metadata only</h3>
         <label>
           Kind <input value={artKind} onChange={(e) => setArtKind(e.target.value)} />
         </label>{' '}

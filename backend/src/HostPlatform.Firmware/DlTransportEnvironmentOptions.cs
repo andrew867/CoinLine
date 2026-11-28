@@ -31,4 +31,13 @@ public sealed class DlTransportEnvironmentOptions
     public string PipeName { get; set; } = "coinline-dla";
 
     public bool PreferCrcMode { get; set; }
+
+    public (string Mode, bool Configured) DescribeLiveTransport() => (TransportKind ?? "simulation").Trim().ToLowerInvariant() switch
+    {
+        "simulation" => ("simulation", false),
+        "serial" => ("serial", !string.IsNullOrWhiteSpace(SerialPort) && Baud > 0),
+        "tcp" => ("tcp", !string.IsNullOrWhiteSpace(TcpHost) && TcpPort is > 0 and <= 65535),
+        "pipe" => ("pipe", !string.IsNullOrWhiteSpace(PipeName)),
+        _ => ("unknown", false)
+    };
 }

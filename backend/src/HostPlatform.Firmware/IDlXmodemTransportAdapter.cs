@@ -24,6 +24,9 @@ public sealed class DlaTransferObservation
 /// <summary>DLA / XMODEM transport — host simulation validates framing; live path is gated.</summary>
 public interface IDlXmodemTransportAdapter
 {
+    /// <summary>Validate endpoint configuration without opening it or starting a transfer.</summary>
+    void ValidateLiveConfiguration(DlaTransferObservation? observation);
+
     Task<DlaTransportSimulationResult> SimulateTransferAsync(DlaTransportSimulationRequest request,
         CancellationToken cancellationToken = default);
 

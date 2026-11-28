@@ -1,0 +1,15 @@
+# Incoming code server
+
+The Manager can accept a terminal-initiated code callback independently of its normal NCC listener and outbound transport options. It is disabled by default.
+
+For an isolated Compose installation, add `docker/docker-compose.code-server.yml` to the existing Compose files and explicitly set both `COINLINE_FIRMWARE_ALLOW_LIVE_FLASHING=true` and `COINLINE_FIRMWARE_LIVE_DLA_ENABLED=true`. The overlay exposes port 4001 on the host loopback interface only. A different local published port can be selected with `COINLINE_CODE_SERVER_PORT`. Route the terminal's configured code-server number to that endpoint using the installation's approved modem routing. Do not point the terminal's normal NCC route at this listener.
+
+For a direct API host, set `IncomingCodeServer:Enabled=true` with the two execution switches. The default bind is IPv4 loopback on port 4001. The following settings control capacity and deadlines: `BindAddress`, `Port`, `MaximumConnections`, `RequestTimeoutSeconds`, `ResponseTimeoutSeconds`, `SessionTimeoutSeconds`, `AckTimeoutMs` and `MaximumRetries` in the `IncomingCodeServer` section. Verify the runtime listening indicator in the Manager.
+
+Complete the [scheduled approval](code-schedule-job-binding.md) first. The incoming connection is matched against one approved job, the terminal's last matched source report, the exact staged configuration and latest delivered MT94 receipt. The start time, allocated slot where present, selected blocks, requested revision fields, nonblank protected authentication and current primary artifact bytes must agree. A pending replacement or a subsequently delivered cancellation cannot reuse the old approval. No default image is available. A database claim precedes any image delivery, and a competing connection cannot reuse the approval.
+
+When configuration is held awaiting a fresh version report, an ordinary callback may still pick up the exact disabled copy of the latest delivered MT94. This exception sends only that cancellation record; enabled replacements and unrelated source records remain held.
+
+A result separately records completed transport and an observed application response. A fresh matched target report is still required for configuration activation; service and restart qualification require independent observation. An unclaimed approval accepts both observed full-download request reasons. After a durable claim, an interrupted or uncertain transfer is retained for review; automatic repeat delivery is not yet enabled.
+
+The PostgreSQL and loopback TCP regression uses generated payloads and separate fixture contacts. It exercises the normal MT94 receipt, premature and mismatched callbacks, concurrent claims, exact selected-block delivery, application response, later target-version report and target configuration receipt. This is not a physical device qualification.
