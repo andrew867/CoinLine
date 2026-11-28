@@ -17,7 +17,22 @@ The native editor encoded a 26-byte MT58 configured for level 1, free and emerge
 
 The restriction therefore changed the actual terminal's access decision for the tested paid call without blocking the tested free route. No answer or payment completion is claimed for those free controls. This is native emulator evidence, not a physical telephone qualification.
 
-The disabled record was separately prepared with the same daily window and only the level byte changed to zero. The second native run was deferred while the operator was using other terminals; its isolated batch was still pending and was not sent. The enabled run and terminal-clear readback were retained. Restoration, timed expiry, overnight transitions, cover override, levels 2 through 4, other terminal profiles and physical acceptance remain unqualified.
+## Retained-state restoration
+
+A subsequent isolated native run restarted from the normally saved restricted state. Before the selected refresh, the ordinary paid control still displayed `No access to that number`, and the free control still displayed `Calling...`. The disabled record retained the same daily window and reserved bytes; only the restriction level changed to zero.
+
+| Evidence | Result |
+| --- | --- |
+| Encoded disabled record | 26 bytes; SHA-256 `111928d2a0b35b01dac4f193ffd81b9e468d0f8bf0cc7d1590b667fecf403c9a` |
+| Terminal acknowledgement | Original selected batch completed, item application result ACK, one terminal-originated clear, session closed |
+| Panel | `Completed 02` following ordinary Craft refresh |
+| Restored paid local control | `Please insert card or deposit $0.25`; no payment input and no destination outpulse |
+| Free local control | `Calling...` before and after restoration; two complete local destination outpulses across the run |
+| Closing state | Returned to the ordinary idle screen and exited normally |
+
+The opt-in test runner encountered a file-sharing error while replacing its progress snapshot. The staged snapshot already recorded the completed acknowledgement and terminal clear. A separate read-only query of the retained PostgreSQL database independently confirmed the exact disabled record digest, completed batch, successful application ACK, closed session and one terminal clear. The evidence writer now retries brief sharing failures with a fixed bound. The native run is not described as a successful xUnit execution; the independent database and panel observations establish the restoration behavior.
+
+Timed expiry, overnight transitions, cover override, levels 2 through 4, other terminal profiles and physical acceptance remain unqualified.
 
 ## Repeating the host bench
 

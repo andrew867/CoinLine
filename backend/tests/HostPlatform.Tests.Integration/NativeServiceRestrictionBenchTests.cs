@@ -164,7 +164,7 @@ public sealed class NativeServiceRestrictionBenchTests
             var destination = Path.Combine(directory, name);
             var staging = destination + ".tmp";
             File.WriteAllText(staging, JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true }));
-            File.Move(staging, destination, overwrite: true);
+            NativeBenchEvidenceWriter.ReplaceWithRetry(staging, destination);
         }
     }
 }
