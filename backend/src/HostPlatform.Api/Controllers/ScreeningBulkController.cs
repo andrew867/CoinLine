@@ -236,7 +236,10 @@ public sealed class ScreeningBulkController(HostPlatformDbContext db, TableDistr
             foreach (var field in fields.Values.Where(field => field.Key.EndsWith(".reloadScreen", StringComparison.Ordinal)))
             {
                 var prefix = field.Key[..^"reloadScreen".Length];
-                if (field.Read(raw) == value || (slot == 1 && field.Read(raw) == "0" && fields[prefix + "reloadable"].Read(raw) == "true"))
+                var saved = field.Read(raw);
+                var usesDefault = slot == 1 && int.TryParse(saved, out var entry) && (entry == 0 || entry > 180)
+                    && (fields[prefix + "reloadable"].Read(raw) == "true" || fields[prefix + "reloadOnly"].Read(raw) == "true");
+                if (saved == value || usesDefault)
                     return "MT134 stored-value reload configuration references this slot. Clear the reference first.";
             }
         }
