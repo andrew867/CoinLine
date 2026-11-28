@@ -2,6 +2,7 @@ using System.Data;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Authorization;
 using HostPlatform.Api.Firmware;
+using HostPlatform.Api.Hosting;
 using HostPlatform.Api.Options;
 using HostPlatform.Api.Services;
 using HostPlatform.Domain;
@@ -27,7 +28,9 @@ public sealed class FirmwareController(
     FirmwareJobOrchestrator orchestrator,
     IFirmwareExecutionPolicy executionPolicy,
     IOptions<DlTransportEnvironmentOptions> dlOptions,
-    IOptions<PlatformOptions> platformOptions) : ControllerBase
+    IOptions<PlatformOptions> platformOptions,
+    IOptions<IncomingCodeServerOptions> incomingOptions,
+    IncomingCodeServerState incomingState) : ControllerBase
 {
     /// <summary>UI / operators — surface whether live modem flashing is enabled (default false).</summary>
     [Authorize(Policy = Policies.RequireOperator)]
@@ -41,16 +44,24 @@ public sealed class FirmwareController(
             liveDlaEnabled = dlOptions.Value.LiveDlaEnabled,
             transportMode = transport.Mode,
             liveTransportConfigured = transport.Configured,
+            incomingCodeServerConfigured = IncomingConfigured(),
+            incomingCodeServerListening = incomingState.Listening,
             hardwareValidationNotice = PolicyNotice(
                 "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only. Live execute needs Firmware:AllowLiveFlashing and COINLINE_FIRMWARE_LIVE_DLA_ENABLED.")
         });
     }
 
     private (string Mode, bool Configured) TransportPresentation() => dlOptions.Value.DescribeLiveTransport();
+    private bool IncomingConfigured() => executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled &&
+        incomingOptions.Value.Enabled && incomingOptions.Value.IsValid;
 
     private string PolicyNotice(string disabledNotice)
     {
         if (!executionPolicy.AllowLiveFlashing || !dlOptions.Value.LiveDlaEnabled) return disabledNotice;
+        if (incomingState.Listening)
+            return "Terminal-initiated code server is listening. Select a reviewed scheduled transition and approve the exact job.";
+        if (IncomingConfigured())
+            return "Incoming code server is configured but not listening. Review the service status before scheduling delivery.";
         var transport = TransportPresentation();
         return transport.Configured
             ? $"Live execution policy enabled; {transport.Mode} transport settings are present. Job approval, endpoint connectivity and terminal compatibility remain separate checks."
@@ -554,6 +565,7 @@ public sealed class FirmwareController(
             safetyChecks = checks,
             rollBackPlan = rollback,
             liveExecutionConfigured = j.CodeTransitionId == null && executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled && TransportPresentation().Configured,
+            incomingCodeServerListening = incomingState.Listening,
             hardwareValidationNotice = j.SimulationMode && executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled
                 ? "This job is a simulation. Live execution must use a separately approved non-simulation job."
                 : PolicyNotice("Live modem flashing disabled unless Firmware:AllowLiveFlashing; see the firmware transport reference.")

@@ -7,11 +7,13 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using HostPlatform.Domain;
+using HostPlatform.Firmware;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Infrastructure.Tables;
 using HostPlatform.Protocols.Dlog;
 using HostPlatform.Protocols.Ncc;
 using HostPlatform.Protocols.Tables;
+using HostPlatform.Transport;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
@@ -37,10 +39,22 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
     [PostgresIntegrationFact]
     public Task Scheduled_job_approval_is_bound_once_to_the_exact_transition_and_primary_artifact() => Workflow(false, bindJob: true);
 
-    private static async Task Workflow(bool automatic, bool targetInstallContact = true, bool recover = false, bool bindJob = false)
+    [PostgresIntegrationFact]
+    public Task Incoming_code_server_delivers_only_the_approved_received_schedule_and_holds_target_until_report() =>
+        Workflow(false, bindJob: true, serveJob: true);
+
+    [PostgresIntegrationFact]
+    public Task Incoming_code_server_rejects_previously_approved_schedule_after_actual_disabled_record_receipt() =>
+        Workflow(false, bindJob: true, serveJob: true, cancelBeforeTransfer: true);
+
+    private static async Task Workflow(bool automatic, bool targetInstallContact = true, bool recover = false, bool bindJob = false,
+        bool serveJob = false, bool cancelBeforeTransfer = false)
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
-        var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
+        var port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        var codeProbe = new TcpListener(IPAddress.Loopback, 0); codeProbe.Start();
+        var codePort = ((IPEndPoint)codeProbe.LocalEndpoint).Port; codeProbe.Stop(); probe.Stop();
+        var clock = new FixtureClock();
         var storage = Directory.CreateTempSubdirectory("coinline-code-binding-fixture-");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web.UseEnvironment("Production")
             .UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
@@ -48,7 +62,10 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
             .UseSetting("Security:Mode", "Token").UseSetting("Platform:Seed:EnableDemoData", "false")
             .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString())
             .UseSetting("Firmware:AllowLiveFlashing", bindJob ? "true" : "false").UseSetting("DlTransport:LiveDlaEnabled", bindJob ? "true" : "false")
-            .UseSetting("Platform:PayloadStorage:RootPath", storage.FullName));
+            .UseSetting("IncomingCodeServer:Enabled", serveJob ? "true" : "false").UseSetting("IncomingCodeServer:Port", codePort.ToString())
+            .UseSetting("IncomingCodeServer:RequestTimeoutSeconds", "15").UseSetting("IncomingCodeServer:ResponseTimeoutSeconds", "5")
+            .UseSetting("IncomingCodeServer:SessionTimeoutSeconds", "60").UseSetting("IncomingCodeServer:AckTimeoutMs", "3000")
+            .UseSetting("Platform:PayloadStorage:RootPath", storage.FullName).ConfigureServices(services => services.AddSingleton<TimeProvider>(clock)));
         using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         var customer = new Customer { Name = "Transition fixture", Code = Guid.NewGuid().ToString("N")[..8] };
         var site = new Site { Customer = customer, Name = "Fixture location", Code = Guid.NewGuid().ToString("N")[..8] };
@@ -87,11 +104,19 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
         foreach (var (number, raw) in targetRecords) Add(target, number, raw);
         var codeSet = new TableSet { Name = "Enabled code schedule fixture", Customer = customer };
         var codeTemplate = Assert.Single(NativeTableLayouts.DraftTemplates(94));
-        var code = codeTemplate.Apply(NativeTableLayouts.CreateDraftTemplate(codeTemplate), new Dictionary<string, string>
+        var codeFields = new Dictionary<string, string>
         {
             ["enabled"] = "true", ["startAt"] = DateTime.UtcNow.AddHours(2).ToString("yyyy-MM-dd'T'HH:mm:ss", CultureInfo.InvariantCulture),
             ["server"] = "12345", ["targetRom"] = "LABNEW", ["targetApp"] = "B001", ["sector-0"] = "true"
-        });
+        };
+        if (bindJob)
+        {
+            byte[] generatedAuthentication = RandomNumberGenerator.GetBytes(6);
+            generatedAuthentication[0] = 0x5a;
+            codeFields["serverAuthentication"] = Convert.ToHexString(generatedAuthentication);
+            CryptographicOperations.ZeroMemory(generatedAuthentication);
+        }
+        var code = codeTemplate.Apply(NativeTableLayouts.CreateDraftTemplate(codeTemplate), codeFields);
         Add(codeSet, 94, code);
         foreach (var set in new[] { source, target, codeSet }) TableDistributionService.MarkPublished(set, DateTime.UtcNow);
         var assignment = new TerminalTableAssignment { Terminal = phone, TableSet = source, Customer = customer, Site = site };
@@ -187,6 +212,7 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
             Assert.Equal(planId, detail.GetProperty("codeTransitionId").GetGuid());
             Assert.Equal(scheduleId, detail.GetProperty("codeScheduleId").GetGuid());
             Assert.False(detail.GetProperty("liveExecutionConfigured").GetBoolean());
+            Assert.Equal(serveJob, detail.GetProperty("incomingCodeServerListening").GetBoolean());
             using (var outbound = await client.PostAsync(winner + "/execute-live", null))
             {
                 Assert.Equal(HttpStatusCode.Conflict, outbound.StatusCode);
@@ -200,9 +226,88 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
                 Assert.Equal((long)image.Length, bound.ApprovedArtifactSizeBytes);
                 Assert.NotNull(bound.ApprovedAtUtc);
             }
+            byte[] incoming = [];
+            if (serveJob)
+            {
+                incoming = new byte[69]; incoming[1] = 1; wire.CopyTo(incoming, 2);
+                Encoding.ASCII.GetBytes("LABOLD ").CopyTo(incoming, 7);
+                Encoding.ASCII.GetBytes("B001").CopyTo(incoming, 14);
+                code.AsSpan(19, 11).CopyTo(incoming.AsSpan(18)); code.AsSpan(68, 6).CopyTo(incoming.AsSpan(29));
+                code.AsSpan(36, 32).CopyTo(incoming.AsSpan(37));
+                await RejectIncoming(incoming);
+            }
             await ExchangeDownload([8], [code]);
             await RejectActivation();
             using (var rejected = await Approve(loser)) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            if (serveJob)
+            {
+                if (cancelBeforeTransfer)
+                {
+                    clock.Advance(TimeSpan.FromHours(3));
+                    using var clear = await client.PostAsync($"/api/tables/sets/{codeSet.Id}/schedules/{scheduleId}/clear-firmware", null);
+                    Assert.True(clear.IsSuccessStatusCode, await clear.Content.ReadAsStringAsync());
+                    // Pending replacement must deny the old callback, and a completed
+                    // disabled record must continue to deny it after management closes.
+                    await RejectIncoming(incoming);
+                    await ExchangeDownload([8], [CodeDownloadWire.Disable(code)]);
+                    await RejectIncoming(incoming);
+                    var retained = await client.GetFromJsonAsync<JsonElement>(winner);
+                    Assert.False(retained.GetProperty("steps").EnumerateArray().Any(step => step.GetProperty("name").GetString()!.StartsWith("live_")));
+                    Assert.NotEqual(JsonValueKind.Null, retained.GetProperty("approvedAtUtc").ValueKind);
+                    await AssertSourceUnchanged();
+                    CryptographicOperations.ZeroMemory(incoming);
+                    File.Delete(file); Directory.Delete(Path.GetDirectoryName(file)!); storage.Delete();
+                    return;
+                }
+                // The exact receipt alone is not sufficient before the scheduled start.
+                await RejectIncoming(incoming);
+                clock.Advance(TimeSpan.FromHours(3));
+                foreach (var changedOffset in new[] { 2, 7, 18, 25, 29, 37 })
+                {
+                    var mismatch = incoming.ToArray(); mismatch[changedOffset] ^= 0x02;
+                    await RejectIncoming(mismatch);
+                }
+                var resume = incoming.ToArray(); resume[1] = 2;
+                await File.WriteAllBytesAsync(file, new byte[image.Length]);
+                await RejectIncoming(incoming); await File.WriteAllBytesAsync(file, image);
+                var delivery = await Task.WhenAll(ReceiveIncoming(incoming), ReceiveIncoming(resume));
+                Assert.Single(delivery, received => received);
+                JsonElement outcome = default;
+                for (var retry = 0; retry < 50; retry++)
+                {
+                    outcome = await client.GetFromJsonAsync<JsonElement>(winner);
+                    if (outcome.GetProperty("steps").EnumerateArray().Any(step => step.GetProperty("name").GetString() == "live_code_transport")) break;
+                    await Task.Delay(100);
+                }
+                var steps = outcome.GetProperty("steps").EnumerateArray().ToArray();
+                Assert.True(Assert.Single(steps, step => step.GetProperty("name").GetString() == "live_code_claim").GetProperty("succeeded").GetBoolean());
+                Assert.True(Assert.Single(steps, step => step.GetProperty("name").GetString() == "live_code_transport").GetProperty("succeeded").GetBoolean());
+                Assert.True(Assert.Single(steps, step => step.GetProperty("name").GetString() == "live_code_application_response").GetProperty("succeeded").GetBoolean());
+                using var state = JsonDocument.Parse(outcome.GetProperty("safetyStateJson").GetString()!);
+                Assert.False(state.RootElement.GetProperty("targetVersionVerified").GetBoolean());
+                Assert.False(state.RootElement.GetProperty("serviceVerified").GetBoolean());
+                await RejectIncoming(incoming); await RejectIncoming(resume);
+                await RejectActivation();
+                await AssertSourceUnchanged();
+                // A separate matched target report is needed even after a completed code transport.
+                await Report("LABNEW", "A002");
+                using var activation = await client.PostAsJsonAsync($"{endpoint}/{planId}/activate", new { confirm = true, revision });
+                Assert.True(activation.IsSuccessStatusCode, await activation.Content.ReadAsStringAsync());
+                var incomingActivated = await activation.Content.ReadFromJsonAsync<JsonElement>();
+                var targetBatch = incomingActivated.GetProperty("targetBatchId").GetGuid();
+                var expected = TableDistributionService.OrderVersionsForDownload(target.Versions.ToArray())
+                    .Select(TableDistributionService.GetEffectivePayload).ToArray();
+                await ExchangeDownload([44, 1], expected);
+                await using var finalScope = factory.Services.CreateAsyncScope();
+                var finalDb = finalScope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                var finalBatch = await finalDb.DownloadBatches.Include(row => row.Items).SingleAsync(row => row.Id == targetBatch);
+                Assert.Equal(DownloadBatchStatus.Completed, finalBatch.Status);
+                Assert.Equal(expected.Length, finalBatch.Items.Count); Assert.All(finalBatch.Items, row => Assert.True(row.Succeeded));
+                Assert.Equal(later.Id, (await finalDb.Terminals.FindAsync(phone.Id))!.FirmwareVersionId);
+                CryptographicOperations.ZeroMemory(incoming);
+                File.Delete(file); Directory.Delete(Path.GetDirectoryName(file)!); storage.Delete();
+                return;
+            }
             using (var cancel = await client.PostAsJsonAsync(winner + "/cancel", new { confirm = true, reason = "Fixture" })) cancel.EnsureSuccessStatusCode();
             using (var rejected = await Approve(loser)) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
             await AssertSourceUnchanged();
@@ -220,6 +325,36 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
                 return path;
             }
             Task<HttpResponseMessage> Approve(string path) => client.PostAsJsonAsync(path + "/approve", new { rollbackNotes = notes, codeTransitionId = planId });
+
+            async Task SendIncoming(IAsyncDuplexTransport peer, byte[] requestBytes, CancellationToken ct)
+            {
+                var pacing = new ModemPacingProfile { InterBlockDelayMs = 0, RetrySpacingMs = 0, AfterControlByteDelayMs = 0 };
+                var sent = await XmodemSender.SendAsync(peer, requestBytes, pacing, 3000, 3, TimeSpan.FromSeconds(15), null, null, null, ct);
+                Assert.True(sent.Success, sent.Detail);
+            }
+            async Task RejectIncoming(byte[] requestBytes)
+            {
+                using var ct = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+                await using var peer = new TcpClientDuplexTransport("127.0.0.1", codePort);
+                await SendIncoming(peer, requestBytes, ct.Token);
+                Assert.Equal(0, await peer.ReadAsync(new byte[1], ct.Token));
+            }
+            async Task<bool> ReceiveIncoming(byte[] requestBytes)
+            {
+                using var ct = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+                await using var peer = new TcpClientDuplexTransport("127.0.0.1", codePort);
+                await SendIncoming(peer, requestBytes, ct.Token);
+                try
+                {
+                    var received = await DlaXmodemReceiver.ReceiveAsync(peer, 3000, 3, 8192, null, ct.Token);
+                    Assert.Equal(5, received.PacketCount);
+                    Assert.True(received.Data.AsSpan(10, 4096).SequenceEqual(image.AsSpan(0, 4096)));
+                    await SendIncoming(peer, [DlaCodeServerSession.ResponseDownload], ct.Token);
+                    return true;
+                }
+                catch (IOException) { return false; }
+                catch (TimeoutException) { return false; }
+            }
         }
         storage.Delete();
 
@@ -398,7 +533,7 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
                             var frame = await Read(stream, ct.Token); actual.AddRange(frame.Data);
                             await Send(stream, (byte)(NccControl.Ack | frame.Control), [], ct.Token);
                         }
-                        Assert.Equal(raw, actual.ToArray()); await Send(stream, 0, [14, raw[0]], ct.Token);
+                        Assert.True(raw.SequenceEqual(actual), "Downloaded fixture record differs."); await Send(stream, 0, [14, raw[0]], ct.Token);
                         Assert.NotEqual(0, (await Read(stream, ct.Token)).Control & NccControl.Ack);
                     }
                 }
@@ -413,6 +548,13 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
     private static byte[] Version(string rom, string software)
     {
         var record = new byte[28]; record[0] = 60; Encoding.ASCII.GetBytes(rom.PadRight(7)).CopyTo(record, 1); Encoding.ASCII.GetBytes(software).CopyTo(record, 8); return record;
+    }
+
+    private sealed class FixtureClock : TimeProvider
+    {
+        private long offsetTicks;
+        public void Advance(TimeSpan offset) => Interlocked.Exchange(ref offsetTicks, offset.Ticks);
+        public override DateTimeOffset GetUtcNow() => DateTimeOffset.UtcNow.AddTicks(Interlocked.Read(ref offsetTicks));
     }
     private static async Task<NccWirePacket> Read(NetworkStream stream, CancellationToken ct)
     {

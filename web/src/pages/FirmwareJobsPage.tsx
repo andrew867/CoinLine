@@ -17,7 +17,7 @@ type Row = {
 
 type TermOpt = { id: string; displayName: string }
 type Pkg = { id: string; name?: string; versionLabel?: string }
-type ExecutionPolicy = { allowLiveFlashing: boolean; liveDlaEnabled: boolean; liveTransportConfigured?: boolean }
+type ExecutionPolicy = { allowLiveFlashing: boolean; liveDlaEnabled: boolean; liveTransportConfigured?: boolean; incomingCodeServerListening?: boolean }
 type ArtifactOptions = { id: string; primaryArtifactId: string | null; artifactChecksumHex: string; artifactSizeBytes: number;
   artifacts: { id: string; kind: string; sha256Hex: string; sizeBytes: number; payloadPresent?: boolean }[] }
 
@@ -163,7 +163,9 @@ export function FirmwareJobsPage() {
             </select>
           </label>
           {allowPreparation && <label><input type="checkbox" checked={liveSelected} disabled={starting} onChange={event => setPrepareLive(event.target.checked)} /> Prepare for live execution after simulation and approval</label>}
-          {liveSelected && <p>This prepares a job only. No terminal contact or code transfer is started.{policy?.liveTransportConfigured === false ? ' Live delivery can be configured separately.' : ''}</p>}
+          {liveSelected && <p>This prepares a job only. No terminal contact or code transfer is started.{policy?.incomingCodeServerListening
+            ? ' The incoming code server is listening for approved scheduled callbacks.'
+            : policy?.liveTransportConfigured === false ? ' Live delivery can be configured separately.' : ''}</p>}
           {liveSelected && <>
             <label>Registered artifact<select value={artifactId} onChange={event => setArtifactId(event.target.value)} disabled={starting || !eligibleArtifacts.length}>
               <option value="">Choose a stored artifact</option>{eligibleArtifacts.map(artifact => <option key={artifact.id} value={artifact.id}>{artifact.kind} · {artifact.sizeBytes} B · {artifact.sha256Hex.slice(0, 12)}</option>)}

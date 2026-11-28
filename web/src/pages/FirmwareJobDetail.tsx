@@ -26,6 +26,7 @@ type Job = {
   firmwareArtifactId: string | null
   codeTransitionId?: string | null
   codeScheduleId?: string | null
+  incomingCodeServerListening?: boolean
   status: number
   simulationMode: boolean
   liveExecutionConfigured?: boolean
@@ -65,6 +66,8 @@ export function FirmwareJobDetail() {
   const [busy, setBusy] = useState(false)
   const actionInProgress = useRef(false)
   const liveAttempted = job?.steps.some(step => step.name.startsWith('live_')) ?? false
+  const codeTransport = job?.steps.find(step => step.name === 'live_code_transport')
+  const codeResponse = job?.steps.find(step => step.name === 'live_code_application_response')
   const canSimulate = !!job && [0, 1, 2].includes(job.status)
   const canApprove = !!job && job.status === 4 && !job.approvedAtUtc
   const eligibleForExecution = !!job && !job.simulationMode && !!job.approvedAtUtc && job.status === 4 && !liveAttempted && !job.codeTransitionId
@@ -194,8 +197,18 @@ export function FirmwareJobDetail() {
       </p>
       {job.codeTransitionId && <p role="status">
         Approval bound to terminal-initiated delivery. Transition {job.codeTransitionId}, schedule {job.codeScheduleId}.
-        {job.status === 4 && !liveAttempted && ' Awaiting incoming code-server integration; no outbound execution is available for this job.'}
+        {job.status === 4 && !liveAttempted && (job.incomingCodeServerListening
+          ? ' Waiting for the scheduled terminal callback.'
+          : ' Incoming code server is not listening. Approval is retained.')}
       </p>}
+      {job.codeTransitionId && codeTransport && <section aria-label="Code delivery progress">
+        <h2 style={{ fontSize: 17 }}>Code delivery progress</h2>
+        <dl>
+          <dt>Transport</dt><dd>{codeTransport.succeeded ? 'Completed' : 'Did not complete'}</dd>
+          <dt>Application response</dt><dd>{codeResponse?.succeeded ? 'Observed' : 'Not observed'}</dd>
+          <dt>Terminal activation and service</dt><dd>Separate evidence required. <Link to={`/terminals/${job.terminalId}`}>Review the terminal configuration transition</Link>.</dd>
+        </dl>
+      </section>}
 
       <h2 style={{ fontSize: 17 }}>Safety checklist (audit)</h2>
       <p style={{ fontSize: 13, color: '#555' }}>

@@ -38,6 +38,7 @@ builder.Services.Configure<FirmwareOptions>(builder.Configuration.GetSection(Fir
 builder.Services.Configure<CraftOptions>(builder.Configuration.GetSection(CraftOptions.SectionName));
 builder.Services.Configure<DlTransportEnvironmentOptions>(builder.Configuration.GetSection(DlTransportEnvironmentOptions.SectionName));
 builder.Services.PostConfigure<DlTransportEnvironmentOptions>(BindDlTransportFromEnvironment);
+builder.Services.Configure<IncomingCodeServerOptions>(builder.Configuration.GetSection("IncomingCodeServer"));
 
 builder.Services.PostConfigure<SecurityOptions>(o =>
 {
@@ -127,6 +128,9 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IDlXmodemTransportAdapter, DlXmodemTransportAdapter>();
 builder.Services.AddScoped<IFirmwareExecutionPolicy, FirmwareExecutionPolicy>();
 builder.Services.AddScoped<FirmwareJobOrchestrator>();
+builder.Services.AddScoped<IncomingCodeDeliveryService>();
+builder.Services.AddSingleton<IncomingCodeServerState>();
+builder.Services.AddHostedService<IncomingCodeServer>();
 builder.Services.AddScoped<CapturedSessionReplayService>();
 
 builder.Services.AddControllers(options => options.Filters.Add<OperatorPermissionFilter>());

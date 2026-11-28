@@ -450,13 +450,19 @@ public sealed class FirmwareJobOrchestrator(
         if (observation == null || FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != (plan.SourceControllerRom, plan.SourceControllerSoftware))
             throw new InvalidOperationException("The latest matched terminal report does not establish the reviewed source version.");
         if (code.Schedule.CompletedAtUtc != null)
+        {
             _ = await FirmwareConfigurationTransitionService.VerifyScheduleReceipt(db, plan, config, code, ct);
+            await FirmwareConfigurationTransitionService.EnsureLatestDeliveredCodeSchedule(db, plan.TerminalId, code.Schedule.Id, ct);
+        }
         if (await db.FirmwareUpdateJobs.AnyAsync(row => row.CodeTransitionId == plan.Id || row.CodeScheduleId == code.Schedule.Id, ct))
             throw new InvalidOperationException("This transition or code schedule already has a linked job.");
         if (artifact.SizeBytes <= 0 || artifact.SizeBytes > 256L * CodeDownloadWire.CodeBlockBytes ||
             artifact.SizeBytes % CodeDownloadWire.CodeBlockBytes != 0)
             throw new InvalidOperationException("The primary artifact must contain complete addressable code blocks.");
-        var selected = CodeDownloadWire.SelectedBlocks(TableDistributionService.GetEffectivePayload(code.Record));
+        var rawCode = TableDistributionService.GetEffectivePayload(code.Record);
+        if (!CodeDownloadWire.HasServerAuthentication(rawCode))
+            throw new InvalidOperationException("Configure nonblank code-server authentication in the reviewed MT94 before approving incoming delivery.");
+        var selected = CodeDownloadWire.SelectedBlocks(rawCode);
         if (selected.Length == 0 || selected.Any(block => block >= artifact.SizeBytes / CodeDownloadWire.CodeBlockBytes))
             throw new InvalidOperationException("The code schedule selects blocks outside the registered primary artifact or no blocks.");
         _ = await LoadLivePayloadAsync(job, ct);

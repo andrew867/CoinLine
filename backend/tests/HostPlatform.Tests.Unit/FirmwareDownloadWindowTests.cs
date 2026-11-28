@@ -5,6 +5,26 @@ namespace HostPlatform.Tests.Unit;
 
 public sealed class FirmwareDownloadWindowTests
 {
+    [Fact]
+    public void Code_server_authentication_rejects_blank_erased_and_different_comparisons()
+    {
+        var record = ArmedRecord();
+        var generated = System.Security.Cryptography.RandomNumberGenerator.GetBytes(6);
+        generated[0] = 0x5a;
+        record.AsSpan(68, 6).Clear();
+        Assert.False(CodeDownloadWire.HasServerAuthentication(record));
+        Assert.False(CodeDownloadWire.MatchesServerAuthentication(record, new byte[6]));
+        record.AsSpan(68, 6).Fill(0xff);
+        Assert.False(CodeDownloadWire.HasServerAuthentication(record));
+        generated.CopyTo(record, 68);
+        Assert.True(CodeDownloadWire.HasServerAuthentication(record));
+        Assert.True(CodeDownloadWire.MatchesServerAuthentication(record, generated));
+        generated[0] ^= 1;
+        Assert.False(CodeDownloadWire.MatchesServerAuthentication(record, generated));
+        Assert.False(CodeDownloadWire.MatchesServerAuthentication(record, generated.AsSpan(0, 5)));
+        Assert.False(CodeDownloadWire.HasServerAuthentication(CodeDownloadWire.Disable(record)));
+    }
+
     private static readonly DateOnly Date = new(2028, 2, 28);
     private static readonly DateTime Ready = new(2028, 2, 27, 0, 0, 0, DateTimeKind.Utc);
 

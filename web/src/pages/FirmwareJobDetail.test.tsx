@@ -85,3 +85,17 @@ it('approves the selected staged schedule and does not offer outbound execution 
   fireEvent.click(screen.getByLabelText('Confirm cancel (audited)'))
   expect(screen.getByRole('button', { name: 'Cancel job' })).toBeEnabled()
 })
+
+it('reports completed incoming transport separately from an unobserved response and terminal service', async () => {
+  vi.mocked(apiGet).mockResolvedValueOnce({ ...base, codeTransitionId: 'transition-fixture', codeScheduleId: 'schedule-fixture',
+    incomingCodeServerListening: true, steps: [
+      { ...liveStep, name: 'live_code_transport' },
+      { ...liveStep, id: 'response', name: 'live_code_application_response', stepIndex: 102, succeeded: false, stepStatus: 0 }
+    ] })
+  open()
+  expect(await screen.findByRole('region', { name: 'Code delivery progress' })).toBeVisible()
+  expect(screen.getByText('Completed', { exact: true })).toBeVisible()
+  expect(screen.getByText('Not observed', { exact: true })).toBeVisible()
+  expect(screen.getByText(/Separate evidence required/)).toBeVisible()
+  expect(screen.queryByRole('button', { name: /Execute live/ })).not.toBeInTheDocument()
+})

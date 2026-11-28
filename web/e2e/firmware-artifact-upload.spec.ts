@@ -21,7 +21,7 @@ test('uploads a matching artifact and approves the exact scheduled job without t
     if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
       openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
     if (url.pathname === '/api/firmware/execution-policy') return route.fulfill({ json: { allowLiveFlashing: true, liveDlaEnabled: true,
-      transportMode: 'simulation', liveTransportConfigured: false, hardwareValidationNotice: 'Fixture policy' } })
+      transportMode: 'simulation', liveTransportConfigured: false, incomingCodeServerListening: true, hardwareValidationNotice: 'Fixture policy' } })
     if (url.pathname === endpoint) return route.fulfill({ json: { ...pkg, primaryArtifactId: uploaded ? artifactId : null,
       artifacts: uploaded ? [{ id: artifactId, kind: 'primary', sha256Hex: digest, sizeBytes: bytes.length, storageRef: 'firmware/fixture.bin', payloadPresent: true }] : [] } })
     if (url.pathname === `${endpoint}/artifacts/upload`) {
@@ -40,7 +40,7 @@ test('uploads a matching artifact and approves the exact scheduled job without t
     }
     if (url.pathname === jobEndpoint && request.method() === 'GET') return route.fulfill({ json: {
       id: 'fixture-job', terminalId: phoneId, firmwarePackageId: packageId, firmwareArtifactId: artifactId,
-      status: simulated ? 4 : 2, simulationMode: false, liveExecutionConfigured: false, safetyStateJson: '{}',
+      status: simulated ? 4 : 2, simulationMode: false, liveExecutionConfigured: false, incomingCodeServerListening: true, safetyStateJson: '{}',
       approvedAtUtc: approved ? '2026-01-01T00:00:00Z' : null, approvedByOperatorId: approved ? 'fixture' : '',
       codeTransitionId: approved ? 'fixture-transition' : null, codeScheduleId: approved ? 'fixture-schedule' : null,
       cancelReason: '', createdAtUtc: '2026-01-01T00:00:00Z', steps: [], safetyChecks: [], rollBackPlan: null,
@@ -71,6 +71,7 @@ test('uploads a matching artifact and approves the exact scheduled job without t
   const prepare = page.getByRole('checkbox', { name: /Prepare for live execution/ })
   await expect(prepare).not.toBeChecked()
   await prepare.check()
+  await expect(page.getByText(/incoming code server is listening for approved scheduled callbacks/)).toBeVisible()
   await expect(page.getByLabel('Registered artifact')).toHaveValue(artifactId)
   await page.getByRole('button', { name: 'Prepare live-capable job' }).click()
   await expect(page.getByRole('button', { name: 'Queue simulation job' })).toBeVisible()
@@ -80,6 +81,7 @@ test('uploads a matching artifact and approves the exact scheduled job without t
   await page.getByLabel('Delivery configuration').selectOption('fixture-transition')
   await page.getByRole('button', { name: 'Approve (after simulation)' }).click()
   await expect(page.getByText(/Approval bound to terminal-initiated delivery/)).toContainText('fixture-schedule')
+  await expect(page.getByText(/Waiting for the scheduled terminal callback/)).toBeVisible()
   await expect(page.getByRole('button', { name: /Execute live/ })).toHaveCount(0)
   expect(simulated).toBe(true); expect(approved).toBe(true); expect(liveRequests).toBe(0)
 })

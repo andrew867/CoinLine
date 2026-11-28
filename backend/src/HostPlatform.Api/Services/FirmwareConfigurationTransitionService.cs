@@ -185,6 +185,17 @@ internal static class FirmwareConfigurationTransitionService
         return batch;
     }
 
+    internal static async Task EnsureLatestDeliveredCodeSchedule(HostPlatformDbContext db, Guid terminalId, Guid scheduleId, CancellationToken ct)
+    {
+        var latest = await db.ScheduledTableDownloads.AsNoTracking().Where(row => row.TerminalId == terminalId &&
+                row.CompletedAtUtc != null && row.CancelledAtUtc == null && row.RecordNumbers == null &&
+                row.TableSet!.Versions.Count == 1 && row.TableSet.Versions.Any(version => version.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
+            .OrderByDescending(row => row.CompletedAtUtc).ThenByDescending(row => row.CreatedAtUtc).ThenByDescending(row => row.Id)
+            .Select(row => row.Id).FirstOrDefaultAsync(ct);
+        if (latest != scheduleId)
+            throw new InvalidOperationException("A later code schedule or cancellation has replaced the delivered parameters.");
+    }
+
     public static async Task<(Configuration Configuration, DlogTransaction Observation)> VerifyActivation(HostPlatformDbContext db,
         FirmwareConfigurationTransition plan, CancellationToken ct, Guid? currentSessionId = null)
     {

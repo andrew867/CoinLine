@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Numerics;
+using System.Security.Cryptography;
 
 namespace HostPlatform.Protocols.Tables;
 
@@ -48,6 +49,18 @@ public static class CodeDownloadWire
                 result.Add((byte)number);
         return result.ToArray();
     }
+
+    public static bool HasServerAuthentication(ReadOnlySpan<byte> record)
+    {
+        if (!IsEnabled(record)) return false;
+        byte any = 0, differentFromErased = 0;
+        foreach (var value in record.Slice(68, 6)) { any |= value; differentFromErased |= (byte)(value ^ 0xff); }
+        return any != 0 && differentFromErased != 0;
+    }
+
+    public static bool MatchesServerAuthentication(ReadOnlySpan<byte> record, ReadOnlySpan<byte> supplied) =>
+        supplied.Length == 6 && HasServerAuthentication(record) &&
+        CryptographicOperations.FixedTimeEquals(record.Slice(68, 6), supplied);
 
     public static int? MinimumTransferMinutes(ReadOnlySpan<byte> record)
     {
