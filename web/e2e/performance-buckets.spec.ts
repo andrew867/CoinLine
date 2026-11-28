@@ -90,3 +90,50 @@ test('previews configured MT37 histogram boundaries, saves selected MT32 timing,
   await expect(reportGroup.getByText('86', { exact: true })).toBeVisible()
   await expect(reportGroup.getByText('Reference: 4.00 s or more', { exact: true })).toHaveCount(0)
 })
+
+test('compares graphical usage owners with independently acknowledged records', async ({ page, baseURL }) => {
+  if (!baseURL) throw new Error('The console fixture requires a local base URL.')
+  const origin = new URL(baseURL).origin, token = 'fixture-graphical-report-operator'
+  const id = '00000000-0000-4000-8000-000000015301'
+  const batch = '00000000-0000-4000-8000-000000015302'
+  await page.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url())
+    if (url.origin !== origin) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    if (url.pathname === '/api/auth/login') return route.fulfill({ json: { token, displayName: 'Fixture operator',
+      role: 'Operator', permissions: { overview: 1, uploads: 1, downloads: 1, 'table-records': 1 } } })
+    if (request.headers().authorization !== `Bearer ${token}`) return route.fulfill({ status: 401 })
+    if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
+      openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
+    if (url.pathname === `/api/uploads/${id}`) return route.fulfill({ json: {
+      id, terminalId: 'fixture-graphical-phone', status: 2, idempotencyKey: 'fixture-report', isTerminalStatistics: true,
+      rawPayloadHex: '', decodedMetadataJson: '{}', relatedDlogTransactionId: null,
+      createdAtUtc: '2028-04-01T12:00:00Z', updatedAtUtc: '2028-04-01T12:00:00Z',
+      graphicalReferences: [
+        { status: 'acknowledged', recordNumber: 131, collectionDurationDays: 7, laterUncertainAttempt: true,
+          screens: [], downloadBatchId: batch, tableRevision: 2, ackRecordedAtUtc: '2028-04-01T11:00:00Z' },
+        { status: 'missing', recordNumber: 132, screens: null },
+        { status: 'acknowledged', recordNumber: 133, collectionDurationDays: null, laterUncertainAttempt: false,
+          screens: [{ screenNumber: 21, recordNumber: 133, kindCode: 77, screenOwnerCode: 1234,
+            keyOwnerCodes: [2000, 0, 0, 0, 0, 9000] }] },
+      ],
+      records: [{ id: 'fixture-record', terminalStatistics: { messageType: 153, name: 'Graphical usage statistics',
+        periodStart: null, periodEnd: null, groups: [], carriers: [], carrierFormat: null,
+        graphicalScreens: [{ screenNumber: 21, ownerCode: 1234, directionKeyPressCount: 3,
+          keys: [{ keyNumber: 1, ownerCode: 2000, pressCount: 12 }, { keyNumber: 6, ownerCode: 2005, pressCount: 4 }] },
+          { screenNumber: 9, ownerCode: 456, directionKeyPressCount: 0, keys: [] }] } }],
+    } })
+    return route.fulfill({ status: 404 })
+  })
+  await signIn(page)
+  await page.goto(`/uploads/${id}`)
+  const reference = page.getByRole('region', { name: 'Acknowledged graphical configuration reference' })
+  await expect(reference.getByText(/Stored collection duration: 7 days/)).toBeVisible()
+  await expect(reference.getByRole('link', { name: 'Download evidence' })).toHaveAttribute('href', `/downloads/${batch}`)
+  await expect(reference.getByText(/later attempt has no confirmed/)).toBeVisible()
+  const table = page.getByRole('table', { name: 'Graphical usage by screen' })
+  await expect(table.getByText('Reference 1234, matches', { exact: true })).toBeVisible()
+  await expect(table.getByText('Reference 9000, differs', { exact: true })).toBeVisible()
+  await expect(table.getByText('No acknowledged screen reference', { exact: true })).toBeVisible()
+  await expect(reference.getByText(/not the current assignment/)).toBeVisible()
+})

@@ -4,6 +4,7 @@ import { apiFetch, apiPostBareOk } from '../api/client'
 import { carrierReportLabel } from './collectionPolicy'
 import { PerformanceReferenceSummary, performanceReportRanges, type PerformanceReference } from './PerformanceReportReference'
 import { CollectionReportReference, type CollectionReference } from './CollectionReportReference'
+import { GraphicalOwnerComparison, GraphicalReportReferenceSummary, graphicalScreenReference, type GraphicalReportReference } from './GraphicalReportReference'
 import './UploadDetail.css'
 
 
@@ -63,6 +64,7 @@ type Detail = {
   performanceReference?: PerformanceReference | null
   collectionReference?: CollectionReference | null
   callInReference?: CollectionReference | null
+  graphicalReferences?: GraphicalReportReference[] | null
   records: RecordRow[]
 }
 
@@ -197,7 +199,7 @@ export function UploadDetail() {
         <section aria-label="Received statistics" data-testid="upload-records">
           {d.records.map(({ id: recordId, terminalStatistics }) => terminalStatistics &&
             <StatisticsReport key={recordId} report={terminalStatistics} performanceReference={d.performanceReference}
-              collectionReference={d.collectionReference} />)}
+              collectionReference={d.collectionReference} graphicalReferences={d.graphicalReferences} />)}
           <p>Received <time dateTime={d.createdAtUtc}>{new Date(d.createdAtUtc).toLocaleString()}</time></p>
         </section>
       ) : d.isTerminalCallDetail ? (
@@ -243,8 +245,9 @@ export function UploadDetail() {
   )
 }
 
-function StatisticsReport({ report, performanceReference, collectionReference }: { report: TerminalStatistics;
-  performanceReference?: PerformanceReference | null; collectionReference?: CollectionReference | null }) {
+function StatisticsReport({ report, performanceReference, collectionReference, graphicalReferences }: { report: TerminalStatistics;
+  performanceReference?: PerformanceReference | null; collectionReference?: CollectionReference | null;
+  graphicalReferences?: GraphicalReportReference[] | null }) {
   const period = (value: string | null) => value?.replace('T', ' ') ?? 'Unavailable'
 
   return <article className="upload-statistics">
@@ -265,15 +268,16 @@ function StatisticsReport({ report, performanceReference, collectionReference }:
       <summary>{carrierReportLabel(report.messageType, reference)}</summary>
       <CounterGroups groups={groups} />
     </details>)}
-    {report.messageType === 153 ? <GraphicalUsageReport screens={report.graphicalScreens ?? []} />
+    {report.messageType === 153 ? <GraphicalUsageReport screens={report.graphicalScreens ?? []} references={graphicalReferences} />
       : report.groups.length === 0 && report.carriers.length === 0 && <p>No carrier entries in this report.</p>}
   </article>
 }
 
-function GraphicalUsageReport({ screens }: { screens: GraphicalScreenUsage[] }) {
+function GraphicalUsageReport({ screens, references }: { screens: GraphicalScreenUsage[]; references?: GraphicalReportReference[] | null }) {
   return <section aria-label="Graphical screen usage">
     <p>Each screen's reported owner and key counts are captured for this reporting period.
       A phone can upload more than one record for the same period. Counts are key presses, not advertisement impressions.</p>
+    <GraphicalReportReferenceSummary references={references} />
     {screens.length === 0 ? <p>No screen entries in this report.</p> :
       <div className="graphical-usage-scroll">
         <table className="graphical-usage-table">
@@ -283,17 +287,25 @@ function GraphicalUsageReport({ screens }: { screens: GraphicalScreenUsage[] }) 
             {Array.from({ length: 6 }, (_, index) => <th key={index} scope="col">Softkey {index + 1}</th>)}
             <th scope="col">Direction keys</th>
           </tr></thead>
-          <tbody>{screens.map((screen, index) => <tr key={`${screen.screenNumber}-${index}`}>
-            <th scope="row">Screen {screen.screenNumber}</th><td>{screen.ownerCode}</td>
+          <tbody>{screens.map((screen, index) => {
+            const reference = graphicalScreenReference(references, screen.screenNumber)
+            return <tr key={`${screen.screenNumber}-${index}`}>
+            <th scope="row">Screen {screen.screenNumber}</th><td>{screen.ownerCode}
+              {reference ? <GraphicalOwnerComparison reported={screen.ownerCode} expected={reference.screenOwnerCode} /> :
+                <small>No acknowledged screen reference</small>}
+              {reference?.kindCode === 0 && <small>Stored screen is undefined</small>}
+              {reference && ![0, 66, 84, 77].includes(reference.kindCode) && <small>Stored screen type is unrecognized</small>}</td>
             {Array.from({ length: 6 }, (_, index) => {
               const key = screen.keys.find(item => item.keyNumber === index + 1)
               return <td key={index}>{key ? <>
                 <strong>{key.pressCount.toLocaleString()}</strong>
                 <span>Owner {key.ownerCode}</span>
+                {reference?.keyOwnerCodes[index] != null &&
+                  <GraphicalOwnerComparison reported={key.ownerCode} expected={reference.keyOwnerCodes[index]} />}
               </> : 'Unavailable'}</td>
             })}
             <td>{screen.directionKeyPressCount.toLocaleString()}</td>
-          </tr>)}</tbody>
+          </tr>})}</tbody>
         </table>
       </div>}
   </section>

@@ -74,6 +74,7 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
         PerformanceReportReference? performanceReference = null;
         CollectionReportReference? collectionReference = null;
         CollectionReportReference? callInReference = null;
+        IReadOnlyList<GraphicalReportReference>? graphicalReferences = null;
         var mayReadReference = OperatorPermissions.Allows(HttpContext, "downloads", PermissionOperation.Read) &&
             OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read);
         if (records.Any(record => record.TerminalStatistics?.MessageType == 37))
@@ -90,6 +91,10 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
             callInReference = mayReadReference
                 ? await CollectionReportReferences.FindAsync(db, u.TerminalId, u.CreatedAtUtc, NativeTableLayouts.CallInRecord, ct)
                 : new("restricted", NativeTableLayouts.CallInRecord);
+        if (records.Any(record => record.TerminalStatistics?.MessageType == 153))
+            graphicalReferences = mayReadReference
+                ? await GraphicalReportReferences.FindAsync(db, u.TerminalId, u.CreatedAtUtc, ct)
+                : GraphicalReportReferences.Restricted();
         return Ok(new
         {
             u.Id,
@@ -106,6 +111,7 @@ public sealed class UploadsController(HostPlatformDbContext db) : ControllerBase
             performanceReference,
             collectionReference,
             callInReference,
+            graphicalReferences,
             Records = records
         });
     }
