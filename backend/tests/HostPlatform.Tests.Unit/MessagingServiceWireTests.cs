@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using HostPlatform.Domain;
 using HostPlatform.Infrastructure.Tables;
 using HostPlatform.Protocols.Tables;
@@ -6,6 +7,36 @@ namespace HostPlatform.Tests.Unit;
 
 public sealed class MessagingServiceWireTests
 {
+    [Fact]
+    public void Report_reference_projects_only_collection_permissions_and_configured_surcharges()
+    {
+        var record = Enumerable.Repeat((byte)0xA5, 72).ToArray();
+        record[0] = 68; record[19] = 1; record[20] = 0;
+        record[21] = 0xA5; record[34] = 0xB5; record[35] = 0xCA;
+        ushort[] amounts = [25, 256, 300, ushort.MaxValue];
+        for (var i = 0; i < amounts.Length; i++)
+            BinaryPrimitives.WriteUInt16LittleEndian(record.AsSpan(22 + 2 * i), amounts[i]);
+        var before = record.ToArray();
+        var reference = Assert.IsType<MessagingReportSettings>(MessagingServiceWire.ReadReportSettings(record));
+        Assert.Equal(1, reference.ServiceMode);
+        Assert.Equal(0, reference.CallRecordMode);
+        Assert.True(reference.CollectStatistics);
+        Assert.Equal(new[] { "Local", "Intra-area toll", "Inter-area toll", "International" },
+            reference.Areas.Select(area => area.Area));
+        Assert.Equal(new[] { true, false, true, false }, reference.Areas.Select(area => area.Allowed));
+        Assert.Equal(amounts, reference.Areas.Select(area => area.SurchargeCents));
+        Assert.Equal(new[] { "Stored-value cards", "Calling cards" }, reference.AllowedPayments);
+        Assert.Equal(before, record);
+        record[21] = 0xA4; record[19] = 3; record[20] = 2;
+        reference = MessagingServiceWire.ReadReportSettings(record)!;
+        Assert.False(reference.CollectStatistics);
+        Assert.Equal(3, reference.ServiceMode);
+        Assert.Equal(2, reference.CallRecordMode);
+        Assert.Null(MessagingServiceWire.ReadReportSettings(record[..71]));
+        record[0] = 69;
+        Assert.Null(MessagingServiceWire.ReadReportSettings(record));
+    }
+
     [Fact]
     public void Statistics_changes_preserve_reserved_flags_and_the_legacy_timing_and_spare_fields_are_distinct()
     {

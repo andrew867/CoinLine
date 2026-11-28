@@ -5,6 +5,7 @@ import { carrierReportLabel } from './collectionPolicy'
 import { PerformanceReferenceSummary, performanceReportRanges, type PerformanceReference } from './PerformanceReportReference'
 import { CollectionReportReference, type CollectionReference } from './CollectionReportReference'
 import { GraphicalOwnerComparison, GraphicalReportReferenceSummary, graphicalScreenReference, type GraphicalReportReference } from './GraphicalReportReference'
+import { MessagingReportReference, type MessagingReference } from './MessagingReportReference'
 import './UploadDetail.css'
 
 
@@ -65,6 +66,7 @@ type Detail = {
   collectionReference?: CollectionReference | null
   callInReference?: CollectionReference | null
   graphicalReferences?: GraphicalReportReference[] | null
+  messagingReference?: MessagingReference | null
   records: RecordRow[]
 }
 
@@ -199,7 +201,8 @@ export function UploadDetail() {
         <section aria-label="Received statistics" data-testid="upload-records">
           {d.records.map(({ id: recordId, terminalStatistics }) => terminalStatistics &&
             <StatisticsReport key={recordId} report={terminalStatistics} performanceReference={d.performanceReference}
-              collectionReference={d.collectionReference} graphicalReferences={d.graphicalReferences} />)}
+              collectionReference={d.collectionReference} graphicalReferences={d.graphicalReferences}
+              messagingReference={d.messagingReference} />)}
           <p>Received <time dateTime={d.createdAtUtc}>{new Date(d.createdAtUtc).toLocaleString()}</time></p>
         </section>
       ) : d.isTerminalCallDetail ? (
@@ -245,9 +248,9 @@ export function UploadDetail() {
   )
 }
 
-function StatisticsReport({ report, performanceReference, collectionReference, graphicalReferences }: { report: TerminalStatistics;
+function StatisticsReport({ report, performanceReference, collectionReference, graphicalReferences, messagingReference }: { report: TerminalStatistics;
   performanceReference?: PerformanceReference | null; collectionReference?: CollectionReference | null;
-  graphicalReferences?: GraphicalReportReference[] | null }) {
+  graphicalReferences?: GraphicalReportReference[] | null; messagingReference?: MessagingReference | null }) {
   const period = (value: string | null) => value?.replace('T', ' ') ?? 'Unavailable'
 
   return <article className="upload-statistics">
@@ -262,6 +265,7 @@ function StatisticsReport({ report, performanceReference, collectionReference, g
     </header>
     {report.messageType === 37 && <PerformanceReferenceSummary reference={performanceReference} />}
     {[56, 57, 71].includes(report.messageType) && <CollectionReportReference number={34} reference={collectionReference} />}
+    {report.messageType === 69 && <MessagingReportReference reference={messagingReference} />}
     {report.groups.length > 0 && <CounterGroups groups={report.groups}
       performanceReference={report.messageType === 37 ? performanceReference : null} />}
     {report.carriers.map(({ reference, groups }, index) => <details key={`${reference}-${index}`} open={index === 0}>

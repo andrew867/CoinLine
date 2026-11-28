@@ -157,6 +157,8 @@ The MT153 detail view also compares each reported screen and main-key owner code
 
 ## Manager data and workflows
 
+The MT69 Audio-Gram upload detail compares received counters with the latest retained same-phone MT68 application acknowledgement before host receipt. It shows service, statistics and call-record settings independently, the configured call areas, payment permissions and surcharges, and the source download. It does not reveal service credentials or access digits, change counters or infer collected payments. Missing, invalid, ambiguous and permission-restricted references remain distinct. This is host configuration evidence, not a successful service call or proof of configuration during the phone-clock period.
+
 ### Configuration library
 
 The saved-record list supports the legacy configuration-oriented workflow across the native editors rather than requiring an operator to know a set identifier in advance. Records are searchable by set or definition name, exact Configuration ID, message type, target firmware, and draft or published state. The list also supports untargeted records, stable sorting and server-side paging. It retains the existing set-specific links and opens the corresponding editor when the set contains exactly one record of that type and a native layout of the stored length is known. Duplicate same-type records and records without a matching known layout are explicitly marked rather than opening an unrelated editor. The native editor still checks the actual payload and profile.

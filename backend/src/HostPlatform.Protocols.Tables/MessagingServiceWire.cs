@@ -1,9 +1,32 @@
+using System.Buffers.Binary;
+
 namespace HostPlatform.Protocols.Tables;
+
+public sealed record MessagingAreaReportingSetting(string Area, bool Allowed, ushort SurchargeCents);
+public sealed record MessagingReportSettings(byte ServiceMode, byte CallRecordMode, bool CollectStatistics,
+    IReadOnlyList<MessagingAreaReportingSetting> Areas, IReadOnlyList<string> AllowedPayments);
 
 public static class MessagingServiceWire
 {
     public const byte MessageType = 68;
     public const int RecordLength = 72;
+
+    // Report context deliberately excludes access credentials, destination digits,
+    // signaling parameters and reserved data from the retained configuration.
+    public static MessagingReportSettings? ReadReportSettings(ReadOnlySpan<byte> record)
+    {
+        if (record.Length != RecordLength || record[0] != MessageType) return null;
+        string[] areas = ["Local", "Intra-area toll", "Inter-area toll", "International"];
+        string[] methods = ["Coins", "Stored-value cards", "Credit cards", "Calling cards"];
+        var settings = new List<MessagingAreaReportingSetting>();
+        var payments = new List<string>();
+        for (var index = 0; index < areas.Length; index++)
+            settings.Add(new(areas[index], (record[34] & (1 << index)) != 0,
+                BinaryPrimitives.ReadUInt16LittleEndian(record.Slice(22 + index * 2, 2))));
+        for (var index = 0; index < methods.Length; index++)
+            if ((record[35] & (1 << index)) != 0) payments.Add(methods[index]);
+        return new(record[19], record[20], (record[21] & 1) != 0, settings, payments);
+    }
 
     public static string? ConfigurationIssue(ReadOnlySpan<byte> record)
     {
