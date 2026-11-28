@@ -2,6 +2,8 @@
 
 Firmware jobs is the place to prepare and review a proposed device update. A simulated job, a terminal's acknowledgement of a code schedule, a completed code transfer and a verified new installed version are different outcomes.
 
+The page reports the actual execution policy for this host. Public defaults keep both live switches disabled. When an operator enables them for an independent lab, the status identifies the configured transport mode and whether its settings are present. Simulation is not a live endpoint. Even when live settings are present, a separately approved job and actual endpoint and terminal verification are still required.
+
 ## Review a change of firmware version
 
 1. Register the installed and proposed versions with their matching table profiles in the firmware registry.
