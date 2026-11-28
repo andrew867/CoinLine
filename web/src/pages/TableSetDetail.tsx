@@ -11,6 +11,7 @@ import { TableDownloadScheduleList } from './TableDownloadScheduleList'
 import { FirmwareVersionSelect } from '../components/FirmwareVersionSelect'
 import { TerminalFamilyReview } from './TerminalFamilyReview'
 import { PortableTerminalConfigurationPanel } from './PortableTerminalConfigurationPanel'
+import { TableProfileComparison, type ProfileComparison } from './TableProfileComparison'
 import './TableSetConfiguration.css'
 
 
@@ -46,6 +47,7 @@ type Detail = {
   tableProfileEvidence?: { recordCount: number; terminalAcknowledgedCount: number; completeCatalogue: boolean;
     observedLengthsOnly?: boolean; evidenceNote?: string | null } | null
   firmwareFindings: { tableNumber: number; blocking: boolean; message: string }[]
+  profileComparison?: ProfileComparison[] | null
   firmwareSchedule?: FirmwareSchedule | null
   versions: Ver[]
   provisioning?: {
@@ -250,6 +252,8 @@ export function TableSetDetail() {
           </li>
         ))}</ul>}
       </section>
+      {!d.tableProfile && !!d.profileComparison?.length &&
+        <TableProfileComparison comparisons={d.profileComparison} draft={draft} />}
       {canReadRecords && <PortableTerminalConfigurationPanel key={`portable:${d.id}`} setId={d.id}
         supported={!!d.tableProfileEvidence && !d.tableProfileEvidence.observedLengthsOnly}
         disabled={recordDirty || targetChanged} onCreated={created => navigate(`/table-sets/${created}`)} />}

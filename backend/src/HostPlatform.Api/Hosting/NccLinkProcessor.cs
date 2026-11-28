@@ -308,6 +308,12 @@ internal sealed class NccLinkProcessor(
             && NccControl.PacketId(previousMaintenance.Control) == NccControl.PacketId(packet.Control)
             && previousMaintenance.TerminalId.AsSpan().SequenceEqual(packet.TerminalId)
             && previousMaintenance.Data.AsSpan().SequenceEqual(packet.Data);
+        var repeatedAlarm = !control && !headerOnlyRetry && terminal != null && (packet.Control & NccControl.ReTrans) != 0
+            && _lastDialogueRequest is { } previousAlarm && ReferenceEquals(_lastInboundMessage, previousAlarm)
+            && _lastDialogueReply != null && DlogAlarmWire.TryBuildAcknowledgement(previousAlarm.Data, out _)
+            && NccControl.PacketId(previousAlarm.Control) == NccControl.PacketId(packet.Control)
+            && previousAlarm.TerminalId.AsSpan().SequenceEqual(packet.TerminalId)
+            && previousAlarm.Data.AsSpan().SequenceEqual(packet.Data);
         if (!control)
         {
             _session.TerminalId = terminal?.Id;
@@ -419,6 +425,16 @@ internal sealed class NccLinkProcessor(
             return;
         }
 
+        if (repeatedAlarm)
+        {
+            // A complete identical retry replays its original application receipt,
+            // not the event ledger or its destination decision.
+            if (_firmwareDialogue) await Task.Delay(FirmwareLinkAckDelay, stoppingToken);
+            await WriteAckAsync(stream, packet.Control);
+            await SendDialogueReplyAsync(stream, packet, _lastDialogueReply!.Data, "alarm retry");
+            return;
+        }
+
         if (explicitUpload && (terminal == null || terminal.Id != _callUploadPhoneId || uploadFrame == null))
             throw new IOException("NCC call upload closed before acknowledgement: unrecognized or incomplete upload record.");
 
@@ -495,6 +511,7 @@ internal sealed class NccLinkProcessor(
                     _lastDialogueRequest!.Data is [DlogCashboxWire.CollectionType, ..] or [TableDownloadRequestType, DlogCashboxWire.StatusRequestFlag, ..]
                         or [DlogCallDetailWire.UploadAttention, _, ..]
                     || DlogMaintenanceWire.HasRequestRecord(_lastDialogueRequest.Data)
+                    || DlogAlarmWire.TryBuildAcknowledgement(_lastDialogueRequest.Data, out _)
                     || (_lastDialogueRequest.Data.Length > 0 && (DlogCardAuthorizationWire.IsRequest(_lastDialogueRequest.Data[0])
                         || _lastDialogueRequest.Data[0] == DlogRateWire.MessageTypeRequest))))
                 await SendDialogueReplyAsync(stream, packet, reply.Data, "immediate dialogue retry");
@@ -803,7 +820,9 @@ internal sealed class NccLinkProcessor(
         CardAuthorizationAuditDetail Detail(string result, SyntheticAuthorizationEvidence? lab) => new(
             request.Data[0], result, providerKind, lab?.Reason ?? bankEvidence?.Reason, lab?.CardAccountId, lab?.QuoteId ?? bankEvidence?.QuoteId,
             lab?.QuotedAmountUsd ?? bankEvidence?.QuotedAmountUsd, lab?.CallSequence ?? bankEvidence?.CallSequence, lab?.Replayed == true ? lab.DecisionId : null,
-            request.Data.Length, receipts.Length / 3, RateSource: bankEvidence?.RateSource, RatePlanVersionId: bankEvidence?.RatePlanVersionId);
+            request.Data.Length, receipts.Length / 3, RateSource: bankEvidence?.RateSource, RatePlanVersionId: bankEvidence?.RatePlanVersionId,
+            CaptureRequestId: result == "approved" ? bankEvidence?.CaptureRequestId : null,
+            CapturePeriodSeconds: result == "approved" ? bankEvidence?.CapturePeriodSeconds : null);
     }
 
     private static async Task ObserveCardInvocationAsync(Task<NccCardAuthorizationDecision> invocation)
@@ -1035,9 +1054,19 @@ internal sealed class NccLinkProcessor(
     private async Task SendManagementReplyAsync(NetworkStream stream, NccWirePacket request, Guid terminalId,
         byte[] acknowledgement, string dialogue)
     {
+        var existingOffer = _callbackOffer;
         if (acknowledgement.Length + DlogCallbackWire.ScheduleLength <= NccConstants.MaxDataSize &&
             await TryOfferCallbackAsync(stream, terminalId, request.TerminalId, CallbackContinuation.ManagementReply, acknowledgement))
+        {
+            // The callback schedule can be embedded in an alarm receipt. Retain
+            // the exact offered message for a terminal retry of that same alarm.
+            if (existingOffer == null && _callbackOffer is { } offer && DlogAlarmWire.TryBuildAcknowledgement(request.Data, out _))
+            {
+                _lastDialogueRequest = _lastInboundMessage;
+                _lastDialogueReply = offer.Frame;
+            }
             return;
+        }
 
         await SendDialogueReplyAsync(stream, request, acknowledgement, dialogue);
     }

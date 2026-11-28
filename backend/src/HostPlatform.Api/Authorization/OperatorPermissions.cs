@@ -77,8 +77,11 @@ public static class OperatorPermissions
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
+            ("TerminalDiscountReferences", R, "Get"),
             ("TerminalTariffReferences", R, "Get"),
+            ("ScreeningSlotReferences", R, "Get"),
             ("DialedNumberReview", R, "Review"),
+            ("TerminalCarrierReferences", R, "Get"),
             ("FirmwareTariffStaging", R, "Preview"),
             ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),
@@ -142,7 +145,7 @@ public static class OperatorPermissions
         Screen("card-products", "Card products", ("Cards", R, "SimulationState Products Product"), ("Cards", A, "CreateProduct"));
         Screen("card-accounts", "Card accounts", ("Cards", R, "Accounts Account AccountTimeline"),
             ("Cards", A, "CreateAccount"), ("Cards", U, "Adjust"));
-        Screen("card-transactions", "Card payments", ("Cards", R, "Transactions AuthorizationAttempts"), ("Cards", A, "ReadEvent PostTransaction WriteEvent"));
+        Screen("card-transactions", "Card payments", ("Cards", R, "Transactions AuthorizationAttempts MerchantCaptures"), ("Cards", A, "ReadEvent PostTransaction WriteEvent"));
         Screen("reconciliation", "Reconciliation", ("Cards", R, "ReconciliationPending ListReconciliationBatches GetReconciliationBatch"),
             ("Cards", A, "PostReconciliationBatch"), ("Cards", U, "PostReconciliationPosted PostReconciliationClose PostReconciliationException"));
         Screen("craft", "Technician craft", ("Craft", R, "ExecutionPolicy CommandTypes Sessions SessionDetail CommandDetail"),

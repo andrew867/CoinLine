@@ -148,6 +148,8 @@ builder.Services.AddSingleton<CraftLiveSocketWriter>();
 builder.Services.AddScoped<ICardAccountLedger, CardAccountLedger>();
 var labAuthorizationEnabled = builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:Enabled");
 var shadyBankAuthorizationEnabled = builder.Configuration.GetValue<bool>("CardPayments:ShadyBankAuthorization:Enabled");
+if (!shadyBankAuthorizationEnabled && builder.Configuration.GetValue<bool>("CardPayments:ShadyBankAuthorization:CaptureUploadedCalls"))
+    throw new InvalidOperationException("ShadyBank capture requires the scoped authorization provider.");
 if (labAuthorizationEnabled && shadyBankAuthorizationEnabled)
     throw new InvalidOperationException("Choose either the synthetic lab or ShadyBank authorization provider for this instance.");
 if (labAuthorizationEnabled)
@@ -161,6 +163,11 @@ if (shadyBankAuthorizationEnabled)
         .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false })
         .RedactLoggedHeaders(_ => true);
     builder.Services.AddScoped<INccCardAuthorizationProvider, ShadyBankCardAuthorizationProvider>();
+    if (bankOptions.CaptureUploadedCalls)
+    {
+        builder.Services.AddScoped<ShadyBankCaptureCoordinator>();
+        builder.Services.AddHostedService<ShadyBankCaptureService>();
+    }
 }
 if (labAuthorizationEnabled
     && builder.Configuration.GetValue<bool>("CardPayments:LabAuthorization:SettleUploadedCalls"))

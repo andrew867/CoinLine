@@ -49,8 +49,15 @@ internal static class RatingCoinSpareFixture
                 raw[75] = 0x5A; raw[80] = 0xB6; raw[191] = 0xAC; raw[195] = 0x11; raw[224] = 0x5B;
                 expected = raw.ToArray(); expected[224] = 129;
                 spareKey = later ? "spare.byte34" : "spare.byte30";
-                changes = new() { [spareKey] = "129" };
-                if (later) { changes["spare.discount.byte6"] = "99"; expected[80] = 99; }
+                changes = new() { [spareKey] = "129", ["unit-0.limit"] = "1000", ["validation-key-0"] = "" };
+                expected[161] = 0x0F; expected[162] = 0xA0;
+                if (later)
+                {
+                    changes["spare.discount.byte6"] = "99"; expected[80] = 99;
+                    changes["discount-0.localMode"] = "1"; changes["discount-0.localInitial"] = "75";
+                    expected[65] = 0x7F; expected[81] = 75; expected[82] = 0;
+                }
+                else { changes["domestic"] = "25"; expected[191] = 25; expected[192] = 0; }
                 break;
             case 151:
                 raw[1] = 0xC1; raw[2] = 5; raw[3] = 0xA5;

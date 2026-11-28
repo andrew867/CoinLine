@@ -25,6 +25,6 @@ internal sealed record SyntheticAuthorizationEvidence(string Reason, Guid? CardA
 
 internal sealed record ShadyBankAuthorizationEvidence(string Reason, Guid? QuoteId = null,
     decimal? QuotedAmountUsd = null, ushort? CallSequence = null, string? RateSource = null,
-    Guid? RatePlanVersionId = null);
+    Guid? RatePlanVersionId = null, Guid? CaptureRequestId = null, int? CapturePeriodSeconds = null);
 
 internal sealed class InvalidCardProviderResponseException : Exception { }

@@ -392,8 +392,11 @@ public sealed record NativeTableLayout(byte Number, int Length, string Profile, 
         };
         var fields = sections.SelectMany(s => s.Fields).ToDictionary(f => f.Key, StringComparer.Ordinal);
         ValidateOverlappingFields(original, fields, changes);
+        var promptCells = VisualPromptCells.Apply(Number, original, edited, changes);
         foreach (var (key, value) in changes)
         {
+            if (promptCells.Contains(key))
+                continue;
             if (!fields.TryGetValue(key, out var field) || value == null)
                 throw new InvalidOperationException($"Unknown or empty field {key}.");
             field.Write(edited, value);

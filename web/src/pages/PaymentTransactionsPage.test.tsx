@@ -52,4 +52,26 @@ it('shows ShadyBank authorization evidence separately from posted payments', asy
   expect(within(history).getByText('Host rate at authorization, no terminal quote')).toBeVisible()
   expect(within(history).getByText('Rate plan version fixture-version')).toBeVisible()
   expect(screen.getByText('No payment transactions recorded.')).toBeVisible()
+  expect(screen.getByText('No matched bank payment intents recorded.')).toBeVisible()
+})
+
+it('distinguishes verified receipts from unresolved bank posting intents', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'card-transactions': 1 })
+  const common = { terminalId: 'fixture-phone', terminalDisplayName: 'Synthetic phone', callStartedAtUtc: '2026-01-01T12:00:00Z',
+    durationSeconds: 10, amountUsd: 0.05, attemptCount: 2, createdAtUtc: '2026-01-01T12:00:10Z', nextAttemptAtUtc: '2026-01-01T12:00:25Z' }
+  vi.mocked(apiGet).mockImplementation(async path => path.endsWith('merchant-captures') ? [
+    { ...common, id: 'receipt-posted', uploadBatchId: 'cdr-posted', authorizationDecisionId: 'auth-posted', callSequence: 42,
+      status: 1, lastResult: 'posted', postedAtUtc: '2026-01-01T12:00:18Z' },
+    { ...common, id: 'receipt-review', uploadBatchId: 'cdr-review', authorizationDecisionId: 'auth-review', callSequence: 43,
+      status: 2, lastResult: 'timeout', postedAtUtc: null },
+  ] as never : [] as never)
+  render(<MemoryRouter><PaymentTransactionsPage /></MemoryRouter>)
+  const receipts = await screen.findByRole('region', { name: 'ShadyBank payment receipts' })
+  expect(within(receipts).getByText('Posted by ShadyBank')).toBeVisible()
+  expect(within(receipts).getByText('Verified bank receipt')).toBeVisible()
+  expect(within(receipts).getByText('Needs reconciliation')).toBeVisible()
+  expect(within(receipts).getByText('Bank response timed out; outcome may be uncertain')).toBeVisible()
+  expect(within(receipts).getAllByText('USD 0.05')).toHaveLength(2)
+  expect(within(receipts).getByText(/CDR cdr-posted/)).toHaveTextContent('Authorization auth-posted')
+  expect(screen.getByText('No payment transactions recorded.')).toBeVisible()
 })

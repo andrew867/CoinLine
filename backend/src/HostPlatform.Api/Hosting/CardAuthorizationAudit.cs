@@ -11,7 +11,8 @@ namespace HostPlatform.Api.Hosting;
 internal sealed record CardAuthorizationAuditDetail(byte MessageType, string Outcome, string Provider,
     string? Reason = null, Guid? CardAccountId = null, Guid? QuoteId = null, decimal? QuotedAmountUsd = null,
     ushort? CallSequence = null, Guid? OriginalDecisionId = null, int? RequestBytes = null, int? BundledCallRecords = null,
-    int[]? SuffixCdrTypes = null, string? RateSource = null, Guid? RatePlanVersionId = null);
+    int[]? SuffixCdrTypes = null, string? RateSource = null, Guid? RatePlanVersionId = null,
+    Guid? CaptureRequestId = null, int? CapturePeriodSeconds = null);
 
 internal static class CardAuthorizationAudit
 {
@@ -66,7 +67,9 @@ internal static class CardAuthorizationAudit
                 provider == LabProvider ? SafeGuid(root, "cardAccountId") : null, SafeGuid(root, "quoteId"), amount, sequence,
                 provider == LabProvider ? SafeGuid(root, "originalDecisionId") : null, requestBytes, bundledRecords, suffix,
                 provider == ShadyBankProvider ? SafeString(root, "rateSource", BankRateSources) : null,
-                provider == ShadyBankProvider ? SafeGuid(root, "ratePlanVersionId") : null);
+                provider == ShadyBankProvider ? SafeGuid(root, "ratePlanVersionId") : null,
+                provider == ShadyBankProvider && outcome == "approved" ? SafeGuid(root, "captureRequestId") : null,
+                provider == ShadyBankProvider && outcome == "approved" ? SafeCount(root, "capturePeriodSeconds", 1, ushort.MaxValue) : null);
         }
         catch (JsonException) { return null; }
     }

@@ -15,6 +15,12 @@ type Attempt = {
   requestBytes?: number | null; bundledCallRecords?: number | null; suffixCdrTypes?: number[] | null
   rateSource?: 'native_quote' | 'authorization_only' | null; ratePlanVersionId?: string | null
 }
+type MerchantCapture = {
+  id: string; terminalId: string; terminalDisplayName: string; authorizationDecisionId: string; uploadBatchId: string
+  callSequence: number; callStartedAtUtc: string; durationSeconds: number; amountUsd: number; status: number
+  attemptCount: number; lastResult: string | null; createdAtUtc: string; lastAttemptAtUtc: string | null
+  postedAtUtc: string | null; nextAttemptAtUtc: string
+}
 
 const outcomes: Record<string, string> = {
   approved: 'Approved', declined: 'Declined', provider_unavailable: 'No provider',
@@ -34,12 +40,21 @@ const reasons: Record<string, string> = {
 }
 const cardTypes: Record<number, string> = { 0: 'Unknown', 1: 'Magstripe', 2: 'Smart card', 3: 'E-purse', 4: 'Mondex', 5: 'SmartCity', 6: 'Proton' }
 const reconciliations: Record<number, string> = { 0: 'Unknown', 1: 'Pending', 2: 'Matched', 3: 'Exception' }
+const captureStates: Record<number, string> = { 0: 'Pending bank receipt', 1: 'Posted by ShadyBank', 2: 'Needs reconciliation' }
+const captureResults: Record<string, string> = {
+  attempt_in_progress: 'Attempt started; receipt not yet recorded', posted: 'Verified bank receipt',
+  timeout: 'Bank response timed out; outcome may be uncertain', http_error: 'Bank connection or HTTP failure',
+  invalid_response: 'Invalid bank receipt; outcome may be uncertain', bank_rejected: 'Bank rejected the capture',
+  provider_failed: 'Capture provider failed', binding_or_window_unavailable: 'Binding or capture window unavailable',
+}
 
 export function PaymentTransactionsPage() {
   const [rows, setRows] = useState<Row[] | null>(null)
   const [attempts, setAttempts] = useState<Attempt[] | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [attemptError, setAttemptError] = useState<string | null>(null)
+  const [captures, setCaptures] = useState<MerchantCapture[] | null>(null)
+  const [captureError, setCaptureError] = useState<string | null>(null)
   const [refresh, setRefresh] = useState(0)
   const [filter, setFilter] = useState('all')
   const canReadPhones = canPerform('phones', op.read)
@@ -47,13 +62,16 @@ export function PaymentTransactionsPage() {
 
   useEffect(() => {
     let active = true
-    setRows(null); setAttempts(null); setErr(null); setAttemptError(null)
+    setRows(null); setAttempts(null); setCaptures(null); setErr(null); setAttemptError(null); setCaptureError(null)
     void apiGet<Row[]>('/api/cards/transactions')
       .then(value => { if (active) setRows(value) })
       .catch(error => { if (active) setErr(error instanceof Error ? error.message : 'Could not load payment history.') })
     void apiGet<Attempt[]>('/api/cards/authorization-attempts')
       .then(value => { if (active) setAttempts(value) })
       .catch(error => { if (active) setAttemptError(error instanceof Error ? error.message : 'Could not load authorization history.') })
+    void apiGet<MerchantCapture[]>('/api/cards/merchant-captures')
+      .then(value => { if (active) setCaptures(value) })
+      .catch(error => { if (active) setCaptureError(error instanceof Error ? error.message : 'Could not load merchant capture history.') })
     return () => { active = false }
   }, [refresh])
 
@@ -104,6 +122,28 @@ export function PaymentTransactionsPage() {
               {row.rateSource === 'authorization_only' && <div><small>Host rate at authorization, no terminal quote</small></div>}
               {row.ratePlanVersionId && <div><small>Rate plan version {row.ratePlanVersionId}</small></div>}
               {row.quoteId && <div><small>Quote {row.quoteId}</small></div>}</td>
+          </tr>)}</tbody>
+        </table>
+      </div>}
+    </section>
+    <section className="table-config-panel" aria-labelledby="merchant-capture-heading">
+      <h2 id="merchant-capture-heading">ShadyBank call payments</h2>
+      <p>Only matched, positively charged call records can create a posting intent. A reservation alone is not a posted bank payment. Pending and unresolved receipts require reconciliation, not a second charge.</p>
+      {captures === null && !captureError && <p role="status">Loading bank payment receipts…</p>}
+      {captureError && <p role="alert" style={{ color: 'crimson' }}>Could not load bank payment receipts: {captureError}</p>}
+      {captures !== null && !captureError && captures.length === 0 && <p role="status">No matched bank payment intents recorded.</p>}
+      {!!captures?.length && <div role="region" aria-label="ShadyBank payment receipts" tabIndex={0} style={{ overflowX: 'auto' }}>
+        <table cellPadding={8} style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <thead><tr><th scope="col">Call</th><th scope="col">Phone</th><th scope="col">Reported charge</th>
+            <th scope="col">Bank status</th><th scope="col">Attempts and receipt</th><th scope="col">Evidence</th></tr></thead>
+          <tbody>{captures.map(row => <tr key={row.id} style={{ borderBottom: '1px solid #eee' }}>
+            <td>{new Date(row.callStartedAtUtc).toLocaleString()}<div><small>Call {row.callSequence}, {row.durationSeconds} s</small></div></td>
+            <td>{canReadPhones ? <Link to={`/terminals/${row.terminalId}`}>{row.terminalDisplayName}</Link> : row.terminalDisplayName}</td>
+            <td>USD {row.amountUsd.toFixed(2)}</td>
+            <td><StatusBadge label={captureStates[row.status] ?? 'Status unavailable'} variant={row.status === 1 ? 'ok' : row.status === 0 ? 'neutral' : 'warn'} />
+              {row.lastResult && <div><small>{captureResults[row.lastResult] ?? 'Result unavailable'}</small></div>}</td>
+            <td>{row.attemptCount}{row.postedAtUtc && <div><small>{new Date(row.postedAtUtc).toLocaleString()}</small></div>}</td>
+            <td><small>CDR {row.uploadBatchId}<br />Authorization {row.authorizationDecisionId}<br />Settlement {row.id}</small></td>
           </tr>)}</tbody>
         </table>
       </div>}

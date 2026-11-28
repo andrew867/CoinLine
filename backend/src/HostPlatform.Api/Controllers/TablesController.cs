@@ -1149,6 +1149,7 @@ public sealed class TablesController(HostPlatformDbContext db, TableDistribution
                 profile.EvidenceNote
             },
             firmwareFindings = TableSetFirmwareCompatibility.Review(s),
+            profileComparison = profile == null ? TableProfileComparison.Compare(s) : null,
             s.IsDefault,
             s.Status,
             s.PublishedAtUtc,

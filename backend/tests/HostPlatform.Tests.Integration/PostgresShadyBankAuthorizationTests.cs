@@ -26,6 +26,8 @@ public sealed class PostgresShadyBankAuthorizationTests
     [InlineData("missing-key")]
     [InlineData("bad-instrument")]
     [InlineData("query")]
+    [InlineData("capture-without-binding")]
+    [InlineData("capture-without-offset")]
     public async Task Invalid_provider_configuration_refuses_startup(string mode)
     {
         await using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
@@ -36,11 +38,13 @@ public sealed class PostgresShadyBankAuthorizationTests
             .UseSetting("CardPayments:ShadyBankAuthorization:ServiceUrl", mode == "remote-http" ? "http://bank.example.invalid/api/merchant/authorize" :
                 "https://bank.example.invalid/api/merchant/authorize" + (mode == "query" ? "?unexpected=1" : ""))
             .UseSetting("CardPayments:ShadyBankAuthorization:ServiceKey", mode == "missing-key" ? "" : new string('K',43))
+            .UseSetting("CardPayments:ShadyBankAuthorization:CaptureUploadedCalls", mode.StartsWith("capture-", StringComparison.Ordinal) ? "true" : "false")
             .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:TerminalId", Guid.NewGuid().ToString())
             .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:Destination", "3335550123")
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:AllowCaptureUploadedCalls", mode == "capture-without-offset" ? "true" : "false")
             .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:InstrumentToken", mode == "bad-instrument" ? "bad" : new string('T',43)));
         var error = Assert.Throws<InvalidOperationException>(() => host.CreateClient());
-        Assert.Contains(mode == "both" ? "Choose either" : "ShadyBank requires", error.Message);
+        Assert.Contains(mode == "both" ? "Choose either" : mode.StartsWith("capture-", StringComparison.Ordinal) ? "ShadyBank capture requires" : "ShadyBank requires", error.Message);
     }
 
     [PostgresIntegrationFact]
@@ -162,6 +166,141 @@ public sealed class PostgresShadyBankAuthorizationTests
             await stream.WriteAsync(Encode((byte)(NccControl.Ack | (response.Control & 3)), []), deadline.Token);
             await stream.WriteAsync(Encode(NccControl.Clr, []), deadline.Token);
             return response.Data;
+        }
+    }
+
+    [PostgresIntegrationFact]
+    public async Task Charged_call_upload_posts_one_scoped_bank_receipt_after_retries()
+    {
+        const string route = "3335550123";
+        var key = Guid.NewGuid().ToString("N");
+        var serviceKey = new string('K', 43);
+        var instrument = new string('T', 43);
+        var bank = new BankFixture(serviceKey, instrument) { LoseFirstCaptureReply = true };
+        var customer = new Customer { Name = "Capture fixture", Code = Guid.NewGuid().ToString("N")[..12] };
+        var site = new Site { CustomerId = customer.Id, Name = "Isolated site", Code = "LAB" };
+        var wireId = Guid.NewGuid().ToByteArray()[..5];
+        var terminal = new Terminal { SiteId = site.Id, TerminalIdHex = Convert.ToHexString(wireId), DisplayName = "Synthetic capture phone" };
+        var plan = new RatePlan { CustomerId = customer.Id, Name = "Capture fixture rate", Mode = RatingMode.RealTimeRated };
+        var version = new RatePlanVersion { RatePlanId = plan.Id, VersionNumber = 1, Status = RatePlanVersionStatus.Published, PublishedAtUtc = DateTime.UtcNow };
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start(); var port = ((IPEndPoint)probe.LocalEndpoint!).Port; probe.Stop();
+        await using var host = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web
+            .UseEnvironment("Production").UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
+            .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
+            .UseSetting("Security:Mode", "ApiKey").UseSetting("Security:ApiKeys:0", key)
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Platform:Seed:EnableDemoData", "false")
+            .UseSetting("Ncc:Listen", "1").UseSetting("Ncc:LoopbackOnly", "true").UseSetting("Ncc:Port", port.ToString())
+            .UseSetting("CardPayments:ShadyBankAuthorization:Enabled", "true")
+            .UseSetting("CardPayments:ShadyBankAuthorization:ServiceUrl", "http://127.0.0.1:8022/api/merchant/authorize")
+            .UseSetting("CardPayments:ShadyBankAuthorization:AllowLoopbackHttp", "true")
+            .UseSetting("CardPayments:ShadyBankAuthorization:ServiceKey", serviceKey)
+            .UseSetting("CardPayments:ShadyBankAuthorization:CaptureUploadedCalls", "true")
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:TerminalId", terminal.Id.ToString())
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:Destination", route)
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:InstrumentToken", instrument)
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:AllowCaptureUploadedCalls", "true")
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:AllowAuthorizationOnlyRate", "true")
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:TerminalClockOffsetMinutes", "0")
+            .ConfigureServices(services => services.AddHttpClient("shadybank-authorization").ConfigurePrimaryHttpMessageHandler(() => bank)));
+        using var admin = TestOperatorAuthentication.CreateAuthenticatedClient(host);
+        admin.DefaultRequestHeaders.Add("X-API-Key", key);
+        int beforePayments;
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            db.AddRange(customer, site, terminal, plan, version);
+            db.RateRules.Add(new RateRule { RatePlanVersionId = version.Id, Priority = 1, MatchKind = RateRuleMatchKind.Exact,
+                Pattern = route, Outcome = RateRuleOutcome.Rated, RatePerMinuteUsd = 0.05m });
+            await db.SaveChangesAsync(); plan.PublishedVersionId = version.Id; await db.SaveChangesAsync();
+            beforePayments = await db.PaymentTransactions.CountAsync();
+        }
+        var started = DateTime.UtcNow;
+        // Exercise both the legacy authorization-only path and the normal quoted path.
+        Assert.Equal(0, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 50)))[1]);
+        Assert.Equal(0, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 51)))[1]);
+        Assert.Equal(64, (await Exchange(DlogRateWire.EncodeRequest(route, false)))[0]);
+        Assert.Equal(0, (await Exchange(ManualCardLabTests.SyntheticAuthorizationRequest(route, 2, 52)))[1]);
+        Assert.Equal(3, bank.Reservations.Count);
+        Assert.Empty(bank.Captures);
+        await Upload(Cdr(50, started, 0, 10, 0x44)); // genuine-shaped zero charge is not a debit
+        await Upload(Cdr(52, started, 6, 10, 0x44)); // amount differs from the quote
+        await Upload(Cdr(52, started, 5, 61, 0x44)); // beyond authorized period
+        await Upload(Cdr(52, started, 5, 10, 0x41)); // unanswered
+        await Upload(Cdr(99, started, 5, 10, 0x44)); // no matching reservation
+        await Task.Delay(TimeSpan.FromSeconds(6));
+        Assert.Empty(bank.Captures);
+        Assert.Empty((await List()).EnumerateArray());
+        var valid = Cdr(52, started, 5, 10, 0x44);
+        await Upload(valid); await Upload(valid);
+        await Upload(Cdr(52, started.AddSeconds(1), 5, 10, 0x44)); // distinct upload, same reservation
+        await Upload(Cdr(51, started, 5, 10, 0x44)); // correctly matched direct authorization
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+        JsonElement[] receipts;
+        while (true)
+        {
+            receipts = (await List()).EnumerateArray().ToArray();
+            if (receipts.Length == 2 && receipts.All(row => row.GetProperty("status").GetInt32() == 1)) break;
+            await Task.Delay(500, deadline.Token);
+        }
+        Assert.Equal(new[] { 51, 52 }, receipts.Select(r => r.GetProperty("callSequence").GetInt32()).Order().ToArray());
+        Assert.All(receipts, receipt =>
+        {
+            Assert.Equal(0.05m, receipt.GetProperty("amountUsd").GetDecimal());
+            Assert.Equal(2, receipt.GetProperty("attemptCount").GetInt32());
+            Assert.Equal("posted", receipt.GetProperty("lastResult").GetString());
+            Assert.Contains(receipt.GetProperty("id").GetGuid(), bank.Captures.Values);
+            var json = receipt.GetRawText();
+            Assert.DoesNotContain(serviceKey, json); Assert.DoesNotContain(instrument, json); Assert.DoesNotContain("SB123456", json);
+        });
+        Assert.Equal(2, bank.Captures.Count);
+        Assert.Equal(4, bank.CaptureRequests.Count);
+        Assert.Equal(2, bank.CaptureRequests.Distinct().Count());
+        await Upload(valid);
+        await using (var scope = host.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+            var intents = await db.MerchantCaptureIntents.Where(row => row.TerminalId == terminal.Id).ToListAsync();
+            Assert.Equal(2, intents.Count);
+            Assert.Equal(beforePayments, await db.PaymentTransactions.CountAsync());
+            foreach (var intent in intents)
+            {
+                Assert.Equal(MerchantCaptureStatus.Posted, intent.Status);
+                Assert.Equal(intent.Id, bank.Captures[intent.AuthorizationRequestId]);
+                var upload = await db.UploadBatches.Include(row => row.Records).SingleAsync(row => row.Id == intent.UploadBatchId);
+                Assert.Empty(upload.RawPayload); Assert.Empty(Assert.Single(upload.Records).RawPayload);
+            }
+        }
+
+        Task<JsonElement> List() => admin.GetFromJsonAsync<JsonElement>("/api/cards/merchant-captures?terminalId=" + terminal.Id);
+        byte[] Cdr(ushort sequence, DateTime start, int cents, byte seconds, byte classification)
+        {
+            var data = new byte[54]; data[0] = 53;
+            DlogRateWire.EncodeRequest(route, false).AsSpan(3, 10).CopyTo(data.AsSpan(2));
+            BinaryPrimitives.WriteInt32LittleEndian(data.AsSpan(27), cents);
+            BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(31), sequence);
+            byte[] time = [(byte)(start.Year - 1900), (byte)start.Month, (byte)start.Day, (byte)start.Hour, (byte)start.Minute, (byte)start.Second,
+                0, (byte)(seconds / 60), (byte)(seconds % 60), classification];
+            time.CopyTo(data, 33); return data;
+        }
+        async Task Upload(byte[] payload)
+        {
+            var response = await Exchange(payload);
+            Assert.Equal(DlogCallDetailWire.Acknowledgement, response[0]);
+            Assert.Equal(BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(31)), BinaryPrimitives.ReadUInt16LittleEndian(response.AsSpan(1)));
+        }
+        async Task<byte[]> Exchange(byte[] payload)
+        {
+            using var tcp = new TcpClient(); using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+            await tcp.ConnectAsync(IPAddress.Loopback, port, timeout.Token);
+            var stream = tcp.GetStream();
+            byte[] Encode(byte control, byte[] data) => NccFrameCodec.Encode(new NccWirePacket { Control = control, TerminalId = wireId, Data = data });
+            await stream.WriteAsync(Encode(0, payload), timeout.Token);
+            Assert.NotEqual(0, (await ReadFrame(stream, timeout.Token)).Control & NccControl.Ack);
+            var reply = await ReadFrame(stream, timeout.Token);
+            await stream.WriteAsync(Encode((byte)(NccControl.Ack | (reply.Control & 3)), []), timeout.Token);
+            await stream.WriteAsync(Encode(NccControl.Clr, []), timeout.Token);
+            return reply.Data;
         }
     }
 
@@ -297,14 +436,19 @@ public sealed class PostgresShadyBankAuthorizationTests
     }
 
     [ManualShadyBankFact]
-    public async Task Isolated_real_bank_reservation_replays_the_same_ncc_authorization()
+    public Task Isolated_real_bank_reservation_replays_the_same_ncc_authorization() => RunIsolatedBankAsync(capture: false);
+
+    [ManualShadyBankCaptureFact]
+    public Task Isolated_real_bank_posts_one_matching_synthetic_call_fixture() => RunIsolatedBankAsync(capture: true);
+
+    private async Task RunIsolatedBankAsync(bool capture)
     {
         const string route = "3335550123";
         using var settings = JsonDocument.Parse(await File.ReadAllTextAsync(Environment.GetEnvironmentVariable("COINLINE_SHADYBANK_LAB_SETTINGS")!));
         var serviceKey = settings.RootElement.GetProperty("merchant_service_key").GetString()!;
         var instrument = settings.RootElement.GetProperty("instrument_token").GetString()!;
         var url = new Uri(Environment.GetEnvironmentVariable("COINLINE_SHADYBANK_LAB_URL")!);
-        Assert.True(url.IsLoopback && url.AbsolutePath == "/api/merchant/authorize");
+        Assert.True((url.IsLoopback || capture && url.Scheme == Uri.UriSchemeHttps) && url.AbsolutePath == "/api/merchant/authorize");
         var evidencePath = Environment.GetEnvironmentVariable("COINLINE_SHADYBANK_LAB_RESULT")!;
         var customer = new Customer { Name = "Isolated merchant bench", Code = Guid.NewGuid().ToString("N")[..12] };
         var site = new Site { CustomerId = customer.Id, Name = "Synthetic site", Code = "LAB" };
@@ -323,8 +467,11 @@ public sealed class PostgresShadyBankAuthorizationTests
             .UseSetting("CardPayments:ShadyBankAuthorization:ServiceUrl", url.AbsoluteUri)
             .UseSetting("CardPayments:ShadyBankAuthorization:AllowLoopbackHttp", "true")
             .UseSetting("CardPayments:ShadyBankAuthorization:ServiceKey", serviceKey)
+            .UseSetting("CardPayments:ShadyBankAuthorization:CaptureUploadedCalls", capture ? "true" : "false")
             .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:TerminalId", terminal.Id.ToString())
             .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:Destination", route)
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:AllowCaptureUploadedCalls", capture ? "true" : "false")
+            .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:TerminalClockOffsetMinutes", "0")
             .UseSetting("CardPayments:ShadyBankAuthorization:Bindings:0:InstrumentToken", instrument));
         int beforePayments;
         await using (var scope = host.Services.CreateAsyncScope())
@@ -336,6 +483,7 @@ public sealed class PostgresShadyBankAuthorizationTests
             await db.SaveChangesAsync(); plan.PublishedVersionId = version.Id; await db.SaveChangesAsync();
             beforePayments = await db.PaymentTransactions.CountAsync();
         }
+        var started = DateTime.UtcNow;
         var quote = await Exchange(DlogRateWire.EncodeRequest(route, false));
         Assert.Equal(64, quote[0]); Assert.Equal(5, BinaryPrimitives.ReadUInt16LittleEndian(quote.AsSpan(4, 2)));
         Guid quoteId;
@@ -359,6 +507,43 @@ public sealed class PostgresShadyBankAuthorizationTests
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             Assert.Equal(beforePayments, await db.PaymentTransactions.CountAsync());
             Assert.Equal(1, await db.AuditEvents.CountAsync(row => row.Id == requestId && row.Action == "merchant_authorization_claim"));
+        }
+        if (capture)
+        {
+            // Explicit isolated TCP fixture, not evidence from a physical or emulated terminal.
+            var detail = new byte[54]; detail[0] = DlogCallDetailWire.CombinedDetails;
+            DlogRateWire.EncodeRequest(route, false).AsSpan(3, 10).CopyTo(detail.AsSpan(2));
+            BinaryPrimitives.WriteInt32LittleEndian(detail.AsSpan(27), 5);
+            BinaryPrimitives.WriteUInt16LittleEndian(detail.AsSpan(31), 1);
+            byte[] timestamp = [(byte)(started.Year - 1900), (byte)started.Month, (byte)started.Day, (byte)started.Hour,
+                (byte)started.Minute, (byte)started.Second, 0, 0, 10, 0x44];
+            timestamp.CopyTo(detail, 33);
+            var cdrReply = await Exchange(detail);
+            Assert.Equal(DlogCallDetailWire.Acknowledgement, cdrReply[0]);
+            Assert.Equal(cdrReply, await Exchange(detail));
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(40));
+            MerchantCaptureIntent? receipt;
+            do
+            {
+                await using var scope = host.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                receipt = await db.MerchantCaptureIntents.AsNoTracking().SingleOrDefaultAsync(row => row.TerminalId == terminal.Id, deadline.Token);
+                if (receipt?.Status == MerchantCaptureStatus.Posted) break;
+                Assert.NotEqual(MerchantCaptureStatus.NeedsReview, receipt?.Status);
+                await Task.Delay(500, deadline.Token);
+            } while (true);
+            Assert.Equal(requestId, receipt!.AuthorizationRequestId);
+            Assert.Equal(0.05m, receipt.AmountUsd);
+            Assert.Equal(cdrReply, await Exchange(detail));
+            await using (var scope = host.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                Assert.Equal(1, await db.MerchantCaptureIntents.CountAsync(row => row.TerminalId == terminal.Id));
+                Assert.Equal(beforePayments, await db.PaymentTransactions.CountAsync());
+            }
+            await File.WriteAllTextAsync(evidencePath, JsonSerializer.Serialize(new { requestId, settlementId = receipt.Id, chargedAmount = 0.05m,
+                completed = true, fixtureOnly = true, replayConfirmed = true, postedBankReceipt = true, noLocalPaymentPosted = true }));
+            return;
         }
         await File.WriteAllTextAsync(evidencePath, JsonSerializer.Serialize(new { requestId, quotedAmount = 0.05m, completed = true, replayConfirmed = true, noPaymentPosted = true }));
 
@@ -387,18 +572,45 @@ public sealed class PostgresShadyBankAuthorizationTests
         }
     }
 
+    private sealed class ManualShadyBankCaptureFactAttribute : FactAttribute
+    {
+        public ManualShadyBankCaptureFactAttribute()
+        {
+            if (Environment.GetEnvironmentVariable("COINLINE_SHADYBANK_CAPTURE_LAB") != "1" ||
+                new[] { "COINLINE_SHADYBANK_LAB_SETTINGS", "COINLINE_SHADYBANK_LAB_URL", "COINLINE_SHADYBANK_LAB_RESULT", PostgresIntegrationFact.ConnectionVariable }
+                    .Any(key => string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key))))
+                Skip = "Explicit capture opt-in, independently funded synthetic bank settings and disposable PostgreSQL database are required.";
+        }
+    }
+
     private sealed class BankFixture(string key, string instrument) : HttpMessageHandler
     {
         public ConcurrentBag<Guid> RequestIds { get; } = new();
         public ConcurrentDictionary<Guid, string> Reservations { get; } = new();
+        public ConcurrentBag<(Guid Request, Guid Settlement)> CaptureRequests { get; } = new();
+        public ConcurrentDictionary<Guid, Guid> Captures { get; } = new();
+        public bool LoseFirstCaptureReply { get; init; }
         public string Mode { get; set; } = "approve";
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
-            Assert.Equal("/api/merchant/authorize", request.RequestUri!.AbsolutePath);
             Assert.Equal(key, Assert.Single(request.Headers.GetValues("X-Shadybank-Merchant-Key")));
             Assert.InRange(request.Content!.Headers.ContentLength!.Value, 1, 1024);
             Assert.Equal("application/json", request.Content.Headers.ContentType!.MediaType);
             var body = await request.Content!.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            if (request.RequestUri!.AbsolutePath == "/api/merchant/capture")
+            {
+                Assert.Equal(new[] { "amount", "request_id", "settlement_id" }, body.EnumerateObject().Select(row => row.Name).Order().ToArray());
+                Assert.Equal("0.05", body.GetProperty("amount").GetString());
+                var requestId = body.GetProperty("request_id").GetGuid();
+                var settlementId = body.GetProperty("settlement_id").GetGuid();
+                Assert.True(Reservations.ContainsKey(requestId));
+                CaptureRequests.Add((requestId, settlementId));
+                var first = Captures.TryAdd(requestId, settlementId);
+                Assert.Equal(settlementId, Captures[requestId]);
+                if (first && LoseFirstCaptureReply) return new HttpResponseMessage(HttpStatusCode.BadGateway);
+                return Reply(JsonSerializer.Serialize(new { status = "posted", settlement_id = settlementId }));
+            }
+            Assert.Equal("/api/merchant/authorize", request.RequestUri.AbsolutePath);
             Assert.Equal(new[] { "amount", "instrument_token", "request_id" }, body.EnumerateObject().Select(row => row.Name).Order().ToArray());
             Assert.Equal(instrument, body.GetProperty("instrument_token").GetString());
             Assert.Equal("0.05", body.GetProperty("amount").GetString());

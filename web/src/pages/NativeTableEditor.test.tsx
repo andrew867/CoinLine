@@ -18,6 +18,42 @@ function renderEditor(number = 55) {
     onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} />)
 }
 
+it('reviews later discount references by the one-based row number without writing published records', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 1 })
+  const layout = { supported: true, editable: false, profile: 'Later fixture', length: 225, revision: 1, sha256: 'fixture-hash',
+    sections: [0, 9].map(index => ({ key: `discount-${index}`, label: `Discount rate ${index + 1}`, fields: [
+      { key: `discount-${index}.local`, label: 'Local discount', editor: 'number', value: '0', min: 0, max: 100, choices: null, maxLength: null, help: null },
+    ] })) }
+  vi.mocked(apiFetch).mockImplementation(async path => {
+    const selected = String(path).match(/discounts\/(\d+)\/references$/)
+    if (!selected) return Response.json(layout)
+    const discount = Number(selected[1])
+    if (discount === 1) return Response.json({ discount, setRevision: 2, profile: 'Later fixture', review: {
+      supported: true, reason: null, references: [{ recordNumber: 134, label: 'Card range 1 data spill', use: 'configured', savedIndex: 1, payment: null }],
+      reviewedRecords: [93, 134], missingRecords: [152], unreviewedRecords: [] } })
+    return Response.json({ discount, setRevision: 2, profile: 'Later fixture', review: {
+      supported: true, reason: null, references: [{ recordNumber: 152, label: 'Holidays, period 2, Local', use: 'retained', savedIndex: 9, payment: 'Disabled' }],
+      reviewedRecords: [93, 152], missingRecords: [], unreviewedRecords: [134] } })
+  })
+  renderEditor(93)
+  expect(await screen.findByRole('heading', { name: 'What uses discount 1?' })).toBeVisible()
+  expect(screen.getByLabelText('Local discount')).toBeDisabled()
+  fireEvent.click(screen.getByRole('button', { name: 'Review references' }))
+  expect(await screen.findByText('MT134: Card range 1 data spill')).toBeVisible()
+  expect(screen.getByText(/one-based number: 1/)).toBeVisible()
+  expect(screen.getByText(/Not present here: MT152/)).toBeVisible()
+  fireEvent.change(screen.getByLabelText('Section or entry'), { target: { value: 'discount-9' } })
+  expect(screen.getByRole('heading', { name: 'What uses discount 10?' })).toBeVisible()
+  expect(screen.queryByText('MT134: Card range 1 data spill')).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Review references' }))
+  expect(await screen.findByText('MT152: Holidays, period 2, Local')).toBeVisible()
+  expect(screen.getByText(/Retained but inactive.*zero-based index: 9/)).toBeVisible()
+  expect(screen.getByText(/duplicate records not reviewed: MT134/)).toBeVisible()
+  expect(vi.mocked(apiFetch).mock.calls.some(([path]) => path === '/api/tables/sets/set-fixture/discounts/10/references')).toBe(true)
+  expect(vi.mocked(apiFetch).mock.calls.every(([, options]) => !options?.method || options.method === 'GET')).toBe(true)
+  expect(screen.queryByRole('button', { name: 'Save record' })).toBeNull()
+})
+
 it('reviews the selected saved tariff row even on a published read-only record, and discards the old row review', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 1 })
   const layout = { supported: true, editable: false, profile: 'MTR 1.9 packed', length: 1192, revision: 1, sha256: 'fixture-hash',
