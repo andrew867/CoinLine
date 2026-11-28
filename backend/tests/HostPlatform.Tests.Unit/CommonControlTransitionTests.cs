@@ -116,7 +116,34 @@ public sealed class CommonControlTransitionTests
     }
 
     [Theory]
-    [InlineData(29,481)][InlineData(30,68)][InlineData(32,33)][InlineData(34,19)][InlineData(35,21)][InlineData(50,105)]
+    [InlineData(0,0x1235,0x1236)][InlineData(7,0x9235,0x1235)][InlineData(14,0x9237,0x1234)]
+    public void Stored_value_limit_carries_only_the_selected_big_endian_unit_pair(int index,int sourceWord,int targetWord)
+    {
+        var source=Record(93,225);var target=Record(93,225);
+        source.AsSpan(1,160).Fill(0x11);target.AsSpan(1,160).Fill(0xA5);
+        source.AsSpan(161,30).Fill(0x33);target.AsSpan(161,30).Fill(0x55);
+        source.AsSpan(191).Fill(0x22);target.AsSpan(191).Fill(0x5A);
+        var offset=161+2*index;
+        BinaryPrimitives.WriteUInt16BigEndian(source.AsSpan(offset,2),(ushort)sourceWord);
+        BinaryPrimitives.WriteUInt16BigEndian(target.AsSpan(offset,2),(ushort)targetWord);
+        var sourceBefore=source.ToArray();var targetBefore=target.ToArray();var expected=target.ToArray();
+        source.AsSpan(offset,2).CopyTo(expected.AsSpan(offset,2));
+        var group=$"stored-value-unit-{index}";
+        var preview=CommonControlTransitionWire.Project(93,source,target,[]);
+        Assert.Equal(target,preview.Payload);Assert.Equal(15,preview.Groups.Length);
+        Assert.All(preview.Groups,row=>Assert.Equal(2,row.Fields.Length));
+        Assert.All(preview.Groups.SelectMany(row=>row.Fields),field=>Assert.StartsWith("unit-",field.Key));
+        var result=CommonControlTransitionWire.Project(93,source,target,[group]);
+        Assert.Equal(expected,result.Payload);Assert.Equal(sourceBefore,source);Assert.Equal(targetBefore,target);
+        Assert.Equal(expected.Zip(target).Count(pair=>pair.First!=pair.Second),result.ChangedBytes);
+        Assert.Single(result.Groups,row=>row.Selected);
+        Assert.Contains(result.Findings,row=>!row.Blocking&&row.Message.Contains("target card-value mapping"));
+        Assert.DoesNotContain(result.Findings,row=>row.Blocking);
+        Assert.Equal(expected,CommonControlTransitionWire.Project(93,source,expected,[group]).Payload);
+    }
+
+    [Theory]
+    [InlineData(29,481)][InlineData(30,68)][InlineData(32,33)][InlineData(34,19)][InlineData(35,21)][InlineData(50,105)][InlineData(93,225)]
     public void Preview_is_read_only_and_rejects_wrong_shape_or_group(int number,int length)
     {
         var source = Record(number,length); var target = Record(number,length); target[^1] = 0xA5;
