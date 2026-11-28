@@ -24,7 +24,7 @@ public sealed class TableProfileComparisonTests
         var later = ByProfile(results, FirmwareTableProfiles.LaterMultiPay180);
         Assert.Equal("conflict", later.Records.Single(record => record.TableNumber == 131).Status);
         var earlier = ByProfile(results, FirmwareTableProfiles.MultiPay200);
-        Assert.Contains("confirmed field layout", earlier.Records.Single(record => record.TableNumber == 26).Message);
+        Assert.Contains("confirmed record layout", earlier.Records.Single(record => record.TableNumber == 26).Message);
         var wrongLength = earlier.Records.Single(record => record.TableNumber == 92);
         Assert.Equal(3401, wrongLength.ExpectedLength);
         Assert.Equal(3061, wrongLength.ActualLength);
@@ -58,6 +58,22 @@ public sealed class TableProfileComparisonTests
             Assert.Contains("message type", profile.Records[1].Message);
             Assert.Contains("failed validation", profile.Records[2].Message);
         });
+    }
+
+    [Fact]
+    public void Selecting_a_conflicting_same_size_target_blocks_publication_before_assignment()
+    {
+        var firmware = new FirmwareVersion { TableProfileId = FirmwareTableProfiles.MultiPay200 };
+        var set = new TableSet { TargetFirmwareVersionId = firmware.Id, TargetFirmwareVersion = firmware };
+        set.Versions.Add(Record(26, 72, NativeTableLayouts.Later));
+        var finding = Assert.Single(TableSetFirmwareCompatibility.Review(set));
+        Assert.True(finding.Blocking);
+        Assert.Equal(26, finding.TableNumber);
+        Assert.Contains("confirmed record layout", finding.Message);
+        Assert.Contains(finding.Message, Assert.Single(TableDistributionService.PublicationIssues(set)));
+        Assert.Contains(finding.Message, TableSetFirmwareCompatibility.SelectionIssue(
+            FirmwareTableProfiles.Find(firmware.TableProfileId), TableSetFirmwareCompatibility.Shapes(set.Versions)));
+        Assert.Equal(TableSetStatus.Draft, set.Status);
     }
 
     private static TableVersion Record(int number, int length, string? confirmedLayout = null)

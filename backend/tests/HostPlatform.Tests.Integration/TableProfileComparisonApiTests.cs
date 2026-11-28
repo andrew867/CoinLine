@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using HostPlatform.Domain;
@@ -33,11 +34,12 @@ public sealed class TableProfileComparisonApiTests(ApiFixture factory)
         };
         set.Versions.Add(feature); set.Versions.Add(screen);
         var firmware = new FirmwareVersion { Label = "Synthetic registered target", TableProfileId = FirmwareTableProfiles.GraphicalMultiPay180 };
+        var earlierFirmware = new FirmwareVersion { Label = "Synthetic earlier target", TableProfileId = FirmwareTableProfiles.MultiPay200 };
         var targeted = new TableSet { Name = "Synthetic targeted draft", TargetFirmwareVersionId = firmware.Id };
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
-            db.AddRange(featureDefinition, screenDefinition, normalized, set, firmware, targeted);
+            db.AddRange(featureDefinition, screenDefinition, normalized, set, firmware, earlierFirmware, targeted);
             await db.SaveChangesAsync();
         }
 
@@ -57,6 +59,18 @@ public sealed class TableProfileComparisonApiTests(ApiFixture factory)
 
         var targetedDetail = await client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{targeted.Id}");
         Assert.True(!targetedDetail.TryGetProperty("profileComparison", out var comparison) || comparison.ValueKind == JsonValueKind.Null);
+        using var clone = await client.PostAsJsonAsync($"/api/tables/sets/{set.Id}/clone", new { name = "Synthetic comparison draft" });
+        clone.EnsureSuccessStatusCode();
+        var cloneId = (await clone.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+        using var target = await client.PutAsJsonAsync($"/api/tables/sets/{cloneId}/firmware-target", new { firmwareVersionId = earlierFirmware.Id });
+        target.EnsureSuccessStatusCode();
+        var cloneDetail = await client.GetFromJsonAsync<JsonElement>($"/api/tables/sets/{cloneId}");
+        var conflict = Assert.Single(cloneDetail.GetProperty("firmwareFindings").EnumerateArray(),
+            row => row.GetProperty("tableNumber").GetInt32() == 26);
+        Assert.True(conflict.GetProperty("blocking").GetBoolean());
+        Assert.Contains("confirmed record layout", conflict.GetProperty("message").GetString());
+        using var publish = await client.PostAsync($"/api/tables/sets/{cloneId}/publish?confirm=true", null);
+        Assert.Equal(HttpStatusCode.BadRequest, publish.StatusCode);
         await using (var scope = factory.Services.CreateAsyncScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
@@ -67,6 +81,9 @@ public sealed class TableProfileComparisonApiTests(ApiFixture factory)
             Assert.Equal(3, retained.PublishGeneration);
             Assert.Equal(raw, TableDistributionService.GetEffectivePayload(retained.Versions.Single(row => row.Id == feature.Id)));
             Assert.Equal(screening, TableDistributionService.GetEffectivePayload(retained.Versions.Single(row => row.Id == screen.Id)));
+            var retainedDraft = await db.TableSets.SingleAsync(row => row.Id == cloneId);
+            Assert.Equal(TableSetStatus.Draft, retainedDraft.Status);
+            Assert.Equal(earlierFirmware.Id, retainedDraft.TargetFirmwareVersionId);
         }
     }
 }

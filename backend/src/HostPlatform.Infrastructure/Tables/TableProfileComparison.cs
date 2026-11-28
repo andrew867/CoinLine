@@ -57,14 +57,12 @@ public static class TableProfileComparison
                 "This incomplete catalogue does not establish the record length.");
 
         var confirmed = version.ScreeningLayoutProfile;
-        var target = profile.LayoutFor(number);
         var layouts = NativeTableLayouts.Candidates(number, data);
         if (confirmed != null && layouts.Count > 0 && layouts.All(layout => layout.Profile != confirmed))
             return new(number, data.Length, expected, "conflict", false,
                 "The saved field layout is not available at this record length.");
-        if (confirmed != null && target != null && confirmed != target)
-            return new(number, data.Length, expected, "conflict", false,
-                "The saved record's confirmed field layout differs from this profile.");
+        if (TableSetFirmwareCompatibility.ConfirmedLayoutIssue(profile, number, confirmed) is { } layoutIssue)
+            return new(number, data.Length, expected, "conflict", false, layoutIssue);
 
         var review = profile.ObservedLengthsOnly || (confirmed == null && layouts.Count > 1);
         return new(number, data.Length, expected, "match", review, review
