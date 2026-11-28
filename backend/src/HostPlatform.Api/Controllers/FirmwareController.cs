@@ -5,11 +5,13 @@ using HostPlatform.Api.Firmware;
 using HostPlatform.Api.Options;
 using HostPlatform.Api.Services;
 using HostPlatform.Domain;
+using HostPlatform.Firmware;
 using HostPlatform.Infrastructure.Persistence;
 using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using Npgsql;
 
 namespace HostPlatform.Api.Controllers;
@@ -23,20 +25,47 @@ namespace HostPlatform.Api.Controllers;
 public sealed class FirmwareController(
     HostPlatformDbContext db,
     FirmwareJobOrchestrator orchestrator,
-    IFirmwareExecutionPolicy executionPolicy) : ControllerBase
+    IFirmwareExecutionPolicy executionPolicy,
+    IOptions<DlTransportEnvironmentOptions> dlOptions) : ControllerBase
 {
     /// <summary>UI / operators — surface whether live modem flashing is enabled (default false).</summary>
     [Authorize(Policy = Policies.RequireOperator)]
     [HttpGet("execution-policy")]
-    public ActionResult<object> ExecutionPolicy(
-        [FromServices] Microsoft.Extensions.Options.IOptions<HostPlatform.Firmware.DlTransportEnvironmentOptions> dlOpt) =>
-        Ok(new
+    public ActionResult<object> ExecutionPolicy()
+    {
+        var transport = TransportPresentation();
+        return Ok(new
         {
             allowLiveFlashing = executionPolicy.AllowLiveFlashing,
-            liveDlaEnabled = dlOpt.Value.LiveDlaEnabled,
-            hardwareValidationNotice =
-                "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only. Live execute needs Firmware:AllowLiveFlashing and COINLINE_FIRMWARE_LIVE_DLA_ENABLED."
+            liveDlaEnabled = dlOptions.Value.LiveDlaEnabled,
+            transportMode = transport.Mode,
+            liveTransportConfigured = transport.Configured,
+            hardwareValidationNotice = PolicyNotice(
+                "DLA/XMODEM and field flash paths remain HARDWARE_VALIDATION_REQUIRED until certified; simulation-first only. Live execute needs Firmware:AllowLiveFlashing and COINLINE_FIRMWARE_LIVE_DLA_ENABLED.")
         });
+    }
+
+    private (string Mode, bool Configured) TransportPresentation()
+    {
+        var options = dlOptions.Value;
+        return (options.TransportKind ?? "simulation").Trim().ToLowerInvariant() switch
+        {
+            "simulation" => ("simulation", false),
+            "serial" => ("serial", !string.IsNullOrWhiteSpace(options.SerialPort)),
+            "tcp" => ("tcp", !string.IsNullOrWhiteSpace(options.TcpHost) && options.TcpPort is > 0 and <= 65535),
+            "pipe" => ("pipe", !string.IsNullOrWhiteSpace(options.PipeName)),
+            _ => ("unknown", false)
+        };
+    }
+
+    private string PolicyNotice(string disabledNotice)
+    {
+        if (!executionPolicy.AllowLiveFlashing || !dlOptions.Value.LiveDlaEnabled) return disabledNotice;
+        var transport = TransportPresentation();
+        return transport.Configured
+            ? $"Live execution policy enabled; {transport.Mode} transport settings are present. Job approval, endpoint connectivity and terminal compatibility remain separate checks."
+            : $"Live execution policy enabled; {transport.Mode} transport has no configured live endpoint. Configure and verify the intended transport before execution.";
+    }
 
     [HttpGet("packages")]
     public async Task<ActionResult<IEnumerable<object>>> Packages(CancellationToken ct) =>
@@ -305,8 +334,8 @@ public sealed class FirmwareController(
             targets,
             rules,
             manifests,
-            hardwareValidationNotice =
-                "DLA/XMODEM transfer and flash programming remain HARDWARE_VALIDATION_REQUIRED — registry holds metadata only.",
+            hardwareValidationNotice = PolicyNotice(
+                "DLA/XMODEM transfer and flash programming remain HARDWARE_VALIDATION_REQUIRED; registry holds metadata only."),
             skuRoutingNotice =
                 "RequiredTargetSkuContains on compatibility rules is a routing hint only until Terminal stores hardware SKU on host (HARDWARE_VALIDATION_REQUIRED)."
         });
@@ -478,8 +507,9 @@ public sealed class FirmwareController(
             steps = orderedSteps,
             safetyChecks = checks,
             rollBackPlan = rollback,
-            hardwareValidationNotice =
-                "Live modem flashing disabled unless Firmware:AllowLiveFlashing — see docs-site reference firmware-dla-transport-adapter and docs/protocols/firmware_update/."
+            hardwareValidationNotice = j.SimulationMode && executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled
+                ? "This job is a simulation. Live execution must use a separately approved non-simulation job."
+                : PolicyNotice("Live modem flashing disabled unless Firmware:AllowLiveFlashing; see the firmware transport reference.")
         });
     }
 
