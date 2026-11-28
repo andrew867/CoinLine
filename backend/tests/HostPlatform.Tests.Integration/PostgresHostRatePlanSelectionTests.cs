@@ -38,6 +38,7 @@ public sealed class PostgresHostRatePlanSelectionTests
             var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
             db.AddRange(first, second, foreignCustomer); await db.SaveChangesAsync();
         }
+        await WorksheetRating(first, null, "none", false);
         var legacy = await Plan("Local default", customer.Id, .05m);
         var alternate = await Plan("Regional fixture", customer.Id, .50m);
         var shared = await Plan("Shared fixture", null, .25m);
@@ -49,6 +50,7 @@ public sealed class PostgresHostRatePlanSelectionTests
         using (var denied = await anonymous.GetAsync(firstPath)) Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
         var initialCustomer = await Get(customerPath); Assert.Equal("legacy", Source(initialCustomer)); Assert.Equal(2, initialCustomer.GetProperty("inheritedPhones").GetInt32());
         var initialFirst = await Get(firstPath);
+        await WorksheetRating(first, "Local default", "legacy", true);
         Assert.Contains(initialFirst.GetProperty("options").EnumerateArray(), option => option.GetProperty("id").GetGuid() == shared.plan);
         Assert.DoesNotContain(initialFirst.GetProperty("options").EnumerateArray(), option => option.GetProperty("id").GetGuid() is var id && (id == foreign.plan || id == draft.plan));
         using (var denied = await viewer.PutAsJsonAsync(firstPath, Body(initialFirst, shared.plan))) Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
@@ -58,11 +60,14 @@ public sealed class PostgresHostRatePlanSelectionTests
         await Set(customerPath, initialCustomer, alternate.plan);
         var chosenCustomer = await Get(customerPath); Assert.Equal("customer", Source(chosenCustomer));
         Assert.Equal("customer", Source(await Get(firstPath)));
+        await WorksheetRating(first, "Regional fixture", "customer", true);
         await Quote(first, alternate, 50); await Quote(second, alternate, 50);
         await Set(firstPath, await Get(firstPath), shared.plan);
         var chosenFirst = await Get(firstPath); Assert.Equal("terminal", Source(chosenFirst));
         Assert.Equal(1, (await Get(customerPath)).GetProperty("inheritedPhones").GetInt32());
         Assert.Equal("customer", Source(await Get(secondPath)));
+        await WorksheetRating(first, "Shared fixture", "terminal", true);
+        await WorksheetRating(second, "Regional fixture", "customer", true);
         await Quote(first, shared, 25); await Quote(second, alternate, 50);
         using (var stale = await admin.PutAsJsonAsync(firstPath, Body(initialFirst, legacy.plan))) Assert.Equal(HttpStatusCode.Conflict, stale.StatusCode);
         // An invalid explicit selection must not fall back to a customer's differently priced plan.
@@ -73,12 +78,14 @@ public sealed class PostgresHostRatePlanSelectionTests
             saved.RatePlanId = foreign.plan; saved.Version++; await db.SaveChangesAsync();
         }
         Assert.Equal("terminal-unavailable", Source(await Get(firstPath)));
+        await WorksheetRating(first, null, "terminal-unavailable", false);
         await Quote(first, null, null);
         await Set(firstPath, await Get(firstPath), null); await Quote(first, alternate, 50);
         using (var denied = await admin.PutAsJsonAsync(firstPath, Body(await Get(firstPath), null, true))) Assert.Equal(HttpStatusCode.BadRequest, denied.StatusCode);
         await Quote(second, alternate, 50, 0x44); // Explicit opt-out retains the original lookup.
         await Set(customerPath, await Get(customerPath), alternate.plan, true);
         Assert.True((await Get(firstPath)).GetProperty("effective").GetProperty("restoreNationalTollPrefix").GetBoolean());
+        await WorksheetRating(first, "Regional fixture", "customer", true, true);
         await Quote(first, alternate, 75, 0x44); // National toll is normalized for lookup only.
         await Quote(second, alternate, 50, 0x43); // Local calls keep the ten-digit lookup.
         await Set(customerPath, await Get(customerPath), null); await Quote(first, legacy, 5);
@@ -114,6 +121,16 @@ public sealed class PostgresHostRatePlanSelectionTests
             return (await response.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
         }
         async Task<JsonElement> Get(string path) => await admin.GetFromJsonAsync<JsonElement>(path);
+        async Task WorksheetRating(Terminal phone, string? name, string source, bool published, bool restore = false)
+        {
+            var worksheet = await Get($"/api/terminals/{phone.Id}/configuration-worksheet");
+            var rating = worksheet.GetProperty("hostRating");
+            Assert.Equal(name, rating.GetProperty("name").GetString());
+            Assert.Equal(source, rating.GetProperty("source").GetString());
+            Assert.Equal(published, rating.GetProperty("hasPublishedPlan").GetBoolean());
+            Assert.Equal(restore, rating.GetProperty("restoreNationalTollPrefix").GetBoolean());
+            Assert.Equal(4, rating.EnumerateObject().Count());
+        }
         static string? Source(JsonElement data) => data.GetProperty("effective").GetProperty("source").GetString();
         static object Body(JsonElement current, Guid? id, bool restore = false) => new { ratePlanId = id, expectedSelectionId = current.GetProperty("selectionId"),
             expectedRevision = current.GetProperty("revision"), confirm = true, restoreNationalTollPrefix = restore };

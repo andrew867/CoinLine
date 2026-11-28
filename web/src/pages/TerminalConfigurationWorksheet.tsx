@@ -5,6 +5,7 @@ import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { InitialConfigurationStarter, type StarterRecord } from './InitialConfigurationStarter'
 import './TerminalConfigurationWorksheet.css'
 import { FamilyOperatingModeNotice, type FamilyOperatingMode } from './FamilyOperatingModeNotice'
+import { hostRatePlanSourceLabel, type HostRatingContext } from './hostRatePlanPresentation'
 
 type RecordSummary = { configurationId: string | null; revision: number; length: number; sha256: string }
 type AssignedRecord = RecordSummary & { id: string; setId: string; setName: string; validationPassed: boolean }
@@ -12,7 +13,7 @@ type RecordRow = { number: number; name: string; family: string; familyRequired:
 type FamilyReview = { familyLabel: string; documented: boolean; note?: string | null; tables: { name: string; required: boolean; status: string }[];
   operatingMode?: FamilyOperatingMode | null }
 type Worksheet = { id: string; displayName: string; terminalIdHex: string; firmware: string | null; baseSetId: string | null; baseSetName: string | null;
-  assignmentRevision: number | null; canUpdate: boolean; family: FamilyReview | null; records: RecordRow[] }
+  assignmentRevision: number | null; canUpdate: boolean; hostRating?: HostRatingContext | null; family: FamilyReview | null; records: RecordRow[] }
 type Option = RecordSummary & { id: string; tableSetId: string; setName: string; targetFirmware: string | null; issue: string | null }
 type Options = { records: Option[]; total: number; page: number; pageSize: number }
 type Choice = { action: 'copy'; source: Option } | { action: 'clear' }
@@ -33,6 +34,18 @@ function FamilyReviewNotice({ review }: { review: FamilyReview | null }) {
       : <p>All documented required families have at least one matching record in the catalogue review.</p>}
     <p>This is a Manager configuration review, not proof of complete firmware INSTALL or device behavior.</p>
   </div>
+}
+
+function HostRatingNotice({ rating, active }: { rating: HostRatingContext | null | undefined; active: boolean }) {
+  return <section className="worksheet-family-review" aria-label="Effective host real-time rating">
+    <strong>Host real-time rating (at worksheet load)</strong>
+    {rating ? <>
+      <p>{rating.hasPublishedPlan ? (rating.name ?? 'Published host plan') : 'No effective published host plan'} · {hostRatePlanSourceLabel(rating.source)}</p>
+      <p>National toll prefix restoration: {rating.restoreNationalTollPrefix ? 'enabled' : 'not enabled'}.</p>
+      {active && <a href="#host-rate-plan-selection">Review host rate plan selection</a>}
+    </> : <p>{rating === undefined ? 'The server does not report the effective host plan in this worksheet.' : 'The effective host plan is not available with your current read permissions.'}</p>}
+    <p>Changing or downloading terminal records here does not select or publish a host rating plan. Real-time quotes use the separately resolved host plan.</p>
+  </section>
 }
 
 export function TerminalConfigurationWorksheet({ terminalId, assignmentKey, terminalActive, onApplied }: {
@@ -139,6 +152,7 @@ export function TerminalConfigurationWorksheet({ terminalId, assignmentKey, term
           setPersonalize(false); setChooser(null); clearPreview()
         }} />}
         <FamilyReviewNotice review={worksheet.family} />
+        <HostRatingNotice rating={worksheet.hostRating} active={terminalActive} />
         <div className="worksheet-controls"><label>Configuration family<select value={family} onChange={event => setFamily(event.target.value)}>
           <option value="all">All families</option>{families.map(name => <option key={name}>{name}</option>)}</select></label>
           <label>Find configuration row<input type="search" value={filter} onChange={event => setFilter(event.target.value)} /></label>
@@ -207,6 +221,7 @@ export function TerminalConfigurationWorksheet({ terminalId, assignmentKey, term
             </tr>)}</tbody>
           </table></div>
           <FamilyReviewNotice review={preview.family} />
+          <p className="worksheet-note">The staged terminal record changes leave the separate host rate plan selection unchanged.</p>
           {preview.canApply ? <div className="worksheet-review-actions">
             <label><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} /> I reviewed the resulting host assignment.</label>
             <button type="button" disabled={busy || !confirmed} onClick={() => void execute(true)}>Apply configuration assignment</button>

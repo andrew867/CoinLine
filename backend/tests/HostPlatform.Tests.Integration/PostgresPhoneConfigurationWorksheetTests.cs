@@ -59,6 +59,7 @@ public sealed class PostgresPhoneConfigurationWorksheetTests
         using (var anonymous = await client.GetAsync(endpoint)) Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
         await SignIn(client, reader, password);
         var worksheet = await client.GetFromJsonAsync<JsonElement>(endpoint);
+        Assert.Equal(JsonValueKind.Null, worksheet.GetProperty("hostRating").ValueKind);
         Assert.Equal(basis.Id, worksheet.GetProperty("baseSetId").GetGuid()); Assert.False(worksheet.GetProperty("canUpdate").GetBoolean());
         Assert.Equal("ADV001", Row(worksheet, 29).GetProperty("assigned").GetProperty("configurationId").GetString());
         Assert.True(Row(worksheet, 32).GetProperty("canClear").GetBoolean()); Assert.False(Row(worksheet, 31).GetProperty("canClear").GetBoolean());
