@@ -17,6 +17,7 @@ type Row = {
 
 type TermOpt = { id: string; displayName: string }
 type Pkg = { id: string; name?: string; versionLabel?: string }
+type ExecutionPolicy = { allowLiveFlashing: boolean; liveDlaEnabled: boolean; liveTransportConfigured?: boolean }
 
 export function FirmwareJobsPage() {
   const [rows, setRows] = useState<Row[]>([])
@@ -24,6 +25,9 @@ export function FirmwareJobsPage() {
   const [packages, setPackages] = useState<Pkg[]>([])
   const [terminalId, setTerminalId] = useState('')
   const [packageId, setPackageId] = useState('')
+  const [policy, setPolicy] = useState<ExecutionPolicy | null>(null)
+  const [prepareLive, setPrepareLive] = useState(false)
+  const [starting, setStarting] = useState(false)
   const [jobErr, setJobErr] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [err, setErr] = useState<string | null>(null)
@@ -53,19 +57,30 @@ export function FirmwareJobsPage() {
     void refresh()
   }, [refresh])
 
+  useEffect(() => {
+    let active = true
+    void apiGet<ExecutionPolicy>('/api/firmware/execution-policy').then(value => { if (active) setPolicy(value) })
+      .catch(() => { if (active) setPolicy(null) })
+    return () => { active = false }
+  }, [])
+  const allowPreparation = policy?.allowLiveFlashing === true && policy.liveDlaEnabled === true
+  const liveSelected = allowPreparation && prepareLive
+
   async function startJob(e: FormEvent) {
     e.preventDefault()
-    if (!terminalId || !packageId) return
+    if (!terminalId || !packageId || starting) return
     setJobErr(null)
+    setStarting(true)
     try {
       await apiPost<{ id: string }>(`/api/terminals/${terminalId}/firmware-jobs`, {
         firmwarePackageId: packageId,
-        simulationMode: true,
+        simulationMode: !liveSelected,
       })
+      setPrepareLive(false)
       await refresh()
     } catch (ex) {
       setJobErr(ex instanceof Error ? ex.message : 'start failed')
-    }
+    } finally { setStarting(false) }
   }
 
   return (
@@ -89,7 +104,7 @@ export function FirmwareJobsPage() {
       <section
         style={{ marginBottom: 20, padding: 12, border: '1px solid #ddd', borderRadius: 6, maxWidth: 520 }}
       >
-        <h2 style={{ marginTop: 0, fontSize: '1rem' }}>Start simulated job</h2>
+        <h2 style={{ marginTop: 0, fontSize: '1rem' }}>Prepare a firmware job</h2>
         {jobErr && <p style={{ color: 'crimson' }}>{jobErr}</p>}
         <form onSubmit={(e) => void startJob(e)} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <label>
@@ -122,8 +137,10 @@ export function FirmwareJobsPage() {
               ))}
             </select>
           </label>
-          <button type="submit" data-testid="firmware-job-start">
-            Queue simulation job
+          {allowPreparation && <label><input type="checkbox" checked={liveSelected} disabled={starting} onChange={event => setPrepareLive(event.target.checked)} /> Prepare for live execution after simulation and approval</label>}
+          {liveSelected && <p>This prepares a job only. No terminal contact or code transfer is started.{policy?.liveTransportConfigured === false ? ' Live delivery can be configured separately.' : ''}</p>}
+          <button type="submit" data-testid="firmware-job-start" disabled={starting || !terminalId || !packageId}>
+            {liveSelected ? 'Prepare live-capable job' : 'Queue simulation job'}
           </button>
         </form>
       </section>

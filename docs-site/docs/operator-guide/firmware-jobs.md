@@ -4,6 +4,8 @@ Firmware jobs is the place to prepare and review a proposed device update. A sim
 
 The page reports the actual execution policy for this host. Public defaults keep both live switches disabled. When an operator enables them for an independent lab, the status identifies the configured transport mode and whether its settings are present. Simulation is not a live endpoint. Even when live settings are present, a separately approved job and actual endpoint and terminal verification are still required.
 
+In **Prepare a firmware job**, the default remains a simulation-only job. When both live switches are enabled, explicitly select **Prepare for live execution after simulation and approval** to create a live-capable job for the registered phone and package. Preparation does not call the terminal or transfer code. Run the simulation and complete the separate approval and rollback review in the job detail. If the transport is not configured, the live action is unavailable and an attempted API request is rejected before claiming the job. The approval and previous simulation are retained; a configuration issue does not become a failed transfer attempt.
+
 ## Review a change of firmware version
 
 1. Register the installed and proposed versions with their matching table profiles in the firmware registry.
