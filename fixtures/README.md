@@ -27,3 +27,7 @@ dotnet run --project host-platform/backend/tools/FixtureGen -- host-platform/fix
 Repository `docs/protocols/` (for example `docs/protocols/ncc_framing/`, `docs/protocols/host_platform/dlog_tables/`) and generated tables under `docs/generated/` where applicable.
 
 Tests: `HostPlatform.Tests.Golden` (manifest + NCC), `HostPlatform.Tests.Protocol` (DLOG), `HostPlatform.Tests.Unit` (tables, rating, placeholders).
+
+## GPM103 lab pack
+
+See [`tables/gpm103-lab/`](tables/gpm103-lab/) for MT22/23/93/134/135 binaries paired with CoinLine-emu's default lab contact fixture.
