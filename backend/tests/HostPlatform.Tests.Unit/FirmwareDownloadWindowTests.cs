@@ -20,6 +20,8 @@ public sealed class FirmwareDownloadWindowTests
         Assert.Equal(new[] { 1, 2, 1, 2, 1 }, slots.Select(slot => slot.ServerSlot));
         Assert.All(slots, slot => Assert.Equal(slot.StartAtUtc.AddMinutes(30), slot.EndAtUtc));
         Assert.Equal(3, CodeDownloadWire.SelectedBlockCount(record));
+        Assert.Equal(new byte[] { 0, 31, 255 }, CodeDownloadWire.SelectedBlocks(record));
+        Assert.Throws<ArgumentException>(() => CodeDownloadWire.SelectedBlocks(record[..99]));
         Assert.Equal(1, CodeDownloadWire.MinimumTransferMinutes(record));
         var allocated = CodeDownloadWire.WithStart(record, slots[4].StartAtUtc);
         Assert.Equal(slots[4].StartAtUtc, CodeDownloadWire.StartAt(allocated));

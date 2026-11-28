@@ -38,6 +38,17 @@ public static class CodeDownloadWire
         return count;
     }
 
+    public static byte[] SelectedBlocks(ReadOnlySpan<byte> record)
+    {
+        if (record.Length != RecordLength || record[0] != MessageType)
+            throw new ArgumentException("A complete MT94 record is required.", nameof(record));
+        var result = new List<byte>();
+        for (var number = 0; number < 256; number++)
+            if ((record[36 + (number >> 3)] & (1 << (number & 7))) != 0)
+                result.Add((byte)number);
+        return result.ToArray();
+    }
+
     public static int? MinimumTransferMinutes(ReadOnlySpan<byte> record)
     {
         if (record.Length != RecordLength || record[0] != MessageType || record[18] is not (1 or 2))

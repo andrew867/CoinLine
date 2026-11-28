@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using HostPlatform.Domain;
@@ -32,15 +34,21 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
     [PostgresIntegrationFact]
     public Task Restore_retained_configuration_only_after_a_separate_live_original_version_report() => Workflow(false, recover: true);
 
-    private static async Task Workflow(bool automatic, bool targetInstallContact = true, bool recover = false)
+    [PostgresIntegrationFact]
+    public Task Scheduled_job_approval_is_bound_once_to_the_exact_transition_and_primary_artifact() => Workflow(false, bindJob: true);
+
+    private static async Task Workflow(bool automatic, bool targetInstallContact = true, bool recover = false, bool bindJob = false)
     {
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();
         var port = ((IPEndPoint)probe.LocalEndpoint).Port; probe.Stop();
+        var storage = Directory.CreateTempSubdirectory("coinline-code-binding-fixture-");
         await using var factory = new WebApplicationFactory<Program>().WithWebHostBuilder(web => web.UseEnvironment("Production")
             .UseSetting("Security:OperatorTokenKey", TestOperatorAuthentication.SigningKey)
             .UseSetting("ConnectionStrings:Default", Environment.GetEnvironmentVariable(PostgresIntegrationFact.ConnectionVariable))
             .UseSetting("Security:Mode", "Token").UseSetting("Platform:Seed:EnableDemoData", "false")
-            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString()));
+            .UseSetting("Observability:MetricsEnabled", "false").UseSetting("Ncc:Listen", "1").UseSetting("Ncc:Port", port.ToString())
+            .UseSetting("Firmware:AllowLiveFlashing", bindJob ? "true" : "false").UseSetting("DlTransport:LiveDlaEnabled", bindJob ? "true" : "false")
+            .UseSetting("Platform:PayloadStorage:RootPath", storage.FullName));
         using var client = TestOperatorAuthentication.CreateAuthenticatedClient(factory);
         var customer = new Customer { Name = "Transition fixture", Code = Guid.NewGuid().ToString("N")[..8] };
         var site = new Site { Customer = customer, Name = "Fixture location", Code = Guid.NewGuid().ToString("N")[..8] };
@@ -121,6 +129,99 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
         var planId = plan.GetProperty("id").GetGuid(); var revision = plan.GetProperty("revision").GetInt32();
         await AssertSourceUnchanged();
         await RejectActivation();
+
+        if (bindJob)
+        {
+            byte[] image = Enumerable.Range(0, 256 * CodeDownloadWire.CodeBlockBytes).Select(index => (byte)(index % 251)).ToArray();
+            string digest = Convert.ToHexString(SHA256.HashData(image)).ToLowerInvariant();
+            string notes = "Independent fixture backup and recovery reviewed.";
+            using var packageResponse = await client.PostAsJsonAsync("/api/firmware/packages", new
+            { name = "Generated target", versionLabel = "A002", checksumHex = digest, artifactSizeBytes = image.Length, targetFirmwareVersionId = later.Id });
+            packageResponse.EnsureSuccessStatusCode();
+            var packageId = (await packageResponse.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            string packagePath = $"/api/firmware/packages/{packageId}";
+            using var uploadBody = new ByteArrayContent(image);
+            uploadBody.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            using var upload = await client.PostAsync(packagePath + "/artifacts/upload", uploadBody);
+            upload.EnsureSuccessStatusCode();
+            var artifactId = (await upload.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+            var job1 = await Job();
+            using (var missingRule = await Approve(job1)) Assert.Equal(HttpStatusCode.BadRequest, missingRule.StatusCode);
+            using (var rule = await client.PostAsJsonAsync(packagePath + "/compatibility-rules", new { requiredTerminalFirmwareVersionId = earlier.Id }))
+                rule.EnsureSuccessStatusCode();
+            var candidates = await client.GetFromJsonAsync<JsonElement>(job1 + "/code-transitions");
+            var option = Assert.Single(candidates.EnumerateArray()); Assert.Equal(planId, option.GetProperty("id").GetGuid());
+            Assert.Equal(scheduleId, option.GetProperty("codeScheduleId").GetGuid());
+            using (var wrongPlan = await client.PostAsJsonAsync(job1 + "/approve", new { rollbackNotes = notes, codeTransitionId = Guid.NewGuid() }))
+                Assert.Equal(HttpStatusCode.BadRequest, wrongPlan.StatusCode);
+            using (var forbidden = await anonymous.PostAsJsonAsync(job1 + "/approve", new { rollbackNotes = notes, codeTransitionId = planId }))
+                Assert.Equal(HttpStatusCode.Unauthorized, forbidden.StatusCode);
+            using var ordinary = TestOperatorAuthentication.CreateAuthenticatedClient(factory, "fixture-code-binding-" + Guid.NewGuid().ToString("N"), "Operator");
+            using (var forbidden = await ordinary.PostAsJsonAsync(job1 + "/approve", new { rollbackNotes = notes, codeTransitionId = planId }))
+                Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                var registered = await db.FirmwarePackages.SingleAsync(row => row.Id == packageId);
+                registered.TargetFirmwareVersionId = earlier.Id; await db.SaveChangesAsync();
+            }
+            Assert.Empty((await client.GetFromJsonAsync<JsonElement>(job1 + "/code-transitions")).EnumerateArray());
+            using (var wrongTarget = await Approve(job1)) Assert.Equal(HttpStatusCode.BadRequest, wrongTarget.StatusCode);
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                var registered = await db.FirmwarePackages.SingleAsync(row => row.Id == packageId);
+                registered.TargetFirmwareVersionId = later.Id; await db.SaveChangesAsync();
+            }
+            // A changed registered file must not consume the approval.
+            string file = Path.Combine(storage.FullName, "firmware", digest + ".bin"); await File.WriteAllBytesAsync(file, new byte[image.Length]);
+            using (var changed = await Approve(job1)) Assert.Equal(HttpStatusCode.BadRequest, changed.StatusCode);
+            await File.WriteAllBytesAsync(file, image);
+            var job2 = await Job();
+            var attempts = await Task.WhenAll(Approve(job1), Approve(job2));
+            var winnerIndex = Assert.Single(Enumerable.Range(0, attempts.Length), index => attempts[index].IsSuccessStatusCode);
+            Assert.Contains(attempts[1 - winnerIndex].StatusCode, new[] { HttpStatusCode.BadRequest, HttpStatusCode.Conflict });
+            foreach (var response in attempts) response.Dispose();
+            var winner = winnerIndex == 0 ? job1 : job2; var loser = winnerIndex == 0 ? job2 : job1;
+            var detail = await client.GetFromJsonAsync<JsonElement>(winner);
+            Assert.Equal(planId, detail.GetProperty("codeTransitionId").GetGuid());
+            Assert.Equal(scheduleId, detail.GetProperty("codeScheduleId").GetGuid());
+            Assert.False(detail.GetProperty("liveExecutionConfigured").GetBoolean());
+            using (var outbound = await client.PostAsync(winner + "/execute-live", null))
+            {
+                Assert.Equal(HttpStatusCode.Conflict, outbound.StatusCode);
+                Assert.Contains("terminal-initiated", await outbound.Content.ReadAsStringAsync());
+            }
+            await using (var scope = factory.Services.CreateAsyncScope())
+            {
+                var db = scope.ServiceProvider.GetRequiredService<HostPlatformDbContext>();
+                var bound = await db.FirmwareUpdateJobs.SingleAsync(row => row.CodeScheduleId == scheduleId);
+                Assert.Equal(artifactId, bound.FirmwareArtifactId); Assert.Equal(digest, bound.ApprovedArtifactSha256Hex);
+                Assert.Equal((long)image.Length, bound.ApprovedArtifactSizeBytes);
+                Assert.NotNull(bound.ApprovedAtUtc);
+            }
+            await ExchangeDownload([8], [code]);
+            await RejectActivation();
+            using (var rejected = await Approve(loser)) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            using (var cancel = await client.PostAsJsonAsync(winner + "/cancel", new { confirm = true, reason = "Fixture" })) cancel.EnsureSuccessStatusCode();
+            using (var rejected = await Approve(loser)) Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+            await AssertSourceUnchanged();
+            File.Delete(file); Directory.Delete(Path.GetDirectoryName(file)!);
+            storage.Delete();
+            return;
+
+            async Task<string> Job()
+            {
+                using var creation = await client.PostAsJsonAsync($"/api/terminals/{phone.Id}/firmware-jobs", new
+                { firmwarePackageId = packageId, firmwareArtifactId = artifactId, simulationMode = false });
+                creation.EnsureSuccessStatusCode();
+                string path = "/api/firmware/jobs/" + (await creation.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("id").GetGuid();
+                using var simulation = await client.PostAsync(path + "/simulate", null); simulation.EnsureSuccessStatusCode();
+                return path;
+            }
+            Task<HttpResponseMessage> Approve(string path) => client.PostAsJsonAsync(path + "/approve", new { rollbackNotes = notes, codeTransitionId = planId });
+        }
+        storage.Delete();
 
         // Deliver only the scheduled MT94 over the real loopback NCC listener.
         await ExchangeDownload([8], [code]);

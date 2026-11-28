@@ -24,8 +24,11 @@ type Job = {
   terminalId: string
   firmwarePackageId: string
   firmwareArtifactId: string | null
+  codeTransitionId?: string | null
+  codeScheduleId?: string | null
   status: number
   simulationMode: boolean
+  liveExecutionConfigured?: boolean
   safetyStateJson: string
   approvedAtUtc: string | null
   approvedByOperatorId: string
@@ -35,6 +38,15 @@ type Job = {
   safetyChecks: Check[]
   rollBackPlan: { id: string; backupNotes: string; recoveryStepsJson: string } | null
   hardwareValidationNotice: string
+}
+
+type CodeTransition = {
+  id: string
+  codeScheduleId: string
+  sourceControllerRom: string
+  sourceControllerSoftware: string
+  targetControllerRom: string
+  targetControllerSoftware: string
 }
 
 export function FirmwareJobDetail() {
@@ -47,13 +59,30 @@ export function FirmwareJobDetail() {
     'Verified backup image and rollback steps on lab bench before production.',
   )
   const [cancelConfirmed, setCancelConfirmed] = useState(false)
+  const [codeTransitions, setCodeTransitions] = useState<CodeTransition[] | null>(null)
+  const [transitionError, setTransitionError] = useState(false)
+  const [codeTransitionId, setCodeTransitionId] = useState('')
   const [busy, setBusy] = useState(false)
   const actionInProgress = useRef(false)
   const liveAttempted = job?.steps.some(step => step.name.startsWith('live_')) ?? false
   const canSimulate = !!job && [0, 1, 2].includes(job.status)
   const canApprove = !!job && job.status === 4 && !job.approvedAtUtc
-  const canExecute = !!job && !job.simulationMode && !!job.approvedAtUtc && job.status === 4 && !liveAttempted
-  const canCancel = !!job && ![3, 4, 7].includes(job.status)
+  const eligibleForExecution = !!job && !job.simulationMode && !!job.approvedAtUtc && job.status === 4 && !liveAttempted && !job.codeTransitionId
+  const canExecute = eligibleForExecution && job?.liveExecutionConfigured !== false
+  const canCancel = !!job && (![3, 4, 7].includes(job.status) || (job.status === 4 && !!job.codeTransitionId && !liveAttempted))
+  const canChooseSchedule = canApprove && !job?.simulationMode
+
+  useEffect(() => {
+    setCodeTransitions(null)
+    setCodeTransitionId('')
+    setTransitionError(false)
+    if (!id || !canChooseSchedule) return
+    let current = true
+    void apiGet<CodeTransition[]>(`/api/firmware/jobs/${id}/code-transitions`)
+      .then(rows => { if (current) setCodeTransitions(rows) })
+      .catch(() => { if (current) setTransitionError(true) })
+    return () => { current = false }
+  }, [id, canChooseSchedule])
 
   const refresh = useCallback(async () => {
     if (!id) return
@@ -112,7 +141,7 @@ export function FirmwareJobDetail() {
   async function runApprove() {
     if (!id || !canApprove) return
     await performAction(async () => {
-      await apiPost(`/api/firmware/jobs/${id}/approve`, { rollbackNotes })
+      await apiPost(`/api/firmware/jobs/${id}/approve`, { rollbackNotes, ...(codeTransitionId ? { codeTransitionId } : {}) })
       setActionMsg('Approved (rollback notes recorded).')
       await refresh()
     })
@@ -163,6 +192,10 @@ export function FirmwareJobDetail() {
       <p style={{ fontFamily: 'monospace', fontSize: 12 }}>
         Terminal {job.terminalId} · Package {job.firmwarePackageId}
       </p>
+      {job.codeTransitionId && <p role="status">
+        Approval bound to terminal-initiated delivery. Transition {job.codeTransitionId}, schedule {job.codeScheduleId}.
+        {job.status === 4 && !liveAttempted && ' Awaiting incoming code-server integration; no outbound execution is available for this job.'}
+      </p>}
 
       <h2 style={{ fontSize: 17 }}>Safety checklist (audit)</h2>
       <p style={{ fontSize: 13, color: '#555' }}>
@@ -212,14 +245,27 @@ export function FirmwareJobDetail() {
         <button type="button" disabled={busy || !canSimulate} onClick={() => void runSimulate()}>
           Run simulation
         </button>
-        {canExecute ? (
-          <button type="button" disabled={busy} onClick={() => void runLive()}>
+        {eligibleForExecution ? (
+          <button type="button" disabled={busy || !canExecute} onClick={() => void runLive()}>
             Execute live (dual-gated)
           </button>
         ) : null}
+        {eligibleForExecution && !canExecute && <p role="status">Live delivery is not configured. This approval is retained until a transport is available.</p>}
         {job.status === 3 ? <p role="status">Live execution is claimed or its outcome is uncertain. Review the existing attempt; do not submit another transfer.</p> :
           liveAttempted ? <p role="status">A live attempt is retained for this job. Review its result before preparing a new job.</p> : null}
         <div>
+          {canChooseSchedule && <div style={{ marginBottom: 8 }}>
+            <label htmlFor="job-code-transition">Delivery configuration</label>
+            <select id="job-code-transition" value={codeTransitionId} onChange={e => setCodeTransitionId(e.target.value)}
+              disabled={busy || !codeTransitions} style={{ display: 'block', maxWidth: '100%' }}>
+              <option value="">Manual / outbound approval (not a scheduled callback)</option>
+              {codeTransitions?.map(plan => <option key={plan.id} value={plan.id}>
+                {plan.sourceControllerRom} {plan.sourceControllerSoftware} to {plan.targetControllerRom} {plan.targetControllerSoftware}
+              </option>)}
+            </select>
+            {transitionError && <small role="alert">Could not load matching staged transitions.</small>}
+            {codeTransitions?.length === 0 && <small>No unlinked staged transition matches this package's target version and terminal.</small>}
+          </div>}
           <label style={{ display: 'block', fontSize: 13 }}>Rollback / backup notes (approval)</label>
           <textarea
             value={rollbackNotes}
@@ -242,7 +288,7 @@ export function FirmwareJobDetail() {
             />
             Confirm cancel (audited)
           </label>
-          <button type="button" disabled={busy || !canCancel} onClick={() => void runCancel()} style={{ marginTop: 6 }}>
+          <button type="button" disabled={busy || !canCancel || !cancelConfirmed} onClick={() => void runCancel()} style={{ marginTop: 6 }}>
             Cancel job
           </button>
         </div>

@@ -53,7 +53,7 @@ export function FirmwareLiveFlashBanner() {
         <strong>Live execution policy enabled</strong>
         <p style={{ margin: '6px 0 0', fontSize: 14, lineHeight: 1.4 }}>
           Both host switches are enabled.{' '}
-          {pol.transportMode === 'simulation' ? 'Transport mode is simulation; no live endpoint is configured.' :
+          {pol.transportMode === 'simulation' ? 'Transport: simulation.' :
             pol.transportMode && pol.liveTransportConfigured === true ? `${pol.transportMode.toUpperCase()} transport settings are present.` :
             pol.transportMode && pol.liveTransportConfigured === false ? `${pol.transportMode.toUpperCase()} transport needs configuration.` :
             'Transport configuration is not reported by this server.'}

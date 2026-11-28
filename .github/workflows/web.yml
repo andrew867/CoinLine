@@ -197,6 +197,11 @@ jobs:
         env:
           CI: "true"
 
+      - name: Verify firmware artifact and job preparation workflow
+        run: npm run e2e -- e2e/firmware-artifact-upload.spec.ts --output test-results/firmware-artifact-upload
+        env:
+          CI: "true"
+
       - name: Verify current reported phone status workflow
         run: npm run e2e -- e2e/current-phone-status.spec.ts --output test-results/current-phone-status
         env:
