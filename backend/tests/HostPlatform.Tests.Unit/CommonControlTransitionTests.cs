@@ -145,6 +145,12 @@ public sealed class CommonControlTransitionTests
         expected=source.ToArray(); target.AsSpan(12,2).CopyTo(expected.AsSpan(12,2)); expected[33]=0xA7; expected[34]=0xAF;
         Assert.Equal(expected,all.Payload); Assert.Equal(sourceBefore,source); Assert.Equal(targetBefore,target);
         Assert.Equal(expected,CommonControlTransitionWire.Project(33,source,expected,groups).Payload);
+        var reversed=CommonControlTransitionWire.Project(33,source,target,groups.Reverse().ToArray());
+        Assert.Equal(all.Payload,reversed.Payload);
+        Assert.Equal(all.ChangedBytes,reversed.ChangedBytes);
+        Assert.Throws<InvalidOperationException>(()=>CommonControlTransitionWire.Project(33,source,target,
+            ["modem-answer-detection","modem-answer-detection"]));
+        Assert.Equal(sourceBefore,source); Assert.Equal(targetBefore,target);
         Assert.DoesNotContain(all.Groups.SelectMany(row=>row.Fields),field=>field.Key is "spare.timer" or "answerRemovalDelay" || field.Key.StartsWith("spare."));
     }
 
