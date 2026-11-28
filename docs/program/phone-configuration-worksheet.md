@@ -8,6 +8,9 @@ The Manager terminal information workflow includes individual configuration fami
 | Choose multiple published records | Stage separate sources, leave unselected rows unchanged, explicit optional clear and reviewed result | Multi-source planner merges matching dependencies, rejects conflicting dependencies, clones one resulting published set, retains original source sets and other phones; stale/concurrent confirmation verified | A separately requested partial batch carries both selected changed records and the required dependency, receives their MT14s on the original batch | Stock firmware behavior pending |
 | Start initial assignment and choose MT21 identity | Missing families shown as advisory; explicit registered identity opt-in | PostgreSQL verifies that only the five MT21 identity bytes change, original source retained, prior pointer null | No download implied by assigning | Physical INSTALL and subsequent connection pending |
 | Optional removal and rollback | Clear only on the independently verified optional-record profile; existing rollback retained | Removing an assignment does not erase already stored terminal data; no unrelated records or schedules are changed | Explicit subsequent delivery only | Physical optional removal remains pending |
+| Effective host rating context | Read-only name, selection source and national-prefix setting when both phone and rate-plan read permissions are present | Uses the same resolver as real-time host quotes; no selection or tariff changes | Not a wire operation | Not applicable |
+
+Host rating is separate from the terminal's own dialing, screening, payment and rate-table records. The worksheet shows the effective host plan at load time; reopen it after changing the host rate plan selection. Applying a record assignment or preparing a download does not publish or select a host plan.
 
 ## Start an unassigned phone from a published configuration
 

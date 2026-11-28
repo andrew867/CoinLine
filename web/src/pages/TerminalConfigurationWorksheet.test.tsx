@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { apiGet, apiGetRaw, apiPostRaw } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { TerminalConfigurationWorksheet } from './TerminalConfigurationWorksheet'
+import type { HostRatingContext } from './hostRatePlanPresentation'
 
 vi.mock('../api/client', () => ({ apiGet: vi.fn(), apiGetRaw: vi.fn(), apiPostRaw: vi.fn() }))
 afterEach(() => { cleanup(); vi.resetAllMocks(); consoleSession.clear() })
@@ -23,12 +24,12 @@ const family = { familyLabel: 'Fixture family', documented: true, tables: [{ nam
   operatingMode: { expectedCode: 2, expectedLabel: 'Multi-pay', configuredCode: 1, configuredLabel: 'Card only', status: 'differs',
     message: 'Review whether the payment-mode difference is intentional for this phone.' } }
 const receipt = { tableSetId: 'result-set', tableSetName: 'Updated configuration', changedNumbers: [29, 50], removedNumbers: [32] }
-function setup(canUpdate = true, initial = false, onApplied = vi.fn()) {
+function setup(canUpdate = true, initial = false, onApplied = vi.fn(), hostRating?: HostRatingContext | null, terminalActive = true) {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-assignments': canUpdate ? 3 : 1 })
   vi.mocked(apiGet).mockImplementation(async path => {
     const url = new URL(String(path), 'http://localhost')
     if (url.pathname === endpoint) return { id: 'fixture-phone', displayName: 'Phone', terminalIdHex: '0000000001', firmware: 'Fixture target',
-      baseSetId: initial ? null : 'base', baseSetName: initial ? null : 'Current configuration', assignmentRevision: initial ? null : 7, canUpdate, family,
+      baseSetId: initial ? null : 'base', baseSetName: initial ? null : 'Current configuration', assignmentRevision: initial ? null : 7, canUpdate, family, hostRating,
       records: initial ? records.map(row => ({ ...row, assigned: null, canClear: false })) : records } as never
     if (url.pathname === endpoint + '/initial-sources') return { available: true, total: 2, page: Number(url.searchParams.get('page')), pageSize: 50,
       sources: [{ id: 'starter', name: 'Preferred starter', recordCount: 3, isDefault: true, hasAccess: true },
@@ -41,7 +42,7 @@ function setup(canUpdate = true, initial = false, onApplied = vi.fn()) {
     }
     throw new Error(`Unexpected read ${path}`)
   })
-  render(<MemoryRouter><TerminalConfigurationWorksheet terminalId="fixture-phone" assignmentKey="base" terminalActive onApplied={onApplied} /></MemoryRouter>)
+  render(<MemoryRouter><TerminalConfigurationWorksheet terminalId="fixture-phone" assignmentKey="base" terminalActive={terminalActive} onApplied={onApplied} /></MemoryRouter>)
   return onApplied
 }
 
@@ -82,6 +83,7 @@ it('looks up records from two sources, stages an explicit clear, and handles sta
   expect(screen.queryByRole('button', { name: 'Clear MT31' })).not.toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: 'Preview configuration assignment' }))
   const preview = await screen.findByRole('region', { name: 'Configuration assignment preview' })
+  expect(within(preview).getByText(/leave the separate host rate plan selection unchanged/)).toBeVisible()
   expect(within(preview).getByText('Required dependency')).toBeVisible()
   expect(within(preview).getByText('Card only (code 1)')).toBeVisible()
   expect(within(preview).getByRole('button', { name: 'Apply configuration assignment' })).toBeDisabled()
@@ -98,6 +100,30 @@ it('looks up records from two sources, stages an explicit clear, and handles sta
     { number: 29, action: 'copy', sourceSetId: 'set-29', sourceVersionId: 'source-29' }, { number: 32, action: 'clear' },
     { number: 50, action: 'copy', sourceSetId: 'set-50', sourceVersionId: 'source-50' },
   ] })
+})
+
+it.each([
+  [{ name: 'Local default', source: 'legacy', hasPublishedPlan: true, restoreNationalTollPrefix: false }, 'Local default · Existing automatic customer default', true],
+  [{ name: 'Regional fixture', source: 'terminal', hasPublishedPlan: true, restoreNationalTollPrefix: true }, 'Regional fixture · Explicit phone selection', true],
+  [{ name: null, source: 'terminal-unavailable', hasPublishedPlan: false, restoreNationalTollPrefix: false }, 'No effective published host plan · Phone selection unavailable', true],
+  [null, 'The effective host plan is not available with your current read permissions.', false],
+  [undefined, 'The server does not report the effective host plan in this worksheet.', false],
+] as const)('shows read-only host rating context without changing configuration (%s)', async (rating, expected, link) => {
+  setup(true, false, vi.fn(), rating)
+  fireEvent.click(screen.getByText('Individual configuration assignments'))
+  const context = await screen.findByRole('region', { name: 'Effective host real-time rating' })
+  expect(within(context).getByText(expected)).toBeVisible()
+  expect(within(context).getByText(/Changing or downloading terminal records here does not select/)).toBeVisible()
+  if (rating) expect(within(context).getByText(`National toll prefix restoration: ${rating.restoreNationalTollPrefix ? 'enabled' : 'not enabled'}.`)).toBeVisible()
+  if (link) expect(within(context).getByRole('link')).toHaveAttribute('href', '#host-rate-plan-selection')
+  else expect(within(context).queryByRole('link')).not.toBeInTheDocument()
+  expect(apiPostRaw).not.toHaveBeenCalled()
+})
+
+it('does not link to the selection editor for an inactive phone', async () => {
+  setup(false, false, vi.fn(), { name: 'Local default', source: 'legacy', hasPublishedPlan: true, restoreNationalTollPrefix: false }, false)
+  fireEvent.click(screen.getByText('Individual configuration assignments'))
+  expect(within(await screen.findByRole('region', { name: 'Effective host real-time rating' })).queryByRole('link')).not.toBeInTheDocument()
 })
 
 it('permits read-only lookup without linking to restricted configuration editors or enabling changes', async () => {

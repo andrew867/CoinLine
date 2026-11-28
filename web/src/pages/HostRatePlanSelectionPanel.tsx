@@ -2,13 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { apiFetch, apiGet } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { hostRatePlanSourceLabel } from './hostRatePlanPresentation'
 
 type Selection = { selectionId: string | null; revision: number | null; selectedPlanId: string | null; restoreNationalTollPrefix: boolean;
   effective: { customerId: string; ratePlanId: string | null; publishedVersionId: string | null; name: string | null; source: string; restoreNationalTollPrefix?: boolean };
   options: { id: string; name: string; customerId: string | null; publishedVersionId: string }[]; inheritedPhones: number }
-const sourceLabel: Record<string, string> = { terminal: 'Explicit phone selection', customer: 'Customer default',
-  legacy: 'Existing automatic customer default', none: 'No published customer plan', 'terminal-unavailable': 'Phone selection unavailable',
-  'customer-unavailable': 'Customer selection unavailable', unmatched: 'Unmatched phone' }
 
 export function HostRatePlanSelectionPanel({ scope, id, active = true }: { scope: 'customers' | 'terminals'; id: string; active?: boolean }) {
   const endpoint = `/api/rate-plans/selection/${scope}/${id}`
@@ -53,7 +51,7 @@ export function HostRatePlanSelectionPanel({ scope, id, active = true }: { scope
   }
 
   if (!canRead) return null
-  return <section aria-label="Host rate plan selection" style={{ margin: '16px 0' }}>
+  return <section id={scope === 'terminals' ? 'host-rate-plan-selection' : undefined} aria-label="Host rate plan selection" style={{ margin: '16px 0' }}>
     <h3>{scope === 'customers' ? 'Default host rating plan' : 'Host rating plan for this phone'}</h3>
     <p>Determines subsequent real-time rating requests only. Terminal-local pricing and dialing tables are configured separately.</p>
     {busy && !data && <p role="status">Loading host rating plan…</p>}
@@ -61,7 +59,7 @@ export function HostRatePlanSelectionPanel({ scope, id, active = true }: { scope
     {notice && <p role="status">{notice}</p>}
     {data && <>
       <p>Effective: {data.effective.ratePlanId ? <Link to={`/rate-plans/${data.effective.ratePlanId}`}>{data.effective.name}</Link> : 'No available plan'}
-        {' '}({sourceLabel[data.effective.source] ?? data.effective.source})</p>
+        {' '}({hostRatePlanSourceLabel(data.effective.source)})</p>
       {data.effective.restoreNationalTollPrefix && <p>Classified national toll requests use the leading 1 for host lookup.</p>}
       {scope === 'customers' && <p>{data.inheritedPhones} active phones inherit this default. Explicit phone selections are retained.</p>}
       <label>{scope === 'customers' ? 'Customer default host rate plan' : 'Phone host rate plan'}{' '}
