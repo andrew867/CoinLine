@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import './VisualPromptWorksheet.css'
 import { authorableDisplayText, westernDisplayGlyphs } from './advertisingGlyphs'
 import { canonicalPromptText, hasPromptCellChanges, hasRowCellChanges, isPromptCellKey, makePromptWorksheet,
   maxPromptWorksheetBytes, planPromptImport, promptCellKey, promptRowChanged, readPromptRow, type PromptImportPlan, type PromptRow } from './visualPromptWorksheetCodec'

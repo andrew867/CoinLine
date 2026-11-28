@@ -236,26 +236,3 @@
 .graphical-usage-config-table th, .graphical-usage-config-table td { text-align: left; vertical-align: top; padding: 10px 8px; border-bottom: 1px solid var(--line); }
 .graphical-usage-config-table small { display: block; color: var(--muted); }
 .graphical-usage-config-table button { margin-top: 5px; }
-.visual-prompt-opaque-cells {
-  width: 100%;
-  margin: 6px 0;
-}
-.visual-prompt-cell-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(68px, 1fr));
-  gap: 6px;
-}
-.visual-prompt-cell-grid label {
-  display: grid;
-  gap: 3px;
-  font-size: .8rem;
-}
-.visual-prompt-cell-grid input {
-  width: 100%;
-  text-align: center;
-}
-.visual-prompt-opaque-value {
-  padding: 5px;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-}
