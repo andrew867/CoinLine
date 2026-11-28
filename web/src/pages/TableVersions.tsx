@@ -1,7 +1,8 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { apiFetch } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
+import { ConfigurationUsagePanel } from './ConfigurationUsagePanel'
 import './ConfigurationLibrary.css'
 
 type Row = {
@@ -50,9 +51,12 @@ export function TableVersions() {
   const [error, setError] = useState('')
   const [optionError, setOptionError] = useState('')
   const [refresh, setRefresh] = useState(0)
+  const [usage, setUsage] = useState<string | null>(null)
+  const usageTrigger = useRef<HTMLButtonElement>(null)
   const canRead = canPerform('table-records', op.read)
   const canOpenSet = canPerform('table-sets', op.read)
   const canEdit = canPerform('table-records', op.update)
+  const canReviewPhones = canPerform('phones', op.read) && canPerform('table-assignments', op.read)
 
   useEffect(() => {
     if (!canRead) return
@@ -68,7 +72,7 @@ export function TableVersions() {
     const filters = readFilters(active)
     setDraft(filters)
     if (!canRead) return
-    setData(null); setError('')
+    setData(null); setError(''); setUsage(null)
     const controller = new AbortController()
     const request = filterParams(filters)
     if (request.has('set')) { request.set('tableSetId', request.get('set')!); request.delete('set') }
@@ -148,7 +152,11 @@ export function TableVersions() {
             <td>{row.targetFirmware ?? 'Untargeted'}</td>
             <td>rev {row.tableRevision}<br />{row.payloadLengthBytes} B</td>
             <td>{row.validationPassed ? 'Passed' : <span className="configuration-library-warning">Needs review</span>}</td>
-            {data.canReadAssignment && <td>{row.assignedPhoneCount ?? 0}</td>}
+            {data.canReadAssignment && <td>{row.assignedPhoneCount ?? 0}
+              {canReviewPhones && <><br /><button type="button" aria-expanded={usage === row.id} aria-controls={usage === row.id ? 'configuration-usage' : undefined}
+                aria-label={`Review phones for MT${row.number} ${row.configurationId ?? 'unnamed'}, ${row.setName}, revision ${row.tableRevision}`}
+                onClick={event => { usageTrigger.current = event.currentTarget; setUsage(previous => previous === row.id ? null : row.id) }}>View phones</button></>}
+            </td>}
             <td><code>{row.payloadSha256Hex}</code></td>
           </tr>)}</tbody></table>
       </div>}
@@ -159,5 +167,6 @@ export function TableVersions() {
       </div>}
       <p className="page-intro">Validation and assignment counts are host evidence. They do not establish terminal acknowledgement or device behavior.</p>
     </section>
+    {usage && canReviewPhones && <ConfigurationUsagePanel key={usage} versionId={usage} onClose={() => { setUsage(null); usageTrigger.current?.focus() }} />}
   </div>
 }

@@ -87,7 +87,7 @@ public static class OperatorPermissions
             ("Tables", D, "RemoveDraftRecord"),
             ("FirmwareNumberingStaging", R, "Preview"),
             ("FirmwareVisualPromptStaging", R, "Preview"),
-            ("ConfigurationLibrary", R, "List Options"),
+            ("ConfigurationLibrary", R, "List Options Assignments"),
             ("FirmwareSetupStaging", R, "Preview"),
             ("FirmwareLocalDialingStaging", R, "Preview"),
             ("FirmwareCommonControlStaging", R, "Preview"),

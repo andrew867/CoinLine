@@ -100,4 +100,41 @@ public sealed class ConfigurationLibraryController(HostPlatformDbContext db) : C
             total, page, pageSize = PageSize, canReadAssignment
         });
     }
+
+    [HttpGet("{versionId:guid}/assignments")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> Assignments(Guid versionId, [FromQuery] int page = 1, CancellationToken ct = default)
+    {
+        if (!OperatorPermissions.Allows(HttpContext, "table-records", PermissionOperation.Read) ||
+            !OperatorPermissions.Allows(HttpContext, "table-assignments", PermissionOperation.Read) ||
+            !OperatorPermissions.Allows(HttpContext, "phones", PermissionOperation.Read)) return Forbid();
+        if (page is < 1 or > 1_000_000) return BadRequest(new { error = "Choose a valid assignment page." });
+
+        var version = await db.TableVersions.AsNoTracking().Where(row => row.Id == versionId)
+            .Select(row => new { row.Id, row.TableSetId, setName = row.TableSet!.Name,
+                setStatus = row.TableSet.Status, number = row.TableDefinition!.TableNumber, row.ConfigurationId, row.TableRevision })
+            .SingleOrDefaultAsync(ct);
+        if (version == null) return NotFound();
+
+        var assigned = db.TerminalTableAssignments.AsNoTracking().Where(row => row.TableSetId == version.TableSetId);
+        var total = await assigned.CountAsync(ct);
+        var canReadDownloads = OperatorPermissions.Allows(HttpContext, "downloads", PermissionOperation.Read);
+        // Historical receipt for this immutable version only. Other copies with the
+        // same Configuration ID or bytes, pending sends and unmatched sessions are not receipts.
+        var items = await assigned.OrderBy(row => row.Terminal!.DisplayName).ThenBy(row => row.TerminalId)
+            .Skip((page - 1) * PageSize).Take(PageSize)
+            .Select(row => new
+            {
+                row.TerminalId, row.Terminal!.DisplayName, row.Terminal.TerminalIdHex,
+                deactivated = row.Terminal.DeactivatedAtUtc != null, row.AssignedAtUtc,
+                lastExactAcknowledgement = canReadDownloads && version.setStatus == TableSetStatus.Published ? db.DownloadBatchItems.AsNoTracking().Where(item =>
+                        item.TableVersionId == versionId && item.DownloadBatch!.TableSetId == version.TableSetId &&
+                        item.DownloadBatch.TerminalId == row.TerminalId && item.DownloadBatch.NccSessionId != null &&
+                        item.DownloadBatch.NccSession!.TerminalId == row.TerminalId && item.Succeeded && item.LastAckStatus == "ack" &&
+                        item.ItemStatus == DownloadBatchItemStatus.Succeeded && item.HostDownloadPhase == TableDownloadHostPhase.Completed)
+                    .OrderByDescending(item => item.UpdatedAtUtc).ThenByDescending(item => item.Id)
+                    .Select(item => new { item.DownloadBatchId, recordedAtUtc = item.UpdatedAtUtc }).FirstOrDefault() : null
+            }).ToListAsync(ct);
+        return Ok(new { version, items, total, page, pageSize = PageSize, canReadDownloads });
+    }
 }
