@@ -36,6 +36,10 @@ public sealed class CardsController(
             runtimeAuthorizationProviderRegistered = registrations.IsService(typeof(INccCardAuthorizationProvider)),
             labAuthorizationEnabled = _opts.LabAuthorization?.Enabled == true,
             shadyBankAuthorizationEnabled = _opts.ShadyBankAuthorization?.Enabled == true,
+            shadyBankRouteBindingCount = _opts.ShadyBankAuthorization?.Enabled == true
+                ? _opts.ShadyBankAuthorization.Bindings.Length : 0,
+            shadyBankCaptureEnabled = _opts.ShadyBankAuthorization?.Enabled == true &&
+                _opts.ShadyBankAuthorization.CaptureUploadedCalls,
             labSettlementEnabled = _opts.LabAuthorization?.Enabled == true && _opts.LabAuthorization.SettleUploadedCalls,
             physicalCardWritesDisabled = _opts.PhysicalCardWritesDisabled,
             banner =
