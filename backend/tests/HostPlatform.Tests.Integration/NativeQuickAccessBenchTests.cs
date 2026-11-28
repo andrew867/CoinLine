@@ -23,7 +23,9 @@ internal sealed class NativeQuickAccessFact : FactAttribute
 public sealed class NativeQuickAccessBenchTests
 {
     [Theory]
-    [InlineData(true, 5)]
+    [InlineData(true, 6)]
+    [InlineData(true, 10)]
+    [InlineData(false, 1)]
     [InlineData(false, 10)]
     public void Selected_native_control_record_and_clear_round_trip_in_both_layouts(bool earlier, int position) =>
         BuildControlRecords(earlier, position);
@@ -59,7 +61,7 @@ public sealed class NativeQuickAccessBenchTests
 
     private static (byte[] Configured, byte[] Cleared) BuildControlRecords(bool earlier, int position)
     {
-        Assert.InRange(position, 1, earlier ? 5 : 10);
+        Assert.InRange(position, earlier ? 6 : 1, 10);
         var wireProfile = earlier ? NativeTableLayouts.MultiPay : NativeTableLayouts.Later;
         var layout = Assert.Single(NativeTableLayouts.DraftTemplates(55), item => item.Profile == wireProfile);
         var blank = NativeTableLayouts.CreateDraftTemplate(layout);
