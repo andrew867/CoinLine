@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { apiGet, apiPost, apiPostRaw } from '../api/client'
 
@@ -47,6 +47,13 @@ export function FirmwareJobDetail() {
     'Verified backup image and rollback steps on lab bench before production.',
   )
   const [cancelConfirmed, setCancelConfirmed] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const actionInProgress = useRef(false)
+  const liveAttempted = job?.steps.some(step => step.name.startsWith('live_')) ?? false
+  const canSimulate = !!job && [0, 1, 2].includes(job.status)
+  const canApprove = !!job && job.status === 4 && !job.approvedAtUtc
+  const canExecute = !!job && !job.simulationMode && !!job.approvedAtUtc && job.status === 4 && !liveAttempted
+  const canCancel = !!job && ![3, 4, 7].includes(job.status)
 
   const refresh = useCallback(async () => {
     if (!id) return
@@ -67,52 +74,62 @@ export function FirmwareJobDetail() {
     void refresh()
   }, [refresh])
 
-  async function runSimulate() {
-    if (!id) return
+  async function performAction(action: () => Promise<void>) {
+    if (actionInProgress.current) return
+    actionInProgress.current = true
+    setBusy(true)
     setActionMsg(null)
-    const r = await apiPostRaw(`/api/firmware/jobs/${id}/simulate`)
-    const j = await r.json().catch(() => ({}))
-    if (!r.ok) setActionMsg(`Simulate failed: ${r.status} ${JSON.stringify(j)}`)
-    else setActionMsg(`Simulation completed — status ${(j as { status?: number }).status ?? '?'}`)
-    await refresh()
+    try { await action() }
+    catch (e) {
+      setActionMsg(e instanceof Error ? e.message : 'Job action failed.')
+      await refresh()
+    }
+    finally { actionInProgress.current = false; setBusy(false) }
+  }
+
+  async function runSimulate() {
+    if (!id || !canSimulate) return
+    await performAction(async () => {
+      const r = await apiPostRaw(`/api/firmware/jobs/${id}/simulate`)
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) setActionMsg(`Simulate failed: ${r.status} ${JSON.stringify(j)}`)
+      else setActionMsg(`Simulation completed; status ${(j as { status?: number }).status ?? '?'}`)
+      await refresh()
+    })
   }
 
   async function runLive() {
-    if (!id) return
-    setActionMsg(null)
-    const r = await apiPostRaw(`/api/firmware/jobs/${id}/execute-live`)
-    const j = await r.json().catch(() => ({}))
-    if (!r.ok) setActionMsg(`Live execute failed: ${r.status} ${JSON.stringify(j)}`)
-    else setActionMsg(`Live execute finished — status ${(j as { status?: number }).status ?? '?'}`)
-    await refresh()
+    if (!id || !canExecute) return
+    await performAction(async () => {
+      const r = await apiPostRaw(`/api/firmware/jobs/${id}/execute-live`)
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) setActionMsg(`Live execute failed: ${r.status} ${JSON.stringify(j)}`)
+      else setActionMsg(`Live execute finished; status ${(j as { status?: number }).status ?? '?'}`)
+      await refresh()
+    })
   }
 
   async function runApprove() {
-    if (!id) return
-    setActionMsg(null)
-    try {
+    if (!id || !canApprove) return
+    await performAction(async () => {
       await apiPost(`/api/firmware/jobs/${id}/approve`, { rollbackNotes })
       setActionMsg('Approved (rollback notes recorded).')
       await refresh()
-    } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : 'approve failed')
-    }
+    })
   }
 
   async function runCancel() {
-    if (!id) return
+    if (!id || !canCancel) return
     setActionMsg(null)
     if (!cancelConfirmed) {
       setActionMsg('Confirm cancellation — checked operators only (audit trail).')
       return
     }
-    try {
+    await performAction(async () => {
       await apiPost(`/api/firmware/jobs/${id}/cancel`, { confirm: true, reason: 'Cancelled from UI' })
       setActionMsg('Cancelled.')
       await refresh()
-    } catch (e) {
-      setActionMsg(e instanceof Error ? e.message : 'cancel failed')
-    }
+    })
   }
 
   if (!id) return <p>Missing id</p>
@@ -192,23 +209,26 @@ export function FirmwareJobDetail() {
       )}
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 16 }}>
-        <button type="button" onClick={() => void runSimulate()}>
+        <button type="button" disabled={busy || !canSimulate} onClick={() => void runSimulate()}>
           Run simulation
         </button>
-        {!job.simulationMode && job.approvedAtUtc ? (
-          <button type="button" onClick={() => void runLive()}>
+        {canExecute ? (
+          <button type="button" disabled={busy} onClick={() => void runLive()}>
             Execute live (dual-gated)
           </button>
         ) : null}
+        {job.status === 3 ? <p role="status">Live execution is claimed or its outcome is uncertain. Review the existing attempt; do not submit another transfer.</p> :
+          liveAttempted ? <p role="status">A live attempt is retained for this job. Review its result before preparing a new job.</p> : null}
         <div>
           <label style={{ display: 'block', fontSize: 13 }}>Rollback / backup notes (approval)</label>
           <textarea
             value={rollbackNotes}
             onChange={(e) => setRollbackNotes(e.target.value)}
+            disabled={busy || !canApprove}
             rows={3}
             style={{ width: 420, fontFamily: 'inherit' }}
           />
-          <button type="button" onClick={() => void runApprove()} style={{ display: 'block', marginTop: 6 }}>
+          <button type="button" disabled={busy || !canApprove} onClick={() => void runApprove()} style={{ display: 'block', marginTop: 6 }}>
             Approve (after simulation)
           </button>
         </div>
@@ -217,11 +237,12 @@ export function FirmwareJobDetail() {
             <input
               type="checkbox"
               checked={cancelConfirmed}
+              disabled={busy || !canCancel}
               onChange={(e) => setCancelConfirmed(e.target.checked)}
             />
             Confirm cancel (audited)
           </label>
-          <button type="button" onClick={() => void runCancel()} style={{ marginTop: 6 }}>
+          <button type="button" disabled={busy || !canCancel} onClick={() => void runCancel()} style={{ marginTop: 6 }}>
             Cancel job
           </button>
         </div>

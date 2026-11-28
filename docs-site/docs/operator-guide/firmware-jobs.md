@@ -45,4 +45,6 @@ Choose alternate exact matches or vacant segments if desired, preview again, and
 
 Use the simulation job form to exercise the host's checks without opening a device transport. Inspect the resulting job, safety checks and rollback notes before planning any real upgrade. The execution policy reports whether the existing live transport is enabled.
 
+A live job is claimed once after its registered artifact has been verified. A failed artifact check before the claim does not consume the approval. Once claimed, repeated requests and concurrent browser sessions cannot start another transfer from that job. The job remains Running if the host loses the outcome before recording a final state; do not treat that as a safe retry. Inspect the retained attempt and reconcile the terminal before preparing a distinct approved job. Simulation and cancellation do not overwrite a claimed live transfer.
+
 On supported terminals, a separate code-download scheduler record (MT94) is configured through table management. Its window, retry and cancellation settings are delivered through regular management contacts. A native code-server connection, image transfer, reboot and subsequent target configuration delivery must be qualified separately; a successful MT94 acknowledgement does not establish those outcomes.

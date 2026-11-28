@@ -59,6 +59,9 @@ public sealed class FirmwareVerifiedPayloadTests
             var detail = await client.GetFromJsonAsync<JsonElement>($"/api/firmware/jobs/{job}");
             Assert.Contains(detail.GetProperty("steps").EnumerateArray(), row => row.GetProperty("name").GetString() == "live_payload_prepare" &&
                 row.GetProperty("detail").GetString()!.Contains("SHA-256", StringComparison.Ordinal));
+            using var repeated = await client.PostAsync($"/api/firmware/jobs/{job}/execute-live", null);
+            Assert.Equal(HttpStatusCode.Conflict, repeated.StatusCode);
+            Assert.Single(adapter.Payloads);
 
             async Task<Guid> ApprovedJob(Guid? firmwareArtifactId)
             {
