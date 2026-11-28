@@ -81,6 +81,7 @@ public static class OperatorPermissions
             ("TerminalTariffReferences", R, "Get"),
             ("ScreeningSlotReferences", R, "Get"),
             ("DialedNumberReview", R, "Review"),
+            ("TerminalCarrierReferences", R, "Get"),
             ("FirmwareTariffStaging", R, "Preview"),
             ("FirmwareCarrierStaging", R, "Preview"),
             ("Tables", D, "RemoveDraftRecord"),

@@ -5,6 +5,7 @@ import { CraftAccessReveal } from './CraftAccessReveal'
 import { NativeBitmapField } from './NativeBitmapField'
 import { CarrierLibraryPanel } from './CarrierLibraryPanel'
 import { CarrierBrandingPreview } from './CarrierLibraryPage'
+import { TerminalCarrierReferencePanel } from './TerminalCarrierReferencePanel'
 import { GraphicalFlashField, GraphicalLinkField, GraphicalPanelPreview, GraphicalTextField } from './NativeGraphicalFields'
 import { GraphicalAdvertisingSimulator } from './GraphicalAdvertisingSimulator'
 import { GraphicalLinkReviewPanel, type GraphicalLinkReview } from './GraphicalLinkReviewPanel'
@@ -401,6 +402,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const keyCleared = selectedKey != null && clearedKeys.has(selectedKey)
   const carrierReference = selectedKey != null && current && keyValue(current, 'free') === 'true' && keyValue(current, 'featureGroupB') === 'true'
   const carrierRow = (number === 23 || number === 135) && current?.key.startsWith('carrier-') ? Number(current.key.slice(8)) : null
+  const savedCarrierReference = carrierRow == null ? null : current?.fields.find(field => field.key === `${current.key}.reference`)?.value ?? null
   const displayFields = current?.showDisplayPreview ? current.fields
     : selectedKey != null && current ? current.fields.filter(field => field.key.endsWith('.upper') || field.key.endsWith('.lower')) : []
   const visibleFields = current?.fields.filter((field) => (!changingKind || field.editor === 'screen-kind')
@@ -607,6 +609,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       )}
       {showingSettings && current && carrierRow != null && <>
         <CarrierBrandingPreview name={keyValue(current, 'name') ?? ''} />
+        {savedCarrierReference != null && /^\d+$/.test(savedCarrierReference) && Number(savedCarrierReference) < 255 &&
+          <TerminalCarrierReferencePanel key={`${setId}:${number}:${carrierRow}:${layout.revision}`} setId={setId} reference={Number(savedCarrierReference)} dirty={changed > 0} />}
         <CarrierLibraryPanel key={`${setId}:${number}:${carrierRow}`} setId={setId} number={number} slot={carrierRow}
           revision={layout.revision} sha256={layout.sha256} reference={keyValue(current, 'reference') ?? null}
           editable={canEdit} dirty={changed !== 0 || busy} onApplied={() => { setReload(count => count + 1); onSaved() }} />
