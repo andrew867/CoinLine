@@ -16,6 +16,43 @@ afterEach(() => {
   consoleSession.clear()
 })
 
+it('compares untargeted published records without assigning a firmware or editing bytes', async () => {
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 3, 'table-records': 1, 'firmware-registry': 1 })
+  vi.mocked(apiGet).mockResolvedValue([])
+  vi.mocked(apiFetch).mockResolvedValue(Response.json({
+    id: 'fixture-set', name: 'Untargeted configuration', status: 1, revision: 1, firmwareFindings: [],
+    optionalRecordRemovals: [], versions: [],
+    profileComparison: [
+      { profileId: 'later', label: 'Later graphical', completeCatalogue: true, observedLengthsOnly: false,
+        matchingLengthCount: 1, conflictCount: 0, unknownCount: 0, layoutReviewCount: 1,
+        records: [{ tableNumber: 26, actualLength: 72, expectedLength: 72, status: 'match',
+          layoutReviewRequired: true, message: 'Confirm the field layout independently.' }] },
+      { profileId: 'earlier', label: 'Earlier multi-pay', completeCatalogue: false, observedLengthsOnly: false,
+        matchingLengthCount: 0, conflictCount: 1, unknownCount: 1, layoutReviewCount: 0,
+        records: [{ tableNumber: 92, actualLength: 3061, expectedLength: 3401, status: 'conflict',
+          layoutReviewRequired: false, message: 'Different record length.' },
+        { tableNumber: 131, actualLength: 9224, expectedLength: null, status: 'unknown',
+          layoutReviewRequired: false, message: 'Incomplete catalogue.' }] },
+    ],
+  }))
+  render(<MemoryRouter initialEntries={['/table-sets/fixture-set']}><Routes>
+    <Route path="/table-sets/:id" element={<TableSetDetail />} />
+  </Routes></MemoryRouter>)
+  fireEvent.click(await screen.findByText('Compare saved records with known terminal profiles'))
+  expect(screen.getByText(/cannot identify the terminal version/)).toBeVisible()
+  expect(screen.getByText(/Make an unassigned draft copy/)).toBeVisible()
+  expect(screen.getByRole('link', { name: 'registered firmware versions' })).toHaveAttribute('href', '/firmware/versions')
+  fireEvent.click(screen.getByText('Later graphical'))
+  expect(screen.getByText('Layout review')).toBeVisible()
+  expect(screen.getByText('Confirm the field layout independently.', { exact: false })).toBeVisible()
+  fireEvent.click(screen.getByText('Earlier multi-pay'))
+  expect(screen.getByText('Different record length.', { exact: false })).toBeVisible()
+  expect(screen.getByText('3,401')).toBeVisible()
+  expect(screen.getByText('Incomplete catalogue.', { exact: false })).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Save target' })).not.toBeInTheDocument()
+  expect(vi.mocked(apiFetch).mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true)
+})
+
 it('blocks publishing an invalid numbering plan and opens the affected editor directly from its finding', async () => {
   consoleSession.save('fixture', '', undefined, 'Operator', { 'table-sets': 3, 'table-records': 3 })
   vi.mocked(apiGet).mockResolvedValue([])
