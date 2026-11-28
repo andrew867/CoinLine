@@ -26,9 +26,10 @@ internal static class VisualPromptFixture
         var expected = raw.ToArray();
         expected.AsSpan(1, 20).Fill((byte)' ');
         new byte[] { (byte)'P', (byte)'r', 0xA6, (byte)'p', (byte)'a', (byte)'r', (byte)'e', (byte)'z' }.CopyTo(expected, 1);
+        expected[22] = (byte)'Q';
         expected.AsSpan(1 + (count - 1) * 20, 20).Fill((byte)' ');
         return new(NativeTableLayouts.Find(number, raw)!, raw, expected,
-            new() { ["prompt-0.text"] = "Préparez", ["prompt-32.text"] = "Café", [$"prompt-{count - 1}.text"] = "" });
+            new() { ["prompt-0.text"] = "Préparez", ["prompt-1.cell-1"] = "Q", ["prompt-32.text"] = "Café", [$"prompt-{count - 1}.text"] = "" });
     }
 }
 

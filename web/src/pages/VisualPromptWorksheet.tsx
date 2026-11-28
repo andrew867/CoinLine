@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
 import { authorableDisplayText, westernDisplayGlyphs } from './advertisingGlyphs'
-import { canonicalPromptText, makePromptWorksheet, maxPromptWorksheetBytes, planPromptImport, readPromptRow, type PromptImportPlan, type PromptRow } from './visualPromptWorksheetCodec'
+import { canonicalPromptText, hasPromptCellChanges, hasRowCellChanges, isPromptCellKey, makePromptWorksheet,
+  maxPromptWorksheetBytes, planPromptImport, promptCellKey, promptRowChanged, readPromptRow, type PromptImportPlan, type PromptRow } from './visualPromptWorksheetCodec'
 
 const pageSize = 25
 
@@ -37,19 +38,20 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, companion
   const coverageDifferenceCount = rows.filter(differentCoverage).length
   const matches = rows.filter(row => {
     const value = readPromptRow(row, edits)
-    return (activeFilter === 'all' || (activeFilter === 'changed' && Object.hasOwn(edits, row.key)) || (activeFilter === 'unmapped' && value === null)
+    return (activeFilter === 'all' || (activeFilter === 'changed' && promptRowChanged(row, edits)) || (activeFilter === 'unmapped' && value === null)
       || (activeFilter === 'coverage' && differentCoverage(row)))
       && (!needle || row.label.toLowerCase().includes(needle) || String(row.row) === needle || value?.toLowerCase().includes(needle))
   })
   const pages = Math.max(1, Math.ceil(matches.length / pageSize))
   const shownPage = Math.min(page, pages - 1)
   const displayed = matches.slice(shownPage * pageSize, (shownPage + 1) * pageSize)
-  const changedCount = rows.filter(row => Object.hasOwn(edits, row.key)).length
+  const changedCount = rows.filter(row => promptRowChanged(row, edits)).length
+  const cellChanges = hasPromptCellChanges(edits)
   const unmappedCount = rows.filter(row => readPromptRow(row, edits) === null).length
   const invalidCount = rows.filter(row => {
     const text = readPromptRow(row, edits)
     return text !== null && !authorableDisplayText(text, 20)
-  }).length
+  }).length + Object.entries(edits).filter(([key, value]) => isPromptCellKey(key) && !authorableDisplayText(value, 1)).length
   const reviewCurrent = review !== null && review.snapshot === JSON.stringify(edits)
 
   function download() {
@@ -61,6 +63,7 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, companion
 
   function inspect() {
     setError(''); setReview(null)
+    if (cellChanges) { setError('Save or undo individual cell edits before importing a worksheet.'); return }
     try { setReview({ plan: planPromptImport(json, rows, edits), snapshot: JSON.stringify(edits) }) }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'The worksheet could not be read.') }
   }
@@ -85,13 +88,15 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, companion
         <option value="all">All rows</option><option value="changed">Changed rows</option><option value="unmapped">Unmapped rows</option>
         {compatible.length > 0 && <option value="coverage">Blank in one language</option>}
       </select></label>
-      <button type="button" className="quiet" disabled={invalidCount > 0} onClick={download}>Export worksheet JSON</button>
+      <button type="button" className="quiet" disabled={invalidCount > 0 || cellChanges} onClick={download}>Export worksheet JSON</button>
     </div>
+    {cellChanges && <p role="status">Save or undo individual cell edits before importing or exporting worksheet JSON.</p>}
     <p role="status">{rows.length} wire rows · {changedCount} staged · {unmappedCount} unmapped{invalidCount > 0 ? ` · ${invalidCount} invalid` : ''}</p>
     <div className="visual-prompt-grid">
       {displayed.map(row => {
         const value = readPromptRow(row, edits)
-        const changed = Object.hasOwn(edits, row.key)
+        const changed = promptRowChanged(row, edits)
+        const rowCellChanges = hasRowCellChanges(row, edits)
         const invalid = value !== null && !authorableDisplayText(value, 20)
         return <div className="visual-prompt-row" key={row.key}>
           <div><strong>Row {row.row}</strong><small>{row.label}</small>
@@ -102,7 +107,23 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, companion
           </div>
           {value === null ? <div className="visual-prompt-unmapped">
             <span>Unmapped glyphs, original bytes retained</span>
-            {editable && <button type="button" className="quiet" onClick={() => stage({ [row.key]: '' })}>Replace row {row.row}</button>}
+            {row.cells && <details className="visual-prompt-opaque-cells">
+              <summary>Inspect known cells in row {row.row}</summary>
+              <p>Only recognized characters and blank cells can be changed here. Unmapped glyphs retain their original bytes.</p>
+              <div className="visual-prompt-cell-grid">
+                {row.cells.map((saved, index) => {
+                  const key = promptCellKey(row.row, index)
+                  const text = edits[key] ?? saved
+                  return <label key={index}>Cell {index + 1}
+                    {saved === null ? <span className="visual-prompt-opaque-value" aria-label={`Row ${row.row} cell ${index + 1} unmapped`}>Unmapped</span> :
+                      <input aria-label={`Row ${row.row} cell ${index + 1}`} value={text ?? ''} maxLength={2}
+                        disabled={!editable} aria-invalid={!authorableDisplayText(text ?? '', 1)}
+                        onChange={event => stage({ [key]: event.target.value })} />}
+                  </label>
+                })}
+              </div>
+            </details>}
+            {editable && <button type="button" className="quiet" disabled={rowCellChanges} onClick={() => stage({ [row.key]: '' })}>Replace row {row.row}</button>}
           </div> : <label className="visual-prompt-cell">
             <span className="visual-prompt-sr-only">Row {row.row} text</span>
             <input type="text" value={value} disabled={!editable} maxLength={40} aria-invalid={invalid}
@@ -136,7 +157,7 @@ export function VisualPromptWorksheet({ number, rows, edits, editable, companion
         catch { if (generation === fileGeneration.current) setError('Could not read the worksheet file.') }
       }} /></label>
       <label>Worksheet JSON<textarea rows={5} value={json} onChange={event => { fileGeneration.current++; setJson(event.target.value); setReview(null); setError('') }} /></label>
-      <button type="button" className="quiet" disabled={!json.trim()} onClick={inspect}>Review worksheet import</button>
+      <button type="button" className="quiet" disabled={!json.trim() || cellChanges} onClick={inspect}>Review worksheet import</button>
       {error && <p role="alert">{error}</p>}
       {review && <div className="visual-prompt-review" aria-label="Worksheet import review">
         <h3>Import review</h3>

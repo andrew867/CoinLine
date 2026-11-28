@@ -30,7 +30,7 @@ import { authorableDisplayText } from './advertisingGlyphs'
 import { advertisingLine, blankAdvertisingLine } from './advertisingPlayback'
 import { VisualPromptWorksheet, type VisualPromptCompanion } from './VisualPromptWorksheet'
 import { VisualPromptDraftForm, type VisualPromptAuthoringRequest, type VisualPromptAuthoringSpec } from './VisualPromptDraftForm'
-import { promptRows, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
+import { isPromptCellKey, promptRows, stagePromptChanges, undoPromptChanges, visualPromptRowCount, type OpaquePromptRow } from './visualPromptWorksheetCodec'
 import { RegionalRatingPreview } from './RegionalRatingPreview'
 import { LanguageOrderPanel } from './LanguageOrderPanel'
 import { languageOrderKeys } from './languageOrderPlan'
@@ -73,6 +73,7 @@ type Layout = {
   sections: Section[]
   graphicalLinks?: GraphicalLinkReview | null
   visualPromptCompanions?: VisualPromptCompanion[] | null
+  visualPromptOpaqueRows?: OpaquePromptRow[] | null
   numberingPlan?: NumberingPlan | null
   numberingFormatCapacity?: number | null
   spareBytes?: string | null
@@ -213,9 +214,9 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
     event.preventDefault()
     if (!layout?.supported || !canEdit) return
     if (visualPromptRowCount(number, layout.length) !== null) {
-      const invalid = Object.entries(edits).find(([, text]) => !authorableDisplayText(text, 20))
+      const invalid = Object.entries(edits).find(([key, text]) => !authorableDisplayText(text, isPromptCellKey(key) ? 1 : 20))
       if (invalid) {
-        setMessage(`Wire row ${invalid[0].match(/^prompt-(\d+)\.text$/)?.[1] ?? ''} exceeds 20 cells or contains an unsupported glyph.`)
+        setMessage(`Wire row ${invalid[0].match(/^prompt-(\d+)\./)?.[1] ?? ''} exceeds ${isPromptCellKey(invalid[0]) ? 'one display cell' : '20 cells'} or contains an unsupported glyph.`)
         return
       }
     }
@@ -375,7 +376,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
   const showingRules = layout.numberingPlan && view === 'rules'
   const showingBytes = layout.spareBytes && view === 'bytes'
   const promptCount = visualPromptRowCount(number, layout.length)
-  const worksheetRows = promptCount !== null ? promptRows(layout.sections, promptCount) : null
+  const worksheetRows = promptCount !== null ? promptRows(layout.sections, promptCount, layout.visualPromptOpaqueRows) : null
   const showingPrompts = worksheetRows !== null && view === 'prompts'
   const showingSettings = !showingRules && !showingBytes && !showingPrompts
   const changingKind = current?.graphicalScreenIndex != null && `screen-${current.graphicalScreenIndex}.kind` in edits
@@ -529,7 +530,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
           setEdits(updated); onDirty(Object.keys(updated).length > 0); setMessage('')
         }}
         onUndo={key => {
-          const updated = { ...edits }; delete updated[key]
+          const updated = undoPromptChanges(worksheetRows, edits, key)
           setEdits(updated); onDirty(Object.keys(updated).length > 0); setMessage('')
         }} />}
       {exchangeSegment && areaField && <LocalDialingImport segment={exchangeSegment} editable={canEdit && !busy}

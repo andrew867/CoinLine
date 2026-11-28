@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { apiFetch } from '../api/client'
 import { consoleSession } from '../api/consoleSession'
 import { NativeTableEditor } from './NativeTableEditor'
-import { makePromptWorksheet, planPromptImport, promptRows, promptWorksheetFormat, stagePromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
+import { makePromptWorksheet, planPromptImport, promptRows, promptWorksheetFormat, stagePromptChanges, undoPromptChanges, visualPromptRowCount } from './visualPromptWorksheetCodec'
 
 vi.mock('../api/client', () => ({ apiFetch: vi.fn(), apiPostRaw: vi.fn(), apiGet: vi.fn(), apiPost: vi.fn() }))
 afterEach(() => { cleanup(); vi.resetAllMocks(); consoleSession.clear() })
@@ -69,6 +69,43 @@ function renderEditor(editable = true) {
   render(<MemoryRouter><NativeTableEditor setId="fixture" number={27} revision={4} exchangeFile={null}
     onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} /></MemoryRouter>)
 }
+
+it('edits and saves only a known cell in an unmapped row, keeping opaque positions intact', async () => {
+  const cells = [null, 'A', '', ...Array<string>(17).fill(' ')]
+  const mapped = promptRows(sections(), 140, [{ row: 1, cells }])!
+  const staged = stagePromptChanges(mapped, {}, { 'prompt-1.cell-1': 'é', 'prompt-1.cell-0': 'X' })
+  expect(staged).toEqual({ 'prompt-1.cell-1': 'é' })
+  expect(() => makePromptWorksheet(27, mapped, staged)).toThrow(/individual cell edits/)
+  expect(() => planPromptImport(document([]), mapped, staged)).toThrow(/individual cell edits/)
+  expect(stagePromptChanges(mapped, staged, { 'prompt-1.cell-1': 'A' })).toEqual({})
+  expect(undoPromptChanges(mapped, staged, 'prompt-1.text')).toEqual({})
+
+  consoleSession.save('fixture', '', undefined, 'Operator', { 'table-records': 3 })
+  vi.mocked(apiFetch).mockImplementation(async (_, init) => init?.method === 'PUT'
+    ? new Response(null, { status: 204 }) : Response.json({ supported: true, editable: true, profile: 'MTR 1.9 packed',
+      length: 2801, revision: 4, sha256: 'fixture-sha', sections: sections(), visualPromptOpaqueRows: [{ row: 1, cells }] }))
+  render(<MemoryRouter><NativeTableEditor setId="fixture" number={27} revision={4} exchangeFile={null}
+    onExchangeFile={vi.fn()} onSaved={vi.fn()} onDirty={vi.fn()} /></MemoryRouter>)
+  fireEvent.click(await screen.findByRole('button', { name: 'Visual prompt worksheet' }))
+  screen.getByText('Inspect known cells in row 1').closest('details')!.open = true
+  expect(screen.getByLabelText('Row 1 cell 1 unmapped')).toBeVisible()
+  expect(screen.queryByRole('textbox', { name: 'Row 1 cell 1' })).toBeNull()
+  const known = screen.getByRole('textbox', { name: 'Row 1 cell 2' })
+  expect(known).toHaveValue('A')
+  fireEvent.change(known, { target: { value: 'é' } })
+  expect(screen.getByRole('button', { name: 'Replace row 1' })).toBeDisabled()
+  expect(screen.getByRole('button', { name: 'Export worksheet JSON' })).toBeDisabled()
+  fireEvent.change(screen.getByLabelText('Show rows'), { target: { value: 'changed' } })
+  expect(screen.getByText('Row 1', { exact: true })).toBeVisible()
+  fireEvent.click(screen.getByRole('button', { name: 'Undo row 1' }))
+  fireEvent.change(screen.getByLabelText('Show rows'), { target: { value: 'all' } })
+  screen.getByText('Inspect known cells in row 1').closest('details')!.open = true
+  fireEvent.change(screen.getByRole('textbox', { name: 'Row 1 cell 2' }), { target: { value: 'é' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  await waitFor(() => expect(vi.mocked(apiFetch).mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(true))
+  const [, options] = vi.mocked(apiFetch).mock.calls.find(([, init]) => init?.method === 'PUT')!
+  expect(JSON.parse(options!.body as string).changes).toEqual({ 'prompt-1.cell-1': 'é' })
+})
 
 it('stages multi-row edits and imports in one revision while preserving unknown cells and supports undo', async () => {
   renderEditor()
