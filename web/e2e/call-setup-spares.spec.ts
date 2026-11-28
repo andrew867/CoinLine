@@ -36,6 +36,16 @@ test('authors optional promotion text and usage settings while retaining protect
   ]
   let revision = 1
   let saved: Record<string, string> = {}
+  let supervisionRevision = 1
+  let supervisionMode = '5'
+  let supervisionSaved: Record<string, string> = {}
+  const retainedLayout = {
+    unmappedByteCount: 66,
+    unmappedRanges: [{ startOffset: 1, endOffset: 2 },
+      ...Array.from({ length: 15 }, (_, i) => ({ startOffset: 15 + i * 10, endOffset: 16 + i * 10 })),
+      { startOffset: 165, endOffset: 198 }],
+    partiallyMappedBytes: Array.from({ length: 16 }, (_, i) => ({ offset: 14 + i * 10, unmappedMask: 0xF8 })),
+  }
   const set = () => ({ id: setId, name: 'Workshop optional configuration', status: 0, revision: 1, customerId: null, isDefault: false,
     publishedAtUtc: null, publishGeneration: 0, optionalRecordRemovals: [], targetFirmwareVersionId: null, targetFirmware: null,
     tableProfile: null, firmwareFindings: [], versions: [
@@ -43,6 +53,8 @@ test('authors optional promotion text and usage settings while retaining protect
         tableRevision: revision, sortOrder: 1, validationPassed: true, payloadSha256Hex: 'a'.repeat(64), payloadLengthBytes: 153, warnings: [] },
       { id: 'fixture-version-31', tableDefinitionId: 'fixture-definition-31', definitionName: 'Installation and service', tableNumber: 31,
         tableRevision: 1, sortOrder: 2, validationPassed: true, payloadSha256Hex: 'b'.repeat(64), payloadLengthBytes: 37, warnings: [] },
+      { id: 'fixture-version-49', tableDefinitionId: 'fixture-definition-49', definitionName: 'Answer supervision', tableNumber: 49,
+        tableRevision: supervisionRevision, sortOrder: 3, validationPassed: true, payloadSha256Hex: 'c'.repeat(64), payloadLengthBytes: 199, warnings: [] },
     ] })
   await page.route('**/*', async route => {
     const request = route.request()
@@ -68,6 +80,20 @@ test('authors optional promotion text and usage settings while retaining protect
     }
     if (url.pathname === `/api/tables/sets/${setId}/records/31/fields`) return route.fulfill({ json: {
       supported: true, editable: true, profile: 'Later packed profile', length: 37, revision: 1, sha256: 'b'.repeat(64), sections: installationSections } })
+    if (url.pathname === `/api/tables/sets/${setId}/records/49/fields`) {
+      if (request.method() === 'PUT') {
+        supervisionSaved = request.postDataJSON().changes
+        supervisionMode = supervisionSaved['pattern-15.mode']
+        supervisionRevision++
+        return route.fulfill({ status: 204 })
+      }
+      return route.fulfill({ json: { supported: true, editable: true, profile: 'Later packed profile', length: 199,
+        revision: supervisionRevision, sha256: 'c'.repeat(64), retainedLayout, sections: [
+          { key: 'pattern-15', label: 'Dial pattern 16', fields: [
+            { ...field('pattern-15.mode', 'Supervision method code', supervisionMode, 'number'), max: 7 },
+          ] },
+        ] } })
+    }
     if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
       openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
     if (url.pathname === '/api/terminals/families') return route.fulfill({ json: [] })
@@ -98,4 +124,18 @@ test('authors optional promotion text and usage settings while retaining protect
   await page.getByLabel('Section or entry').selectOption('craft')
   await expect(page.getByLabel('Craft access code')).toHaveValue('')
   await expect(page.getByLabel('Desk terminal key card number')).toHaveValue('')
+  await page.goto(`/table-sets/${setId}?record=49`)
+  const retained = page.getByRole('region', { name: 'Retained record layout' })
+  await expect(retained).toContainText('Partial editor, existing record required')
+  await expect(retained).toContainText('66')
+  await expect(retained).toContainText('16')
+  await retained.getByText('Retained positions (no data values)').click()
+  await expect(retained).toContainText('Offset 164: retained mask 0xF8')
+  await page.getByLabel('Supervision method code').fill('3')
+  await page.getByRole('button', { name: 'Save record' }).click()
+  await expect(page.getByText('Changes saved to this draft.')).toBeVisible()
+  expect(supervisionSaved).toEqual({ 'pattern-15.mode': '3' })
+  await page.reload()
+  await expect(page.getByLabel('Supervision method code')).toHaveValue('3')
+  await expect(retained).toContainText('Partial editor, existing record required')
 })

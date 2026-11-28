@@ -42,3 +42,19 @@ it('shows only matching behavior evidence and counts observations independently 
   expect(screen.getByText('No behavior observation recorded for this target profile.')).toBeVisible()
   expect(within(screen.getByLabelText('Selected profile coverage')).getByText(/emulator acknowledgements: 2; recorded behavior observations: 1/)).toBeVisible()
 })
+
+it('distinguishes a partial imported record from an authorable layout', async () => {
+  const catalogue = [{ number: 21, name: 'Management access', kind: 'native_editor', firmware: [],
+    registeredDefinitions: [], layouts: [
+      { number: 21, length: 18, profile: 'Earlier', draftTemplateAvailable: false, explicitAuthoringAvailable: true },
+      { number: 21, length: 40, profile: 'Later', draftTemplateAvailable: false, explicitAuthoringAvailable: false,
+        retainedLayout: { unmappedByteCount: 14, unmappedRanges: [{ startOffset: 26, endOffset: 39 }], partiallyMappedBytes: [] } },
+    ] }]
+  vi.mocked(apiGet).mockImplementation(async url => (url === '/api/tables/reference-records' ? catalogue : []) as never)
+  render(<MemoryRouter><TableDefinitions /></MemoryRouter>)
+  const layouts = await screen.findByText('2 layouts')
+  layouts.closest('details')!.open = true
+  expect(screen.getByText(/Earlier: 18 bytes; explicit authoring/)).toBeVisible()
+  expect(screen.getByText(/Later: 40 bytes; import\/edit only/)).toBeVisible()
+  expect(screen.getByText('Partial field mapping: 14 unmapped bytes, 0 partially mapped bytes. Existing record required.')).toBeVisible()
+})

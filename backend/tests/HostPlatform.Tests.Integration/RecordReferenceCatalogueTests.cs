@@ -101,6 +101,19 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
             .Select(layout => (record.GetProperty("number").GetInt32(), layout.GetProperty("length").GetInt32())))
             .OrderBy(pair => pair.Item1).ThenBy(pair => pair.Item2).ToArray();
         Assert.Equal(new[] { (21, 40), (49, 199) }, importOnly);
+        var partialLayouts = rows.Values.SelectMany(record => record.GetProperty("layouts").EnumerateArray()
+            .Where(layout => layout.GetProperty("retainedLayout").ValueKind != JsonValueKind.Null)
+            .Select(layout => (record.GetProperty("number").GetInt32(), layout.GetProperty("length").GetInt32())))
+            .OrderBy(pair => pair.Item1).ThenBy(pair => pair.Item2).ToArray();
+        Assert.Equal(importOnly, partialLayouts);
+        foreach (var (number, length, bytes, bits) in new[] { (21, 40, 14, 0), (49, 199, 66, 16) })
+        {
+            var layout = Assert.Single(rows[number].GetProperty("layouts").EnumerateArray(),
+                row => row.GetProperty("length").GetInt32() == length);
+            var retained = layout.GetProperty("retainedLayout");
+            Assert.Equal(bytes, retained.GetProperty("unmappedByteCount").GetInt32());
+            Assert.Equal(bits, retained.GetProperty("partiallyMappedBytes").GetArrayLength());
+        }
 
         var definitions = await _client.GetFromJsonAsync<JsonElement>("/api/tables/definitions");
         foreach (var definition in definitions.EnumerateArray())
