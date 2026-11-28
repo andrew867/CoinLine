@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using HostPlatform.Transport;
 
 namespace HostPlatform.Firmware;
@@ -28,6 +29,38 @@ public static class XmodemSender
         IProgress<DlaTransferProgress>? progress,
         CancellationToken cancellationToken)
     {
+        XmodemSendOutcome outcome;
+        try
+        {
+            outcome = await SendCoreAsync(io, payload, pacing, ackTimeoutMs, maxRetriesPerBlock,
+                initialHandshakeTimeout, onState, onWireTap, progress, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            outcome = new XmodemSendOutcome(false, "Transport disconnected or failed during transfer.",
+                DlXmodemSessionState.Failed);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            onState?.Invoke(DlXmodemSessionState.Cancelled);
+            throw;
+        }
+        onState?.Invoke(outcome.FinalState);
+        return outcome;
+    }
+
+    private static async Task<XmodemSendOutcome> SendCoreAsync(
+        IAsyncDuplexTransport io,
+        ReadOnlyMemory<byte> payload,
+        ModemPacingProfile pacing,
+        int ackTimeoutMs,
+        int maxRetriesPerBlock,
+        TimeSpan? initialHandshakeTimeout,
+        Action<DlXmodemSessionState>? onState,
+        Action<bool, ReadOnlyMemory<byte>>? onWireTap,
+        IProgress<DlaTransferProgress>? progress,
+        CancellationToken cancellationToken)
+    {
         void State(DlXmodemSessionState s) => onState?.Invoke(s);
         void Tap(bool outbound, ReadOnlyMemory<byte> bytes) => onWireTap?.Invoke(outbound, bytes);
 
@@ -35,18 +68,19 @@ public static class XmodemSender
         State(DlXmodemSessionState.WaitingForReceiver);
 
         var handshakeWait = initialHandshakeTimeout ?? TimeSpan.FromSeconds(120);
-        var deadline = DateTime.UtcNow + handshakeWait;
+        var elapsed = Stopwatch.StartNew();
         var negotiated = false;
         var crcMode = false;
 
-        while (DateTime.UtcNow < deadline && !negotiated)
+        while (elapsed.Elapsed < handshakeWait && !negotiated)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var remaining = (int)Math.Max(1, (deadline - DateTime.UtcNow).TotalMilliseconds);
+            var remaining = (int)Math.Clamp((handshakeWait - elapsed.Elapsed).TotalMilliseconds, 1, int.MaxValue);
             var slice = Math.Min(ackTimeoutMs, remaining);
             var hand = await io.ReadByteWithTimeoutAsync(slice, cancellationToken).ConfigureAwait(false);
             if (hand is null)
                 continue;
+            Tap(false, new[] { hand.Value });
             if (hand.Value == XmodemConstants.Can)
                 return new XmodemSendOutcome(false, "Receiver sent CAN during handshake.",
                     DlXmodemSessionState.Cancelled);
@@ -131,7 +165,7 @@ public static class XmodemSender
             }
 
             progress?.Report(new DlaTransferProgress(block + 1, totalBlocks,
-                Math.Min((long)(block + 1) * XmodemConstants.Block128, Math.Max(payload.Length, 1))));
+                Math.Min((long)(block + 1) * XmodemConstants.Block128, payload.Length)));
         }
 
         State(DlXmodemSessionState.SendingEot);
@@ -142,10 +176,10 @@ public static class XmodemSender
             if (pacing.AfterControlByteDelayMs > 0)
                 await Task.Delay(pacing.AfterControlByteDelayMs, cancellationToken).ConfigureAwait(false);
             var eat = await io.ReadByteWithTimeoutAsync(ackTimeoutMs, cancellationToken).ConfigureAwait(false);
+            if (eat is { } control)
+                Tap(false, new[] { control });
             if (eat == XmodemConstants.Ack)
             {
-                State(DlXmodemSessionState.Verifying);
-                State(DlXmodemSessionState.Completed);
                 return new XmodemSendOutcome(true, $"Completed ({totalBlocks} blocks, crcMode={crcMode}).",
                     DlXmodemSessionState.Completed);
             }
