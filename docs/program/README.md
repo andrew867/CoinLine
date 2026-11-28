@@ -18,3 +18,4 @@
 - [Regional rating and portable rate plan packages](regional-rating-packages.md)
 - [Explicit call upload completion](call-upload-completion.md)
 - [Editor catalogue byte-preservation regression](editor-catalogue-preservation.md)
+- [Quick Access Key qualification](quick-access-native-qualification.md)
