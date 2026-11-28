@@ -30,6 +30,7 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
                 {
                     Assert.Equal("length-only", evidence.GetProperty("editorStatus").GetString());
                     Assert.Equal(JsonValueKind.Null, evidence.GetProperty("editorProfile").ValueKind);
+                    Assert.Equal(JsonValueKind.Null, evidence.GetProperty("behaviorObservation").ValueKind);
                 }
                 else
                 {
@@ -40,6 +41,8 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
                     Assert.Equal(chosen.GetProperty("draftTemplateAvailable").GetBoolean() ? "template" : chosen.GetProperty("explicitAuthoringAvailable").GetBoolean() ? "explicit" : "import-only",
                         evidence.GetProperty("editorStatus").GetString());
                 }
+                if (evidence.GetProperty("behaviorObservation").ValueKind != JsonValueKind.Null)
+                    Assert.True(evidence.GetProperty("terminalAcknowledged").GetBoolean());
             }
         });
 
@@ -83,8 +86,16 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
             Assert.Equal(number < 80 ? 2801 : 8001, prompt.GetProperty("length").GetInt32());
         }
         var graphical = FirmwareTableProfiles.Find(FirmwareTableProfiles.GraphicalMultiPay180)!;
-        Assert.Equal(43, rows.Values.Count(record => record.GetProperty("firmware").EnumerateArray().Any(profile =>
+        Assert.Equal(44, rows.Values.Count(record => record.GetProperty("firmware").EnumerateArray().Any(profile =>
             profile.GetProperty("profileId").GetString() == graphical.Id && profile.GetProperty("terminalAcknowledged").GetBoolean())));
+        Assert.Contains("Sixteen downloaded bitmap frames", Profile(131, graphical.Id).GetProperty("behaviorObservation").GetString());
+        Assert.Equal(JsonValueKind.Null, Profile(133, graphical.Id).GetProperty("behaviorObservation").ValueKind);
+        Assert.Contains("No image data was transferred", Profile(94, graphical.Id).GetProperty("behaviorObservation").GetString());
+        Assert.True(Profile(94, graphical.Id).GetProperty("terminalAcknowledged").GetBoolean());
+        Assert.False(Profile(58, graphical.Id).GetProperty("terminalAcknowledged").GetBoolean());
+        Assert.Contains("Both edited collection records", Profile(34, FirmwareTableProfiles.MultiPay200).GetProperty("behaviorObservation").GetString());
+        Assert.Contains("130 emulated seconds", Profile(73, FirmwareTableProfiles.MultiPay200).GetProperty("behaviorObservation").GetString());
+        Assert.Contains("711 and 811", Profile(73, graphical.Id).GetProperty("behaviorObservation").GetString());
         var importOnly = rows.Values.SelectMany(record => record.GetProperty("layouts").EnumerateArray()
             .Where(layout => !layout.GetProperty("draftTemplateAvailable").GetBoolean() && !layout.GetProperty("explicitAuthoringAvailable").GetBoolean())
             .Select(layout => (record.GetProperty("number").GetInt32(), layout.GetProperty("length").GetInt32())))
@@ -96,6 +107,9 @@ public sealed class RecordReferenceCatalogueTests(ApiFixture factory)
             Assert.Contains(rows[definition.GetProperty("tableNumber").GetInt32()].GetProperty("registeredDefinitions").EnumerateArray(),
                 row => row.GetProperty("id").GetGuid() == definition.GetProperty("id").GetGuid()
                     && row.GetProperty("name").GetString() == definition.GetProperty("name").GetString());
+
+        JsonElement Profile(int number, string id) => Assert.Single(rows[number].GetProperty("firmware").EnumerateArray(),
+            row => row.GetProperty("profileId").GetString() == id);
     }
 
     [Fact]
