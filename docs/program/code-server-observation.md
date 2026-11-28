@@ -22,6 +22,18 @@ The next acceptance gates are an observed native handshake, documented compatibl
 
 The tests use only loopback synthetic data. They check that the listener sends zero bytes, that arbitrary input is absent from its report, that idle connections close and that the receive cap applies.
 
+## Incoming request negotiation endpoint
+
+After the separate modem route is established, run the standalone observation endpoint on an explicitly chosen local port. Unlike the passive listener above, it sends only the ordinary XMODEM receiver negotiation and transport acknowledgements. The endpoint does not reply to the application request, authorize a job, or serve an image.
+
+```sh
+cd backend
+dotnet run --project tools/HostPlatform.Tools.CodeServerObservation -- \
+  --port 4001 --mode checksum --attempts 3 --connection-seconds 300 --session-seconds 60
+```
+
+The process binds IPv4 loopback only and emits JSON lines for readiness, each bounded attempt and normal closure. The chosen port can be zero for an ephemeral test port. Choose `crc` for an independent CRC negotiation test where appropriate. The process accepts a maximum of six sequential connections, each with its own bounded accept and receive wait, and retains no request bytes. Exit code 0 means at least one request transfer completed, 2 means none completed, 64 means invalid arguments and 130 means interrupted. A completed request transfer is still not application authorization or code delivery. Do not expose the endpoint on the LAN or reuse the normal NCC listener. A private loopback tunnel can connect an isolated remote bench without changing the Manager's live execution transport.
+
 ## Native scheduling acceptance
 
 A previously installed MTR 2.12 graphical lab terminal completed a normal Craft refresh. Its MT44 Craft and cashbox request received all eighteen assigned data records; the separate MT94 schedule stayed pending. After that schedule's start expired, the host cancelled it and prepared a replacement containing one 100-byte MT94, with one requested 4 KiB block and blank authentication. The normal assignment stayed unchanged.
