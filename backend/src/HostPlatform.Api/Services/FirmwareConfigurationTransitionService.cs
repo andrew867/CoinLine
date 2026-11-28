@@ -208,6 +208,10 @@ internal static class FirmwareConfigurationTransitionService
         var current = await tables.FindCodeOnlyVersionAsync(latest.TableSetId, ct);
         var pending = await tables.FindCodeOnlyVersionAsync(candidate.TableSetId, ct);
         if (current == null || pending == null || !pending.ValidationPassed) return false;
+        if (candidate.LastBatch is { Status: DownloadBatchStatus.Pending } batch &&
+            (batch.TerminalId != candidate.TerminalId || batch.TableSetId != candidate.TableSetId || batch.ScheduleId != candidate.Id ||
+                batch.Items.Count != 1 || batch.Items.Single().TableVersionId != pending.Id))
+            return false;
         var raw = TableDistributionService.GetEffectivePayload(current);
         return CodeDownloadWire.IsEnabled(raw) &&
             CodeDownloadWire.Disable(raw).SequenceEqual(TableDistributionService.GetEffectivePayload(pending));
