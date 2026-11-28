@@ -137,3 +137,49 @@ test('compares graphical usage owners with independently acknowledged records', 
   await expect(table.getByText('No acknowledged screen reference', { exact: true })).toBeVisible()
   await expect(reference.getByText(/not the current assignment/)).toBeVisible()
 })
+
+test('reviews Audio-Gram collection and surcharges separately from received counters', async ({ page, baseURL }) => {
+  if (!baseURL) throw new Error('The console fixture requires a local base URL.')
+  const origin = new URL(baseURL).origin, token = 'fixture-messaging-report-operator'
+  const id = '00000000-0000-4000-8000-000000006901'
+  const batch = '00000000-0000-4000-8000-000000006802'
+  await page.route('**/*', async route => {
+    const request = route.request(), url = new URL(request.url())
+    if (url.origin !== origin) return route.abort()
+    if (!url.pathname.startsWith('/api/')) return route.continue()
+    if (url.pathname === '/api/auth/login') return route.fulfill({ json: { token, displayName: 'Fixture operator',
+      role: 'Operator', permissions: { overview: 1, uploads: 1, downloads: 1, 'table-records': 1 } } })
+    if (request.headers().authorization !== `Bearer ${token}`) return route.fulfill({ status: 401 })
+    if (url.pathname === '/api/operator/dashboard') return route.fulfill({ json: { terminalsByStatus: [], activeCraftSessions: 0,
+      openNccSessions: 0, failedDownloads: 0, uploadAlerts: { failed: 0, quarantined: 0 } } })
+    if (url.pathname === `/api/uploads/${id}`) return route.fulfill({ json: {
+      id, terminalId: 'fixture-messaging-phone', status: 2, idempotencyKey: 'fixture-report', isTerminalStatistics: true,
+      rawPayloadHex: '', decodedMetadataJson: '{}', relatedDlogTransactionId: null,
+      createdAtUtc: '2028-04-01T12:00:00Z', updatedAtUtc: '2028-04-01T12:00:00Z',
+      messagingReference: { status: 'acknowledged', downloadBatchId: batch, tableRevision: 2,
+        ackRecordedAtUtc: '2028-04-01T11:40:00Z', laterUncertainAttempt: true,
+        settings: { serviceMode: 1, callRecordMode: 0, collectStatistics: true, allowedPayments: ['Coins'], areas: [
+          { area: 'Local', allowed: true, surchargeCents: 25 }, { area: 'Intra-area toll', allowed: false, surchargeCents: 50 },
+          { area: 'Inter-area toll', allowed: false, surchargeCents: 0 }, { area: 'International', allowed: false, surchargeCents: 0 },
+        ] } },
+      records: [{ id: 'fixture-record', terminalStatistics: { messageType: 69, name: 'Messaging statistics',
+        periodStart: '2028-04-01T06:00:00', periodEnd: '2028-04-01T11:00:00', carrierFormat: null, carriers: [],
+        groups: [{ label: 'Messaging selected after no answer', counters: [{ label: 'Local', value: 17 }] }] } }],
+    } })
+    return route.fulfill({ status: 404 })
+  })
+  await signIn(page)
+  await page.goto(`/uploads/${id}`)
+  const reference = page.getByRole('region', { name: 'MT68 Audio-Gram configuration reference' })
+  await expect(reference).toContainText('Revision 2')
+  await expect(reference.getByRole('link', { name: 'View source download' })).toHaveAttribute('href', `/downloads/${batch}`)
+  await expect(reference).toContainText('MT69 statistics collection')
+  await expect(reference).toContainText('Coins')
+  await expect(reference).toContainText('A later attempt has no confirmed application acknowledgement')
+  const table = reference.getByRole('table', { name: 'Configured Audio-Gram call areas and surcharges' })
+  await expect(table.getByRole('row', { name: 'Local Allowed 25 cents' })).toBeVisible()
+  await expect(table.getByRole('row', { name: 'Intra-area toll Not selected 50 cents' })).toBeVisible()
+  await expect(reference).toContainText('configured surcharges do not establish collected or settled amounts')
+  await expect(page.getByRole('heading', { name: 'Messaging selected after no answer' })).toBeVisible()
+  await expect(page.getByText('17', { exact: true })).toBeVisible()
+})
