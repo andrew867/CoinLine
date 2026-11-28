@@ -9,6 +9,11 @@ test('finds record layouts and distinguishes historical labels from operational 
   const catalogue = [
     { number: 10, name: 'Terminal status', kind: 'operational', layouts: [], firmware: [],
       registeredDefinitions: [{ id: definition.id, name: definition.name }] },
+    { number: 21, name: 'Management access', kind: 'native_editor', layouts: [
+      { number: 21, length: 18, profile: 'Earlier packed profile', draftTemplateAvailable: false, explicitAuthoringAvailable: true },
+      { number: 21, length: 40, profile: 'Later packed profile', draftTemplateAvailable: false, explicitAuthoringAvailable: false,
+        retainedLayout: { unmappedByteCount: 14, unmappedRanges: [{ startOffset: 26, endOffset: 39 }], partiallyMappedBytes: [] } },
+    ], firmware: [], registeredDefinitions: [] },
     { number: 62, name: 'Numbering plan', kind: 'native_editor', layouts: [{ number:62,length:353,profile:'Later packed profile',draftTemplateAvailable:false,explicitAuthoringAvailable:true }],
       firmware: [],registeredDefinitions: [] },
     { number: 92, name: 'Call screening', kind: 'native_editor',
@@ -72,6 +77,11 @@ test('finds record layouts and distinguishes historical labels from operational 
   const numbering = reference.getByRole('row').filter({hasText:'Numbering plan'})
   await numbering.getByText('1 layout').click()
   await expect(numbering).toContainText('explicit authoring (no default template)')
+  await page.getByLabel('Find a record').fill('MT21')
+  const access = reference.getByRole('row').filter({ hasText: 'Management access' })
+  await access.getByText('2 layouts').click()
+  await expect(access).toContainText('40 bytes; import/edit only')
+  await expect(access).toContainText('Partial field mapping: 14 unmapped bytes, 0 partially mapped bytes. Existing record required.')
   await page.getByLabel('Find a record').fill('')
   await page.getByLabel('Record category').selectOption('scheduler_record')
   await expect(reference.getByRole('row')).toHaveCount(2)

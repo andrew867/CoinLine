@@ -3,10 +3,12 @@ import { Link } from 'react-router-dom'
 import { apiGet, apiPost } from '../api/client'
 import { canPerform, permissionOperation as op } from '../api/consoleSession'
 import { StatusBadge } from '../components/StatusBadge'
+import type { RetainedLayoutCoverage } from './RetainedLayoutReview'
 import './TableSetConfiguration.css'
 
 type Row = { id: string; name: string; tableNumber: number; description: string | null }
-type Layout = { number: number; length: number; profile: string; draftTemplateAvailable: boolean; explicitAuthoringAvailable?: boolean }
+type Layout = { number: number; length: number; profile: string; draftTemplateAvailable: boolean; explicitAuthoringAvailable?: boolean;
+  retainedLayout?: RetainedLayoutCoverage | null }
 type Firmware = { profileId: string; label: string; length: number; terminalAcknowledged: boolean;
   completeCatalogue?: boolean; observedLengthsOnly?: boolean; editorStatus?: string; editorProfile?: string | null; behaviorObservation?: string | null }
 type Reference = {
@@ -121,7 +123,9 @@ export function TableDefinitions() {
                 {record.kind === 'scheduler_record' && <div><small>Separate scheduling workflow</small></div>}</td>
               <td>{record.layouts.length ? <details><summary>{record.layouts.length} layout{record.layouts.length === 1 ? '' : 's'}</summary>
                 <ul>{record.layouts.map(layout => <li key={`${layout.profile}-${layout.length}`}>{layout.profile}: {layout.length.toLocaleString()} bytes;
-                  {layout.draftTemplateAvailable ? ' draft template' : layout.explicitAuthoringAvailable ? ' explicit authoring (no default template)' : ' import/edit only'}</li>)}</ul></details> : 'Not established'}</td>
+                  {layout.draftTemplateAvailable ? ' draft template' : layout.explicitAuthoringAvailable ? ' explicit authoring (no default template)' : ' import/edit only'}
+                  {layout.retainedLayout && <div><small>Partial field mapping: {layout.retainedLayout.unmappedByteCount} unmapped bytes, {layout.retainedLayout.partiallyMappedBytes.length} partially mapped bytes. Existing record required.</small></div>}
+                </li>)}</ul></details> : 'Not established'}</td>
               <td>{record.firmware.length ? selectedProfile ? <>
                 {record.firmware.filter(profile => profile.profileId === profileFilter).map(profile => <div key={profile.profileId}>
                   {profile.length.toLocaleString()} bytes

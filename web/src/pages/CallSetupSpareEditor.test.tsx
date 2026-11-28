@@ -27,6 +27,27 @@ async function saved() {
   return JSON.parse(request![1]!.body as string)
 }
 
+it('identifies retained positions without exposing their values or including them in a save', async () => {
+  editor(49, { ...layout(199, [{ key: 'pattern-15', label: 'Dial pattern 16', fields: [
+    { ...field('pattern-15.mode', 'Supervision method code', '5'), max: 7 },
+  ] }]), retainedLayout: { unmappedByteCount: 66, unmappedRanges: [{ startOffset: 1, endOffset: 2 },
+    ...Array.from({ length: 15 }, (_, i) => ({ startOffset: 15 + i * 10, endOffset: 16 + i * 10 })),
+    { startOffset: 165, endOffset: 198 }], partiallyMappedBytes: Array.from({ length: 16 },
+      (_, i) => ({ offset: 14 + i * 10, unmappedMask: 248 })) } })
+  const report = await screen.findByRole('region', { name: 'Retained record layout' })
+  expect(within(report).getByText('Partial editor, existing record required')).toBeVisible()
+  expect(within(report).getByText('66')).toBeVisible()
+  expect(within(report).getByText('16')).toBeVisible()
+  expect(within(report).getByText('Retained positions (no data values)')).toBeVisible()
+  within(report).getByText('Retained positions (no data values)').closest('details')!.open = true
+  expect(within(report).getByText(/Unmapped byte ranges: 1 to 2,/)).toBeVisible()
+  expect(within(report).getByText('Offset 164: retained mask 0xF8')).toBeVisible()
+  expect(within(report).queryByRole('spinbutton')).toBeNull()
+  fireEvent.change(screen.getByLabelText('Supervision method code'), { target: { value: '3' } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save record' }))
+  expect((await saved()).changes).toEqual({ 'pattern-15.mode': '3' })
+})
+
 it('labels later predial settings by packet-data route and keeps craft credentials out of unrelated saves', async () => {
   editor(31, layout(37, [
     { key: 'installation', label: 'Installation and packet timing', fields: [field('retries', 'Retries before out of service', '40')] },

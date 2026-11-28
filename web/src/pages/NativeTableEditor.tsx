@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { apiFetch, apiPostRaw } from '../api/client'
 import { canPerform, consoleSession, permissionOperation as op } from '../api/consoleSession'
 import { CraftAccessReveal } from './CraftAccessReveal'
+import { RetainedLayoutReview, type RetainedLayoutCoverage } from './RetainedLayoutReview'
 import { NativeBitmapField } from './NativeBitmapField'
 import { CarrierLibraryPanel } from './CarrierLibraryPanel'
 import { CarrierBrandingPreview } from './CarrierLibraryPage'
@@ -74,6 +75,7 @@ type Layout = {
   revision: number
   sha256: string
   sections: Section[]
+  retainedLayout?: RetainedLayoutCoverage | null
   graphicalLinks?: GraphicalLinkReview | null
   visualPromptCompanions?: VisualPromptCompanion[] | null
   visualPromptOpaqueRows?: OpaquePromptRow[] | null
@@ -431,6 +433,7 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
       </header>
       {layout.observedLengthsOnly && <p className="page-intro">Observed firmware profile: this editor is a candidate for the wire record.
         Record-length acknowledgement does not establish that every field has the same meaning on this build.</p>}
+      {layout.retainedLayout && <RetainedLayoutReview coverage={layout.retainedLayout} />}
       {family && <section aria-label="Screening family workspace" className="table-config-panel">
         <h3>{family.familyLabel} screening</h3>
         <p>Maximizer documents {documentedScreeningSlots} entries; this record has {packedScreeningSlots} packed slots.

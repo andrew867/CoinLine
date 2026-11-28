@@ -40,7 +40,7 @@ public static partial class NativeTableLayouts
         return layouts
             .Select(layout => new NativeLayoutReference(layout.Number, layout.Length, layout.Profile,
                 DraftTemplates(layout.Number).Any(template => template.Length == layout.Length && template.Profile == layout.Profile),
-                explicitAuthoring.Contains((layout.Number, layout.Length, layout.Profile))))
+                explicitAuthoring.Contains((layout.Number, layout.Length, layout.Profile)), RetainedLayoutCoverage.Inspect(layout)))
             .OrderBy(layout => layout.Number).ThenBy(layout => layout.Length).ThenBy(layout => layout.Profile, StringComparer.Ordinal)
             .ToArray();
     }
