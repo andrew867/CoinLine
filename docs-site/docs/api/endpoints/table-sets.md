@@ -5,6 +5,8 @@
 | Method | Path | Notes |
 |--------|------|-------|
 | GET | `/api/tables/sets` | List |
+| GET | `/api/tables/configuration-library` | Paged saved configurations with record, Configuration ID and target filters |
+| GET | `/api/tables/configuration-library/{versionId}/assignments` | Current assigned phones for one exact record version, with permitted historical receipt evidence |
 | POST | `/api/tables/sets` | Create |
 | GET | `/api/tables/sets/{id}` | Detail |
 | PUT | `/api/tables/sets/{id}` | Update |
@@ -40,6 +42,8 @@
 | POST | `/api/tables/sets/{id}/schedules/{scheduleId}/cancel` | Cancel a schedule before delivery starts or between attempts |
 
 The assignment API supports `terminal`, `group`, `site` and `customer`. Apply the same `targetType` and `targetId` with the preview's eligible phone IDs in `terminalIds`. A changed eligible list requires another preview.
+
+The configuration library assignment drill-down takes the saved `versionId`, not a Configuration ID string. `GET .../{versionId}/assignments?page=1` returns `version`, `items`, `total`, `page`, `pageSize` and `canReadDownloads`. Only phones currently assigned to the set containing that version are listed, including inactive phones. Table records, Table assignments and Phones Read are required. With Downloads Read, each item can include `lastExactAcknowledgement` (`downloadBatchId`, `recordedAtUtc`) when an application acknowledgement was recorded for this exact published version on a matched session. Otherwise the receipt is null. This historical receipt is not a current memory readback or an acknowledgement of identical bytes in a different version.
 
 A new set accepts an optional `targetFirmwareVersionId`. A draft copy inherits the target. Published targeted sets can be assigned and downloaded by phones with the same registered firmware version. Detail responses expose `firmwareFindings`. Blocking findings prevent publishing. Other findings identify records whose format still needs verification.
 
