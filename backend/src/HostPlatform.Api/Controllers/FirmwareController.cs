@@ -45,18 +45,7 @@ public sealed class FirmwareController(
         });
     }
 
-    private (string Mode, bool Configured) TransportPresentation()
-    {
-        var options = dlOptions.Value;
-        return (options.TransportKind ?? "simulation").Trim().ToLowerInvariant() switch
-        {
-            "simulation" => ("simulation", false),
-            "serial" => ("serial", !string.IsNullOrWhiteSpace(options.SerialPort)),
-            "tcp" => ("tcp", !string.IsNullOrWhiteSpace(options.TcpHost) && options.TcpPort is > 0 and <= 65535),
-            "pipe" => ("pipe", !string.IsNullOrWhiteSpace(options.PipeName)),
-            _ => ("unknown", false)
-        };
-    }
+    private (string Mode, bool Configured) TransportPresentation() => dlOptions.Value.DescribeLiveTransport();
 
     private string PolicyNotice(string disabledNotice)
     {
@@ -507,6 +496,7 @@ public sealed class FirmwareController(
             steps = orderedSteps,
             safetyChecks = checks,
             rollBackPlan = rollback,
+            liveExecutionConfigured = executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled && TransportPresentation().Configured,
             hardwareValidationNotice = j.SimulationMode && executionPolicy.AllowLiveFlashing && dlOptions.Value.LiveDlaEnabled
                 ? "This job is a simulation. Live execution must use a separately approved non-simulation job."
                 : PolicyNotice("Live modem flashing disabled unless Firmware:AllowLiveFlashing; see the firmware transport reference.")

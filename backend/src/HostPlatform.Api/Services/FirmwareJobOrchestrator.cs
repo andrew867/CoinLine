@@ -231,7 +231,8 @@ public sealed class FirmwareJobOrchestrator(
         if (job.Status != FirmwareUpdateJobStatus.Completed || job.Steps.Any(step => step.Name.StartsWith("live_", StringComparison.Ordinal)))
             throw new InvalidOperationException("Live execution requires an approved simulated job that has not already been attempted.");
 
-        // Verify the complete artifact before claiming a transfer. Validation failure does not consume approval.
+        // Endpoint and artifact preflight are read-only. A configuration error must not consume approval.
+        dlTransport.ValidateLiveConfiguration(observation);
         var (payload, prepareDetail) = await LoadLivePayloadAsync(job, ct);
         await ClaimLiveExecutionAsync(job, ct);
 

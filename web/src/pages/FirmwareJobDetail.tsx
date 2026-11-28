@@ -26,6 +26,7 @@ type Job = {
   firmwareArtifactId: string | null
   status: number
   simulationMode: boolean
+  liveExecutionConfigured?: boolean
   safetyStateJson: string
   approvedAtUtc: string | null
   approvedByOperatorId: string
@@ -52,7 +53,8 @@ export function FirmwareJobDetail() {
   const liveAttempted = job?.steps.some(step => step.name.startsWith('live_')) ?? false
   const canSimulate = !!job && [0, 1, 2].includes(job.status)
   const canApprove = !!job && job.status === 4 && !job.approvedAtUtc
-  const canExecute = !!job && !job.simulationMode && !!job.approvedAtUtc && job.status === 4 && !liveAttempted
+  const eligibleForExecution = !!job && !job.simulationMode && !!job.approvedAtUtc && job.status === 4 && !liveAttempted
+  const canExecute = eligibleForExecution && job?.liveExecutionConfigured !== false
   const canCancel = !!job && ![3, 4, 7].includes(job.status)
 
   const refresh = useCallback(async () => {
@@ -212,11 +214,12 @@ export function FirmwareJobDetail() {
         <button type="button" disabled={busy || !canSimulate} onClick={() => void runSimulate()}>
           Run simulation
         </button>
-        {canExecute ? (
-          <button type="button" disabled={busy} onClick={() => void runLive()}>
+        {eligibleForExecution ? (
+          <button type="button" disabled={busy || !canExecute} onClick={() => void runLive()}>
             Execute live (dual-gated)
           </button>
         ) : null}
+        {eligibleForExecution && !canExecute && <p role="status">Live delivery is not configured. This approval is retained until a transport is available.</p>}
         {job.status === 3 ? <p role="status">Live execution is claimed or its outcome is uncertain. Review the existing attempt; do not submit another transfer.</p> :
           liveAttempted ? <p role="status">A live attempt is retained for this job. Review its result before preparing a new job.</p> : null}
         <div>
