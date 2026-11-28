@@ -12,7 +12,7 @@ internal static class AsyncDuplexTransportExtensions
         {
             var n = await t.ReadAsync(buffer[written..], cancellationToken).ConfigureAwait(false);
             if (n == 0)
-                throw new InvalidOperationException("Transport closed before expected bytes received.");
+                throw new EndOfStreamException("Transport closed before expected bytes received.");
             written += n;
         }
     }

@@ -4,6 +4,8 @@ The MT94 Manager scheduling workflow prepares, delivers and records the acknowle
 
 The existing XMODEM sender is tested separately using generated payloads and scripted peers. It requires a receiver negotiation byte before writing a block, distinguishes a closed transport from a response timeout, reports receiver cancellation, and repeats a rejected block without advancing its sequence or payload progress. An acknowledged EOT establishes transport completion only. The firmware job still requires independent terminal version and configuration confirmation; this sender does not establish that the native code-server call uses this exact transfer sequence.
 
+An independent bounded XMODEM-128 receiver now supports the opposite direction for an explicitly selected duplex session. It negotiates checksum or CRC mode, checks sequence and complement, limits blocks and session time, accepts exact duplicate retries without appending them twice, and withholds incomplete or invalid results. The caller receives block-rounded bytes and must validate the application record and its padding separately. Generated-data tests do not establish native request layout, authorization, application acknowledgement or successful code delivery. No incoming listener is enabled by this component.
+
 For an isolated laboratory phone whose normal INSTALL and restart have been verified, the receive-only observer provides a first test of the independent call route. It listens on IPv4 loopback only, handles one connection at a time and stops after its configured lifetime. Each connection has independent idle, total-time and received-byte limits. It never sends an image, a greeting or any application data.
 
 ```sh
