@@ -77,6 +77,7 @@ public static class OperatorPermissions
         Screen("table-definitions", "Table definitions", ("Tables", R, "Definitions DefinitionById ReferenceRecords"), ("Tables", A, "CreateDefinition"));
         Screen("table-records", "Table records and advertising",
             ("Tables", R, "Versions Advertising"), ("Tables", A | U, "CreateVersion SaveAdvertising"),
+            ("TerminalDiscountReferences", R, "Get"),
             ("TerminalTariffReferences", R, "Get"),
             ("ScreeningSlotReferences", R, "Get"),
             ("DialedNumberReview", R, "Review"),

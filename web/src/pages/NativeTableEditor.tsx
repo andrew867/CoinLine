@@ -37,6 +37,7 @@ import { LanguageOrderPanel } from './LanguageOrderPanel'
 import { languageOrderKeys } from './languageOrderPlan'
 import { TerminalTariffPricing } from './TerminalTariffPricing'
 import { TerminalTariffReferencePanel } from './TerminalTariffReferencePanel'
+import { TerminalDiscountReferencePanel } from './TerminalDiscountReferencePanel'
 import { ManagementAccessDraftForm, type ManagementAccessInput, type ManagementAccessSpec } from './ManagementAccessDraftForm'
 
 type Field = {
@@ -643,6 +644,8 @@ export function NativeTableEditor({ setId, number, revision, exchangeFile, onExc
         }} />}
       {showingSettings && current && number === 73 && /^rate-\d+$/.test(current.key) &&
         <TerminalTariffReferencePanel key={`${setId}:${current.key}:${layout.revision}`} setId={setId} rateIndex={Number(current.key.slice(5))} />}
+      {showingSettings && current && number === 93 && /^discount-\d+$/.test(current.key) &&
+        <TerminalDiscountReferencePanel key={`${setId}:${current.key}:${layout.revision}`} setId={setId} discount={Number(current.key.slice(9)) + 1} dirty={changed > 0} />}
       {showingSettings && current?.key === 'craft' && number === 31 && consoleSession.role() === 'Admin' && !busy &&
         <CraftAccessReveal key={`${endpoint}:${layout.revision}:${layout.sha256}:${layout.profile}:${reload}`} endpoint={endpoint}
           revision={layout.revision} sha256={layout.sha256} profile={layout.profile} />}

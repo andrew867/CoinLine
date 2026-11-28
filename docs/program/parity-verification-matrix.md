@@ -46,7 +46,9 @@ The [family-aware screening workspace](terminal-family-checklist-coverage.md) di
 | 136 to 149, 154 to 155, double-compressed NPA/NXX | Four packed exchange indices per row | 203 bytes per segment | Native all sixteen segments in the 43-record graphical transfer | Verify device cross-segment lookups and rating. |
 | 150, area-code rating | Paired area-code rate reference editor | 401 bytes; MT73 rate references and host/invalid options | Native MT150 in the 43-record graphical transfer | Verify code and tariff lookup on device. |
 | 151, international rating | Destinations, default/fallback and rate selection | 604 bytes; canonical fallback code and reserved fields preserved | Native MT151 in the 43-record graphical transfer; later selected fixture updates | Verify international matching and fallback on device. |
-| 152, discounts and holidays | Calendar, time periods, zone/payment masks and preview | 95 bytes; ten dates and eight periods; independent reserved fields | Native MT152 in the 43-record graphical transfer; later selected fixture updates | Verify date, overlapping/overnight periods and related MT93 discount behavior. |
+| 152, discounts and holidays | Calendar, time periods, zone/payment masks and preview; [later MT93 discount reference review](discount-reference-review.md) distinguishes configured, retained and invalid-window selections | 95 bytes; ten dates and eight periods; independent reserved fields | Native MT152 in the 43-record graphical transfer; later selected fixture updates | Verify date, overlapping/overnight periods and related MT93 discount behavior. |
+
+Each later MT93 discount row now includes a [saved card and schedule reference review](discount-reference-review.md). Unit, PostgreSQL and WebUI tests distinguish the one-based MT134 card number from the zero-based MT152 schedule index and retain saved bytes. Actual changed-discount behavior is not yet qualified.
 
 ## Management and runtime workflows
 
