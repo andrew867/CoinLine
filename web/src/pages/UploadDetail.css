@@ -56,3 +56,5 @@
 .graphical-usage-table :is(th, td) { text-align: left; padding: 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 .graphical-usage-table thead { background: var(--accent-soft); }
 .graphical-usage-table td span { display: block; font-size: .82rem; color: var(--muted); padding-top: 3px; }
+.graphical-usage-table td small { display: block; font-size: .76rem; padding-top: 3px; }
+.graphical-owner-comparison.owner-diff { color: #9b401f; font-weight: 650; }
