@@ -6,6 +6,8 @@ type Policy = {
   liveDlaEnabled?: boolean
   transportMode?: 'simulation' | 'serial' | 'tcp' | 'pipe' | 'unknown'
   liveTransportConfigured?: boolean
+  incomingCodeServerConfigured?: boolean
+  incomingCodeServerListening?: boolean
   hardwareValidationNotice: string
 }
 
@@ -53,10 +55,13 @@ export function FirmwareLiveFlashBanner() {
         <strong>Live execution policy enabled</strong>
         <p style={{ margin: '6px 0 0', fontSize: 14, lineHeight: 1.4 }}>
           Both host switches are enabled.{' '}
-          {pol.transportMode === 'simulation' ? 'Transport mode is simulation; no live endpoint is configured.' :
+          {pol.incomingCodeServerListening === true ? 'Terminal-initiated code server is listening.' :
+            pol.incomingCodeServerConfigured === true ? 'Terminal-initiated code server is configured but not listening.' :
+            pol.transportMode === 'simulation' ? 'Outbound transport: simulation. Incoming delivery is not configured.' :
             pol.transportMode && pol.liveTransportConfigured === true ? `${pol.transportMode.toUpperCase()} transport settings are present.` :
             pol.transportMode && pol.liveTransportConfigured === false ? `${pol.transportMode.toUpperCase()} transport needs configuration.` :
             'Transport configuration is not reported by this server.'}
+          {pol.incomingCodeServerListening === true && pol.transportMode === 'simulation' && ' Outbound/manual transport remains simulated.'}
           {' '}Explicit job approval and terminal compatibility are separate from these settings.
         </p>
       </div>

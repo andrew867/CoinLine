@@ -51,6 +51,9 @@ public class FirmwarePackage : AuditableEntity
     public byte[] ArtifactChecksum { get; set; } = Array.Empty<byte>();
     public long ArtifactSizeBytes { get; set; }
     public string MetadataJson { get; set; } = "{}";
+    /// <summary>Explicit target registry version for scheduled terminal-initiated delivery.</summary>
+    public Guid? TargetFirmwareVersionId { get; set; }
+    public FirmwareVersion? TargetFirmwareVersion { get; set; }
     public Guid? PrimaryArtifactId { get; set; }
     public FirmwareArtifact? PrimaryArtifact { get; set; }
     public ICollection<FirmwareArtifact> Artifacts { get; set; } = new List<FirmwareArtifact>();
@@ -80,6 +83,13 @@ public class FirmwareUpdateJob : AuditableEntity
     public bool SimulationMode { get; set; } = true;
     public string SafetyStateJson { get; set; } = "{}";
     public DateTime? ApprovedAtUtc { get; set; }
+    public Guid? CodeTransitionId { get; set; }
+    public Guid? CodeScheduleId { get; set; }
+    public string? ApprovedArtifactSha256Hex { get; set; }
+    public long? ApprovedArtifactSizeBytes { get; set; }
+    public int IncomingAttemptLimit { get; set; } = 1;
+    public int IncomingAttemptCount { get; set; }
+    public bool IncomingRetryEligible { get; set; }
     public string ApprovedByOperatorId { get; set; } = string.Empty;
     public string CancelReason { get; set; } = string.Empty;
     public ICollection<FirmwareUpdateStep> Steps { get; set; } = new List<FirmwareUpdateStep>();

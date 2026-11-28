@@ -26,6 +26,27 @@ public sealed class DlXmodemTransportAdapterTests
     }
 
     [Fact]
+    public void Endpoint_preflight_matches_reported_configuration_without_opening_a_transport()
+    {
+        foreach (var options in new[]
+        {
+            new DlTransportEnvironmentOptions { LiveDlaEnabled = true },
+            new DlTransportEnvironmentOptions { LiveDlaEnabled = true, TransportKind = "tcp", TcpPort = 0 },
+            new DlTransportEnvironmentOptions { LiveDlaEnabled = true, TransportKind = "serial", SerialPort = "" },
+            new DlTransportEnvironmentOptions { LiveDlaEnabled = true, TransportKind = "pipe", PipeName = "" },
+            new DlTransportEnvironmentOptions { LiveDlaEnabled = true, TransportKind = "unknown" }
+        })
+        {
+            Assert.False(options.DescribeLiveTransport().Configured);
+            var adapter = new DlXmodemTransportAdapter(Options.Create(options), NullLogger<DlXmodemTransportAdapter>.Instance);
+            Assert.Contains("not configured", Assert.Throws<InvalidOperationException>(() => adapter.ValidateLiveConfiguration(null)).Message);
+        }
+        var configured = new DlTransportEnvironmentOptions { LiveDlaEnabled = true, TransportKind = "tcp", TcpHost = "127.0.0.1", TcpPort = 4001 };
+        Assert.Equal(("tcp", true), configured.DescribeLiveTransport());
+        new DlXmodemTransportAdapter(Options.Create(configured), NullLogger<DlXmodemTransportAdapter>.Instance).ValidateLiveConfiguration(null);
+    }
+
+    [Fact]
     public async Task Live_execute_with_injected_duplex_succeeds_when_gate_on()
     {
         var opt = Options.Create(new DlTransportEnvironmentOptions

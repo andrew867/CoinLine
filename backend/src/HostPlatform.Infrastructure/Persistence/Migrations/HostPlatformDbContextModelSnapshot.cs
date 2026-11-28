@@ -2295,6 +2295,9 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("PrimaryArtifactId")
                         .HasColumnType("uuid");
 
+                    b.Property<Guid?>("TargetFirmwareVersionId")
+                        .HasColumnType("uuid");
+
                     b.Property<DateTime>("UpdatedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -2312,6 +2315,8 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("PrimaryArtifactId");
+
+                    b.HasIndex("TargetFirmwareVersionId");
 
                     b.ToTable("FirmwarePackages");
                 });
@@ -2405,7 +2410,15 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<string>("ApprovedArtifactSha256Hex")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)");
+
+                    b.Property<long?>("ApprovedArtifactSizeBytes")
+                        .HasColumnType("bigint");
+
                     b.Property<DateTime?>("ApprovedAtUtc")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("ApprovedByOperatorId")
@@ -2415,6 +2428,13 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<string>("CancelReason")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<Guid?>("CodeScheduleId")
+                        .HasColumnType("uuid");
+
+                    b.Property<Guid?>("CodeTransitionId")
+                        .IsConcurrencyToken()
+                        .HasColumnType("uuid");
 
                     b.Property<DateTime>("CreatedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -2429,6 +2449,19 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                     b.Property<Guid>("FirmwarePackageId")
                         .HasColumnType("uuid");
 
+                    b.Property<int>("IncomingAttemptCount")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.Property<int>("IncomingAttemptLimit")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<bool>("IncomingRetryEligible")
+                        .IsConcurrencyToken()
+                        .HasColumnType("boolean");
+
                     b.Property<string>("SafetyStateJson")
                         .IsRequired()
                         .HasColumnType("text");
@@ -2437,6 +2470,7 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<int>("Status")
+                        .IsConcurrencyToken()
                         .HasColumnType("integer");
 
                     b.Property<Guid>("TerminalId")
@@ -2453,6 +2487,12 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasColumnType("integer");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CodeScheduleId")
+                        .IsUnique();
+
+                    b.HasIndex("CodeTransitionId")
+                        .IsUnique();
 
                     b.HasIndex("FirmwareArtifactId");
 
@@ -5444,7 +5484,14 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
                         .HasForeignKey("PrimaryArtifactId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("HostPlatform.Domain.FirmwareVersion", "TargetFirmwareVersion")
+                        .WithMany()
+                        .HasForeignKey("TargetFirmwareVersionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("PrimaryArtifact");
+
+                    b.Navigation("TargetFirmwareVersion");
                 });
 
             modelBuilder.Entity("HostPlatform.Domain.FirmwareRollBackPlan", b =>
@@ -5471,6 +5518,16 @@ namespace HostPlatform.Infrastructure.Persistence.Migrations
 
             modelBuilder.Entity("HostPlatform.Domain.FirmwareUpdateJob", b =>
                 {
+                    b.HasOne("HostPlatform.Domain.ScheduledTableDownload", null)
+                        .WithMany()
+                        .HasForeignKey("CodeScheduleId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("HostPlatform.Domain.FirmwareConfigurationTransition", null)
+                        .WithMany()
+                        .HasForeignKey("CodeTransitionId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("HostPlatform.Domain.FirmwareArtifact", "FirmwareArtifact")
                         .WithMany()
                         .HasForeignKey("FirmwareArtifactId")

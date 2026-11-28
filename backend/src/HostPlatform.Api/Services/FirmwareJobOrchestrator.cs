@@ -1,3 +1,4 @@
+using System.Data;
 using System.Text.Json;
 using HostPlatform.Api.Audit;
 using HostPlatform.Api.Firmware;
@@ -7,6 +8,9 @@ using HostPlatform.Domain;
 using HostPlatform.Firmware;
 using HostPlatform.Infrastructure;
 using HostPlatform.Infrastructure.Persistence;
+using HostPlatform.Infrastructure.Tables;
+using HostPlatform.Protocols.Dlog;
+using HostPlatform.Protocols.Tables;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -224,6 +228,8 @@ public sealed class FirmwareJobOrchestrator(
 
         if (job.SimulationMode)
             throw new InvalidOperationException("Live execute applies to non-simulation jobs only.");
+        if (job.CodeTransitionId != null)
+            throw new InvalidOperationException("This approval is bound to a terminal-initiated code schedule, not an outbound transfer.");
 
         if (!job.ApprovedAtUtc.HasValue)
             throw new InvalidOperationException("Approve the job before live execute.");
@@ -231,7 +237,8 @@ public sealed class FirmwareJobOrchestrator(
         if (job.Status != FirmwareUpdateJobStatus.Completed || job.Steps.Any(step => step.Name.StartsWith("live_", StringComparison.Ordinal)))
             throw new InvalidOperationException("Live execution requires an approved simulated job that has not already been attempted.");
 
-        // Verify the complete artifact before claiming a transfer. Validation failure does not consume approval.
+        // Endpoint and artifact preflight are read-only. A configuration error must not consume approval.
+        dlTransport.ValidateLiveConfiguration(observation);
         var (payload, prepareDetail) = await LoadLivePayloadAsync(job, ct);
         await ClaimLiveExecutionAsync(job, ct);
 
@@ -327,7 +334,7 @@ public sealed class FirmwareJobOrchestrator(
             // A single conditional update is the durable claim, including across API processes.
             // A crash after this point leaves Running rather than silently making the approval reusable.
             var updated = await db.FirmwareUpdateJobs.Where(row => row.Id == job.Id && !row.SimulationMode &&
-                    row.Status == FirmwareUpdateJobStatus.Completed && row.ApprovedAtUtc == approvedAt &&
+                    row.Status == FirmwareUpdateJobStatus.Completed && row.ApprovedAtUtc == approvedAt && row.CodeTransitionId == null &&
                     !row.Steps.Any(step => step.Name.StartsWith("live_")))
                 .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Status, FirmwareUpdateJobStatus.Running), ct);
             if (updated != 1) throw new InvalidOperationException(conflict);
@@ -343,7 +350,7 @@ public sealed class FirmwareJobOrchestrator(
         try
         {
             await db.Entry(job).ReloadAsync(ct);
-            if (job.SimulationMode || job.Status != FirmwareUpdateJobStatus.Completed || job.ApprovedAtUtc != approvedAt ||
+            if (job.SimulationMode || job.Status != FirmwareUpdateJobStatus.Completed || job.ApprovedAtUtc != approvedAt || job.CodeTransitionId != null ||
                 await db.FirmwareUpdateSteps.AsNoTracking().AnyAsync(step => step.FirmwareUpdateJobId == job.Id &&
                     step.Name.StartsWith("live_"), ct))
                 throw new InvalidOperationException(conflict);
@@ -360,59 +367,29 @@ public sealed class FirmwareJobOrchestrator(
         var storageRef = (artifact?.StorageRef ?? "").Trim();
         if (artifact == null || artifact.FirmwarePackageId != job.FirmwarePackageId || root.Length == 0 || storageRef.Length == 0)
             throw new InvalidOperationException("Live transfer requires a registered artifact and configured payload storage.");
-        if (artifact.SizeBytes is <= 0 or > 50_000_000)
-            throw new InvalidOperationException("Artifact must have a registered size between 1 byte and 50 MB.");
         var digest = artifact.Sha256Hex.Trim();
-        if (digest.Length != 64 || !digest.All(Uri.IsHexDigit))
-            throw new InvalidOperationException("Artifact must have a registered SHA-256 digest.");
         if (job.FirmwarePackage == null || !ValidatePackageArtifactChecksum(job.FirmwarePackage, artifact))
             throw new InvalidOperationException("Artifact checksum does not match the registered package.");
-        if (storageRef.Contains("..", StringComparison.Ordinal) || Path.IsPathRooted(storageRef))
-            throw new InvalidOperationException("Artifact reference must be a relative path under payload storage.");
-
-        try
-        {
-            var rootFull = Path.GetFullPath(root);
-            var full = Path.GetFullPath(Path.Combine(rootFull, storageRef));
-            var relative = Path.GetRelativePath(rootFull, full);
-            if (relative == "." || Path.IsPathRooted(relative) || relative == ".." ||
-                relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
-                throw new InvalidOperationException("Artifact reference must stay within payload storage.");
-
-            var current = rootFull;
-            foreach (var part in relative.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))
-            {
-                current = Path.Combine(current, part);
-                if ((File.GetAttributes(current) & FileAttributes.ReparsePoint) != 0)
-                    throw new InvalidOperationException("Artifact reference must not use a redirected storage path.");
-            }
-            await using var stream = new FileStream(full, FileMode.Open, FileAccess.Read, FileShare.Read, 8192, useAsync: true);
-            if (stream.Length != artifact.SizeBytes)
-                throw new InvalidOperationException("Artifact blob length does not match the registered size.");
-            var bytes = new byte[(int)artifact.SizeBytes];
-            await stream.ReadExactlyAsync(bytes, ct);
-            if (await stream.ReadAsync(new byte[1], ct) != 0)
-                throw new InvalidOperationException("Artifact blob length changed while reading.");
-            var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes));
-            if (!string.Equals(hash, digest, StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Artifact blob SHA-256 does not match the registry.");
-            return (bytes, $"Verified {bytes.Length} byte(s) against the registered size and SHA-256.");
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
-        {
-            throw new InvalidOperationException("Registered artifact could not be read from payload storage.");
-        }
+        var bytes = await FirmwareArtifactStorage.ReadVerifiedAsync(root, storageRef, artifact.SizeBytes, digest, ct);
+        return (bytes, $"Verified {bytes.Length} byte(s) against the registered size and SHA-256.");
     }
 
-    public async Task ApproveJobAsync(Guid jobId, string rollbackNotes, CancellationToken ct)
+    public async Task ApproveJobAsync(Guid jobId, string rollbackNotes, CancellationToken ct, Guid? codeTransitionId = null,
+        int? maximumIncomingAttempts = null)
     {
         var trimmed = rollbackNotes.Trim();
         if (trimmed.Length < 10)
             throw new InvalidOperationException("rollbackNotes required (min 10 chars) — backup / rollback intent.");
+        if (maximumIncomingAttempts.HasValue && (!codeTransitionId.HasValue || maximumIncomingAttempts.Value is < 1 or > 10))
+            throw new InvalidOperationException("Incoming attempt limit must be 1 to 10 and requires a scheduled code transition.");
 
+        await using var transaction = codeTransitionId.HasValue && db.Database.IsRelational()
+            ? await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct) : null;
         var job = await db.FirmwareUpdateJobs
             .Include(j => j.SafetyChecks)
             .Include(j => j.RollBackPlan)
+            .Include(j => j.FirmwarePackage)
+            .Include(j => j.FirmwareArtifact)
             .FirstOrDefaultAsync(j => j.Id == jobId, ct) ?? throw new InvalidOperationException("Job not found.");
 
         if (job.ApprovedAtUtc.HasValue)
@@ -424,6 +401,12 @@ public sealed class FirmwareJobOrchestrator(
         var failed = job.SafetyChecks.Where(c => !c.Passed && c.Code is "checksum_registry" or "compatibility").ToList();
         if (failed.Count > 0)
             throw new InvalidOperationException("Safety checks failed — cannot approve.");
+
+        if (codeTransitionId.HasValue)
+        {
+            await BindCodeTransitionAsync(job, codeTransitionId.Value, ct);
+            job.IncomingAttemptLimit = maximumIncomingAttempts ?? 1;
+        }
 
         job.ApprovedAtUtc = DateTime.UtcNow;
         job.ApprovedByOperatorId = OperatorContext.Current?.OperatorId ?? "system";
@@ -447,18 +430,66 @@ public sealed class FirmwareJobOrchestrator(
 
         var http = httpAccessor.HttpContext;
         ApiAudit.Write(db, http, "firmware.job", "approve", $"FirmwareUpdateJob:{job.Id}",
-            new { job.ApprovedByOperatorId }, job.TerminalId);
+            new { job.ApprovedByOperatorId, job.CodeTransitionId, job.CodeScheduleId, job.IncomingAttemptLimit }, job.TerminalId);
         await SaveChangesWithRetryAsync(ct);
+        if (transaction != null) await transaction.CommitAsync(ct);
+    }
+
+    private async Task BindCodeTransitionAsync(FirmwareUpdateJob job, Guid transitionId, CancellationToken ct)
+    {
+        if (job.SimulationMode || !executionPolicy.AllowLiveFlashing || !_dlOpt.LiveDlaEnabled)
+            throw new InvalidOperationException("Scheduled code delivery requires a live-capable job and enabled live execution policy.");
+        var package = job.FirmwarePackage;
+        var artifact = job.FirmwareArtifact;
+        if (package == null || artifact == null || package.PrimaryArtifactId != artifact.Id || artifact.Kind != "primary")
+            throw new InvalidOperationException("Select the package's verified primary artifact for scheduled code delivery.");
+        var plan = await db.FirmwareConfigurationTransitions.AsNoTracking().SingleOrDefaultAsync(row => row.Id == transitionId && row.TerminalId == job.TerminalId, ct)
+            ?? throw new InvalidOperationException("Choose a staged configuration transition belonging to this job's terminal.");
+        if (package.TargetFirmwareVersionId != plan.TargetFirmwareVersionId)
+            throw new InvalidOperationException("The package's registered target version does not match the staged configuration transition.");
+        if (!await db.FirmwareCompatibilityRules.AnyAsync(rule => rule.FirmwarePackageId == package.Id &&
+            rule.RequiredTerminalFirmwareVersionId == plan.SourceFirmwareVersionId &&
+            (rule.RequiredTargetSkuContains == null || rule.RequiredTargetSkuContains == ""), ct))
+            throw new InvalidOperationException("Register an explicit compatible source version for this package.");
+        var (config, code) = await FirmwareConfigurationTransitionService.VerifyStagedConfiguration(db, plan, ct);
+        var observation = await FirmwareConfigurationTransitionService.LatestObservation(db, plan.TerminalId, ct);
+        if (observation == null || FieldEventCatalog.ReadControllerVersion(observation.RawPayload) != (plan.SourceControllerRom, plan.SourceControllerSoftware))
+            throw new InvalidOperationException("The latest matched terminal report does not establish the reviewed source version.");
+        if (code.Schedule.CompletedAtUtc != null)
+        {
+            _ = await FirmwareConfigurationTransitionService.VerifyScheduleReceipt(db, plan, config, code, ct);
+            await FirmwareConfigurationTransitionService.EnsureLatestDeliveredCodeSchedule(db, plan.TerminalId, code.Schedule.Id, ct);
+        }
+        if (await db.FirmwareUpdateJobs.AnyAsync(row => row.CodeTransitionId == plan.Id || row.CodeScheduleId == code.Schedule.Id, ct))
+            throw new InvalidOperationException("This transition or code schedule already has a linked job.");
+        if (artifact.SizeBytes <= 0 || artifact.SizeBytes > 256L * CodeDownloadWire.CodeBlockBytes ||
+            artifact.SizeBytes % CodeDownloadWire.CodeBlockBytes != 0)
+            throw new InvalidOperationException("The primary artifact must contain complete addressable code blocks.");
+        var rawCode = TableDistributionService.GetEffectivePayload(code.Record);
+        if (!CodeDownloadWire.HasServerAuthentication(rawCode))
+            throw new InvalidOperationException("Configure nonblank code-server authentication in the reviewed MT94 before approving incoming delivery.");
+        var selected = CodeDownloadWire.SelectedBlocks(rawCode);
+        if (selected.Length == 0 || selected.Any(block => block >= artifact.SizeBytes / CodeDownloadWire.CodeBlockBytes))
+            throw new InvalidOperationException("The code schedule selects blocks outside the registered primary artifact or no blocks.");
+        _ = await LoadLivePayloadAsync(job, ct);
+
+        job.CodeTransitionId = plan.Id;
+        job.CodeScheduleId = code.Schedule.Id;
+        job.ApprovedArtifactSha256Hex = artifact.Sha256Hex.Trim().ToLowerInvariant();
+        job.ApprovedArtifactSizeBytes = artifact.SizeBytes;
     }
 
     public async Task CancelJobAsync(Guid jobId, string? reason, CancellationToken ct)
     {
         var job = await db.FirmwareUpdateJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
             ?? throw new InvalidOperationException("Job not found.");
-        if (job.Status is FirmwareUpdateJobStatus.Completed or FirmwareUpdateJobStatus.Cancelled or FirmwareUpdateJobStatus.Running)
+        if (job.Status is FirmwareUpdateJobStatus.Cancelled or FirmwareUpdateJobStatus.Running ||
+            job.Status == FirmwareUpdateJobStatus.Completed && (job.CodeTransitionId == null ||
+                await db.FirmwareUpdateSteps.AnyAsync(step => step.FirmwareUpdateJobId == job.Id && step.Name.StartsWith("live_"), ct)))
             throw new InvalidOperationException("Job cannot be cancelled in this state.");
 
         job.Status = FirmwareUpdateJobStatus.Cancelled;
+        job.IncomingRetryEligible = false;
         job.CancelReason = reason ?? "";
 
         var http = httpAccessor.HttpContext;

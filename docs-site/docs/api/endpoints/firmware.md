@@ -2,7 +2,7 @@
 
 **Route prefix:** `/api/firmware`
 
-The execution-policy response distinguishes `allowLiveFlashing` and `liveDlaEnabled` from `transportMode` and `liveTransportConfigured`. Transport configuration reports whether settings for the selected live mode are present, not whether a remote endpoint is reachable or a terminal is compatible. No endpoint addresses or credentials are returned. Both execution switches remain disabled by default.
+The execution-policy response distinguishes `allowLiveFlashing` and `liveDlaEnabled` from outbound `transportMode` and `liveTransportConfigured`. The independent incoming server reports `incomingCodeServerConfigured` and `incomingCodeServerListening`. Outbound settings do not establish connectivity; an incoming listening indicator does not establish a terminal callback, authorization or compatibility. No endpoint addresses or credentials are returned. Both execution switches and the incoming server remain disabled by default.
 
 Packages, artifacts, compatibility rules, targets, jobs:
 
@@ -10,6 +10,7 @@ Packages, artifacts, compatibility rules, targets, jobs:
 |------|----------|
 | Policy | `GET /api/firmware/execution-policy` |
 | Catalog | `GET/POST .../packages`, `GET .../packages/{id}`, artifacts POST |
+| Artifact storage | `POST .../packages/{id}/artifacts/upload` with an `application/octet-stream` body (admin) |
 | Versions | `GET/POST .../versions` |
 | Revise a build's layout | `POST .../versions/{id}/table-profile/preview`, `PUT .../versions/{id}/table-profile` |
 | Table layouts | `GET .../table-profiles` |
@@ -20,6 +21,7 @@ Packages, artifacts, compatibility rules, targets, jobs:
 | Targets | `GET/POST .../targets` |
 | Prepare local dialing draft | `POST .../transition-local-dialing/preview`, `POST .../transition-local-dialing` |
 | Jobs | `GET .../jobs`, `POST /api/terminals/{id}/firmware-jobs`, `GET .../jobs/{id}`, `simulate`, `approve`, `cancel` |
+| Scheduled approval | `GET .../jobs/{id}/code-transitions` (admin), then `POST .../jobs/{id}/approve` with `codeTransitionId` |
 
 Register a build with `label`, optional `buildId` and optional `tableProfileId` from the table layout catalog. A table set can target a registered version independently of how many record lengths are known for it. Register builds separately when their table layouts differ.
 
@@ -37,6 +39,12 @@ The local dialing draft preview accepts `terminalId`, `targetFirmwareVersionId`,
 
 !!! danger "Live flashing"
     **`Firmware:AllowLiveFlashing`** default **false**. DLA/XMODEM **`HARDWARE VALIDATION REQUIRED`**.
+
+The job detail exposes `liveExecutionConfigured`, which reports whether both execution policies and the selected endpoint settings are present. It does not establish connectivity, authorization of a particular job or device compatibility. `POST .../execute-live` validates the configured transport and registered artifact before atomically claiming an approved job. An unavailable transport configuration returns HTTP 409 without changing approval, status or attempt history. A configured endpoint that fails after the claim remains a recorded attempt.
+
+Primary artifact upload requires an existing package with a valid registered SHA-256 and exact size, from 1 byte to 50,000,000 bytes. The complete body is checked before the immutable digest-addressed file is installed under the configured payload root. Replaying a verified upload for the same package returns the existing artifact ID. Upload never overwrites an existing file, even if that file is corrupted. Registry metadata-only operations remain available separately. Package detail reports `payloadPresent` for each artifact when its path resolves to a stored file of the registered length; this is not a digest check. Live-capable job creation supplies `firmwareArtifactId` explicitly, and execution independently verifies the complete blob.
+
+Package registration accepts an optional `targetFirmwareVersionId` and returns that association in package details. Scheduled approval requires the matching target version, an explicit compatible source-version rule, a verified primary artifact, a staged transition for the same terminal, nonblank code-server authentication in MT94 and a code-record selection within the artifact. The administrator chooses the transition from `GET .../jobs/{id}/code-transitions`; submitting its ID alongside `rollbackNotes` binds the approval atomically. Optional `maximumIncomingAttempts` is an integer from 1 to 10, including the initial attempt, and defaults to 1 for a scheduled approval. The job reports `codeTransitionId`, `codeScheduleId`, `incomingCodeServerListening`, `incomingAttemptLimit`, `incomingAttemptCount` and `incomingRetryEligible`, and cannot use outbound `execute-live`. The schedule can be linked only once. Cancelling an unattempted linked job or an eligible repeat does not cancel an MT94 already delivered to the terminal; cancel the schedule separately. The incoming listener revalidates and durably claims the approved job before delivery; transport and application response are separately recorded. Only an exact repeat request following a confirmed incomplete delivery can use the remaining approved attempt budget; an uncertain or completed delivery cannot be repeated.
 
 To revise a registered build, preview with `{"tableProfileId":"mtr19-multipay-200"}`. Use explicit `null` to remove its verified profile reference. The preview returns affected counts, grouped findings, `canApply` and a `previewToken`. Apply with the same `tableProfileId` and token. Both endpoints require Firmware registry Update permission. An incompatible published targeted or currently assigned record, incompatible queued selection, active NCC session or active transfer blocks the change; draft findings and unobserved lengths are advisory. Scheduled and queued partial transfers are reviewed using their selected records and dependencies, not unrelated source records. A changed configuration or blocking finding returns HTTP 409. Apply updates only the registered firmware reference, its revision and audit history. It does not rewrite tables, reassign phones, schedule downloads or certify device operation.
 
