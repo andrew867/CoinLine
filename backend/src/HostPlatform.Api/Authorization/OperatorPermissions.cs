@@ -142,7 +142,7 @@ public static class OperatorPermissions
         Screen("card-products", "Card products", ("Cards", R, "SimulationState Products Product"), ("Cards", A, "CreateProduct"));
         Screen("card-accounts", "Card accounts", ("Cards", R, "Accounts Account AccountTimeline"),
             ("Cards", A, "CreateAccount"), ("Cards", U, "Adjust"));
-        Screen("card-transactions", "Card payments", ("Cards", R, "Transactions AuthorizationAttempts"), ("Cards", A, "ReadEvent PostTransaction WriteEvent"));
+        Screen("card-transactions", "Card payments", ("Cards", R, "Transactions AuthorizationAttempts MerchantCaptures"), ("Cards", A, "ReadEvent PostTransaction WriteEvent"));
         Screen("reconciliation", "Reconciliation", ("Cards", R, "ReconciliationPending ListReconciliationBatches GetReconciliationBatch"),
             ("Cards", A, "PostReconciliationBatch"), ("Cards", U, "PostReconciliationPosted PostReconciliationClose PostReconciliationException"));
         Screen("craft", "Technician craft", ("Craft", R, "ExecutionPolicy CommandTypes Sessions SessionDetail CommandDetail"),

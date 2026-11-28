@@ -72,6 +72,7 @@ public class HostPlatformDbContext : DbContext
     public DbSet<SmartcardType> SmartcardTypes => Set<SmartcardType>();
     public DbSet<EPurseAccount> EPurseAccounts => Set<EPurseAccount>();
     public DbSet<PaymentTransaction> PaymentTransactions => Set<PaymentTransaction>();
+    public DbSet<MerchantCaptureIntent> MerchantCaptureIntents => Set<MerchantCaptureIntent>();
     public DbSet<BalanceAdjustment> BalanceAdjustments => Set<BalanceAdjustment>();
     public DbSet<CardBalance> CardBalances => Set<CardBalance>();
     public DbSet<CardCredential> CardCredentials => Set<CardCredential>();
@@ -491,6 +492,27 @@ public class HostPlatformDbContext : DbContext
 
         modelBuilder.Entity<EPurseAccount>(b => b.HasOne(e => e.CardAccount).WithMany().HasForeignKey(e => e.CardAccountId));
         modelBuilder.Entity<PaymentTransaction>(b => b.HasOne(p => p.CardAccount).WithMany().HasForeignKey(p => p.CardAccountId));
+        modelBuilder.Entity<MerchantCaptureIntent>(b =>
+        {
+            b.HasOne(row => row.Terminal).WithMany().HasForeignKey(row => row.TerminalId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<AuditEvent>().WithMany().HasForeignKey(row => row.AuthorizationRequestId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<AuditEvent>().WithMany().HasForeignKey(row => row.AuthorizationDecisionId).OnDelete(DeleteBehavior.Restrict);
+            b.HasOne<UploadBatch>().WithMany().HasForeignKey(row => row.UploadBatchId).OnDelete(DeleteBehavior.Restrict);
+            b.HasIndex(row => row.AuthorizationRequestId).IsUnique();
+            b.HasIndex(row => row.UploadBatchId).IsUnique();
+            b.HasIndex(row => new { row.Status, row.NextAttemptAtUtc });
+            b.Property(row => row.AmountUsd).HasPrecision(8, 2);
+            b.Property(row => row.BindingFingerprint).HasMaxLength(64);
+            b.Property(row => row.LastResult).HasMaxLength(64);
+            b.Property(row => row.Version).IsConcurrencyToken();
+            b.ToTable(table =>
+            {
+                table.HasCheckConstraint("CK_MerchantCaptureIntent_PositiveAmount", "\"AmountUsd\" > 0 AND \"AmountUsd\" <= 655.35");
+                table.HasCheckConstraint("CK_MerchantCaptureIntent_CallSequence", "\"CallSequence\" BETWEEN 0 AND 65535");
+                table.HasCheckConstraint("CK_MerchantCaptureIntent_Duration", "\"DurationSeconds\" > 0");
+                table.HasCheckConstraint("CK_MerchantCaptureIntent_State", "\"AttemptCount\" >= 0 AND \"Status\" BETWEEN 0 AND 2");
+            });
+        });
         modelBuilder.Entity<BalanceAdjustment>(b => b.HasOne(a => a.CardAccount).WithMany().HasForeignKey(a => a.CardAccountId));
 
         modelBuilder.Entity<CraftSession>(b => b.HasOne(s => s.Terminal).WithMany().HasForeignKey(s => s.TerminalId));
