@@ -24,6 +24,7 @@ public sealed class FirmwareJobOrchestrator(
     IDlXmodemTransportAdapter dlTransport)
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { WriteIndented = false };
+    private static readonly SemaphoreSlim InMemoryLiveClaimGate = new(1, 1);
     private readonly JobOrchestrationOptions _jobRetry = jobOrchestrationOptions.Value;
     private readonly DlTransportEnvironmentOptions _dlOpt = dlTransportOptions.Value;
     private readonly PayloadStorageOptions _payloadStorage = platformOptions.Value.PayloadStorage;
@@ -132,7 +133,7 @@ public sealed class FirmwareJobOrchestrator(
             .Include(j => j.SafetyChecks)
             .FirstOrDefaultAsync(j => j.Id == jobId, ct) ?? throw new InvalidOperationException("Job not found.");
 
-        if (job.Status is FirmwareUpdateJobStatus.Completed or FirmwareUpdateJobStatus.Cancelled or FirmwareUpdateJobStatus.Failed)
+        if (job.Status is not (FirmwareUpdateJobStatus.Draft or FirmwareUpdateJobStatus.Simulation or FirmwareUpdateJobStatus.PendingApproval))
             throw new InvalidOperationException("Job is terminal; cannot simulate again.");
 
         if (!job.SimulationMode && !executionPolicy.AllowLiveFlashing)
@@ -224,23 +225,21 @@ public sealed class FirmwareJobOrchestrator(
         if (job.SimulationMode)
             throw new InvalidOperationException("Live execute applies to non-simulation jobs only.");
 
-        if (job.Status is FirmwareUpdateJobStatus.Cancelled or FirmwareUpdateJobStatus.Failed)
-            throw new InvalidOperationException("Job is terminal; cannot execute live transfer.");
-
         if (!job.ApprovedAtUtc.HasValue)
             throw new InvalidOperationException("Approve the job before live execute.");
 
-        // Verify the complete artifact before recording a transfer or replacing prior steps.
+        if (job.Status != FirmwareUpdateJobStatus.Completed || job.Steps.Any(step => step.Name.StartsWith("live_", StringComparison.Ordinal)))
+            throw new InvalidOperationException("Live execution requires an approved simulated job that has not already been attempted.");
+
+        // Verify the complete artifact before claiming a transfer. Validation failure does not consume approval.
         var (payload, prepareDetail) = await LoadLivePayloadAsync(job, ct);
+        await ClaimLiveExecutionAsync(job, ct);
 
         var httpStart = httpAccessor.HttpContext;
         ApiAudit.Write(db, httpStart, "firmware.job", "live_start", $"FirmwareUpdateJob:{job.Id}",
             new { job.TerminalId, job.FirmwarePackageId }, job.TerminalId);
 
-        foreach (var s in job.Steps.Where(x => x.Name.StartsWith("live_", StringComparison.Ordinal)).ToList())
-            db.FirmwareUpdateSteps.Remove(s);
-        await SaveChangesWithRetryAsync(ct);
-
+        job.SafetyStateJson = JsonSerializer.Serialize(new { mode = "live", state = "claimed", fieldCertificationPending = true }, JsonOpts);
         db.FirmwareUpdateSteps.Add(new FirmwareUpdateStep
         {
             FirmwareUpdateJobId = job.Id,
@@ -317,6 +316,41 @@ public sealed class FirmwareJobOrchestrator(
 
         if (!live.Success)
             throw new InvalidOperationException(live.Detail);
+    }
+
+    private async Task ClaimLiveExecutionAsync(FirmwareUpdateJob job, CancellationToken ct)
+    {
+        const string conflict = "Live execution was already claimed, attempted or changed. Review the existing job before creating a new one.";
+        var approvedAt = job.ApprovedAtUtc;
+        if (db.Database.IsRelational())
+        {
+            // A single conditional update is the durable claim, including across API processes.
+            // A crash after this point leaves Running rather than silently making the approval reusable.
+            var updated = await db.FirmwareUpdateJobs.Where(row => row.Id == job.Id && !row.SimulationMode &&
+                    row.Status == FirmwareUpdateJobStatus.Completed && row.ApprovedAtUtc == approvedAt &&
+                    !row.Steps.Any(step => step.Name.StartsWith("live_")))
+                .ExecuteUpdateAsync(setters => setters.SetProperty(row => row.Status, FirmwareUpdateJobStatus.Running), ct);
+            if (updated != 1) throw new InvalidOperationException(conflict);
+            var status = db.Entry(job).Property(row => row.Status);
+            status.CurrentValue = FirmwareUpdateJobStatus.Running;
+            status.OriginalValue = FirmwareUpdateJobStatus.Running;
+            status.IsModified = false;
+            return;
+        }
+
+        // The in-memory test provider does not support ExecuteUpdate. Serialize only this test-provider claim.
+        await InMemoryLiveClaimGate.WaitAsync(ct);
+        try
+        {
+            await db.Entry(job).ReloadAsync(ct);
+            if (job.SimulationMode || job.Status != FirmwareUpdateJobStatus.Completed || job.ApprovedAtUtc != approvedAt ||
+                await db.FirmwareUpdateSteps.AsNoTracking().AnyAsync(step => step.FirmwareUpdateJobId == job.Id &&
+                    step.Name.StartsWith("live_"), ct))
+                throw new InvalidOperationException(conflict);
+            job.Status = FirmwareUpdateJobStatus.Running;
+            await SaveChangesWithRetryAsync(ct);
+        }
+        finally { InMemoryLiveClaimGate.Release(); }
     }
 
     private async Task<(byte[] Payload, string Detail)> LoadLivePayloadAsync(FirmwareUpdateJob job, CancellationToken ct)
@@ -421,7 +455,7 @@ public sealed class FirmwareJobOrchestrator(
     {
         var job = await db.FirmwareUpdateJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct)
             ?? throw new InvalidOperationException("Job not found.");
-        if (job.Status is FirmwareUpdateJobStatus.Completed or FirmwareUpdateJobStatus.Cancelled)
+        if (job.Status is FirmwareUpdateJobStatus.Completed or FirmwareUpdateJobStatus.Cancelled or FirmwareUpdateJobStatus.Running)
             throw new InvalidOperationException("Job cannot be cancelled in this state.");
 
         job.Status = FirmwareUpdateJobStatus.Cancelled;
