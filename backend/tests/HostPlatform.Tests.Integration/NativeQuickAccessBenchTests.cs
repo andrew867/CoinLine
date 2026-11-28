@@ -69,7 +69,7 @@ public sealed class NativeQuickAccessBenchTests
         // An independently reserved local-only control; no payment or external call.
         var configured = layout.Apply(blank, new Dictionary<string, string>
         {
-            [$"{key}.number"] = "7095550174", [$"{key}.free"] = "true", [$"{key}.type"] = "9",
+            [$"{key}.number"] = earlier ? "2374" : "7095550174", [$"{key}.free"] = "true", [$"{key}.type"] = "9",
             [$"{key}.payment"] = "2", [$"{key}.rate"] = "255", [$"{key}.customerReference"] = "1"
         });
         var offset = 1 + (position - 1) * QuickAccessKeyWire.SlotLength;

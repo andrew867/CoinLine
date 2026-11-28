@@ -24,7 +24,7 @@ internal sealed class NativeSelectedTableBench(
     internal static async Task<NativeSelectedTableBench> StartAsync(string directory, string wireId,
         string profileId, string familyId, int tableNumber, string label)
     {
-        Assert.True(Regex.IsMatch(wireId, @"^20255501[0-9]{2}$"), "Use an independently isolated fictional bench wire ID.");
+        Assert.True(Regex.IsMatch(wireId, @"^(?:202|709)55501[0-9]{2}$"), "Use an independently isolated fictional bench wire ID.");
         Assert.True(Directory.Exists(directory));
         Assert.Empty(Directory.EnumerateFileSystemEntries(directory));
         var probe = new TcpListener(IPAddress.Loopback, 0); probe.Start();

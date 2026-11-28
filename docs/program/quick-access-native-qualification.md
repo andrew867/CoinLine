@@ -23,7 +23,15 @@ The two generated control records had these SHA-256 digests:
 | Configured | `254f9d168d10a954d0dd6252ee3dcbb9b8830ff3a4b76258d76422d49aa68049` |
 | Cleared | `baeb7c8670bdc07776d87632318dd6fb8468358ccab4cc058202b70c5016ad79` |
 
-This test qualifies an edited free Quick Access Key, its Clear operation and persistence on the tested graphical profile. Earlier five-key device behavior, custom text, paid/carrier overrides, customer reporting, messaging, other positions and physical terminals remain separate checks.
+This test qualifies an edited free Quick Access Key, its Clear operation and persistence on the tested graphical profile. Custom text, paid/carrier overrides, customer reporting, messaging, other positions and physical terminals remain separate checks.
+
+## Earlier five-key profile
+
+The archived operator help explicitly assigns the five-key layout to table positions 6 through 10. A separate earlier Multi-pay emulator with the five-key panel received a configured position 6 record with a synthetic local-only short destination. The selected record received MT14 and the terminal displayed `Completed 02`.
+
+The configured position did not dial through the tested panel. Its sixth input produced no outgoing digits or changed prompt; the five enabled inputs displayed the blank-button prompt and likewise emitted no digits. An ordinary call to the same short destination emitted all four digits and reached the local answer control. This distinguishes a panel-to-record position problem from a failure to receive MT55 or a general rejection of the destination.
+
+The earlier configured control record SHA-256 was `b9ac003e2a33aee6561172d581d73b868dcb430c14d365f5495fd0b82cee8769`. A distinct selected Clear record, with the same blank-template digest as the graphical control above, also received MT14 and a normal terminal clear, and displayed `Completed 02`. The editor layout remains based on the documented positions 6 through 10. Do not renumber its rows to compensate for the unqualified panel behavior. Earlier native positive-key behavior remains open; the two earlier selected acknowledgements do not qualify it.
 
 ## Reproduce the isolated Manager side
 
