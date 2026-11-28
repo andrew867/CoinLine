@@ -1462,6 +1462,13 @@ internal sealed class NccLinkProcessor(
         }
         if (await FirmwareConfigurationTransitionService.HoldSourceTables(db, terminal.Id, stoppingToken, _session.Id))
         {
+            // Clearing the exact last-delivered code parameters is independent
+            // of the uncertain source/target configuration. Do not unblock any
+            // unrelated data record or a replacement enabled code schedule.
+            if (callIn && !mandatoryFull && !await db.DownloadBatches.AnyAsync(batch => batch.TerminalId == terminal.Id &&
+                batch.Status == DownloadBatchStatus.Running && batch.NccSessionId != null, stoppingToken) &&
+                await TryStartScheduledBatchAsync(stream, terminalId, terminal, callIn, cashboxStatus, exactCodeCancellationOnly: true))
+                return;
             Audit("firmware_transition_holds_source_tables", new { reason = "running controller version requires transition review" }, terminal.Id);
             await db.SaveChangesAsync(stoppingToken);
             await SendInstallEndAsync(stream, terminalId, cashboxStatus);
@@ -1591,7 +1598,7 @@ internal sealed class NccLinkProcessor(
     }
 
     private async Task<bool> TryStartScheduledBatchAsync(NetworkStream stream, byte[] terminalId, Terminal terminal,
-        bool callIn, byte[]? cashboxStatus)
+        bool callIn, byte[]? cashboxStatus, bool exactCodeCancellationOnly = false)
     {
         // A call can arrive while background preparation is committing. Re-read and claim its batch if it won.
         for (var attempt = 0; attempt < 2; attempt++)
@@ -1603,6 +1610,8 @@ internal sealed class NccLinkProcessor(
                     && s.CompletedAtUtc == null && s.CancelledAtUtc == null, stoppingToken);
             if (schedule == null || (!callIn && (schedule.RecordNumbers != null
                 || await tables.FindCodeOnlyVersionAsync(schedule.TableSetId, stoppingToken) != null)))
+                return false;
+            if (exactCodeCancellationOnly && !await FirmwareConfigurationTransitionService.IsExactDisabledCodeCancellation(db, tables, schedule, stoppingToken))
                 return false;
             if (schedule.NccSession?.Status == NccSessionStatus.Active)
                 break;

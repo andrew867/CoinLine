@@ -252,7 +252,7 @@ public sealed class PostgresFirmwareConfigurationTransitionTests
                     await ExchangeDownload([8], [CodeDownloadWire.Disable(code)]);
                     await RejectIncoming(incoming);
                     var retained = await client.GetFromJsonAsync<JsonElement>(winner);
-                    Assert.False(retained.GetProperty("steps").EnumerateArray().Any(step => step.GetProperty("name").GetString()!.StartsWith("live_")));
+                    Assert.DoesNotContain(retained.GetProperty("steps").EnumerateArray(), step => step.GetProperty("name").GetString()!.StartsWith("live_"));
                     Assert.NotEqual(JsonValueKind.Null, retained.GetProperty("approvedAtUtc").ValueKind);
                     await AssertSourceUnchanged();
                     CryptographicOperations.ZeroMemory(incoming);

@@ -187,13 +187,30 @@ internal static class FirmwareConfigurationTransitionService
 
     internal static async Task EnsureLatestDeliveredCodeSchedule(HostPlatformDbContext db, Guid terminalId, Guid scheduleId, CancellationToken ct)
     {
-        var latest = await db.ScheduledTableDownloads.AsNoTracking().Where(row => row.TerminalId == terminalId &&
-                row.CompletedAtUtc != null && row.CancelledAtUtc == null && row.RecordNumbers == null &&
-                row.TableSet!.Versions.Count == 1 && row.TableSet.Versions.Any(version => version.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
-            .OrderByDescending(row => row.CompletedAtUtc).ThenByDescending(row => row.CreatedAtUtc).ThenByDescending(row => row.Id)
-            .Select(row => row.Id).FirstOrDefaultAsync(ct);
+        var latest = await LatestDeliveredCodeSchedule(db, terminalId).Select(row => row.Id).FirstOrDefaultAsync(ct);
         if (latest != scheduleId)
             throw new InvalidOperationException("A later code schedule or cancellation has replaced the delivered parameters.");
+    }
+
+    private static IQueryable<ScheduledTableDownload> LatestDeliveredCodeSchedule(HostPlatformDbContext db, Guid terminalId) =>
+        db.ScheduledTableDownloads.AsNoTracking().Where(row => row.TerminalId == terminalId &&
+                row.CompletedAtUtc != null && row.CancelledAtUtc == null && row.RecordNumbers == null &&
+                row.TableSet!.Versions.Count == 1 && row.TableSet.Versions.Any(version => version.TableDefinition!.TableNumber == CodeDownloadWire.MessageType))
+            .OrderByDescending(row => row.CompletedAtUtc).ThenByDescending(row => row.CreatedAtUtc).ThenByDescending(row => row.Id);
+
+    internal static async Task<bool> IsExactDisabledCodeCancellation(HostPlatformDbContext db, TableDistributionService tables,
+        ScheduledTableDownload candidate, CancellationToken ct)
+    {
+        if (candidate.RecordNumbers != null || candidate.TableSet?.Status != TableSetStatus.Published)
+            return false;
+        var latest = await LatestDeliveredCodeSchedule(db, candidate.TerminalId).FirstOrDefaultAsync(ct);
+        if (latest == null) return false;
+        var current = await tables.FindCodeOnlyVersionAsync(latest.TableSetId, ct);
+        var pending = await tables.FindCodeOnlyVersionAsync(candidate.TableSetId, ct);
+        if (current == null || pending == null || !pending.ValidationPassed) return false;
+        var raw = TableDistributionService.GetEffectivePayload(current);
+        return CodeDownloadWire.IsEnabled(raw) &&
+            CodeDownloadWire.Disable(raw).SequenceEqual(TableDistributionService.GetEffectivePayload(pending));
     }
 
     public static async Task<(Configuration Configuration, DlogTransaction Observation)> VerifyActivation(HostPlatformDbContext db,
