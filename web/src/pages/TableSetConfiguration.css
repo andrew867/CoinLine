@@ -236,3 +236,10 @@
 .graphical-usage-config-table th, .graphical-usage-config-table td { text-align: left; vertical-align: top; padding: 10px 8px; border-bottom: 1px solid var(--line); }
 .graphical-usage-config-table small { display: block; color: var(--muted); }
 .graphical-usage-config-table button { margin-top: 5px; }
+.table-profile-candidate {
+  padding: 0.65rem 0;
+  border-top: 1px solid var(--line);
+}
+.table-profile-candidate > summary {
+  cursor: pointer;
+}
